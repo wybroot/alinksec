@@ -1,0 +1,16 @@
+# ALinkSec 服务端镜像
+# 构建上下文 = 仓库根（docker compose 已配置），需先在本地 mvn package 产出 jar
+FROM eclipse-temurin:21-jre-jammy
+
+WORKDIR /app
+COPY server/alinksec-bootstrap/target/alinksec-bootstrap-0.1.0-SNAPSHOT.jar app.jar
+
+# 9443 gRPC(mTLS) / 8080 REST
+EXPOSE 9443 8080
+
+# data/ 下为证书与运行状态，由 volume 持久化
+VOLUME /app/data
+
+ENTRYPOINT ["java", \
+  "-XX:MaxRAMPercentage=75.0", \
+  "-jar", "app.jar"]

@@ -1,0 +1,70 @@
+/* ===== ALinkSec 控制台全局样式（源自已确认的设计稿） ===== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #app { height: 100%; }
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f1f5f9; color: #0f172a; font-size: 14px;
+}
+:root {
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #5b84f0;
+  --el-color-primary-light-5: #8aa9f5;
+  --el-color-primary-light-7: #b9cdfa;
+  --el-color-primary-light-8: #cddafc;
+  --el-color-primary-light-9: #e4ecfd;
+  --el-color-primary-dark-2: #1d4fc4;
+}
+
+/* ===== 布局 ===== */
+.layout { display: flex; height: 100%; }
+.sidebar { width: 216px; background: #0b1220; color: #cbd5e1; display: flex; flex-direction: column; flex-shrink: 0; }
+.logo { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid #1e293b; }
+.logo .mark { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #2563eb, #06b6d4); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 13px; }
+.logo b { color: #fff; font-size: 15px; letter-spacing: .5px; }
+.logo small { display: block; color: #64748b; font-size: 10px; font-weight: 400; }
+.nav { flex: 1; padding: 12px 10px; overflow: auto; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; color: #94a3b8; margin-bottom: 4px; transition: .15s; }
+.nav-item:hover { background: #111c33; color: #e2e8f0; }
+.nav-item.active { background: linear-gradient(90deg, rgba(37, 99, 235, .28), rgba(37, 99, 235, .06)); color: #60a5fa; font-weight: 600; }
+.nav-item .el-icon { font-size: 16px; }
+.sidebar-foot { padding: 12px 16px; font-size: 11px; color: #475569; border-top: 1px solid #1e293b; line-height: 1.6; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar { height: 56px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }
+.crumb { display: flex; align-items: center; gap: 8px; color: #475569; font-size: 13px; }
+.crumb b { color: #0f172a; font-size: 15px; }
+.topbar-right { display: flex; align-items: center; gap: 18px; }
+.content { flex: 1; overflow: auto; padding: 16px 20px; }
+
+/* ===== 面板与栅格 ===== */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+.stat-card { background: #fff; border-radius: 10px; padding: 18px 16px; display: flex; gap: 14px; align-items: center; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+.stat-ico { width: 46px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #fff; flex-shrink: 0; }
+.stat-card .num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.stat-card .lbl { font-size: 12px; color: #64748b; }
+.stat-card .sub { font-size: 11px; margin-top: 3px; color: #94a3b8; }
+.grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-2eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+.panel { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); padding: 14px 16px; }
+.panel h4 { font-size: 13px; color: #334155; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.panel h4 .more { font-size: 12px; color: #2563eb; cursor: pointer; font-weight: 400; }
+.chart { width: 100%; height: 250px; }
+.toolbar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+.toolbar .spacer { flex: 1; }
+
+/* ===== 通用小件 ===== */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.mono { font-family: Consolas, Menlo, monospace; font-size: 12px; }
+.host-name { font-weight: 600; }
+.host-ip { font-size: 11px; color: #94a3b8; }
+.evt-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px dashed #eef2f7; font-size: 12px; align-items: flex-start; }
+.evt-item:last-child { border-bottom: none; }
+.evt-item .t { color: #94a3b8; width: 86px; flex-shrink: 0; font-family: Consolas, monospace; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); padding: 14px 16px; flex: 1; }
+.chip .n { font-size: 22px; font-weight: 700; }
+.chip .l { font-size: 12px; color: #64748b; }
+.prot-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); padding: 16px; }
+.prot-card .hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.prot-card .hd b { font-size: 14px; }
+.prot-card p { font-size: 12px; color: #64748b; line-height: 1.7; margin-bottom: 6px; }
+.prot-card .stats { font-size: 12px; color: #0f172a; margin-top: 6px; }

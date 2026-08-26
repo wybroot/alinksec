@@ -1,0 +1,49 @@
+# ---------- Java / Maven ----------
+server/*/target/
+*.class
+*.jar
+!deploy/docker/**/*.jar
+
+# ---------- Go ----------
+agent/alinksec-agent
+agent/alinksec-agent.exe
+*.test
+*.out
+
+# ---------- Node / 前端 ----------
+web/node_modules/
+web/dist/
+*.local
+
+# ---------- 发布产物（本机构建，不入库）----------
+release/
+release-bin/
+alinksec-release.zip
+alinksec-m1.zip
+
+# ---------- 运行时数据（证书/密钥/队列/特征库，绝不入库）----------
+data/
+*.crt
+*.key
+*.pem
+jwt.secret
+deploy/docker/.env
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 日志 ----------
+*.log
+logs/
+
+# ---------- 本地工具链（pgsql/protoc 为 Windows 本地二进制，体积大，不建议入库；
+# 如需团队共享请改用各平台包管理器安装，或单独走制品库）----------
+tools/

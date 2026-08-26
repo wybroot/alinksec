@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: alinksec-server
+  datasource:
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/alinksec?stringtype=unspecified
+    username: ${PG_USER:alinksec}
+    password: ${PG_PASSWORD:alinksec123}
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 5000
+
+server:
+  port: 8080   # M2 REST API 占位
+
+alinksec:
+  server:
+    port: 9443
+    cert-dir: ${ALINKSEC_CERT_DIR:./data/certs}
+    tls-sans: localhost,127.0.0.1,::1,alinksec-server
+    agent-cert-days: 3650
+  policy:
+    current-version: v0
+  metrics:
+    enabled: ${ALINKSEC_METRICS_ENABLED:true}
+    vm-base-url: http://${VM_HOST:localhost}:8428
+  signature:
+    storage-dir: ${ALINKSEC_SIG_DIR:./data/signature}
+    # Agent 下载特征包的基础地址（须为 Agent 可达的本服务 REST 地址）
+    download-base-url: http://${ALINKSEC_SIG_BASE:127.0.0.1:8080}
+    push-interval-ms: 3600000   # 特征库兜底推送间隔（导入后立即推送 + 定时兜底）
+
+  patch:
+    storage-dir: ${ALINKSEC_PATCH_DIR:./data/patch}
+    # Agent 下载补丁包的基础地址（与 signature 同一 REST 出口）
+    download-base-url: http://${ALINKSEC_SIG_BASE:127.0.0.1:8080}
+
+logging:
+  level:
+    com.alinksec: INFO

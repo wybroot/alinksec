@@ -1,0 +1,150 @@
+package com.alinksec.service.query;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 基线核查查询：模板 / 任务 / 结果明细。
+ */
+@Service
+public class BaselineQueryService {
+
+    private final JdbcTemplate jdbc;
+
+    public BaselineQueryService(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    public List<Map<String, Object>> templates() {
+        return jdbc.queryForList("""
+                SELECT id, code, name, standard, os_type, version, item_count, enabled
+                FROM t_baseline_template ORDER BY id
+                """);
+    }
+
+    public Map<String, Object> templateItems(long templateId, String category, Integer severity) {
+        StringBuilder where = new StringBuilder(" WHERE template_id = ").append(templateId);
+        if (category != null && !category.isBlank()) {
+            where.append(" AND category = '").append(category.replace("'", "''")).append("'");
+        }
+        if (severity != null) {
+            where.append(" AND severity >= ").append(severity);
+        }
+        Long total = jdbc.queryForObject(
+                "SELECT count(*) FROM t_baseline_item" + where, Long.class);
+        List<Map<String, Object>> items = jdbc.queryForList("""
+                SELECT id, code, name, category, severity, check::text AS check,
+                       remediation, fix_spec::text AS fix_spec, enabled
+                FROM t_baseline_item""" + where + " ORDER BY code");
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", items);
+        result.put("total", total == null ? 0 : total);
+        return result;
+    }
+
+    public Map<String, Object> tasks(int page, int size) {
+        Long total = jdbc.queryForObject("SELECT count(*) FROM t_baseline_task", Long.class);
+        List<Map<String, Object>> list = jdbc.queryForList("""
+                SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
+                       (SELECT count(*) FROM t_baseline_summary s WHERE s.task_id = t.id) AS agent_count,
+                       (SELECT avg(s.score)::numeric(5,2) FROM t_baseline_summary s WHERE s.task_id = t.id) AS avg_score,
+                       t.created_at, t.started_at, t.finished_at
+                FROM t_baseline_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
+                """, size, (page - 1) * size);
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("total", total == null ? 0 : total);
+        return result;
+    }
+
+    /** 任务详情：按主机汇总 */
+    public Map<String, Object> taskDetail(long taskId) {
+        List<Map<String, Object>> task = jdbc.queryForList("""
+                SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
+                       t.scope::text AS scope, t.created_at, t.started_at, t.finished_at
+                FROM t_baseline_task t WHERE t.id = ?
+                """, taskId);
+        if (task.isEmpty()) {
+            return null;
+        }
+        List<Map<String, Object>> hosts = jdbc.queryForList("""
+                SELECT s.agent_id, a.hostname, a.ip, s.total, s.passed_count, s.failed_count,
+                       s.score, s.checked_at
+                FROM t_baseline_summary s
+                LEFT JOIN t_agent a ON a.agent_id = s.agent_id
+                WHERE s.task_id = ?
+                ORDER BY s.score ASC
+                """, taskId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("task", task.get(0));
+        result.put("hosts", hosts);
+        return result;
+    }
+
+    /** 单机核查明细（含模板项信息；fixable = fix_spec 非空且 risk=auto，一键修复入口用） */
+    public List<Map<String, Object>> taskAgentItems(long taskId, String agentId, Boolean passed) {
+        StringBuilder where = new StringBuilder(
+                " WHERE r.task_id = " + taskId + " AND r.agent_id = '" + agentId.replace("'", "''") + "'");
+        if (passed != null) {
+            where.append(" AND r.passed = ").append(passed);
+        }
+        return jdbc.queryForList("""
+                SELECT i.id AS item_id, i.code, i.name, i.category, i.severity, r.passed, r.actual, r.message,
+                       r.checked_at, i.fix_spec::text AS fix_spec,
+                       (i.fix_spec IS NOT NULL
+                        AND i.fix_spec::text NOT IN ('null', '')
+                        AND COALESCE(i.fix_spec->>'risk', 'auto') <> 'manual') AS fixable
+                FROM t_baseline_result r
+                JOIN t_baseline_item i ON i.id = r.item_id""" + where + """
+                ORDER BY i.severity DESC, i.code
+                """);
+    }
+
+    /** 类别维度失败统计（雷达图/柱状图） */
+    public List<Map<String, Object>> taskCategoryStats(long taskId) {
+        return jdbc.queryForList("""
+                SELECT i.category, count(*) AS total,
+                       count(*) FILTER (WHERE r.passed) AS passed,
+                       count(*) FILTER (WHERE NOT r.passed) AS failed
+                FROM t_baseline_result r JOIN t_baseline_item i ON i.id = r.item_id
+                WHERE r.task_id = ?
+                GROUP BY i.category ORDER BY i.category
+                """, taskId);
+    }
+
+    /** 最新任务按主机汇总（含严重度分布），供基线页首屏 */
+    public Map<String, Object> latestTaskRows() {
+        List<Map<String, Object>> tasks = jdbc.queryForList(
+                "SELECT id, task_no, name, template_ids FROM t_baseline_task ORDER BY id DESC LIMIT 1");
+        if (tasks.isEmpty()) {
+            return Map.of("list", List.of(), "total", 0);
+        }
+        long taskId = ((Number) tasks.get(0).get("id")).longValue();
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT s.agent_id, a.hostname, t.name AS tpl, s.total, s.passed_count, s.failed_count,
+                       s.score, s.checked_at,
+                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 4) AS c,
+                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 3) AS h,
+                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 2) AS m,
+                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 1) AS l
+                FROM t_baseline_summary s
+                JOIN t_agent a ON a.agent_id = s.agent_id
+                JOIN t_baseline_task t ON t.id = s.task_id
+                LEFT JOIN t_baseline_result r ON r.task_id = s.task_id AND r.agent_id = s.agent_id
+                LEFT JOIN t_baseline_item i ON i.id = r.item_id
+                WHERE s.task_id = ?
+                GROUP BY s.agent_id, a.hostname, t.name, s.total, s.passed_count, s.failed_count,
+                         s.score, s.checked_at
+                ORDER BY s.score ASC
+                """, taskId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", taskId);
+        result.put("list", rows);
+        result.put("total", rows.size());
+        return result;
+    }
+}

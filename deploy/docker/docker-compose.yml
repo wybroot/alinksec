@@ -1,0 +1,83 @@
+name: alinksec
+
+services:
+  # ---------- PostgreSQL 17 ----------
+  postgres:
+    image: postgres:17
+    container_name: alinksec-pg
+    environment:
+      POSTGRES_USER: alinksec
+      POSTGRES_PASSWORD: alinksec123
+      POSTGRES_DB: alinksec
+      TZ: Asia/Shanghai
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # 首次启动自动执行建表脚本
+      - ../sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alinksec -d alinksec"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    # 注意：不映射 5432 到宿主机（仅 compose 内网访问），验证 SQL 用 docker exec
+
+  # ---------- VictoriaMetrics（时序指标，docs/03 §3） ----------
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.102.0
+    container_name: alinksec-vm
+    # 单机模式：90 天保留（容量规划见总体设计 §6.3）
+    command: ["-retentionPeriod=90d", "-storageDataPath=/storage"]
+    volumes:
+      - vm-data:/storage
+    restart: unless-stopped
+    # 不映射 8422/8428 到宿主机：查询统一经 server REST 出口（/api/metrics/*）
+
+  # ---------- 服务端 ----------
+  server:
+    build:
+      context: ../..                      # 仓库根
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: alinksec-server
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: alinksec
+      PG_PASSWORD: alinksec123
+      VM_HOST: victoriametrics
+      ALINKSEC_METRICS_ENABLED: "true"
+      # 特征库/补丁包下载地址：必须是「Agent 可达」的服务端 REST 地址（默认 127.0.0.1 会导致 Agent 下载失败）
+      ALINKSEC_SIG_BASE: "${HOST_IP:-alinksec-server}:8080"
+      # 生产建议显式设置 JWT 密钥（不设则首次启动自动生成并持久化到 volume）
+      # ALINKSEC_JWT_SECRET: "change-me-to-a-long-random-string"
+      # 证书 SAN：必须在首次启动前带上宿主机 IP（证书只生成一次）！
+      ALINKSEC_SERVER_TLS_SANS: "localhost,127.0.0.1,::1,alinksec-server,${HOST_IP:-alinksec-server}"
+      TZ: Asia/Shanghai
+    ports:
+      - "9443:9443"      # gRPC mTLS，Agent 接入
+      - "8080:8080"      # REST（M2 占位；生产可去掉改由 web 反代）
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
+    volumes:
+      - server-data:/app/data            # 证书 + 状态持久化
+    restart: unless-stopped
+
+  # ---------- 前端 ----------
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+    container_name: alinksec-web
+    ports:
+      - "8081:80"         # http://<服务器IP>:8081
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  vm-data:
+  server-data:

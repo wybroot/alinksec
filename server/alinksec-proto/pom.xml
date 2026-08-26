@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.alinksec</groupId>
+    <artifactId>alinksec-server-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>alinksec-proto</artifactId>
+  <name>ALinkSec Proto (gRPC stubs)</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-protobuf</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-stub</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.annotation</groupId>
+      <artifactId>jakarta.annotation-api</artifactId>
+    </dependency>
+    <!-- grpc-java 1.62 生成的 stub 引用 javax.annotation.Generated -->
+    <dependency>
+      <groupId>javax.annotation</groupId>
+      <artifactId>javax.annotation-api</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!--
+      Windows 中文路径下 protobuf-maven-plugin 传绝对路径给 protoc 会乱码，
+      故改用 dependency-plugin 解包 grpc 生成器 + exec 以相对路径调用仓库内 protoc.exe。
+      Linux/Mac 可将 protoc.path 换成 PATH 中的 protoc。
+    -->
+    <plugins>
+      <!-- 1) 复制 protoc-gen-grpc-java 生成器到无中文的临时目录
+             （protoc 以 ANSI 命令行执行插件，路径含非 ASCII 时失败；exe 为单文件 artifact 用 copy） -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <id>copy-grpc-plugin</id>
+            <phase>generate-sources</phase>
+            <goals><goal>copy</goal></goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>io.grpc</groupId>
+                  <artifactId>protoc-gen-grpc-java</artifactId>
+                  <version>${grpc.version}</version>
+                  <classifier>windows-x86_64</classifier>
+                  <type>exe</type>
+                  <destFileName>protoc-gen-grpc-java.exe</destFileName>
+                  <outputDirectory>${java.io.tmpdir}/alinksec-protoc</outputDirectory>
+                </artifactItem>
+              </artifactItems>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 2) 准备输出目录 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>mkdir-generated</id>
+            <phase>generate-sources</phase>
+            <goals><goal>run</goal></goals>
+            <configuration>
+              <target>
+                <mkdir dir="${project.build.directory}/generated-sources/protobuf/java"/>
+                <mkdir dir="${project.build.directory}/generated-sources/protobuf/grpc-java"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 3) 相对路径调用 protoc 生成 java + grpc stubs -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+        <executions>
+          <execution>
+            <id>protoc-generate</id>
+            <phase>generate-sources</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+              <executable>${project.basedir}${file.separator}..${file.separator}..${file.separator}tools${file.separator}protoc${file.separator}bin${file.separator}protoc.exe</executable>
+              <workingDirectory>${project.basedir}</workingDirectory>
+              <arguments>
+                <argument>-I../../proto</argument>
+                <argument>--java_out=target/generated-sources/protobuf/java</argument>
+                <argument>--plugin=protoc-gen-grpc-java=${java.io.tmpdir}/alinksec-protoc/protoc-gen-grpc-java.exe</argument>
+                <argument>--grpc-java_out=target/generated-sources/protobuf/grpc-java</argument>
+                <argument>../../proto/agent.proto</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 4) 生成目录挂为源码根 -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>add-generated-sources</id>
+            <phase>generate-sources</phase>
+            <goals><goal>add-source</goal></goals>
+            <configuration>
+              <sources>
+                <source>${project.build.directory}/generated-sources/protobuf/java</source>
+                <source>${project.build.directory}/generated-sources/protobuf/grpc-java</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,26 @@
+# 构建上下文 = 仓库根；只排除与镜像无关的内容，保证构建干净快速
+
+# 已废弃的演示页（绝不进镜像）
+demo/
+
+# 前端本地产物与依赖（镜像内多阶段自行构建）
+web/node_modules/
+web/dist/
+
+# 版本控制 / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# 文档
+*.md
+docs/
+deploy/部署检查清单.md
+
+# Agent 端与构建无关的目录（Agent 为裸机安装，不参与服务端镜像）
+agent/
+
+# 系统杂项
+.DS_Store
+Thumbs.db

@@ -1,0 +1,361 @@
+syntax = "proto3";
+package alinksec.v1;
+
+option go_package = "github.com/alinksec/alinksec-agent/internal/proto;proto";
+option java_multiple_files = true;
+option java_package = "com.alinksec.proto";
+
+/* ==================== 公共类型 ==================== */
+
+enum OsType {
+  OS_UNKNOWN = 0;
+  OS_LINUX   = 1;
+  OS_WINDOWS = 2;
+}
+
+enum Severity {
+  SEV_UNKNOWN  = 0;
+  SEV_INFO     = 1;
+  SEV_LOW      = 2;
+  SEV_MEDIUM   = 3;
+  SEV_HIGH     = 4;
+  SEV_CRITICAL = 5;
+}
+
+message HostInfo {
+  string hostname      = 1;
+  OsType os_type       = 2;
+  string os_version    = 3;   // CentOS 7.9 / Ubuntu 22.04 / Windows Server 2019
+  string kernel        = 4;   // 3.10.0-1160.el7 / 10.0.17763
+  string arch          = 5;   // amd64 / arm64
+  string agent_version = 6;
+  repeated string ip_list  = 7;
+  repeated string mac_list = 8;
+  string machine_id    = 9;   // Linux: /etc/machine-id; Windows: MachineGuid
+}
+
+/* ==================== 注册服务 ==================== */
+
+service EnrollService {
+  // 首次安装调用；成功后 Agent 持久化证书，改走 mTLS 主通道
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+message EnrollRequest {
+  string enroll_token = 1;    // 平台生成的一次性注册码
+  HostInfo host       = 2;
+  string nonce        = 3;    // 随机数，防重放
+}
+
+message EnrollResponse {
+  string agent_id     = 1;    // 平台分配的 UUID
+  bytes  client_cert  = 2;    // PEM，CN=agent_id
+  bytes  client_key   = 3;    // PEM 私钥
+  string ca_cert      = 4;    // 平台 CA（PEM）
+}
+
+/* ==================== 主通道（双向流） ==================== */
+
+service AgentChannel {
+  // Agent 发起；上行 stream Report，下行 stream Command
+  rpc Channel(stream Report) returns (stream Command);
+}
+
+/* ---------- 下行指令 ---------- */
+
+message Command {
+  string cmd_id    = 1;       // 指令唯一 ID（UUID），ACK/幂等依据
+  int64  issued_at = 2;       // 服务端下发时间戳（ms）
+  oneof payload {
+    CmdBaselineCheck baseline_check = 10;
+    CmdVulnScan      vuln_scan      = 11;
+    CmdPolicySync    policy_sync    = 12;
+    CmdProtectAction protect_action = 13;
+    CmdAgentUpgrade  agent_upgrade  = 14;
+    CmdCollectNow    collect_now    = 15;
+    CmdAgentControl  agent_control  = 16;
+    CmdVirusScan     virus_scan     = 17;
+    CmdVirusAction   virus_action   = 18;
+    CmdSignatureUpdate signature_update = 19;
+    CmdVulnFix       vuln_fix       = 20;
+  }
+}
+
+message CmdBaselineCheck {
+  string task_id = 1;
+  repeated string template_ids = 2;   // 冗余留档
+  repeated BaselineCheckSpec items = 3;   // 检查项定义随指令下发（Agent 无本地模板，支持热更新）
+}
+
+message BaselineCheckSpec {
+  string item_id = 1;    // t_baseline_item.id
+  string check = 2;      // check JSON：{type, target, regex/operator/expected/cmd/...}
+}
+
+message CmdVulnScan {
+  string task_id = 1;
+  bool include_weak_password = 2;     // 弱口令/空口令检测
+  bool include_port_service  = 3;     // 端口服务识别
+}
+
+message CmdPolicySync {
+  string policy_version = 1;          // 服务端当前全量策略版本（递增）
+  string policy_json    = 2;          // 全量策略快照（docs/04 §策略规范：decoy 段）；空 = 仅版本同步（兼容 M1）
+}
+
+message CmdProtectAction {
+  enum Action {
+    UNKNOWN       = 0;
+    BLOCK_IP      = 1;    // 封禁 IP
+    UNBLOCK_IP    = 2;    // 解封 IP
+    KILL_PROCESS  = 3;    // 按 PID/路径查杀
+    ISOLATE_HOST  = 4;    // 主机隔离（仅放行 Agent 通道）
+    RESTORE_ISOLATION = 5;
+  }
+  Action action      = 1;
+  string target      = 2;   // IP / PID / 进程路径
+  int64  duration_sec = 3;  // 封禁时长，0 = 永久（直至人工解封）
+  string reason      = 4;   // 处置原因（审计留痕）
+}
+
+message CmdAgentUpgrade {
+  string version       = 1;
+  string download_url  = 2;  // MinIO 预签名 URL
+  string sha256        = 3;
+}
+
+message CmdCollectNow {
+  repeated string collector_names = 1;  // 立即触发指定采集器（空 = 全部）
+}
+
+message CmdAgentControl {
+  enum Action {
+    UNKNOWN        = 0;
+    RESTART        = 1;
+    PAUSE_COLLECT  = 2;   // 疑似资源冲突时暂停采集（防护不暂停）
+    RESUME_COLLECT = 3;
+    ARM_UNINSTALL  = 4;   // 布防卸载口令（docs/01 §6.1 防恶意卸载；15min 有效一次性）
+  }
+  Action action = 1;
+  string uninstall_token = 2;  // ARM_UNINSTALL 携带的动态口令
+}
+
+message CmdVirusScan {
+  string task_id = 1;
+  enum Mode { QUICK = 0; FULL = 1; CUSTOM = 2; }
+  Mode mode = 2;
+  repeated string paths = 3;          // CUSTOM 时指定
+}
+
+message CmdVirusAction {
+  enum Action {
+    UNKNOWN    = 0;
+    QUARANTINE = 1;   // 隔离
+    DELETE     = 2;
+    RESTORE    = 3;   // 从隔离区恢复原路径
+    WHITELIST  = 4;   // 加白（path/hash，平台全局生效）
+  }
+  Action action = 1;
+  repeated VirusTarget targets = 2;
+}
+
+message VirusTarget {
+  string path = 1;
+  string sha256 = 2;
+}
+
+message CmdSignatureUpdate {
+  string db_version   = 1;    // 病毒特征库版本（心跳比对，落后即触发）
+  string download_url = 2;    // MinIO 预签名 URL（1h）
+  string sha256       = 3;
+}
+
+message CmdVulnFix {
+  string task_id = 1;
+  repeated FixItem fixes = 2;
+}
+
+message FixItem {
+  string ref_id = 1;              // baseline_item_id 或 vuln_finding_id
+  enum FixType { CONFIG = 0; PACKAGE = 1; }
+  FixType type = 2;
+  string payload = 3;             // JSON：CONFIG=fix_spec 步骤；PACKAGE=包名/目标版本/仓库地址
+}
+
+/* ---------- 上行上报 ---------- */
+
+message Report {
+  string agent_id  = 1;
+  string report_id = 2;   // UUID，服务端去重（补传幂等）
+  int64  ts        = 3;   // 事件产生时间（ms）
+  oneof payload {
+    RptHeartbeat      heartbeat       = 10;
+    RptMetricsBatch   metrics         = 11;
+    RptAssetSnapshot  asset           = 12;
+    RptBaselineResult baseline_result = 13;
+    RptScanResult     scan_result     = 14;
+    RptSecurityEvent  security_event  = 15;
+    RptAck            ack             = 16;
+    RptLogBatch       log_batch       = 17;  // 预留：原始日志订阅
+    RptVirusResult    virus_result    = 18;
+    RptFixResult      fix_result      = 19;
+  }
+}
+
+message RptHeartbeat {
+  string agent_version   = 1;
+  float  cpu_usage       = 2;   // 概要值（详细走 metrics）
+  float  mem_usage       = 3;
+  uint32 process_count   = 4;
+  int64  uptime_sec      = 5;
+  string policy_version  = 6;   // 服务端据此判断是否需要下发 CmdPolicySync
+  string guard_status    = 7;   // guard 引擎运行状态（normal/degraded）
+  string db_version      = 8;   // 病毒特征库本地版本（落后于平台当前版本即触发 CmdSignatureUpdate）
+}
+
+message RptMetricsBatch {
+  repeated MetricSample samples = 1;
+}
+
+message MetricSample {
+  string name = 1;                 // 指标名（详见数据库设计文档 §3 指标命名）
+  map<string, string> labels = 2;  // 如 mount=/data, iface=eth0
+  double value = 3;
+  int64  ts    = 4;
+}
+
+message RptAssetSnapshot {
+  repeated SoftwareInfo software = 1;
+  repeated PortInfo     ports    = 2;
+  repeated ProcessInfo  processes = 3;
+  repeated AccountInfo  accounts  = 4;
+  repeated DiskInfo     disks     = 5;
+}
+
+message SoftwareInfo {
+  string name = 1; string version = 2; string vendor = 3;
+  int64  install_time = 4;
+  string source = 5;              // rpm / dpkg / registry
+}
+
+message PortInfo {
+  uint32 port = 1; string protocol = 2;   // tcp / tcp6 / udp
+  string process = 3; string bind_addr = 4;
+}
+
+message ProcessInfo {
+  int32  pid = 1; string name = 2; string exe = 3;
+  string cmdline = 4; string user = 5; uint64 rss_bytes = 6;
+}
+
+message AccountInfo {
+  string name = 1; uint32 uid = 2; uint32 gid = 3;
+  string shell = 4; bool login_enabled = 5;
+  int64  last_login = 6;
+  bool   risky = 7;                // 空口令 / UID=0 且非 root / 可登录无密码
+  string risky_reason = 8;
+}
+
+message DiskInfo {
+  string mount = 1; string fs_type = 2;
+  uint64 total_bytes = 3; uint64 used_bytes = 4;
+}
+
+message RptBaselineResult {
+  string task_id = 1;
+  repeated BaselineItemResult items = 2;
+}
+
+message BaselineItemResult {
+  string item_id = 1;
+  bool   passed  = 2;
+  string actual  = 3;    // 实际检测值（取证）
+  string message = 4;    // 失败原因（人读）
+  uint32 duration_ms = 5;
+}
+
+message RptScanResult {
+  string task_id = 1;
+  repeated VulnFinding      vulns          = 2;
+  repeated WeakPwdFinding   weak_passwords = 3;
+  repeated PortServiceFinding port_services = 4;
+}
+
+message VulnFinding {
+  string cve_id = 1; string software = 2;
+  string installed_version = 3; string fixed_version = 4;
+  Severity severity = 5; float cvss = 6;
+}
+
+message WeakPwdFinding {
+  string account = 1; string type = 2;   // system_empty / system_weak / uid0_nonroot
+  string password = 3;                   // system_weak 命中时回传明文（离线字典命中，取证展示）
+}
+
+message PortServiceFinding {
+  uint32 port = 1; string protocol = 2;
+  string process = 3; string service = 4; // 指纹识别出的服务
+  bool   risky = 5; string risky_reason = 6;
+}
+
+message RptSecurityEvent {
+  string rule_id   = 1;
+  string rule_name = 2;
+  string type      = 3;      // process / file_tamper / login_crack / self_defense / virus / decoy_tamper / ransom_behavior
+  Severity severity = 4;
+  string detail    = 5;      // JSON：进程五元组/文件前后哈希/登录来源等
+  string action_taken = 6;   // killed / blocked_ip / restored / alert_only
+  int64  event_ts  = 7;
+  repeated string evidence_keys = 8;  // MinIO 对象 key（进程快照/可疑文件样本）
+}
+
+message RptAck {
+  string cmd_id = 1;
+  enum Stage { RECEIVED = 0; RUNNING = 1; DONE = 2; FAILED = 3; }
+  Stage  stage   = 2;
+  int32  code    = 3;    // 0 成功；非 0 错误码
+  string message = 4;
+}
+
+message RptLogBatch {
+  string source = 1;             // secure / windows-security / custom:<path>
+  repeated LogLine lines = 2;
+}
+
+message LogLine {
+  int64 ts = 1; string content = 2;
+  map<string, string> fields = 3; // 结构化字段（解析后）
+}
+
+message RptVirusResult {
+  string task_id = 1;
+  enum Mode { QUICK = 0; FULL = 1; CUSTOM = 2; REALTIME = 3; }
+  Mode mode = 2;
+  uint32 files_scanned = 3;
+  uint32 duration_ms = 4;
+  repeated VirusFinding findings = 5;
+}
+
+message VirusFinding {
+  string path = 1;
+  string name = 2;           // 检出名，如 Trojan.Linux.Miner.X
+  string sha256 = 3;
+  uint64 size = 4;
+  string engine = 5;         // hash / yara
+  Severity severity = 6;
+  string action_taken = 7;   // quarantined / deleted / alert_only
+}
+
+message RptFixResult {
+  string task_id = 1;
+  repeated FixResultItem results = 2;
+}
+
+message FixResultItem {
+  string ref_id = 1;
+  bool   success = 2;
+  bool   rolled_back = 3;    // 配置类修复失败自动回滚标记
+  bool   verified = 4;       // 修复后复核（重跑 check / 重扫 CVE）是否通过
+  bool   reboot_required = 5;
+  string log = 6;
+}
