@@ -6,6 +6,7 @@ import com.alinksec.proto.CmdVulnFix;
 import com.alinksec.proto.FixItem;
 import com.alinksec.proto.RptAck;
 import com.alinksec.service.download.AgentDownloadTokenService;
+import com.alinksec.service.config.AlinkSecProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -31,12 +32,14 @@ public class CommandService {
     private final CommandRepository repository;
     private final CommandSender sender;
     private final AgentDownloadTokenService downloadTokens;
+    private final AlinkSecProperties props;
 
     public CommandService(CommandRepository repository, CommandSender sender,
-                          AgentDownloadTokenService downloadTokens) {
+                          AgentDownloadTokenService downloadTokens, AlinkSecProperties props) {
         this.repository = repository;
         this.sender = sender;
         this.downloadTokens = downloadTokens;
+        this.props = props;
     }
 
     /**
@@ -184,13 +187,24 @@ public class CommandService {
             if (resourceKey == null || resourceKey.isBlank()) {
                 throw new IllegalStateException("download URL has no " + resourceParameter);
             }
-            return UriComponentsBuilder.fromUri(uri)
+            return UriComponentsBuilder.fromUriString(downloadBaseUrl(resourceType))
+                    .path(uri.getPath())
+                    .replaceQueryParam(resourceParameter, resourceKey)
                     .replaceQueryParam("token", downloadTokens.issue(agentId, resourceType, resourceKey))
                     .build(true)
                     .toUriString();
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("invalid download URL", e);
         }
+    }
+
+    private String downloadBaseUrl(String resourceType) {
+        return switch (resourceType) {
+            case "agent-upgrade" -> props.getUpgrade().getDownloadBaseUrl();
+            case "virus-db" -> props.getSignature().getDownloadBaseUrl();
+            case "patch" -> props.getPatch().getDownloadBaseUrl();
+            default -> throw new IllegalArgumentException("unknown download resource type: " + resourceType);
+        };
     }
 
     private String commandType(Command cmd) {
