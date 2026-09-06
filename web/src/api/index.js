@@ -387,10 +387,11 @@ export async function fetchPatches(params = {}) {
 
 /** 导入补丁包：file + 元数据（osType/osVersion/pkgName/targetVersion/repoType） */
 export async function importPatch(formData) {
+  const token = getToken()
   return fetch('/api/fix/patches', {
     method: 'POST',
     body: formData,
-    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   }).then(async r => {
     const j = await r.json().catch(() => ({}))
     if (!r.ok || j.code !== 0) throw new Error(j.message || `导入失败（${r.status}）`)
