@@ -5,6 +5,7 @@ import com.alinksec.service.query.VirusQueryService;
 import com.alinksec.service.virus.VirusActionService;
 import com.alinksec.service.virus.VirusDbService;
 import com.alinksec.service.virus.VirusTaskService;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
@@ -37,13 +38,16 @@ public class VirusController {
     private final VirusTaskService taskService;
     private final VirusActionService actionService;
     private final VirusDbService dbService;
+    private final AgentDownloadTokenService downloadTokens;
 
     public VirusController(VirusQueryService query, VirusTaskService taskService,
-                           VirusActionService actionService, VirusDbService dbService) {
+                           VirusActionService actionService, VirusDbService dbService,
+                           AgentDownloadTokenService downloadTokens) {
         this.query = query;
         this.taskService = taskService;
         this.actionService = actionService;
         this.dbService = dbService;
+        this.downloadTokens = downloadTokens;
     }
 
     /** 创建病毒扫描任务：mode 1快速 2全盘 3自定义（paths） */
@@ -90,7 +94,10 @@ public class VirusController {
 
     /** 特征包下载（Agent 拉取端点，无 JWT：package_key 为版本号文件名 + 内网部署） */
     @GetMapping("/db/download")
-    public ResponseEntity<FileSystemResource> download(@RequestParam String packageKey) {
+    public ResponseEntity<FileSystemResource> download(@RequestParam String packageKey, @RequestParam String token) {
+        if (!downloadTokens.isAuthorized(token, "virus-db", packageKey)) {
+            return ResponseEntity.notFound().build();
+        }
         Path path = dbService.packagePath(packageKey);
         if (!Files.isRegularFile(path)) {
             return ResponseEntity.notFound().build();

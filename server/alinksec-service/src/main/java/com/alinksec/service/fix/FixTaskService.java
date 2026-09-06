@@ -237,7 +237,7 @@ public class FixTaskService {
                     "repo_type", patch.get("repo_type"),
                     "pkg_name", t.get("pkg_name"),
                     "target_version", t.get("target_version"),
-                    "download_url", patchRepo.downloadUrl(patch),
+                    "download_url", patchRepo.downloadUrl(String.valueOf(t.get("agent_id")), patch),
                     "sha256", patch.get("sha256"),
                     "cve_id", t.get("cve_id"),
                     "finding_id", String.valueOf(t.get("finding_id")));

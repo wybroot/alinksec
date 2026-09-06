@@ -2,6 +2,7 @@ package com.alinksec.gateway.rest;
 
 import com.alinksec.common.web.ApiResult;
 import com.alinksec.service.upgrade.UpgradeService;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
@@ -29,9 +30,11 @@ import java.util.Map;
 public class UpgradeController {
 
     private final UpgradeService upgradeService;
+    private final AgentDownloadTokenService downloadTokens;
 
-    public UpgradeController(UpgradeService upgradeService) {
+    public UpgradeController(UpgradeService upgradeService, AgentDownloadTokenService downloadTokens) {
         this.upgradeService = upgradeService;
+        this.downloadTokens = downloadTokens;
     }
 
     /** 上传升级包（multipart：file + version + platform + notes） */
@@ -68,7 +71,10 @@ public class UpgradeController {
 
     /** 升级包下载（Agent 拉取端点，无 JWT） */
     @GetMapping("/download")
-    public ResponseEntity<FileSystemResource> download(@RequestParam String packageKey) {
+    public ResponseEntity<FileSystemResource> download(@RequestParam String packageKey, @RequestParam String token) {
+        if (!downloadTokens.isAuthorized(token, "agent-upgrade", packageKey)) {
+            return ResponseEntity.notFound().build();
+        }
         Path path = upgradeService.packagePath(packageKey);
         if (!Files.isRegularFile(path)) {
             return ResponseEntity.notFound().build();

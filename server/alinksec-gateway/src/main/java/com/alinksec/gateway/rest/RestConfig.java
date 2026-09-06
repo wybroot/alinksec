@@ -21,7 +21,6 @@ public class RestConfig implements WebMvcConfigurer {
         registry.addInterceptor(jwtAuthInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/auth/login", "/api/health",
-                        "/api/virus/db/download", // Agent 特征包拉取（无 JWT：package_key 不可猜测）
-                        "/api/fix/patches/download"); // Agent 补丁拉取（无 JWT：filename+sha256 双因子）
+                        "/api/virus/db/download", "/api/fix/patches/download", "/api/upgrade/download");
     }
 }

@@ -2,6 +2,7 @@ package com.alinksec.service.virus;
 
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import com.alinksec.proto.CmdSignatureUpdate;
 import com.alinksec.proto.Command;
 import com.alinksec.service.command.CommandService;
@@ -39,11 +40,14 @@ public class VirusDbService {
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
     private final AlinkSecProperties props;
+    private final AgentDownloadTokenService downloadTokens;
 
-    public VirusDbService(JdbcTemplate jdbc, CommandService commandService, AlinkSecProperties props) {
+    public VirusDbService(JdbcTemplate jdbc, CommandService commandService, AlinkSecProperties props,
+                          AgentDownloadTokenService downloadTokens) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.props = props;
+        this.downloadTokens = downloadTokens;
     }
 
     /**
@@ -94,9 +98,10 @@ public class VirusDbService {
     }
 
     /** Agent 下载 URL（package_key 为版本号文件名，不可猜测性由版本号语义承担 + 内网部署） */
-    public String downloadUrl(String packageKey) {
+    public String downloadUrl(String agentId, String packageKey) {
         String base = props.getSignature().getDownloadBaseUrl().replaceAll("/+$", "");
-        return base + "/api/virus/db/download?packageKey=" + packageKey;
+        return base + "/api/virus/db/download?packageKey=" + packageKey
+                + "&token=" + downloadTokens.issue(agentId, "virus-db", packageKey);
     }
 
     /** 推送最新特征库给全部 Agent（在线即达，离线指令挂起） */
@@ -144,7 +149,7 @@ public class VirusDbService {
         commandService.dispatch(agentId, Command.newBuilder()
                 .setSignatureUpdate(CmdSignatureUpdate.newBuilder()
                         .setDbVersion((String) db.get("db_version"))
-                        .setDownloadUrl(downloadUrl((String) db.get("package_key")))
+                        .setDownloadUrl(downloadUrl(agentId, (String) db.get("package_key")))
                         .setSha256((String) db.get("sha256"))),
                 null);
     }

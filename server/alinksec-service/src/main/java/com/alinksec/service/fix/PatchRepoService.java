@@ -1,6 +1,7 @@
 package com.alinksec.service.fix;
 
 import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,10 +33,13 @@ public class PatchRepoService {
 
     private final JdbcTemplate jdbc;
     private final AlinkSecProperties props;
+    private final AgentDownloadTokenService downloadTokens;
 
-    public PatchRepoService(JdbcTemplate jdbc, AlinkSecProperties props) {
+    public PatchRepoService(JdbcTemplate jdbc, AlinkSecProperties props,
+                            AgentDownloadTokenService downloadTokens) {
         this.jdbc = jdbc;
         this.props = props;
+        this.downloadTokens = downloadTokens;
     }
 
     /**
@@ -107,19 +111,18 @@ public class PatchRepoService {
         String limit = " ORDER BY id DESC LIMIT " + Math.min(size, 100) + " OFFSET " + (long) Math.max(page - 1, 0) * Math.min(size, 100);
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT * FROM t_patch_package" + where + limit, args.toArray());
-        rows.forEach(this::fillDownloadUrl);
         return Map.of("total", total == null ? 0 : total, "list", rows);
     }
 
     /** Agent 下载端点解析：filename + key（sha256）双因子校验 */
-    public Path resolveFile(String filename, String key) {
+    public Path resolveFile(String filename) {
         if (filename == null || filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
             throw new IllegalArgumentException("非法文件名");
         }
-        String sha = jdbc.queryForObject(
-                "SELECT sha256 FROM t_patch_package WHERE filename = ?", String.class, filename);
-        if (sha == null || key == null || !sha.equalsIgnoreCase(key)) {
-            throw new IllegalArgumentException("补丁不存在或 key 校验失败");
+        Integer count = jdbc.queryForObject("SELECT count(*) FROM t_patch_package WHERE filename = ?",
+                Integer.class, filename);
+        if (count == null || count != 1) {
+            throw new IllegalArgumentException("补丁不存在");
         }
         return Path.of(props.getPatch().getStorageDir()).resolve(filename);
     }
@@ -156,18 +159,10 @@ public class PatchRepoService {
     }
 
     /** 构造 Agent 下载 URL（key=sha256，RestConfig 白名单放行） */
-    public String downloadUrl(Map<String, Object> patchRow) {
+    public String downloadUrl(String agentId, Map<String, Object> patchRow) {
         return props.getPatch().getDownloadBaseUrl()
                 + "/api/fix/patches/download?filename=" + patchRow.get("filename")
-                + "&key=" + patchRow.get("sha256");
-    }
-
-    private void fillDownloadUrl(Map<String, Object> row) {
-        row.put("download_url", props.getPatch().getDownloadBaseUrl()
-                + "/api/fix/patches/download?filename=" + row.get("filename")
-                + "&key=" + row.get("sha256"));
-        row.put("imported_at", row.get("created_at") instanceof OffsetDateTime o
-                ? o.toLocalDateTime().toString() : String.valueOf(row.get("created_at")));
+                + "&token=" + downloadTokens.issue(agentId, "patch", String.valueOf(patchRow.get("filename")));
     }
 
     private String normalizeRepoType(String repoType, int osType, String originalName) {

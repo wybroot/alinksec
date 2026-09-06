@@ -43,7 +43,8 @@ public class CommandRepository {
     }
 
     public int markSent(String cmdId) {
-        return jdbc.update("UPDATE t_command SET status = ? WHERE cmd_id = ?", ST_SENT, cmdId);
+        return jdbc.update("UPDATE t_command SET status = ? WHERE cmd_id = ? AND status = ?",
+                ST_SENT, cmdId, ST_PENDING);
     }
 
     public int bumpRetry(String cmdId) {
@@ -102,6 +103,22 @@ public class CommandRepository {
 
     public Optional<Map<String, Object>> findByCmdId(String cmdId) {
         return jdbc.queryForList("SELECT * FROM t_command WHERE cmd_id = ?", cmdId).stream().findFirst();
+    }
+
+    public int markFailed(String cmdId, String reason) {
+        return jdbc.update("""
+                UPDATE t_command SET status = ?, finished_at = now(), result = ?
+                WHERE cmd_id = ? AND status NOT IN (?, ?, ?)
+                """, ST_FAILED, JsonUtils.write(Map.of("reason", reason)), cmdId,
+                ST_DONE, ST_FAILED, ST_TIMEOUT);
+    }
+
+    public List<Map<String, Object>> findPendingByAgent(String agentId) {
+        return jdbc.queryForList("""
+                SELECT * FROM t_command
+                WHERE agent_id = ? AND status = ?
+                ORDER BY created_at, id
+                """, agentId, ST_PENDING);
     }
 
     public List<Map<String, Object>> recentByAgent(String agentId, int limit) {

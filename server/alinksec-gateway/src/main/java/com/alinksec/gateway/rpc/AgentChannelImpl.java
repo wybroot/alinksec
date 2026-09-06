@@ -6,6 +6,7 @@ import com.alinksec.proto.Command;
 import com.alinksec.proto.Report;
 import com.alinksec.service.agent.AgentEntity;
 import com.alinksec.service.agent.AgentRepository;
+import com.alinksec.service.command.CommandService;
 import com.alinksec.service.report.ReportDispatcher;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -25,12 +26,15 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
     private final ReportDispatcher dispatcher;
     private final AgentRepository agentRepository;
     private final com.alinksec.gateway.channel.ConnectionRegistry registry;
+    private final CommandService commandService;
 
     public AgentChannelImpl(ReportDispatcher dispatcher, AgentRepository agentRepository,
-                            com.alinksec.gateway.channel.ConnectionRegistry registry) {
+                             com.alinksec.gateway.channel.ConnectionRegistry registry,
+                             CommandService commandService) {
         this.dispatcher = dispatcher;
         this.agentRepository = agentRepository;
         this.registry = registry;
+        this.commandService = commandService;
     }
 
     @Override
@@ -77,6 +81,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 authenticatedAgentId = report.getAgentId();
                 authenticated = true;
                 registry.register(authenticatedAgentId, responseObserver);
+                commandService.deliverPending(authenticatedAgentId);
                 return true;
             }
 

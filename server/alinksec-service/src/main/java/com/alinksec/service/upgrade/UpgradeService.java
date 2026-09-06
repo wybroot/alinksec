@@ -2,6 +2,7 @@ package com.alinksec.service.upgrade;
 
 import com.alinksec.service.command.CommandService;
 import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import com.alinksec.proto.CmdAgentUpgrade;
 import com.alinksec.proto.Command;
 import org.slf4j.Logger;
@@ -33,11 +34,14 @@ public class UpgradeService {
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
     private final AlinkSecProperties props;
+    private final AgentDownloadTokenService downloadTokens;
 
-    public UpgradeService(JdbcTemplate jdbc, CommandService commandService, AlinkSecProperties props) {
+    public UpgradeService(JdbcTemplate jdbc, CommandService commandService, AlinkSecProperties props,
+                          AgentDownloadTokenService downloadTokens) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.props = props;
+        this.downloadTokens = downloadTokens;
     }
 
     /** 上传升级包：{version, platform} 由前端指定，落盘 + 记录。 */
@@ -81,12 +85,12 @@ public class UpgradeService {
         if (agentIds.isEmpty()) {
             throw new IllegalArgumentException("请选择升级目标主机");
         }
-        CmdAgentUpgrade cmd = CmdAgentUpgrade.newBuilder()
-                .setVersion((String) pkg.get("version"))
-                .setDownloadUrl(downloadUrl((String) pkg.get("package_key")))
-                .setSha256((String) pkg.get("sha256"))
-                .build();
         for (String agentId : agentIds) {
+            CmdAgentUpgrade cmd = CmdAgentUpgrade.newBuilder()
+                    .setVersion((String) pkg.get("version"))
+                    .setDownloadUrl(downloadUrl(agentId, (String) pkg.get("package_key")))
+                    .setSha256((String) pkg.get("sha256"))
+                    .build();
             commandService.dispatch(agentId, Command.newBuilder().setAgentUpgrade(cmd), operatedBy);
         }
         log.info("升级指令已下发: version={} agents={}", pkg.get("version"), agentIds.size());
@@ -114,9 +118,10 @@ public class UpgradeService {
         return Path.of(props.getUpgrade().getStorageDir()).resolve(name);
     }
 
-    private String downloadUrl(String packageKey) {
+    private String downloadUrl(String agentId, String packageKey) {
         String base = props.getUpgrade().getDownloadBaseUrl().replaceAll("/+$", "");
-        return base + "/api/upgrade/download?packageKey=" + packageKey;
+        return base + "/api/upgrade/download?packageKey=" + packageKey
+                + "&token=" + downloadTokens.issue(agentId, "agent-upgrade", packageKey);
     }
 
     private static String sha256(Path file) throws IOException {

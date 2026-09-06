@@ -4,6 +4,7 @@ import com.alinksec.common.web.ApiResult;
 import com.alinksec.service.fix.FixTaskService;
 import com.alinksec.service.fix.PatchRepoService;
 import com.alinksec.service.query.FixQueryService;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
@@ -34,11 +35,14 @@ public class FixController {
     private final FixTaskService taskService;
     private final FixQueryService query;
     private final PatchRepoService patchRepo;
+    private final AgentDownloadTokenService downloadTokens;
 
-    public FixController(FixTaskService taskService, FixQueryService query, PatchRepoService patchRepo) {
+    public FixController(FixTaskService taskService, FixQueryService query, PatchRepoService patchRepo,
+                         AgentDownloadTokenService downloadTokens) {
         this.taskService = taskService;
         this.query = query;
         this.patchRepo = patchRepo;
+        this.downloadTokens = downloadTokens;
     }
 
     /**
@@ -65,5 +69,56 @@ public class FixController {
     @GetMapping("/tasks/{id}/records")
     public ApiResult<Map<String, Object>> records(@PathVariable long id) {
         return ApiResult.ok(query.taskRecords(id));
+    }
+
+    @PostMapping("/tasks/package")
+    public ApiResult<Map<String, Object>> createPackageTask(@RequestBody Map<String, Object> body,
+                                                             HttpServletRequest request) {
+        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) body.getOrDefault("items", List.of());
+        return ApiResult.ok(taskService.createPackageTask(
+                (String) body.get("name"), items, (String) body.get("approver"),
+                (String) body.get("windowStart"), (String) body.get("windowEnd"), uid));
+    }
+
+    @PostMapping("/tasks/{id}/approve")
+    public ApiResult<Map<String, Object>> approve(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        return ApiResult.ok(taskService.approve(id, (String) body.get("operator")));
+    }
+
+    @GetMapping("/patches")
+    public ApiResult<Map<String, Object>> patches(@RequestParam(defaultValue = "1") int page,
+                                                   @RequestParam(defaultValue = "20") int size,
+                                                   @RequestParam(required = false) Integer osType,
+                                                   @RequestParam(required = false) String keyword) {
+        return ApiResult.ok(patchRepo.list(Math.max(page, 1), Math.max(1, Math.min(size, 100)), osType, keyword));
+    }
+
+    @PostMapping("/patches")
+    public ApiResult<Map<String, Object>> importPatch(@RequestParam("file") MultipartFile file,
+                                                       @RequestParam int osType,
+                                                       @RequestParam(required = false) String osVersion,
+                                                       @RequestParam String pkgName,
+                                                       @RequestParam String targetVersion,
+                                                       @RequestParam(required = false) String repoType,
+                                                       HttpServletRequest request) throws Exception {
+        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        return ApiResult.ok(patchRepo.importPackage(file.getInputStream(), file.getOriginalFilename(), osType,
+                osVersion, pkgName, targetVersion, repoType, uid));
+    }
+
+    @GetMapping("/patches/download")
+    public ResponseEntity<FileSystemResource> downloadPatch(@RequestParam String filename, @RequestParam String token) {
+        if (!downloadTokens.isAuthorized(token, "patch", filename)) {
+            return ResponseEntity.notFound().build();
+        }
+        Path path = patchRepo.resolveFile(filename);
+        if (!Files.isRegularFile(path)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + path.getFileName() + "\"")
+                .body(new FileSystemResource(path));
     }
 }
