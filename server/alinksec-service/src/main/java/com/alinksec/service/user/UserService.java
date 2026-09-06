@@ -10,7 +10,7 @@ import java.util.Optional;
 
 /**
  * 管理端用户（t_user / t_role）：登录校验 + 登录审计。
- * 账号种子见 bootstrap DevSeedRunner（admin/admin@123，生产强制改密）。
+ * 初始账号由 bootstrap DevSeedRunner 根据环境变量创建。
  */
 @Service
 public class UserService {
@@ -53,10 +53,10 @@ public class UserService {
     public void audit(Long userId, String username, String action, String target, String sourceIp) {
         try {
             jdbc.update("""
-                    INSERT INTO t_audit_log (user_id, username, action, target, detail, source_ip)
-                    VALUES (?, ?, ?, ?, ?::jsonb, ?)
-                    """, userId, username, action, target,
-                    target == null ? "{}" : "{\"reason\":\"" + target.replace("\"", "'") + "\"}", sourceIp);
+                    INSERT INTO t_audit_log (uid, username, method, path, body_digest, source_ip, status, cost_ms)
+                    VALUES (?, ?, ?, '/api/auth/login', ?, ?, ?, 0)
+                    """, userId, username, action, target, sourceIp,
+                    "login_failed".equals(action) ? 401 : 200);
         } catch (Exception ignored) {
             // 审计失败不阻断登录主链路
         }

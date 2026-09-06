@@ -275,9 +275,6 @@ iptables 专用链 `ALINKSEC_ISO` 挂载 INPUT/OUTPUT 首位：
 ### ① 本机构建发布包（Windows PowerShell）
 
 ```powershell
-# 服务端 jar（Maven 多模块）
-cd server; mvn -q -DskipTests clean package; cd ..
-
 # Agent 交叉编译 Linux amd64（Windows 版改 GOOS=windows）
 cd agent
 $env:GOOS="linux"; $env:GOARCH="amd64"
@@ -291,17 +288,20 @@ $env:GOOS=""; $env:GOARCH=""; cd ..
 unzip alinksec-release.zip -d ~/alinksec && cd ~/alinksec/deploy/docker
 
 cp .env.example .env && vim .env     # ⚠️ HOST_IP 必须改成服务器真实 IP（证书 SAN 仅首启生成一次）
+# 同时设置 ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD（至少 12 位）和
+# ALINKSEC_BOOTSTRAP_ENROLL_TOKEN（随机 ENROLL- 前缀字符串）
 
 docker compose build && docker compose up -d
 
-docker compose logs server | grep -E "管理员|注册码"
-# 👉 初始账号 admin/admin@123 + ENROLL-XXXX 一次性注册码
+docker compose logs server | grep -E "gRPC|Bootstrap"
+# 👉 仅确认初始化成功；凭据使用 .env 中配置的值，不会打印到日志
+docker cp alinksec-server:/app/data/certs/ca.crt ./alinksec-ca.crt
 ```
 
 ### ③ 目标主机接入（Linux 示例）
 
 ```bash
-sudo ./alinksec-agent install --server <服务器IP>:9443 --token ENROLL-XXXX...
+sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册码> --ca-file ./alinksec-ca.crt
 # 注册 → 签发客户端证书 → 建立双向流通道 → 首次资产采集自动上报
 # 前台试跑确认「主通道已建立」后，配 systemd / Windows 服务常驻（部署文档 §8）
 ```
@@ -310,7 +310,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token ENROLL-XXXX...
 
 | 入口 | 地址 | 说明 |
 |---|---|---|
-| 🖥️ 管理控制台 | `http://<IP>:8081/` | admin / admin@123（首登必改） |
+| 🖥️ 管理控制台 | `http://<IP>:8081/` | admin / `.env` 中的初始密码 |
 | 📺 安全大屏 | `http://<IP>:8081/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
 
 > 📖 **完整部署手册**：35 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表

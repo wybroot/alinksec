@@ -56,7 +56,7 @@ public class GrpcServerLifecycle implements SmartLifecycle {
                     certService.serverCertFile(), certService.serverKeyFile());
             // 客户端证书校验：平台 CA 签发 + 强制提供（Enroll 走 token，注册后才有证书，
             // 因此 Enroll 需要单独的宽松端口/拦截器放行 —— M1 将 Enroll 暴露在同一端口但由
-            // Agent 侧 InsecureSkipVerify + token 认证，服务端 REQUIRE 会拒绝无证书的 Enroll，
+            // Enroll is TLS server-authenticated with a one-time token; mTLS is required after enrollment.
             // 故这里使用 OPTIONAL：有证书则校验，无证书放行（Enroll），业务层由拦截器兜底。
             sslBuilder.trustManager(caFile).clientAuth(ClientAuth.OPTIONAL);
 

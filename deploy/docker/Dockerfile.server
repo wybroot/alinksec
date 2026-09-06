@@ -1,9 +1,15 @@
 # ALinkSec 服务端镜像
-# 构建上下文 = 仓库根（docker compose 已配置），需先在本地 mvn package 产出 jar
+# 构建上下文 = 仓库根（docker compose 已配置）；镜像内完成 Maven 构建。
+FROM maven:3.9-eclipse-temurin-21 AS build
+
+WORKDIR /build
+COPY server /build/server
+RUN mvn -f /build/server/pom.xml -DskipTests package
+
 FROM eclipse-temurin:21-jre-jammy
 
 WORKDIR /app
-COPY server/alinksec-bootstrap/target/alinksec-bootstrap-0.1.0-SNAPSHOT.jar app.jar
+COPY --from=build /build/server/alinksec-bootstrap/target/alinksec-bootstrap-0.1.0-SNAPSHOT.jar app.jar
 
 # 9443 gRPC(mTLS) / 8080 REST
 EXPOSE 9443 8080

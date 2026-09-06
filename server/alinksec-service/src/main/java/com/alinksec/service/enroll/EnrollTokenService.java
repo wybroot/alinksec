@@ -50,7 +50,10 @@ public class EnrollTokenService {
     }
 
     /** 生成新注册码（REST 端点 POST /api/hosts/enroll-token；启动种子与该端点共用） */
-    public String create(String createdBy, int maxUses, int validDays) {
+    public String create(Long createdBy, int maxUses, int validDays) {
+        if (maxUses < 1 || maxUses > 10_000 || validDays < 1 || validDays > 365) {
+            throw new IllegalArgumentException("注册码使用次数或有效期超出允许范围");
+        }
         String token = "ENROLL-" + randomToken();
         jdbc.update("""
                 INSERT INTO t_enroll_token (token, max_uses, expire_at, created_by, status)

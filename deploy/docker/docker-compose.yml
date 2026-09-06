@@ -46,6 +46,9 @@ services:
       PG_PASSWORD: alinksec123
       VM_HOST: victoriametrics
       ALINKSEC_METRICS_ENABLED: "true"
+      # 首启显式创建管理员和注册码；两个值均从 .env 读取，禁止默认凭据。
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:?set ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:?set ALINKSEC_BOOTSTRAP_ENROLL_TOKEN in .env}
       # 特征库/补丁包下载地址：必须是「Agent 可达」的服务端 REST 地址（默认 127.0.0.1 会导致 Agent 下载失败）
       ALINKSEC_SIG_BASE: "${HOST_IP:-alinksec-server}:8080"
       # 生产建议显式设置 JWT 密钥（不设则首次启动自动生成并持久化到 volume）

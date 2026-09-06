@@ -116,8 +116,8 @@ public class HostsController {
     public ApiResult<Map<String, Object>> createEnrollToken(@RequestParam(defaultValue = "10") int maxUses,
                                                             @RequestParam(defaultValue = "7") int validDays,
                                                             jakarta.servlet.http.HttpServletRequest request) {
-        String username = request.getAttribute("username") instanceof String s ? s : "console";
-        String token = enrollTokenService.create(username, maxUses, validDays);
+        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        String token = enrollTokenService.create(uid, maxUses, validDays);
         return ApiResult.ok(Map.of(
                 "token", token,
                 "maxUses", maxUses,

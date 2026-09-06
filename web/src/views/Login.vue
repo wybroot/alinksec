@@ -14,7 +14,7 @@
         </el-form-item>
         <el-button type="primary" size="large" style="width:100%" :loading="loading" @click="submit">登 录</el-button>
       </el-form>
-      <p class="tip">默认账号 admin / Admin@123 · 首次登录后请修改密码</p>
+      <p class="tip">请使用部署时配置的管理员账号登录</p>
     </div>
     <div class="foot">ALINKSEC SECURITY PLATFORM</div>
   </div>

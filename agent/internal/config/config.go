@@ -19,6 +19,8 @@ type Config struct {
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
 	// TLS ServerName 覆盖（服务端证书 SAN 不含连接地址时使用）
 	ServerNameOverride string `yaml:"server_name_override"`
+	// EnrollCAFile is the CA PEM used to verify the server during initial enrollment.
+	EnrollCAFile string `yaml:"enroll_ca_file"`
 	// 离线队列补传限速（条/秒，设计文档：100）
 	DrainRatePerSec int `yaml:"drain_rate_per_sec"`
 	// 资产快照采集间隔（默认 6h；服务端 CmdCollectNow 可即时触发）
@@ -102,8 +104,22 @@ func Load(path string) (*Config, error) {
 }
 
 // WriteExample install 子命令落盘配置
-func WriteExample(path, serverAddr, enrollToken string) error {
-	c := &Config{ServerAddr: serverAddr, EnrollToken: enrollToken}
+func WriteExample(path, serverAddr, enrollToken, enrollCAFile string) error {
+	c := &Config{ServerAddr: serverAddr, EnrollToken: enrollToken, EnrollCAFile: enrollCAFile}
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0600)
+}
+
+// ClearEnrollToken removes the bootstrap credential after the Agent has received its client certificate.
+func ClearEnrollToken(path string) error {
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	c.EnrollToken = ""
 	b, err := yaml.Marshal(c)
 	if err != nil {
 		return err

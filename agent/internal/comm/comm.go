@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -145,9 +146,28 @@ func (c *Client) EnsureEnrolled(ctx context.Context) error {
 	if c.cfg.EnrollToken == "" {
 		return errors.New("未注册且配置缺少 enroll_token")
 	}
-	// 注册阶段不校验服务端证书（信任锚尚未建立），一次性 token 承担首次认证
+	if c.cfg.EnrollCAFile == "" {
+		return errors.New("首次注册必须配置 enroll_ca_file")
+	}
+	caPEM, err := os.ReadFile(c.cfg.EnrollCAFile)
+	if err != nil {
+		return fmt.Errorf("读取注册 CA 文件: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return errors.New("注册 CA 文件不包含有效 PEM 证书")
+	}
+	serverName := c.cfg.ServerNameOverride
+	if serverName == "" {
+		serverName, _, err = net.SplitHostPort(c.cfg.ServerAddr)
+		if err != nil {
+			return fmt.Errorf("解析服务端地址: %w", err)
+		}
+	}
 	conn, err := grpc.NewClient(c.cfg.ServerAddr,
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})))
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: pool, ServerName: serverName, MinVersion: tls.VersionTLS12,
+		})))
 	if err != nil {
 		return err
 	}

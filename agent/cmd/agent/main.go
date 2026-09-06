@@ -1,7 +1,7 @@
 // alinksec-agent 入口：run（默认）/ install 两个子命令
 //
 //	alinksec-agent run    --config <agent.yml> --workdir <dir>
-//	alinksec-agent install --server host:port --token ENROLL-xxx --workdir <dir>
+//	alinksec-agent install --server host:port --token ENROLL-xxx --ca-file ca.crt --workdir <dir>
 package main
 
 import (
@@ -52,7 +52,7 @@ func usage() {
 
 用法:
   alinksec-agent run       --config <path>  --workdir <dir>   前台运行（开发/容器）
-  alinksec-agent install   --server <addr> --token <code> [--workdir <dir>]
+	  alinksec-agent install   --server <addr> --token <code> --ca-file <ca.pem> [--workdir <dir>]
                                                           写入配置并完成注册
   alinksec-agent uninstall --token <口令>  [--workdir <dir>]
                                                           需平台先布防口令（15min 有效一次性）
@@ -114,19 +114,20 @@ func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	server := fs.String("server", "", "服务端地址 host:port（必填）")
 	token := fs.String("token", "", "注册码（必填）")
+	caFile := fs.String("ca-file", "", "平台 CA PEM 文件（必填）")
 	workDir := fs.String("workdir", defaultWorkDir(), "工作目录")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *server == "" || *token == "" {
-		return fmt.Errorf("--server 与 --token 必填")
+	if *server == "" || *token == "" || *caFile == "" {
+		return fmt.Errorf("--server、--token 与 --ca-file 必填")
 	}
 	log := newLogger()
 	if err := os.MkdirAll(*workDir, 0750); err != nil {
 		return err
 	}
 	cfgPath := *workDir + string(os.PathSeparator) + "agent.yml"
-	if err := config.WriteExample(cfgPath, *server, *token); err != nil {
+	if err := config.WriteExample(cfgPath, *server, *token, *caFile); err != nil {
 		return fmt.Errorf("写入配置: %w", err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -139,6 +140,9 @@ func cmdInstall(args []string) error {
 	}
 	if err := client.EnsureEnrolled(context.Background()); err != nil {
 		return fmt.Errorf("注册失败: %w", err)
+	}
+	if err := config.ClearEnrollToken(cfgPath); err != nil {
+		log.Warn("注册成功，但未能从配置文件清除注册码", "error", err)
 	}
 	fmt.Printf("安装完成：agent_id=%s\n配置: %s\n启动服务或运行 alinksec-agent run\n", client.AgentID(), cfgPath)
 	return nil
