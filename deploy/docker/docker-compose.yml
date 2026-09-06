@@ -7,7 +7,7 @@ services:
     container_name: alinksec-pg
     environment:
       POSTGRES_USER: alinksec
-      POSTGRES_PASSWORD: alinksec123
+      POSTGRES_PASSWORD: ${ALINKSEC_POSTGRES_PASSWORD:?set ALINKSEC_POSTGRES_PASSWORD in .env}
       POSTGRES_DB: alinksec
       TZ: Asia/Shanghai
     volumes:
@@ -43,7 +43,7 @@ services:
       PG_HOST: postgres
       PG_PORT: "5432"
       PG_USER: alinksec
-      PG_PASSWORD: alinksec123
+      PG_PASSWORD: ${ALINKSEC_POSTGRES_PASSWORD:?set ALINKSEC_POSTGRES_PASSWORD in .env}
       VM_HOST: victoriametrics
       ALINKSEC_METRICS_ENABLED: "true"
       ALINKSEC_WEB_TLS_DIR: /app/web-tls

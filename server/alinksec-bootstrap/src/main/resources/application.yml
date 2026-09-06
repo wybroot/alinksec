@@ -4,7 +4,7 @@ spring:
   datasource:
     url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/alinksec?stringtype=unspecified
     username: ${PG_USER:alinksec}
-    password: ${PG_PASSWORD:alinksec123}
+    password: ${PG_PASSWORD}
     hikari:
       maximum-pool-size: 20
       connection-timeout: 5000
