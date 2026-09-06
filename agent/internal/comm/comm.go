@@ -477,7 +477,7 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return c.executeProtectAction(p.ProtectAction, received)
 	case *pb.Command_AgentUpgrade:
 		// 灰度升级（docs/01 §6.4）：校验替换成功即 DONE，随后进程退出由 systemd/SCM 拉起新版本
-		msg, err := upgrade.Apply(p.AgentUpgrade.GetDownloadUrl(), p.AgentUpgrade.GetSha256(), p.AgentUpgrade.GetVersion())
+		msg, err := upgrade.Apply(c.workDir, p.AgentUpgrade.GetDownloadUrl(), p.AgentUpgrade.GetSha256(), p.AgentUpgrade.GetVersion())
 		if err != nil {
 			return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
 		}
@@ -800,7 +800,7 @@ func (c *Client) executeVulnFix(vf *pb.CmdVulnFix, received *pb.RptAck) []*pb.Rp
 	go func() {
 		defer c.fixBusy.Store(false)
 		start := time.Now()
-		result := fixer.Run(vf.GetTaskId(), vf.GetFixes(), c.log)
+		result := fixer.Run(vf.GetTaskId(), vf.GetFixes(), c.workDir, c.log)
 		var failed, rolled int
 		for _, r := range result.GetResults() {
 			if !r.GetSuccess() {

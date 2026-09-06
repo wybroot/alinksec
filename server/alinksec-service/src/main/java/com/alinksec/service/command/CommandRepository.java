@@ -121,6 +121,25 @@ public class CommandRepository {
                 """, agentId, ST_PENDING);
     }
 
+    /** Counts pending rows created before complete protobuf command persistence existed. */
+    public int countLegacyPending() {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM t_command
+                WHERE status = ? AND COALESCE(payload ->> 'command_b64', '') = ''
+                """, Integer.class, ST_PENDING);
+        return count == null ? 0 : count;
+    }
+
+    /** Explicitly resolves unrecoverable legacy commands instead of failing on each Agent reconnect. */
+    public int failLegacyPending() {
+        return jdbc.update("""
+                UPDATE t_command
+                SET status = ?, finished_at = now(), result = ?
+                WHERE status = ? AND COALESCE(payload ->> 'command_b64', '') = ''
+                """, ST_FAILED, JsonUtils.write(Map.of("reason", "legacy command payload cannot be replayed")),
+                ST_PENDING);
+    }
+
     public List<Map<String, Object>> recentByAgent(String agentId, int limit) {
         return jdbc.queryForList("""
                 SELECT * FROM t_command WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?

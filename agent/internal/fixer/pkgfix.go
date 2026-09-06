@@ -4,17 +4,18 @@
 package fixer
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securehttp"
 )
 
 // minFreeDiskMB 安装前置磁盘余量（docs/05：前置检查磁盘空间）
@@ -25,17 +26,17 @@ const downloadTimeout = 30 * time.Minute
 
 // PkgPayload CmdVulnFix PACKAGE 项 payload（FixTaskService 构造）
 type PkgPayload struct {
-	RepoType       string `json:"repo_type"`       // rpm / deb / msu
-	PkgName        string `json:"pkg_name"`        // openssl / KB5034441
-	TargetVersion  string `json:"target_version"`  // 1.1.1k-26.el7_9
-	DownloadURL    string `json:"download_url"`    // 平台补丁下载端点
-	Sha256         string `json:"sha256"`
-	CveID          string `json:"cve_id"`          // 关联 CVE（上报展示）
-	FindingID      string `json:"finding_id"`      // t_vuln_finding.id（平台回写状态用）
+	RepoType      string `json:"repo_type"`      // rpm / deb / msu
+	PkgName       string `json:"pkg_name"`       // openssl / KB5034441
+	TargetVersion string `json:"target_version"` // 1.1.1k-26.el7_9
+	DownloadURL   string `json:"download_url"`   // 平台补丁下载端点
+	Sha256        string `json:"sha256"`
+	CveID         string `json:"cve_id"`     // 关联 CVE（上报展示）
+	FindingID     string `json:"finding_id"` // t_vuln_finding.id（平台回写状态用）
 }
 
 // fixPackage 软件包类修复单项
-func fixPackage(f *pb.FixItem, log *slog.Logger) *pb.FixResultItem {
+func fixPackage(f *pb.FixItem, workDir string, log *slog.Logger) *pb.FixResultItem {
 	item := &pb.FixResultItem{RefId: f.GetRefId()}
 	var lines []string
 	addLog := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
@@ -55,7 +56,7 @@ func fixPackage(f *pb.FixItem, log *slog.Logger) *pb.FixResultItem {
 	}
 
 	// 2. 下载补丁 + sha256 校验
-	tmp, err := downloadPatch(p)
+	tmp, err := downloadPatch(workDir, p)
 	if err != nil {
 		addLog("补丁下载/校验失败: %v", err)
 		item.Success, item.Log = false, joinLog(lines)
@@ -114,14 +115,13 @@ func parsePkgPayload(payload string) (*PkgPayload, error) {
 }
 
 // downloadPatch 下载补丁到临时文件并校验 sha256（原子：校验失败即删）
-func downloadPatch(p *PkgPayload) (string, error) {
-	client := &http.Client{Timeout: downloadTimeout}
-	resp, err := client.Get(p.DownloadURL)
+func downloadPatch(workDir string, p *PkgPayload) (string, error) {
+	resp, err := securehttp.Get(context.Background(), workDir, p.DownloadURL, downloadTimeout)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("下载返回 %s", resp.Status)
 	}
 	tmp, err := os.CreateTemp("", "alinksec-patch-*-"+filepath.Base(p.DownloadURL))

@@ -21,19 +21,19 @@ type FixSpec struct {
 
 // Run 执行修复任务：逐项 备份 → 执行 → 复核 → 失败回滚。
 // 单项失败不影响其余项；结果经 RptFixResult 上报。
-func Run(taskID string, fixes []*pb.FixItem, log *slog.Logger) *pb.RptFixResult {
+func Run(taskID string, fixes []*pb.FixItem, workDir string, log *slog.Logger) *pb.RptFixResult {
 	result := &pb.RptFixResult{TaskId: taskID}
 	for _, f := range fixes {
-		result.Results = append(result.GetResults(), fixOne(f, log))
+		result.Results = append(result.GetResults(), fixOne(f, workDir, log))
 	}
 	return result
 }
 
 // fixOne 单项修复事务：备份 → 执行 → 复核 →（失败）回滚
-func fixOne(f *pb.FixItem, log *slog.Logger) *pb.FixResultItem {
+func fixOne(f *pb.FixItem, workDir string, log *slog.Logger) *pb.FixResultItem {
 	// 软件包类走独立链路（不回滚，docs/05 §3.3）
 	if f.GetType() == pb.FixItem_PACKAGE {
-		return fixPackage(f, log)
+		return fixPackage(f, workDir, log)
 	}
 	item := &pb.FixResultItem{RefId: f.GetRefId()}
 	var logLines []string

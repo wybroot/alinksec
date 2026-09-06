@@ -70,6 +70,7 @@ public class CertService {
         } else {
             createServer(dir);
         }
+        publishWebTls(dir);
     }
 
     public X509Certificate caCert() { return caCert; }
@@ -147,6 +148,25 @@ public class CertService {
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
         try (FileInputStream in = new FileInputStream(dir.resolve("server.crt").toFile())) {
             serverCert = (X509Certificate) cf.generateCertificate(in);
+        }
+    }
+
+    /** Shares only the leaf certificate and its key with the HTTPS reverse proxy. */
+    private void publishWebTls(Path certDir) throws IOException {
+        Path webTlsDir = Paths.get(props.getServer().getWebTlsDir());
+        Files.createDirectories(webTlsDir);
+        copyAtomically(certDir.resolve("server.crt"), webTlsDir.resolve("server.crt"));
+        copyAtomically(certDir.resolve("server.key"), webTlsDir.resolve("server.key"));
+    }
+
+    private static void copyAtomically(Path source, Path destination) throws IOException {
+        Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
+        Files.copy(source, temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+            Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

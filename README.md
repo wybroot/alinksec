@@ -76,7 +76,7 @@ flowchart LR
     end
 
     subgraph SERVER["☁️ 服务器 · Docker Compose 一键部署"]
-        NGINX["🌐 nginx :8081<br/>静态资源 + /api/ 反代"]
+        NGINX["🔒 nginx :8443<br/>HTTPS 静态资源 + /api/ 反代"]
         SRV["⚙️ alinksec-server :8080<br/>REST · JWT · RBAC · 审计"]
         GRPC["🔒 gRPC Server :9443<br/>mTLS 双向认证"]
         PG[("🐘 PostgreSQL :5432<br/>35 张业务表")]
@@ -296,6 +296,7 @@ docker compose build && docker compose up -d
 docker compose logs server | grep -E "gRPC|Bootstrap"
 # 👉 仅确认初始化成功；凭据使用 .env 中配置的值，不会打印到日志
 docker cp alinksec-server:/app/data/certs/ca.crt ./alinksec-ca.crt
+# 浏览器访问控制台前，将 alinksec-ca.crt 导入其信任库。
 ```
 
 ### ③ 目标主机接入（Linux 示例）
@@ -310,8 +311,8 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 
 | 入口 | 地址 | 说明 |
 |---|---|---|
-| 🖥️ 管理控制台 | `http://<IP>:8081/` | admin / `.env` 中的初始密码 |
-| 📺 安全大屏 | `http://<IP>:8081/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
+| 🖥️ 管理控制台 | `https://<IP>:8443/` | admin / `.env` 中的初始密码 |
+| 📺 安全大屏 | `https://<IP>:8443/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
 
 > 📖 **完整部署手册**：35 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
 > **👉 [docs/06-部署文档.md](docs/06-部署文档.md)**
@@ -322,8 +323,8 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 端口 | 协议 | 用途 | 放行对象 |
 |---|---|---|---|
 | 9443 | gRPC mTLS | Agent 接入（注册/心跳/双向流） | 全部受管主机 |
-| 8080 | HTTP REST | API + 特征库/补丁包下载 | 受管主机 + nginx 容器 |
-| 8081 | HTTP | Web 控制台 / 大屏 | 安全团队办公网 |
+| 8443 | HTTPS | Web 控制台、API 与 Agent 包下载 | 安全团队和受管主机 |
+| 8081 | HTTP | 仅重定向至 HTTPS | 浏览器 |
 | 5432 / 8428 | — | PG / VM（仅 compose 内网） | 不暴露宿主机 |
 
 </details>

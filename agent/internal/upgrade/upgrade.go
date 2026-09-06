@@ -4,22 +4,24 @@
 package upgrade
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/alinksec/alinksec-agent/internal/securehttp"
 )
 
 const chunkSize = 256 << 10 // 256KB/20ms ≈ 12.5MB/s 限速（避开 virusscan 全速，升级更温和）
 
 // Apply 执行升级：下载校验 + 替换 + 触发重启。返回给平台的完成消息。
 // 成功路径下进程即将退出，调用方应立即回 DONE ACK。
-func Apply(downloadURL, wantSHA, version string) (string, error) {
+func Apply(workDir, downloadURL, wantSHA, version string) (string, error) {
 	if downloadURL == "" || wantSHA == "" {
 		return "", fmt.Errorf("download_url/sha256 为空")
 	}
@@ -31,7 +33,7 @@ func Apply(downloadURL, wantSHA, version string) (string, error) {
 	newPath := exe + ".new"
 	oldPath := exe + ".old"
 
-	if err := downloadLimited(downloadURL, newPath); err != nil {
+	if err := downloadLimited(workDir, downloadURL, newPath); err != nil {
 		os.Remove(newPath)
 		return "", fmt.Errorf("下载失败: %w", err)
 	}
@@ -89,13 +91,13 @@ func Rollback() (string, error) {
 func currentVersionHint() string { return "current" }
 
 // downloadLimited 限速下载到目标路径（与 virusscan.update 同模式：读 chunk → sleep）
-func downloadLimited(url, dst string) error {
-	resp, err := http.Get(url) //nolint:gosec // URL 由平台下发
+func downloadLimited(workDir, url, dst string) error {
+	resp, err := securehttp.Get(context.Background(), workDir, url, 30*time.Minute)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != 200 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	f, err := os.Create(dst)

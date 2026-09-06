@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/alinksec/alinksec-agent/internal/securehttp"
 )
 
 // downloadLimitRate 特征包下载限速（docs/05：2MB/s，内网带宽敏感）
@@ -29,16 +30,12 @@ func UpdateDB(ctx context.Context, workDir, downloadURL, expectSha256 string, lo
 	dctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(dctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return fmt.Errorf("构造下载请求: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := securehttp.Get(dctx, workDir, downloadURL, downloadTimeout)
 	if err != nil {
 		return fmt.Errorf("下载特征包: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != 200 {
 		return fmt.Errorf("下载特征包: HTTP %d", resp.StatusCode)
 	}
 

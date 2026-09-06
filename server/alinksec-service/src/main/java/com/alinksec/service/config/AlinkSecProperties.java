@@ -30,8 +30,8 @@ public class AlinkSecProperties {
     public static class Upgrade {
         /** 升级包存储目录 */
         private String storageDir = "./data/agent-upgrade";
-        /** Agent 下载基础地址（REST 对外可达，含端口） */
-        private String downloadBaseUrl = "http://127.0.0.1:8080";
+        /** Agent 下载基础地址（HTTPS 对外可达，含端口） */
+        private String downloadBaseUrl = "https://127.0.0.1:8443";
 
         public String getStorageDir() { return storageDir; }
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
@@ -45,6 +45,8 @@ public class AlinkSecProperties {
         private int port = 9443;
         /** 证书材料目录（CA/服务端证书首次启动自动生成） */
         private String certDir = "./data/certs";
+        /** 仅供 TLS 反向代理读取的服务端证书目录（不包含 CA 私钥） */
+        private String webTlsDir = "./data/web-tls";
         /** 服务端证书 SAN 列表 */
         private List<String> tlsSans = List.of("localhost", "127.0.0.1", "::1", "alinksec-server");
         /** Agent 证书有效期（天），设计文档 §6：10 年 */
@@ -54,6 +56,8 @@ public class AlinkSecProperties {
         public void setPort(int port) { this.port = port; }
         public String getCertDir() { return certDir; }
         public void setCertDir(String certDir) { this.certDir = certDir; }
+        public String getWebTlsDir() { return webTlsDir; }
+        public void setWebTlsDir(String webTlsDir) { this.webTlsDir = webTlsDir; }
         public List<String> getTlsSans() { return tlsSans; }
         public void setTlsSans(List<String> tlsSans) { this.tlsSans = tlsSans; }
         public int getAgentCertDays() { return agentCertDays; }
@@ -85,7 +89,7 @@ public class AlinkSecProperties {
         /** 特征包存储目录 */
         private String storageDir = "./data/signature";
         /** Agent 下载基础地址（REST 对外可达，含端口） */
-        private String downloadBaseUrl = "http://127.0.0.1:8080";
+        private String downloadBaseUrl = "https://127.0.0.1:8443";
 
         public String getStorageDir() { return storageDir; }
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
@@ -98,7 +102,7 @@ public class AlinkSecProperties {
         /** 补丁包存储目录 */
         private String storageDir = "./data/patch";
         /** Agent 下载基础地址（与 signature.downloadBaseUrl 一致，REST 对外可达） */
-        private String downloadBaseUrl = "http://127.0.0.1:8080";
+        private String downloadBaseUrl = "https://127.0.0.1:8443";
 
         public String getStorageDir() { return storageDir; }
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }

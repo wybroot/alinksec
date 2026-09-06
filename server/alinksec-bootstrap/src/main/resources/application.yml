@@ -16,6 +16,7 @@ alinksec:
   server:
     port: 9443
     cert-dir: ${ALINKSEC_CERT_DIR:./data/certs}
+    web-tls-dir: ${ALINKSEC_WEB_TLS_DIR:./data/web-tls}
     tls-sans: localhost,127.0.0.1,::1,alinksec-server
     agent-cert-days: 3650
   policy:
@@ -25,14 +26,18 @@ alinksec:
     vm-base-url: http://${VM_HOST:localhost}:8428
   signature:
     storage-dir: ${ALINKSEC_SIG_DIR:./data/signature}
-    # Agent 下载特征包的基础地址（须为 Agent 可达的本服务 REST 地址）
-    download-base-url: http://${ALINKSEC_SIG_BASE:127.0.0.1:8080}
+    # Agent 下载特征包的基础地址（须为 Agent 可达的 HTTPS 入口）
+    download-base-url: https://${ALINKSEC_SIG_BASE:127.0.0.1:8443}
     push-interval-ms: 3600000   # 特征库兜底推送间隔（导入后立即推送 + 定时兜底）
 
   patch:
     storage-dir: ${ALINKSEC_PATCH_DIR:./data/patch}
     # Agent 下载补丁包的基础地址（与 signature 同一 REST 出口）
-    download-base-url: http://${ALINKSEC_SIG_BASE:127.0.0.1:8080}
+    download-base-url: https://${ALINKSEC_SIG_BASE:127.0.0.1:8443}
+
+  upgrade:
+    storage-dir: ${ALINKSEC_UPGRADE_DIR:./data/agent-upgrade}
+    download-base-url: https://${ALINKSEC_SIG_BASE:127.0.0.1:8443}
 
 logging:
   level:
