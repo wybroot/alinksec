@@ -108,7 +108,7 @@ func parsePkgPayload(payload string) (*PkgPayload, error) {
 	if err := jsonUnmarshal(payload, &p); err != nil {
 		return nil, fmt.Errorf("payload 解析失败: %w", err)
 	}
-	if p.PkgName == "" || p.TargetVersion == "" || p.DownloadURL == "" {
+	if p.PkgName == "" || p.TargetVersion == "" || p.DownloadURL == "" || p.Sha256 == "" {
 		return nil, fmt.Errorf("payload 缺少 pkg_name/target_version/download_url")
 	}
 	return &p, nil

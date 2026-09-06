@@ -48,7 +48,7 @@ func Get(ctx context.Context, workDir, rawURL string, timeout time.Duration) (*h
 // ValidateURL rejects cleartext and non-HTTP schemes before any network I/O.
 func ValidateURL(rawURL string) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return nil, fmt.Errorf("download URL must be an absolute HTTPS URL")
 	}
 	return u, nil
