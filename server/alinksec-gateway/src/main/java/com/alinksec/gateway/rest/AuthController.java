@@ -22,10 +22,12 @@ public class AuthController {
 
     private final UserService userService;
     private final JwtSecretHolder secretHolder;
+    private final LoginAttemptLimiter loginAttempts;
 
-    public AuthController(UserService userService, JwtSecretHolder secretHolder) {
+    public AuthController(UserService userService, JwtSecretHolder secretHolder, LoginAttemptLimiter loginAttempts) {
         this.userService = userService;
         this.secretHolder = secretHolder;
+        this.loginAttempts = loginAttempts;
     }
 
     @PostMapping("/login")
@@ -36,10 +38,16 @@ public class AuthController {
         if (username.isBlank() || password.isBlank()) {
             return ApiResult.error(10001, "用户名或密码不能为空");
         }
-        var profile = userService.login(username, password, clientIp(request));
+        String sourceIp = clientIp(request);
+        if (!loginAttempts.isAllowed(sourceIp)) {
+            return ApiResult.error(42901, "登录尝试过于频繁，请稍后再试");
+        }
+        var profile = userService.login(username, password, sourceIp);
         if (profile.isEmpty()) {
+            loginAttempts.recordFailure(sourceIp);
             return ApiResult.error(40101, "用户名或密码错误");
         }
+        loginAttempts.recordSuccess(sourceIp);
         var p = profile.get();
         String token = JwtUtil.sign(secretHolder.secret(), Map.of(
                 "uid", p.id(), "username", p.username(), "role", p.roleName()),
