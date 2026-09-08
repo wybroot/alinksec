@@ -38,6 +38,7 @@ public class AssetService {
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
         jdbc.update("DELETE FROM t_asset_software WHERE agent_id = ?", agentId);
         jdbc.update("DELETE FROM t_asset_port WHERE agent_id = ?", agentId);
+        jdbc.update("DELETE FROM t_asset_process WHERE agent_id = ?", agentId);
         jdbc.update("DELETE FROM t_asset_account WHERE agent_id = ?", agentId);
         jdbc.update("DELETE FROM t_asset_container WHERE agent_id = ?", agentId);
 
@@ -63,12 +64,16 @@ public class AssetService {
                     a.getLastLogin() > 0 ? Timestamp.from(Instant.ofEpochMilli(a.getLastLogin())) : null,
                     a.getRisky(), a.getRiskyReason());
         }
+        for (var p : snapshot.getProcessesList()) {
+            jdbc.update("INSERT INTO t_asset_process (agent_id, pid, name, exe, cmdline, username, rss_bytes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    agentId, p.getPid(), p.getName(), p.getExe(), p.getCmdline(), p.getUser(), p.getRssBytes());
+        }
         for (var c : snapshot.getContainersList()) {
             jdbc.update("""
                     INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb)
-                    """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getStatus(),
-                    c.getOrchestrator(), c.getNamespace(), c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
+                    """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getOrchestrator(),
+                    c.getNamespace(), c.getStatus(), c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
                     c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,
                     JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()), c.getRisky(), JsonUtils.write(c.getRiskReasonsList()));
             for (String reason : c.getRiskReasonsList()) {

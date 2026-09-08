@@ -1,6 +1,6 @@
 // Package collector 资产快照采集（跨平台：Linux / Windows）。
 //
-// 采集项：software / ports / accounts / disks。
+// 采集项：software / ports / processes / accounts / disks。
 // 设计要点（04-Agent 设计与策略规范 §采集器）：
 //   - 只读采集，任何单项失败不影响其余项；
 //   - 端口/磁盘走 gopsutil（Linux 读 /proc 与 statfs，Windows 走系统 API）；
@@ -29,6 +29,7 @@ type task struct {
 var tasks = []task{
 	{"software", collectSoftware},
 	{"ports", collectPorts},
+	{"processes", collectProcesses},
 	{"accounts", collectAccounts},
 	{"disks", collectDisks},
 	{"containers", collectContainers},
@@ -69,6 +70,7 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 			"collector", t.name,
 			"software", len(snap.GetSoftware()),
 			"ports", len(snap.GetPorts()),
+			"processes", len(snap.GetProcesses()),
 			"accounts", len(snap.GetAccounts()),
 			"disks", len(snap.GetDisks()),
 			"duration", time.Since(start).Round(time.Millisecond))
@@ -123,6 +125,40 @@ func procName(pid int32, cache map[int32]string) string {
 	}
 	cache[pid] = name
 	return name
+}
+
+func collectProcesses(snap *pb.RptAssetSnapshot) {
+	procs, err := process.Processes()
+	if err != nil {
+		return
+	}
+	for _, p := range procs {
+		name, _ := p.Name()
+		exe, _ := p.Exe()
+		args, _ := p.CmdlineSlice()
+		user, _ := p.Username()
+		var rss uint64
+		if mem, err := p.MemoryInfo(); err == nil && mem != nil {
+			rss = mem.RSS
+		}
+		snap.Processes = append(snap.Processes, &pb.ProcessInfo{Pid: p.Pid, Name: name, Exe: exe, Cmdline: redactCommandLine(args), User: user, RssBytes: rss})
+	}
+}
+
+func redactCommandLine(args []string) string {
+	redacted := append([]string(nil), args...)
+	for i, arg := range redacted {
+		lower := strings.ToLower(arg)
+		for _, key := range []string{"password", "passwd", "token", "secret", "api-key", "apikey"} {
+			if strings.HasPrefix(lower, "--"+key+"=") || strings.HasPrefix(lower, "-"+key+"=") {
+				redacted[i] = arg[:strings.Index(arg, "=")+1] + "***"
+			}
+			if (lower == "--"+key || lower == "-"+key) && i+1 < len(redacted) {
+				redacted[i+1] = "***"
+			}
+		}
+	}
+	return strings.Join(redacted, " ")
 }
 
 /* ==================== 磁盘（gopsutil 跨平台） ==================== */

@@ -37,6 +37,7 @@ public class HostQueryService {
                        a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
                        (SELECT count(*) FROM t_asset_port p WHERE p.agent_id = a.agent_id) AS port_count,
+                       (SELECT count(*) FROM t_asset_process p WHERE p.agent_id = a.agent_id) AS process_count,
                        (SELECT count(*) FROM t_asset_account c WHERE c.agent_id = a.agent_id) AS account_count,
                        (SELECT count(*) FROM t_asset_container c WHERE c.agent_id = a.agent_id) AS container_count,
                        (SELECT count(*) FROM t_alert ta WHERE ta.agent_id = a.agent_id AND ta.status IN (0,1)) AS alert_count,
@@ -100,6 +101,10 @@ public class HostQueryService {
                 FROM t_asset_account WHERE agent_id = ?
                 ORDER BY uid
                 """, agentId);
+    }
+
+    public List<Map<String, Object>> processes(String agentId) {
+        return jdbc.queryForList("SELECT pid, name, exe, cmdline, username, rss_bytes, updated_at FROM t_asset_process WHERE agent_id = ? ORDER BY rss_bytes DESC, pid LIMIT 500", agentId);
     }
 
     public List<Map<String, Object>> containers(String agentId) {

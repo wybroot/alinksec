@@ -77,6 +77,11 @@ public class HostsController {
         return ApiResult.ok(query.ports(agentId));
     }
 
+    @GetMapping("/{agentId}/processes")
+    public ApiResult<List<Map<String, Object>>> processes(@PathVariable String agentId) {
+        return ApiResult.ok(query.processes(agentId));
+    }
+
     @GetMapping("/{agentId}/accounts")
     public ApiResult<List<Map<String, Object>>> accounts(@PathVariable String agentId) {
         return ApiResult.ok(query.accounts(agentId));

@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS t_asset_port (
 );
 CREATE INDEX IF NOT EXISTS idx_port_agent ON t_asset_port(agent_id);
 
+CREATE TABLE IF NOT EXISTS t_asset_process (
+  id BIGSERIAL PRIMARY KEY, agent_id VARCHAR(64) NOT NULL, pid INTEGER NOT NULL,
+  name VARCHAR(255), exe TEXT, cmdline TEXT, username VARCHAR(255), rss_bytes BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(agent_id, pid)
+);
+CREATE INDEX IF NOT EXISTS idx_process_agent_rss ON t_asset_process(agent_id, rss_bytes DESC);
+
 CREATE TABLE IF NOT EXISTS t_asset_container (
   id           BIGSERIAL PRIMARY KEY,
   agent_id     VARCHAR(64) NOT NULL,
