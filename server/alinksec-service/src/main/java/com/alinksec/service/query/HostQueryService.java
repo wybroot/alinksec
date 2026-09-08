@@ -38,6 +38,7 @@ public class HostQueryService {
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
                        (SELECT count(*) FROM t_asset_port p WHERE p.agent_id = a.agent_id) AS port_count,
                        (SELECT count(*) FROM t_asset_account c WHERE c.agent_id = a.agent_id) AS account_count,
+                       (SELECT count(*) FROM t_asset_container c WHERE c.agent_id = a.agent_id) AS container_count,
                        (SELECT count(*) FROM t_alert ta WHERE ta.agent_id = a.agent_id AND ta.status IN (0,1)) AS alert_count,
                        e.title AS last_event
                 FROM t_agent a

@@ -19,6 +19,9 @@
       <el-table-column prop="os" label="系统" width="160" />
       <el-table-column prop="group" label="分组" width="110" />
       <el-table-column prop="ver" label="Agent" width="80" />
+      <el-table-column label="容器" width="76">
+        <template #default="{ row }"><el-tag v-if="row.containerCount" size="small" type="info">{{ row.containerCount }}</el-tag><span v-else>—</span></template>
+      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }"><el-tag size="small" :type="hostTagType(row.status)">{{ hostStatusLabel(row.status) }}</el-tag></template>
       </el-table-column>

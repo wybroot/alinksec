@@ -291,6 +291,7 @@ export async function fetchHosts() {
     softwareCount: h.software_count,
     portCount: h.port_count,
     accountCount: h.account_count,
+    containerCount: Number(h.container_count || 0),
   }))
 }
 
