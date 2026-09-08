@@ -92,6 +92,12 @@
           <el-table-column prop="name" label="进程" min-width="110" show-overflow-tooltip />
           <el-table-column prop="username" label="用户" min-width="90" show-overflow-tooltip />
           <el-table-column prop="exe" label="路径" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="cmdline" label="命令行（已脱敏）" min-width="180" show-overflow-tooltip />
+          <el-table-column label="RSS" width="86">
+            <template #default="{ row }">
+              {{ Math.round((Number(row.rss_bytes) || 0) / 1024 / 1024) }} MB
+            </template>
+          </el-table-column>
         </el-table>
         <el-empty v-else :image-size="48" description="未采集到本机进程" />
       </section>
