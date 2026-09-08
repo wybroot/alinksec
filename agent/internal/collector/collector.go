@@ -45,14 +45,8 @@ func Snapshot(names []string, log *slog.Logger) *pb.RptAssetSnapshot {
 // so a cluster-wide kubectl context never becomes a host asset snapshot.
 func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNodeName string) *pb.RptAssetSnapshot {
 	snap := &pb.RptAssetSnapshot{}
-	want := make(map[string]bool, len(names))
-	for _, n := range names {
-		want[strings.TrimSpace(n)] = true
-	}
-	for _, t := range tasks {
-		if len(want) > 0 && !want[t.name] {
-			continue
-		}
+	for _, t := range selectedTasks(names) {
+		snap.Collected = append(snap.Collected, t.name)
 		start := time.Now()
 		func() {
 			defer func() {
@@ -76,6 +70,21 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	return snap
+}
+
+func selectedTasks(names []string) []task {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[strings.TrimSpace(n)] = true
+	}
+	selected := make([]task, 0, len(tasks))
+	for _, t := range tasks {
+		if len(want) > 0 && !want[t.name] {
+			continue
+		}
+		selected = append(selected, t)
+	}
+	return selected
 }
 
 /* ==================== 端口（gopsutil 跨平台） ==================== */

@@ -231,6 +231,9 @@ message RptAssetSnapshot {
   repeated AccountInfo  accounts  = 4;
   repeated DiskInfo     disks     = 5;
   repeated ContainerInfo containers = 6;
+  // Empty means a legacy full snapshot. New Agents list every category collected
+  // in this report so that a targeted collection cannot remove other assets.
+  repeated string collected = 7;
 }
 
 message ContainerInfo {
