@@ -2,6 +2,9 @@ package com.alinksec.service.asset;
 
 import com.alinksec.proto.RptAssetSnapshot;
 import com.alinksec.service.scan.VulnMatchService;
+import com.alinksec.service.alert.SecurityEventService;
+import com.alinksec.proto.RptSecurityEvent;
+import com.alinksec.proto.Severity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,10 +26,12 @@ public class AssetService {
 
     private final JdbcTemplate jdbc;
     private final VulnMatchService vulnMatchService;
+    private final SecurityEventService securityEventService;
 
-    public AssetService(JdbcTemplate jdbc, VulnMatchService vulnMatchService) {
+    public AssetService(JdbcTemplate jdbc, VulnMatchService vulnMatchService, SecurityEventService securityEventService) {
         this.jdbc = jdbc;
         this.vulnMatchService = vulnMatchService;
+        this.securityEventService = securityEventService;
     }
 
     @Transactional
@@ -66,6 +71,16 @@ public class AssetService {
                     c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
                     c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,
                     JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()), c.getRisky(), JsonUtils.write(c.getRiskReasonsList()));
+            for (String reason : c.getRiskReasonsList()) {
+                securityEventService.onEvent(agentId, RptSecurityEvent.newBuilder()
+                        .setRuleId("CTR-" + reason.toUpperCase())
+                        .setRuleName("Docker container: " + reason)
+                        .setType("container_risk")
+                        .setSeverity("privileged".equals(reason) ? Severity.SEV_HIGH : Severity.SEV_MEDIUM)
+                        .setDetail(JsonUtils.write(java.util.Map.of("containerId", c.getContainerId(), "name", c.getName(), "image", c.getImage(), "reason", reason)))
+                        .setActionTaken("alert_only")
+                        .build());
+            }
         }
         log.info("资产快照已更新: agent={} software={} ports={} accounts={} containers={}",
                 agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());
