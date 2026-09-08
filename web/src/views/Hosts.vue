@@ -138,7 +138,7 @@ import { computed, onMounted, reactive, ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { fetchHosts, fetchGroups, fetchHostDetail, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+import { fetchHosts, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 
 const router = useRouter()
@@ -161,6 +161,37 @@ const riskReasons = row => {
 }
 const miniEl = ref(null)
 let miniChart = null
+
+const metricPoints = (metrics = {}) => {
+  const values = result => new Map((result?.[0]?.values || []).map(([ts, value]) => [Number(ts), Number(value)]))
+  const cpu = values(metrics.cpu)
+  const mem = values(metrics.mem)
+  const timestamps = [...new Set([...cpu.keys(), ...mem.keys()])].sort((a, b) => a - b)
+  return {
+    labels: timestamps.map(ts => new Date(ts * 1000).toTimeString().slice(0, 5)),
+    cpu: timestamps.map(ts => cpu.has(ts) ? Math.round(cpu.get(ts)) : null),
+    mem: timestamps.map(ts => mem.has(ts) ? Math.round(mem.get(ts)) : null),
+  }
+}
+
+const renderMiniChart = (metrics) => {
+  const points = metricPoints(metrics)
+  nextTick(() => {
+    if (!miniEl.value) return
+    if (!miniChart) miniChart = echarts.init(miniEl.value)
+    miniChart.setOption({
+      grid: { left: 34, right: 10, top: 24, bottom: 22 },
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['CPU %', '内存 %'], textStyle: { color: '#64748b' }, top: 0, itemWidth: 14 },
+      xAxis: { type: 'category', data: points.labels, ...AX },
+      yAxis: { type: 'value', max: 100, ...AX },
+      series: [
+        { name: 'CPU %', type: 'line', smooth: true, showSymbol: false, data: points.cpu, lineStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,.18)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } } },
+        { name: '内存 %', type: 'line', smooth: true, showSymbol: false, data: points.mem, lineStyle: { color: '#06b6d4' } },
+      ]
+    }, true)
+  })
+}
 
 const filtered = computed(() => hosts.filter(h => {
   const q = query.value.toLowerCase()
@@ -195,8 +226,10 @@ const openHost = async row => {
   ports.value = []
   riskyAccounts.value = []
   drawer.value = true
+  renderMiniChart()
   try {
     const data = await fetchHostDetail(row.agentId)
+    if (curHost.agentId !== row.agentId) return
     containers.value = data.containers || []
     processes.value = data.processes || []
     ports.value = data.ports || []
@@ -204,25 +237,12 @@ const openHost = async row => {
   } catch (e) {
     ElMessage({ message: e?.message || '主机资产加载失败', type: 'error' })
   }
-  nextTick(() => {
-    if (!miniEl.value) return
-    if (!miniChart) miniChart = echarts.init(miniEl.value)
-    const d = new Array(60).fill(0).map((_, i) => ({
-      cpu: Math.round(30 + 20 * Math.sin(i / 8) + Math.random() * 10),
-      mem: Math.round(45 + 15 * Math.sin(i / 15) + Math.random() * 5)
-    }))
-    miniChart.setOption({
-      grid: { left: 34, right: 10, top: 24, bottom: 22 },
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['CPU %', '内存 %'], textStyle: { color: '#64748b' }, top: 0, itemWidth: 14 },
-      xAxis: { type: 'category', data: d.map((_, i) => i + 'm'), ...AX },
-      yAxis: { type: 'value', max: 100, ...AX },
-      series: [
-        { name: 'CPU %', type: 'line', smooth: true, showSymbol: false, data: d.map(x => x.cpu), lineStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,.18)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } } },
-        { name: '内存 %', type: 'line', smooth: true, showSymbol: false, data: d.map(x => x.mem), lineStyle: { color: '#06b6d4' } },
-      ]
-    })
-  })
+  try {
+    const metrics = await fetchHostMetrics(row.agentId)
+    if (curHost.agentId === row.agentId) renderMiniChart(metrics)
+  } catch (e) {
+    console.warn('主机指标加载失败', e)
+  }
 }
 
 // 隔离 / 解除隔离：CmdProtectAction.ISOLATE_HOST / RESTORE_ISOLATION（Agent ACK 后生效）
