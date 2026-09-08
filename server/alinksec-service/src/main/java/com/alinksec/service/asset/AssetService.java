@@ -60,12 +60,12 @@ public class AssetService {
         }
         for (var c : snapshot.getContainersList()) {
             jdbc.update("""
-                    INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, status, created_at, started_at, ports, labels)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+                    INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, status, created_at, started_at, ports, labels, risky, risk_reasons)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb)
                     """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getStatus(),
                     c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
                     c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,
-                    JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()));
+                    JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()), c.getRisky(), JsonUtils.write(c.getRiskReasonsList()));
         }
         log.info("资产快照已更新: agent={} software={} ports={} accounts={} containers={}",
                 agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());

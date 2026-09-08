@@ -33,11 +33,11 @@ func collectContainers(snap *pb.RptAssetSnapshot) {
 }
 
 func fillContainerDetails(c *pb.ContainerInfo) {
-	out, err := exec.Command("docker", "inspect", "--format", "{{.Image}}\t{{.Created}}\t{{.State.StartedAt}}\t{{json .Config.Labels}}", c.ContainerId).Output()
+	out, err := exec.Command("docker", "inspect", "--format", "{{.Image}}\t{{.Created}}\t{{.State.StartedAt}}\t{{json .Config.Labels}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.NetworkMode}}\t{{.Config.User}}", c.ContainerId).Output()
 	if err != nil {
 		return
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 4)
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 7)
 	if len(parts) > 0 {
 		c.ImageId = parts[0]
 	}
@@ -49,6 +49,15 @@ func fillContainerDetails(c *pb.ContainerInfo) {
 	}
 	if len(parts) > 3 {
 		_ = json.Unmarshal([]byte(parts[3]), &c.Labels)
+	}
+	if len(parts) > 4 && parts[4] == "true" {
+		c.Risky, c.RiskReasons = true, append(c.RiskReasons, "privileged")
+	}
+	if len(parts) > 5 && parts[5] == "host" {
+		c.Risky, c.RiskReasons = true, append(c.RiskReasons, "host_network")
+	}
+	if len(parts) > 6 && (parts[6] == "" || parts[6] == "0" || parts[6] == "root") {
+		c.Risky, c.RiskReasons = true, append(c.RiskReasons, "runs_as_root")
 	}
 }
 

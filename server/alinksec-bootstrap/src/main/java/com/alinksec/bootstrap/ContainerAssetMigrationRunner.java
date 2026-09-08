@@ -21,5 +21,7 @@ public class ContainerAssetMigrationRunner implements CommandLineRunner {
                   UNIQUE(agent_id, container_id))
                 """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_container_agent ON t_asset_container(agent_id)");
+        jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS risky BOOLEAN NOT NULL DEFAULT FALSE");
+        jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS risk_reasons JSONB NOT NULL DEFAULT '[]'");
     }
 }

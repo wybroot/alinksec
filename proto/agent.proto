@@ -243,6 +243,8 @@ message ContainerInfo {
   int64 started_at = 7;
   repeated string ports = 8;
   map<string, string> labels = 9;
+  bool risky = 10;
+  repeated string risk_reasons = 11;
 }
 
 message SoftwareInfo {

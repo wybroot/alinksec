@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS t_asset_container (
   started_at   TIMESTAMPTZ,
   ports        JSONB NOT NULL DEFAULT '[]',
   labels       JSONB NOT NULL DEFAULT '{}',
+  risky        BOOLEAN NOT NULL DEFAULT FALSE,
+  risk_reasons JSONB NOT NULL DEFAULT '[]',
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(agent_id, container_id)
 );
