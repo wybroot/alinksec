@@ -366,7 +366,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 - [x] M5 告警通道（Webhook 配置、管理员权限与失败重试）
 - [x] Docker 容器清点与审计告警（Linux 只读采集）
 - [x] Kubernetes 工作负载清点（宿主机 Agent 通过 kubectl 只读采集）
-- [ ] 容器处置策略
+- 容器信息仅作为宿主机安全研判上下文，不提供编排、发布、调度或生命周期管理
 - [ ] EDR 行为引擎（进程树 lineage + 规则热更）
 - [ ] 长期低优先级：多租户隔离（暂不纳入近期版本）
 
