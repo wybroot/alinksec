@@ -23,6 +23,18 @@ import (
 
 // suspectProc 涉事进程取证（进程五元组 + 父链 + 二进制哈希）
 type suspectProc struct {
+	Pid     int32            `json:"pid"`
+	PPid    int32            `json:"ppid"`
+	Exe     string           `json:"exe"`
+	Cmdline string           `json:"cmdline"`
+	User    string           `json:"user"`
+	ExeSHA  string           `json:"exe_sha256,omitempty"`
+	Lineage []processLineage `json:"lineage,omitempty"`
+}
+
+// processLineage is ordered from the implicated process toward init/root.
+// It is bounded so evidence collection cannot become unbounded on a host.
+type processLineage struct {
 	Pid     int32  `json:"pid"`
 	PPid    int32  `json:"ppid"`
 	Exe     string `json:"exe"`
@@ -135,23 +147,55 @@ func (g *Guard) attribute(files []string) *suspectProc {
 	return attributeByRecency(g.excluded)
 }
 
-// takeForensics 采集进程五元组 + 父进程链首层 + exe 哈希
+// takeForensics captures the implicated process and up to eight parent
+// processes. This keeps the attribution evidence local, bounded, and useful
+// for later security investigation.
 func takeForensics(p *process.Process) *suspectProc {
-	sp := &suspectProc{Pid: p.Pid}
+	lineage := make([]processLineage, 0, 8)
+	seen := make(map[int32]struct{}, 8)
+	current := p
+	for len(lineage) < 8 && current != nil {
+		if _, ok := seen[current.Pid]; ok {
+			break
+		}
+		seen[current.Pid] = struct{}{}
+		node := snapshotProcess(current)
+		lineage = append(lineage, node)
+		if node.PPid <= 0 || node.PPid == current.Pid {
+			break
+		}
+		parent, err := process.NewProcess(node.PPid)
+		if err != nil {
+			break
+		}
+		current = parent
+	}
+	if len(lineage) == 0 {
+		return nil
+	}
+	first := lineage[0]
+	return &suspectProc{
+		Pid: first.Pid, PPid: first.PPid, Exe: first.Exe, Cmdline: first.Cmdline,
+		User: first.User, ExeSHA: first.ExeSHA, Lineage: lineage,
+	}
+}
+
+func snapshotProcess(p *process.Process) processLineage {
+	node := processLineage{Pid: p.Pid}
 	if pp, err := p.Ppid(); err == nil {
-		sp.PPid = pp
+		node.PPid = pp
 	}
 	if exe, err := p.Exe(); err == nil {
-		sp.Exe = exe
-		sp.ExeSHA = fileSha256(exe)
+		node.Exe = exe
+		node.ExeSHA = fileSha256(exe)
 	}
 	if cl, err := p.CmdlineSlice(); err == nil {
-		sp.Cmdline = strings.Join(cl, " ")
+		node.Cmdline = strings.Join(cl, " ")
 	}
 	if u, err := p.Username(); err == nil {
-		sp.User = u
+		node.User = u
 	}
-	return sp
+	return node
 }
 
 // attributeByRecency 启发式：最近 10 分钟启动的非系统进程（Windows/归因失败回退）
@@ -193,15 +237,24 @@ func attributeByRecency(excluded func(string) bool) *suspectProc {
 	return candidates[0]
 }
 
-// KillProcess 结束进程树（先杀子再杀父，防重启拉起）；comm 的 CmdProtectAction 复用
+// KillProcess terminates the complete descendant tree before the target so a
+// child cannot keep running or immediately recreate its parent.
 func KillProcess(pid int32) bool {
 	p, err := process.NewProcess(pid)
 	if err != nil {
 		return syscallKill(pid) == nil
 	}
+	return killProcessTree(p, map[int32]struct{}{})
+}
+
+func killProcessTree(p *process.Process, seen map[int32]struct{}) bool {
+	if _, ok := seen[p.Pid]; ok {
+		return false
+	}
+	seen[p.Pid] = struct{}{}
 	if children, err := p.Children(); err == nil {
-		for _, ch := range children {
-			_ = ch.Kill()
+		for _, child := range children {
+			_ = killProcessTree(child, seen)
 		}
 	}
 	return p.Kill() == nil

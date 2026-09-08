@@ -214,7 +214,7 @@ rules:
 - **Linux**：1s tick 扫描 /proc（读 `comm`、`exe`、`cmdline`；命中正则后再读完整信息取证）。可选启用 `auditd` 订阅（进程 exec 事件驱动，需客户允许安装 audit 规则）。
 - **Windows**：2s 轮询 WMI `Win32_Process`（ETW 为二期演进项）。
 - **处置**：`kill`（Linux: SIGKILL；Windows: TerminateProcess）；`quarantine`：进程二进制复制到证据目录并上报 MinIO。
-- **取证**：命中时采集进程五元组（pid、ppid、exe、cmdline、user）+ 文件 SHA256 + 父进程链，写入事件 detail 与证据文件。
+- **取证**：命中时采集进程五元组（pid、ppid、exe、cmdline、user）+ 文件 SHA256 + 最多 8 层父进程链，写入事件 detail 与证据文件。
 
 ### 5.3 文件完整性实现
 
@@ -245,8 +245,8 @@ rules:
 
 - **诱饵文件由 Agent 本地生成**（文件名模板池随机组合，随机字节 + 合理文件头，不依赖平台下载），投放目录与数量由防护策略下发（默认用户文档/共享目录，每目录 4 个）。
 - **双触发**：诱饵被写入/篡改（高置信）+ 受监听目录写速率异常（10s 窗口 >50 文件重命名且扩展变化率 >80%，典型加密拖尾特征）。
-- **归因**：Linux 经 `/proc/*/fd` 反查写入进程 inode；Windows 经 Restart Manager API 查锁定进程。
-- **本地响应链**（不依赖服务端在线）：kill 涉事进程（含进程链取证）→ 主机隔离（复用 §5.5 的 10s ACK 回滚安全垫）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
+- **归因**：Linux 经 `/proc/*/fd` 反查写入进程 inode；Windows 当前回退为最近活跃进程启发式，Restart Manager API 为后续增强项。
+- **本地响应链**（不依赖服务端在线）：递归结束涉事进程及其后代（含进程链取证）→ 主机隔离（复用 §5.5 的 10s ACK 回滚安全垫）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
 - **误报防护**：备份/杀毒/索引类进程按 exe 路径排除（策略可配）；诱饵目录避开业务工作区；响应级别可配（alert_only / kill / kill_and_isolate，默认 kill_and_isolate）。
 
 ## 6. 本地自治与策略缓存（policystore / offlineq）
