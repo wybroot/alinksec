@@ -79,7 +79,7 @@ flowchart LR
         NGINX["🔒 nginx :8443<br/>HTTPS 静态资源 + /api/ 反代"]
         SRV["⚙️ alinksec-server :8080<br/>REST · JWT · RBAC · 审计"]
         GRPC["🔒 gRPC Server :9443<br/>mTLS 双向认证"]
-        PG[("🐘 PostgreSQL :5432<br/>37 张业务表")]
+        PG[("🐘 PostgreSQL :5432<br/>38 张业务表")]
         VM[("📈 VictoriaMetrics<br/>时序指标 · 90 天")]
     end
 
@@ -314,7 +314,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 🖥️ 管理控制台 | `https://<IP>:8443/` | admin / `.env` 中的初始密码 |
 | 📺 安全大屏 | `https://<IP>:8443/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
 
-> 📖 **完整部署手册**：37 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
+> 📖 **完整部署手册**：38 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
 > **👉 [docs/06-部署文档.md](docs/06-部署文档.md)**
 
 <details>
@@ -338,7 +338,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | **Agent** | Go 1.24 · gopsutil v4 · grpc 1.66 | 单二进制零依赖，交叉编译覆盖 Linux/Windows，资源占用低 |
 | **服务端** | Java 21 · Spring Boot 3.3 · gRPC · protobuf | 虚拟线程承载长连接双向流，生态成熟易扩展 |
 | **前端** | Vue 3.4 · Element Plus 2.7 · ECharts 5.5 · Vite 5 | 组合式 API + 暗色大屏，开发体验与渲染性能兼得 |
-| **存储** | PostgreSQL 17（业务）· VictoriaMetrics（时序） | 关系建模 37 表 + 高压缩比指标存储，各司其职 |
+| **存储** | PostgreSQL 17（业务）· VictoriaMetrics（时序） | 关系建模 38 表 + 高压缩比指标存储，各司其职 |
 | **部署** | Docker Compose · nginx | 一条命令全家桶起，反代统一 8081 入口 |
 
 ---
