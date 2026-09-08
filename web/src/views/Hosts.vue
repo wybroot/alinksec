@@ -74,7 +74,7 @@
           <el-table-column prop="name" label="容器" min-width="110" show-overflow-tooltip />
           <el-table-column prop="image" label="镜像" min-width="145" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" min-width="110" show-overflow-tooltip />
-          <el-table-column label="风险" width="70"><template #default="{ row }"><el-tag v-if="row.risky" size="small" type="danger">风险</el-tag><span v-else>—</span></template></el-table-column>
+          <el-table-column label="风险" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag v-if="row.risky" size="small" type="danger">{{ riskReasons(row) }}</el-tag><span v-else>—</span></template></el-table-column>
           <el-table-column label="端口" min-width="110" show-overflow-tooltip>
             <template #default="{ row }">{{ (row.ports || []).join(', ') || '—' }}</template>
           </el-table-column>
@@ -103,6 +103,11 @@ const statusFilter = ref('')
 const drawer = ref(false)
 const curHost = reactive({})
 const containers = ref([])
+const riskReasons = row => {
+  const value = row.risk_reasons
+  if (Array.isArray(value)) return value.join(', ')
+  try { return JSON.parse(value || '[]').join(', ') || '风险' } catch { return '风险' }
+}
 const miniEl = ref(null)
 let miniChart = null
 
