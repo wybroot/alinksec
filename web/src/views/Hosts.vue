@@ -101,6 +101,28 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未采集到本机进程" />
       </section>
+      <section class="container-assets">
+        <h4>监听端口 <span>{{ ports.length }}</span></h4>
+        <el-table v-if="ports.length" :data="ports" size="small" max-height="180">
+          <el-table-column prop="protocol" label="协议" width="76" />
+          <el-table-column prop="port" label="端口" width="76" />
+          <el-table-column prop="bind_addr" label="绑定地址" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="process" label="所属进程" min-width="130" show-overflow-tooltip />
+        </el-table>
+        <el-empty v-else :image-size="48" description="未发现监听端口" />
+      </section>
+      <section class="container-assets">
+        <h4>高风险账户 <span>{{ riskyAccounts.length }}</span></h4>
+        <el-table v-if="riskyAccounts.length" :data="riskyAccounts" size="small" max-height="180">
+          <el-table-column prop="name" label="账户" min-width="110" show-overflow-tooltip />
+          <el-table-column prop="uid" label="UID" width="76" />
+          <el-table-column prop="shell" label="Shell" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="risky_reason" label="风险原因" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }"><el-tag type="danger" size="small">{{ row.risky_reason || '风险账户' }}</el-tag></template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else :image-size="48" description="未发现高风险账户" />
+      </section>
     </template>
   </el-drawer>
 </template>
@@ -124,6 +146,8 @@ const drawer = ref(false)
 const curHost = reactive({})
 const containers = ref([])
 const processes = ref([])
+const ports = ref([])
+const riskyAccounts = ref([])
 const riskReasons = row => {
   const value = row.risk_reasons
   if (Array.isArray(value)) return value.join(', ')
@@ -162,13 +186,17 @@ const openHost = async row => {
   Object.assign(curHost, row)
   containers.value = []
   processes.value = []
+  ports.value = []
+  riskyAccounts.value = []
   drawer.value = true
   try {
     const data = await fetchHostDetail(row.agentId)
     containers.value = data.containers || []
     processes.value = data.processes || []
+    ports.value = data.ports || []
+    riskyAccounts.value = (data.accounts || []).filter(account => account.risky)
   } catch (e) {
-    ElMessage({ message: e?.message || '容器资产加载失败', type: 'error' })
+    ElMessage({ message: e?.message || '主机资产加载失败', type: 'error' })
   }
   nextTick(() => {
     if (!miniEl.value) return
