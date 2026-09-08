@@ -65,6 +65,18 @@
         <el-button size="small" :loading="busyAction === 'scan'" @click="doQuickScan">病毒快扫</el-button>
         <el-button size="small" type="danger" v-if="curHost.status === 'online'" @click="isolate(curHost, true)">隔离主机</el-button>
       </div>
+      <section class="container-assets">
+        <h4>运行容器 <span>{{ containers.length }}</span></h4>
+        <el-table v-if="containers.length" :data="containers" size="small" max-height="220">
+          <el-table-column prop="name" label="容器" min-width="110" show-overflow-tooltip />
+          <el-table-column prop="image" label="镜像" min-width="145" show-overflow-tooltip />
+          <el-table-column prop="status" label="状态" min-width="110" show-overflow-tooltip />
+          <el-table-column label="端口" min-width="110" show-overflow-tooltip>
+            <template #default="{ row }">{{ (row.ports || []).join(', ') || '—' }}</template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else :image-size="48" description="未发现运行中的 Docker 容器" />
+      </section>
     </template>
   </el-drawer>
 </template>
@@ -74,7 +86,7 @@ import { computed, onMounted, reactive, ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { fetchHosts, fetchGroups, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+import { fetchHosts, fetchGroups, fetchHostDetail, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 
 const router = useRouter()
@@ -86,6 +98,7 @@ const query = ref('')
 const statusFilter = ref('')
 const drawer = ref(false)
 const curHost = reactive({})
+const containers = ref([])
 const miniEl = ref(null)
 let miniChart = null
 
@@ -115,9 +128,16 @@ const armUninstall = async row => {
   }
 }
 
-const openHost = row => {
+const openHost = async row => {
   Object.assign(curHost, row)
+  containers.value = []
   drawer.value = true
+  try {
+    const data = await fetchHostDetail(row.agentId)
+    containers.value = data.containers || []
+  } catch (e) {
+    ElMessage({ message: e?.message || '容器资产加载失败', type: 'error' })
+  }
   nextTick(() => {
     if (!miniEl.value) return
     if (!miniChart) miniChart = echarts.init(miniEl.value)
