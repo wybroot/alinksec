@@ -158,16 +158,30 @@ func redactCommandLine(args []string) string {
 	redacted := append([]string(nil), args...)
 	for i, arg := range redacted {
 		lower := strings.ToLower(arg)
-		for _, key := range []string{"password", "passwd", "token", "secret", "api-key", "apikey"} {
-			if strings.HasPrefix(lower, "--"+key+"=") || strings.HasPrefix(lower, "-"+key+"=") {
-				redacted[i] = arg[:strings.Index(arg, "=")+1] + "***"
-			}
-			if (lower == "--"+key || lower == "-"+key) && i+1 < len(redacted) {
+		if sensitiveArgumentKey(lower) != "" {
+			if equals := strings.Index(arg, "="); equals >= 0 {
+				redacted[i] = arg[:equals+1] + "***"
+			} else if i+1 < len(redacted) {
 				redacted[i+1] = "***"
 			}
 		}
 	}
 	return strings.Join(redacted, " ")
+}
+
+func sensitiveArgumentKey(arg string) string {
+	name := strings.TrimLeft(strings.SplitN(arg, "=", 2)[0], "-")
+	name = strings.ReplaceAll(name, "_", "-")
+	for _, key := range []string{
+		"password", "passwd", "pwd", "token", "secret", "api-key", "apikey",
+		"access-key", "accesskey", "client-secret", "clientsecret", "private-key", "privatekey",
+		"auth", "authorization", "bearer", "cookie",
+	} {
+		if name == key || strings.HasSuffix(name, "-"+key) {
+			return key
+		}
+	}
+	return ""
 }
 
 /* ==================== 磁盘（gopsutil 跨平台） ==================== */
