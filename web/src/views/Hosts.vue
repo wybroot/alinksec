@@ -82,6 +82,16 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未发现本机 Docker 容器或 K8s 工作负载" />
       </section>
+      <section class="container-assets">
+        <h4>本机进程 <span>{{ processes.length }}</span></h4>
+        <el-table v-if="processes.length" :data="processes" size="small" max-height="220">
+          <el-table-column prop="pid" label="PID" width="76" />
+          <el-table-column prop="name" label="进程" min-width="110" show-overflow-tooltip />
+          <el-table-column prop="username" label="用户" min-width="90" show-overflow-tooltip />
+          <el-table-column prop="exe" label="路径" min-width="150" show-overflow-tooltip />
+        </el-table>
+        <el-empty v-else :image-size="48" description="未采集到本机进程" />
+      </section>
     </template>
   </el-drawer>
 </template>
@@ -104,6 +114,7 @@ const statusFilter = ref('')
 const drawer = ref(false)
 const curHost = reactive({})
 const containers = ref([])
+const processes = ref([])
 const riskReasons = row => {
   const value = row.risk_reasons
   if (Array.isArray(value)) return value.join(', ')
@@ -141,10 +152,12 @@ const armUninstall = async row => {
 const openHost = async row => {
   Object.assign(curHost, row)
   containers.value = []
+  processes.value = []
   drawer.value = true
   try {
     const data = await fetchHostDetail(row.agentId)
     containers.value = data.containers || []
+    processes.value = data.processes || []
   } catch (e) {
     ElMessage({ message: e?.message || '容器资产加载失败', type: 'error' })
   }

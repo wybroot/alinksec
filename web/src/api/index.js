@@ -301,14 +301,15 @@ export async function fetchGroups() {
 }
 
 export async function fetchHostDetail(agentId) {
-  const [detail, software, ports, accounts, containers] = await Promise.all([
+  const [detail, software, ports, processes, accounts, containers] = await Promise.all([
     get(`/api/hosts/${agentId}`),
     get(`/api/hosts/${agentId}/software?page=1&size=500`),
     get(`/api/hosts/${agentId}/ports`),
+    get(`/api/hosts/${agentId}/processes`),
     get(`/api/hosts/${agentId}/accounts`),
     get(`/api/hosts/${agentId}/containers`),
   ])
-  return { detail, software, ports, accounts, containers }
+  return { detail, software, ports, processes, accounts, containers }
 }
 
 /* ---------------- 基线 ---------------- */
