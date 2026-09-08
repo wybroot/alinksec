@@ -290,6 +290,7 @@ export async function fetchHosts() {
     lastEvt: h.last_event || '',
     softwareCount: h.software_count,
     portCount: h.port_count,
+    processCount: Number(h.process_count || 0),
     accountCount: h.account_count,
     containerCount: Number(h.container_count || 0),
   }))
