@@ -138,8 +138,13 @@ func checkFileLine(cs *CheckSpec) ItemResult {
 
 /* ==================== cmd_output ==================== */
 
-// checkCmdOutput 执行命令并对输出断言（Linux /bin/sh；Windows cmd /c）
+// checkCmdOutput executes only an Agent-compiled baseline command and then
+// evaluates its output. The server-provided command is a selector, never an
+// unrestricted remote command channel.
 func checkCmdOutput(cs *CheckSpec) ItemResult {
+	if !isApprovedCmdOutput(cs.Cmd) {
+		return ItemResult{Passed: false, Message: "基线命令未获 Agent 白名单许可"}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cs.TimeoutMs)*time.Millisecond)
 	defer cancel()
 

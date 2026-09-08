@@ -22,7 +22,8 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * 基线核查任务编排（docs/04 §4.3）：
  * 创建任务 → 按主机 OS 过滤适用检查项 → 逐台下发 baseline_check 指令。
- * 检查项定义（check JSON）随指令下发，Agent 无本地模板 → 模板热更新即时生效。
+ * 结构化检查项定义（check JSON）随指令下发即可热更新；命令型检查由 Agent
+ * 内置白名单约束，未知命令不会被执行。
  */
 @Service
 public class BaselineTaskService {

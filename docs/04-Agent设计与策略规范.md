@@ -120,7 +120,7 @@ alinksec-agent/
 | `file_line` | 文件中是否存在/不存在匹配行 | target、operator(contains/not_contains/regex)、expected、ignore_case | 检查 pam 配置 |
 | `file_content` | 文件整体内容正则校验 | target、regex | 检查配置值 `PermitRootLogin no` |
 | `file_perm` | 文件/目录权限位 | target、perm(如 0644)、owner、group | /etc/passwd 644 |
-| `cmd_output` | 执行命令并比对输出 | cmd、operator(eq/gt/lt/regex)、expected、timeout_ms | `sysctl -n net.ipv4.tcp_syncookies` = 1 |
+| `cmd_output` | 执行 Agent 内置白名单命令并比对输出 | cmd、operator(eq/gt/lt/regex)、expected、timeout_ms | `sysctl -n net.ipv4.tcp_syncookies` = 1 |
 | `service_status` | 服务启用状态 | name、expected(enabled/disabled/running) | sshd 禁 root 时 firewalld 状态 |
 | `account_policy` | 口令/账户策略 | key(minlen/maxdays/lockout…)、operator、expected | 密码最长有效期 90 天 |
 | `mount_opt` | 挂载点选项 | mount、option(nosuid/noexec/nodev)、required(bool) | /tmp nodev,nosuid |
@@ -131,6 +131,7 @@ alinksec-agent/
 **执行器要求**：
 
 - 单项超时 5s（可覆写）；单项 panic recover，异常记为 `failed(unknown)` 不影响其余项。
+- `cmd_output` 的命令值必须与 Agent 内置基线命令逐字匹配；服务端下发的未知或被篡改命令在创建进程前被拒绝。新增命令型检查必须随 Agent 版本发布，不提供通用 Shell 或脚本下发能力。
 - 结果必须带 `actual`（取证值），供报告展示。
 - 模板全量下发至 Agent 本地执行（SQLite 缓存），核查在 **Agent 本地完成**，只回传结果——避免每项一次交互。
 
