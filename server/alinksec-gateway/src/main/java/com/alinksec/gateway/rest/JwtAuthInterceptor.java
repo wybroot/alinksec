@@ -26,7 +26,10 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成） */
     private static final List<String> ADMIN_WRITE_PREFIXES = List.of(
-            "/api/upgrade/packages", "/api/hosts/enroll-token");
+            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify");
+
+    /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
+    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify");
 
     /** 自服务写操作：任何已认证角色可执行（登出需落审计，不应被写拦截误伤） */
     private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout");
@@ -57,6 +60,11 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             request.setAttribute("uid", ((Number) claims.get("uid")).longValue());
             request.setAttribute("username", claims.get("username"));
             request.setAttribute("role", role);
+            if (ADMIN_ONLY_PREFIXES.stream().anyMatch(request.getRequestURI()::startsWith)
+                    && !"admin".equals(role)) {
+                reject(response, HttpStatus.FORBIDDEN, 40301, "Administrator access is required");
+                return false;
+            }
             // 写操作角色校验（读操作三角色均放行；自服务写操作如登出对所有角色放行）
             if (WRITE_METHODS.contains(request.getMethod().toUpperCase())
                     && !SELF_WRITE_URIS.contains(request.getRequestURI())

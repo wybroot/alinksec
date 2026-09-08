@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,21 +40,53 @@ public class NotifyService {
     @Async
     public void onAlert(String alertNo, String agentId, String eventType,
                         int severity, String title, String actionTaken) {
-        List<Map<String, Object>> channels = jdbc.queryForList(
-                "SELECT id, name, webhook_url FROM t_notify_channel WHERE enabled = true AND min_severity <= ?",
-                severity);
-        if (channels.isEmpty()) {
-            return;
-        }
+        // Snapshot eligible channels before delivery. A later channel change only
+        // affects future alerts, rather than unexpectedly replaying old alerts.
+        jdbc.update("""
+                INSERT INTO t_alert_notify_delivery (alert_no, channel_id)
+                SELECT ?, id FROM t_notify_channel
+                WHERE enabled = true AND type = 'webhook' AND min_severity <= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM t_alert_notify_delivery WHERE alert_no = ?
+                  )
+                ON CONFLICT (alert_no, channel_id) DO NOTHING
+                """, alertNo, severity, alertNo);
+
+        Map<String, Object> details = new HashMap<>();
+        details.put("alertNo", alertNo);
+        details.put("agentId", agentId);
+        details.put("eventType", eventType);
+        details.put("severity", severity);
+        details.put("actionTaken", actionTaken == null ? "" : actionTaken);
         String payload = JsonUtils.write(Map.of(
                 "msgtype", "text",
                 "text", Map.of("content", "[ALinkSec 告警] " + title),
-                "alinksec", Map.of("alertNo", alertNo, "agentId", agentId,
-                        "eventType", eventType, "severity", severity, "actionTaken", actionTaken)));
+                "alinksec", details));
+
+        List<Map<String, Object>> channels = jdbc.queryForList("""
+                SELECT d.channel_id, c.name, c.webhook_url
+                FROM t_alert_notify_delivery d
+                JOIN t_notify_channel c ON c.id = d.channel_id
+                WHERE d.alert_no = ? AND d.delivered_at IS NULL AND c.enabled = true
+                """, alertNo);
         for (Map<String, Object> ch : channels) {
-            send((String) ch.get("webhook_url"), payload, (String) ch.get("name"));
+            long channelId = ((Number) ch.get("channel_id")).longValue();
+            String error = send((String) ch.get("webhook_url"), payload, (String) ch.get("name"));
+            if (error == null) {
+                jdbc.update("""
+                        UPDATE t_alert_notify_delivery
+                        SET attempts = attempts + 1, attempted_at = now(), delivered_at = now(), last_error = NULL
+                        WHERE alert_no = ? AND channel_id = ?
+                        """, alertNo, channelId);
+            } else {
+                jdbc.update("""
+                        UPDATE t_alert_notify_delivery
+                        SET attempts = attempts + 1, attempted_at = now(), last_error = ?
+                        WHERE alert_no = ? AND channel_id = ?
+                        """, error, alertNo, channelId);
+            }
         }
-        jdbc.update("UPDATE t_alert SET notified = true WHERE alert_no = ?", alertNo);
+        markCompleteIfDelivered(alertNo);
     }
 
     /** 兜底重试：每 5 分钟重发未确认的高危告警（含首次通知失败的） */
@@ -71,7 +104,18 @@ public class NotifyService {
         }
     }
 
-    private void send(String url, String payload, String name) {
+    private void markCompleteIfDelivered(String alertNo) {
+        jdbc.update("""
+                UPDATE t_alert SET notified = NOT EXISTS (
+                    SELECT 1 FROM t_alert_notify_delivery d
+                    JOIN t_notify_channel c ON c.id = d.channel_id
+                    WHERE d.alert_no = ? AND c.enabled = true AND d.delivered_at IS NULL
+                ) WHERE alert_no = ?
+                """, alertNo, alertNo);
+    }
+
+    /** @return null when the remote endpoint accepted the delivery. */
+    private String send(String url, String payload, String name) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofSeconds(5))
@@ -81,9 +125,12 @@ public class NotifyService {
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 log.warn("通知发送非 2xx: channel={} status={}", name, resp.statusCode());
+                return "HTTP " + resp.statusCode();
             }
+            return null;
         } catch (Exception e) {
             log.warn("通知发送失败（不阻塞主流程）: channel={} err={}", name, e.getMessage());
+            return e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage());
         }
     }
 }

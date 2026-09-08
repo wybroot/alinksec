@@ -883,6 +883,21 @@ CREATE TABLE IF NOT EXISTS t_notify_channel (
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
+-- Delivery state is tracked per alert and channel so a retry does not resend
+-- notifications that were already accepted by another channel.
+CREATE TABLE IF NOT EXISTS t_alert_notify_delivery (
+    id           BIGSERIAL PRIMARY KEY,
+    alert_no     VARCHAR(64) NOT NULL,
+    channel_id   BIGINT      NOT NULL,
+    attempts     INTEGER     NOT NULL DEFAULT 0,
+    attempted_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    last_error   TEXT,
+    UNIQUE (alert_no, channel_id)
+);
+CREATE INDEX IF NOT EXISTS idx_alert_notify_pending
+    ON t_alert_notify_delivery (delivered_at, attempted_at);
+
 -- t_alert 琛ラ€氱煡鏍囪锛堝凡閫氱煡鐨勫憡璀︿笉閲嶅鎺ㄩ€侊紱澶辫触鐢卞畾鏃朵换鍔″鏈爣璁扮殑閲嶈瘯锛?
 ALTER TABLE t_alert ADD COLUMN IF NOT EXISTS notified BOOLEAN NOT NULL DEFAULT false;
 

@@ -569,6 +569,24 @@ export async function fetchAuditLogs(page = 1, size = 20) {
   return get(`/api/audit/logs?page=${page}&size=${size}`)
 }
 
+/* ---------------- 告警通知通道 ---------------- */
+
+export function fetchNotifyChannels() {
+  return get('/api/notify/channels')
+}
+
+export function createNotifyChannel(channel) {
+  return post('/api/notify/channels', channel)
+}
+
+export function updateNotifyChannel(id, channel) {
+  return put(`/api/notify/channels/${id}`, channel)
+}
+
+export function removeNotifyChannel(id) {
+  return del(`/api/notify/channels/${id}`)
+}
+
 /** 合规报表下载（浏览器直接拉 CSV，带 JWT header） */
 export async function downloadComplianceReport(from, to) {
   const headers = {}

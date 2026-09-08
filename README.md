@@ -363,9 +363,10 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 - [x] M3 安全大屏 + 审计 + RBAC
 - [x] M4 病毒查杀 + 勒索诱饵 + 灰度升级 + 特征库热更
 - [x] 安全加固：卸载口令 / 断网队列 / RBAC 写拦截
-- [ ] M5 多租户与告警通道（邮件 / Webhook / 钉钉）
+- [x] M5 告警通道（Webhook 配置、管理员权限与失败重试）
 - [ ] 容器安全（Docker/K8s workload 清点与策略）
 - [ ] EDR 行为引擎（进程树 lineage + 规则热更）
+- [ ] 长期低优先级：多租户隔离（暂不纳入近期版本）
 
 ---
 

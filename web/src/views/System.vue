@@ -58,6 +58,29 @@
           <span class="hint">报表含主机资产概览 / 基线合规率 / 漏洞分布 / 告警处置四部分</span>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane v-if="isAdmin" label="告警通道" name="notify">
+        <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+          <el-button type="primary" size="small" @click="openChannel()">新增 Webhook</el-button>
+          <span class="hint">仅推送达到通道设定等级的告警。Webhook 返回 2xx 才会视为投递成功。</span>
+        </div>
+        <el-table :data="channels" stripe size="small">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column prop="webhook_url" label="Webhook 地址" min-width="280" show-overflow-tooltip />
+          <el-table-column label="最低等级" width="110">
+            <template #default="{ row }">{{ severityName(row.min_severity) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }"><el-tag size="small" :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openChannel(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="deleteChannel(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 灰度下发弹窗 -->
@@ -69,16 +92,37 @@
         <el-button type="primary" :loading="busy" @click="doDispatch">下发</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="channelDlg" :title="channelForm.id ? '编辑告警通道' : '新增告警通道'" width="500px">
+      <el-form label-width="96px">
+        <el-form-item label="名称" required><el-input v-model="channelForm.name" maxlength="64" /></el-form-item>
+        <el-form-item label="Webhook" required><el-input v-model="channelForm.webhookUrl" placeholder="https://example.com/webhook" /></el-form-item>
+        <el-form-item label="最低等级">
+          <el-select v-model="channelForm.minSeverity" style="width:160px">
+            <el-option label="低危及以上" :value="1" />
+            <el-option label="中危及以上" :value="2" />
+            <el-option label="高危及以上" :value="3" />
+            <el-option label="严重" :value="4" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用"><el-switch v-model="channelForm.enabled" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="channelDlg = false">取消</el-button>
+        <el-button type="primary" :loading="channelBusy" @click="saveChannel">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, downloadComplianceReport } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, downloadComplianceReport, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
 
 const tab = ref('upgrade')
 const busy = ref(false)
+const isAdmin = getUser()?.role === 'admin'
 
 /* ---- 升级 ---- */
 const packages = ref([])
@@ -167,7 +211,53 @@ async function exportCsv() {
   }
 }
 
-onMounted(() => { loadUpgrade(); loadAudit() })
+/* ---- 告警通道 ---- */
+const channels = ref([])
+const channelDlg = ref(false)
+const channelBusy = ref(false)
+const channelForm = ref({ id: null, name: '', webhookUrl: '', minSeverity: 3, enabled: true })
+const severityName = (value) => ({ 1: '低危及以上', 2: '中危及以上', 3: '高危及以上', 4: '严重' }[Number(value)] || '高危及以上')
+
+async function loadChannels() {
+  if (isAdmin) channels.value = await fetchNotifyChannels()
+}
+
+function openChannel(row) {
+  channelForm.value = row
+    ? { id: row.id, name: row.name, webhookUrl: row.webhook_url, minSeverity: Number(row.min_severity), enabled: !!row.enabled }
+    : { id: null, name: '', webhookUrl: '', minSeverity: 3, enabled: true }
+  channelDlg.value = true
+}
+
+async function saveChannel() {
+  if (!channelForm.value.name.trim() || !channelForm.value.webhookUrl.trim()) return msg('请填写通道名称和 Webhook 地址', 'warning')
+  channelBusy.value = true
+  try {
+    const form = { ...channelForm.value }
+    if (form.id) await updateNotifyChannel(form.id, form)
+    else await createNotifyChannel(form)
+    channelDlg.value = false
+    await loadChannels()
+    msg('告警通道已保存')
+  } catch (e) {
+    msg(e?.message || '保存失败', 'error')
+  } finally {
+    channelBusy.value = false
+  }
+}
+
+async function deleteChannel(row) {
+  try {
+    await ElMessageBox.confirm(`删除告警通道“${row.name}”后将停止后续投递，是否继续？`, '删除告警通道', { type: 'warning' })
+    await removeNotifyChannel(row.id)
+    await loadChannels()
+    msg('告警通道已删除')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') msg(e?.message || '删除失败', 'error')
+  }
+}
+
+onMounted(() => { loadUpgrade(); loadAudit(); loadChannels() })
 </script>
 
 <style scoped>
