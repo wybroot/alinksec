@@ -25,6 +25,12 @@
       <el-table-column label="进程" width="76">
         <template #default="{ row }"><el-tag v-if="row.processCount" size="small" type="info">{{ row.processCount }}</el-tag><span v-else>—</span></template>
       </el-table-column>
+      <el-table-column label="端口" width="76">
+        <template #default="{ row }"><el-tag v-if="row.portCount" size="small" type="warning">{{ row.portCount }}</el-tag><span v-else>—</span></template>
+      </el-table-column>
+      <el-table-column label="风险账户" width="96">
+        <template #default="{ row }"><el-tag v-if="row.riskyAccountCount" size="small" type="danger">{{ row.riskyAccountCount }}</el-tag><span v-else>—</span></template>
+      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }"><el-tag size="small" :type="hostTagType(row.status)">{{ hostStatusLabel(row.status) }}</el-tag></template>
       </el-table-column>

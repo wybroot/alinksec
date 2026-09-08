@@ -292,6 +292,7 @@ export async function fetchHosts() {
     portCount: h.port_count,
     processCount: Number(h.process_count || 0),
     accountCount: h.account_count,
+    riskyAccountCount: Number(h.risky_account_count || 0),
     containerCount: Number(h.container_count || 0),
   }))
 }
