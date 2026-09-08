@@ -296,6 +296,7 @@ export async function fetchHosts() {
     protect: !!h.protect_enabled,
     hb: fmtAgo(h.last_heartbeat),
     risk: Number(h.alert_count || 0),
+    alertCount: Number(h.alert_count || 0),
     lastEvt: h.last_event || '',
     softwareCount: h.software_count,
     portCount: h.port_count,

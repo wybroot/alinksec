@@ -69,7 +69,7 @@
       <div class="panel" style="margin-top:14px;box-shadow:none;border:1px solid #eef2f7">
         <h4>本机待处置</h4>
         <p style="font-size:12px;line-height:2">
-          漏洞 6（严重 1）· 基线不合规 9 项 · 病毒待处置 1<br />
+          待处置安全告警 {{ curHost.alertCount || 0 }} 条<br />
           最近事件：{{ curHost.lastEvt || '无' }}</p>
       </div>
       <div style="display:flex;gap:10px;margin-top:14px">
