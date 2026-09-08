@@ -245,6 +245,8 @@ message ContainerInfo {
   map<string, string> labels = 9;
   bool risky = 10;
   repeated string risk_reasons = 11;
+  string orchestrator = 12; // docker / kubernetes
+  string namespace = 13;
 }
 
 message SoftwareInfo {

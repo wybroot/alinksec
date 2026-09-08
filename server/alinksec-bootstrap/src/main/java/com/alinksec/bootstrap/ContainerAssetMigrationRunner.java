@@ -23,5 +23,8 @@ public class ContainerAssetMigrationRunner implements CommandLineRunner {
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_container_agent ON t_asset_container(agent_id)");
         jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS risky BOOLEAN NOT NULL DEFAULT FALSE");
         jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS risk_reasons JSONB NOT NULL DEFAULT '[]'");
+        jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS orchestrator VARCHAR(32) NOT NULL DEFAULT 'docker'");
+        jdbc.execute("ALTER TABLE t_asset_container ADD COLUMN IF NOT EXISTS namespace VARCHAR(255)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_container_orchestrator ON t_asset_container(orchestrator, namespace)");
     }
 }

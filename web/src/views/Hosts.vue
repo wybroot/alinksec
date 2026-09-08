@@ -72,6 +72,7 @@
         <h4>运行容器 <span>{{ containers.length }}</span></h4>
         <el-table v-if="containers.length" :data="containers" size="small" max-height="220">
           <el-table-column prop="name" label="容器" min-width="110" show-overflow-tooltip />
+          <el-table-column label="来源" width="86"><template #default="{ row }"><el-tag size="small" effect="plain">{{ row.orchestrator === 'kubernetes' ? 'K8s' : 'Docker' }}</el-tag></template></el-table-column>
           <el-table-column prop="image" label="镜像" min-width="145" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" min-width="110" show-overflow-tooltip />
           <el-table-column label="风险" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag v-if="row.risky" size="small" type="danger">{{ riskReasons(row) }}</el-tag><span v-else>—</span></template></el-table-column>

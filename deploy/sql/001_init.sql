@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS t_asset_container (
   name         VARCHAR(255),
   image        VARCHAR(512),
   image_id     VARCHAR(128),
+  orchestrator VARCHAR(32) NOT NULL DEFAULT 'docker',
+  namespace    VARCHAR(255),
   status       VARCHAR(255),
   created_at   TIMESTAMPTZ,
   started_at   TIMESTAMPTZ,
@@ -78,6 +80,7 @@ CREATE TABLE IF NOT EXISTS t_asset_container (
   UNIQUE(agent_id, container_id)
 );
 CREATE INDEX IF NOT EXISTS idx_container_agent ON t_asset_container(agent_id);
+CREATE INDEX IF NOT EXISTS idx_container_orchestrator ON t_asset_container(orchestrator, namespace);
 
 CREATE TABLE IF NOT EXISTS t_asset_account (
   id          BIGSERIAL PRIMARY KEY,

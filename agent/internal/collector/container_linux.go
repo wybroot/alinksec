@@ -23,12 +23,62 @@ func collectContainers(snap *pb.RptAssetSnapshot) {
 		if len(parts) < 5 || parts[0] == "" {
 			continue
 		}
-		c := &pb.ContainerInfo{ContainerId: parts[0], Name: parts[1], Image: parts[2], Status: parts[3]}
+		c := &pb.ContainerInfo{ContainerId: parts[0], Name: parts[1], Image: parts[2], Status: parts[3], Orchestrator: "docker"}
 		if parts[4] != "" {
 			c.Ports = strings.Split(parts[4], ", ")
 		}
 		fillContainerDetails(c)
 		snap.Containers = append(snap.Containers, c)
+	}
+	collectKubernetesContainers(snap)
+}
+
+type podList struct {
+	Items []struct {
+		Metadata struct {
+			Namespace         string            `json:"namespace"`
+			Name              string            `json:"name"`
+			CreationTimestamp string            `json:"creationTimestamp"`
+			Labels            map[string]string `json:"labels"`
+		} `json:"metadata"`
+		Status struct {
+			ContainerStatuses []struct {
+				Name        string `json:"name"`
+				Image       string `json:"image"`
+				ImageID     string `json:"imageID"`
+				ContainerID string `json:"containerID"`
+				Ready       bool   `json:"ready"`
+				State       struct {
+					Running struct {
+						StartedAt string `json:"startedAt"`
+					} `json:"running"`
+				} `json:"state"`
+			} `json:"containerStatuses"`
+		} `json:"status"`
+	} `json:"items"`
+}
+
+func collectKubernetesContainers(snap *pb.RptAssetSnapshot) {
+	out, err := exec.Command("kubectl", "get", "pods", "--all-namespaces", "-o", "json").Output()
+	if err != nil {
+		return
+	}
+	var pods podList
+	if json.Unmarshal(out, &pods) != nil {
+		return
+	}
+	for _, pod := range pods.Items {
+		for _, status := range pod.Status.ContainerStatuses {
+			id := status.ContainerID
+			if id == "" {
+				id = pod.Metadata.Namespace + "/" + pod.Metadata.Name + "/" + status.Name
+			}
+			state := "not_ready"
+			if status.Ready {
+				state = "running"
+			}
+			snap.Containers = append(snap.Containers, &pb.ContainerInfo{ContainerId: id, Name: pod.Metadata.Name + "/" + status.Name, Image: status.Image, ImageId: status.ImageID, Status: state, CreatedAt: dockerTime(pod.Metadata.CreationTimestamp), StartedAt: dockerTime(status.State.Running.StartedAt), Labels: pod.Metadata.Labels, Orchestrator: "kubernetes", Namespace: pod.Metadata.Namespace})
+		}
 	}
 }
 

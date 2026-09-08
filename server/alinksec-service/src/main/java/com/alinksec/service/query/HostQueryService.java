@@ -104,7 +104,7 @@ public class HostQueryService {
 
     public List<Map<String, Object>> containers(String agentId) {
         return jdbc.queryForList("""
-                SELECT container_id, name, image, image_id, status, created_at, started_at, ports, labels, risky, risk_reasons, updated_at
+                SELECT container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons, updated_at
                 FROM t_asset_container WHERE agent_id = ? ORDER BY name
                 """, agentId);
     }
