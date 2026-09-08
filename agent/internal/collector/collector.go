@@ -31,6 +31,7 @@ var tasks = []task{
 	{"ports", collectPorts},
 	{"accounts", collectAccounts},
 	{"disks", collectDisks},
+	{"containers", collectContainers},
 }
 
 // Snapshot 执行采集并组装快照；names 为空 = 全部，否则只跑指定采集器。

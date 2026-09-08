@@ -101,6 +101,13 @@ public class HostQueryService {
                 """, agentId);
     }
 
+    public List<Map<String, Object>> containers(String agentId) {
+        return jdbc.queryForList("""
+                SELECT container_id, name, image, image_id, status, created_at, started_at, ports, labels, updated_at
+                FROM t_asset_container WHERE agent_id = ? ORDER BY name
+                """, agentId);
+    }
+
     private static String pad(String keyword) {
         return keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
     }

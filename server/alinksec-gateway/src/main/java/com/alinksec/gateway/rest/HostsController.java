@@ -82,6 +82,11 @@ public class HostsController {
         return ApiResult.ok(query.accounts(agentId));
     }
 
+    @GetMapping("/{agentId}/containers")
+    public ApiResult<List<Map<String, Object>>> containers(@PathVariable String agentId) {
+        return ApiResult.ok(query.containers(agentId));
+    }
+
     /**
      * 申请卸载口令（docs/01 §6.1 防恶意卸载）：
      * 生成 16 位随机口令经 CmdAgentControl.ARM_UNINSTALL 布防到 Agent，

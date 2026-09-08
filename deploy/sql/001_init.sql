@@ -60,6 +60,23 @@ CREATE TABLE IF NOT EXISTS t_asset_port (
 );
 CREATE INDEX IF NOT EXISTS idx_port_agent ON t_asset_port(agent_id);
 
+CREATE TABLE IF NOT EXISTS t_asset_container (
+  id           BIGSERIAL PRIMARY KEY,
+  agent_id     VARCHAR(64) NOT NULL,
+  container_id VARCHAR(128) NOT NULL,
+  name         VARCHAR(255),
+  image        VARCHAR(512),
+  image_id     VARCHAR(128),
+  status       VARCHAR(255),
+  created_at   TIMESTAMPTZ,
+  started_at   TIMESTAMPTZ,
+  ports        JSONB NOT NULL DEFAULT '[]',
+  labels       JSONB NOT NULL DEFAULT '{}',
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(agent_id, container_id)
+);
+CREATE INDEX IF NOT EXISTS idx_container_agent ON t_asset_container(agent_id);
+
 CREATE TABLE IF NOT EXISTS t_asset_account (
   id          BIGSERIAL PRIMARY KEY,
   agent_id    VARCHAR(64) NOT NULL,

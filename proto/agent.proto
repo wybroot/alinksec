@@ -230,6 +230,19 @@ message RptAssetSnapshot {
   repeated ProcessInfo  processes = 3;
   repeated AccountInfo  accounts  = 4;
   repeated DiskInfo     disks     = 5;
+  repeated ContainerInfo containers = 6;
+}
+
+message ContainerInfo {
+  string container_id = 1;
+  string name = 2;
+  string image = 3;
+  string image_id = 4;
+  string status = 5;
+  int64 created_at = 6;
+  int64 started_at = 7;
+  repeated string ports = 8;
+  map<string, string> labels = 9;
 }
 
 message SoftwareInfo {

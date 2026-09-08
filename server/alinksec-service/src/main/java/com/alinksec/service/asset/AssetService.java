@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import com.alinksec.common.util.JsonUtils;
 
 /**
  * 资产快照落库（数据库设计 §2.1：agent 维度全量替换）。
@@ -33,6 +34,7 @@ public class AssetService {
         jdbc.update("DELETE FROM t_asset_software WHERE agent_id = ?", agentId);
         jdbc.update("DELETE FROM t_asset_port WHERE agent_id = ?", agentId);
         jdbc.update("DELETE FROM t_asset_account WHERE agent_id = ?", agentId);
+        jdbc.update("DELETE FROM t_asset_container WHERE agent_id = ?", agentId);
 
         for (var sw : snapshot.getSoftwareList()) {
             jdbc.update("""
@@ -56,8 +58,17 @@ public class AssetService {
                     a.getLastLogin() > 0 ? Timestamp.from(Instant.ofEpochMilli(a.getLastLogin())) : null,
                     a.getRisky(), a.getRiskyReason());
         }
-        log.info("资产快照已更新: agent={} software={} ports={} accounts={}",
-                agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount());
+        for (var c : snapshot.getContainersList()) {
+            jdbc.update("""
+                    INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, status, created_at, started_at, ports, labels)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+                    """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getStatus(),
+                    c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
+                    c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,
+                    JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()));
+        }
+        log.info("资产快照已更新: agent={} software={} ports={} accounts={} containers={}",
+                agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());
         // 快照触发漏洞比对（比对失败不影响快照落库——同一事务内异常会整体回滚，
         // 故捕获后仅告警；比对下一轮快照会重做）
         try {
