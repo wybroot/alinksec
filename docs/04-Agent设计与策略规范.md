@@ -79,6 +79,13 @@ alinksec-agent/
 | 登录日志 | 实时 tail | /var/log/secure（inotify）+ wtmp/btmp 增量解析 | Windows Event Log（Security 4624/4625/4720）订阅 |
 | 文件完整性 | 事件驱动 | inotify（目录递归 watch） | ReadDirectoryChangesW |
 
+进程快照包含 PID、进程名、所属用户、可执行文件路径、命令行和 RSS。命令行在 Agent 本机脱敏后才上报：
+`password`、`token`、`secret`、访问密钥、客户端密钥、认证头和 Cookie 等参数（含 `db-password`、
+`access_key` 等前缀写法）均只保留参数名，值替换为 `***`。
+
+资产快照的 `collected` 字段表示本轮实际执行的类别。服务端按该字段逐类替换软件、端口、进程、账户和
+容器资产；这使指定采集器的即时采集不会误删未执行类别的历史快照。字段为空时保留旧 Agent 的全量快照语义。
+
 **降级策略**：无 root/管理员权限时，敏感采集（shadow、/proc/net/tcp 完整信息）降级并在心跳中上报 `guard_status=degraded`，平台侧提示权限不足。
 
 容器数据仅用于宿主机安全研判。Docker 和 Kubernetes 查询彼此独立；Kubernetes 仅查询调度到本机节点的 Pod，默认节点名为宿主机 hostname，可通过 `kubernetes_node_name` 覆盖。Agent 不执行容器或 Kubernetes 生命周期操作。
