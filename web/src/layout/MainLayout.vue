@@ -12,7 +12,7 @@
           <el-icon><component :is="m.icon" /></el-icon><span>{{ m.title }}</span>
         </div>
       </nav>
-      <div class="sidebar-foot">v1.0.0 · M2<br/>数据源：Agent 实采</div>
+      <div class="sidebar-foot">v1.0.0 · M5<br/>数据源：Agent 实采</div>
     </aside>
 
     <!-- 主区域 -->

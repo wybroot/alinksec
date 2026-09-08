@@ -75,10 +75,13 @@ alinksec-agent/
 | 监听端口 | 60s | /proc/net/tcp、tcp6（无需 root 权限的部分字段降级） | GetExtendedTcpTable/GetExtendedUdpTable |
 | 软件清单 | 24h 或 dpkg/rpm 数据库 mtime 变更触发 | rpm -qa --qf / dpkg-query -l | 注册表 Uninstall 键枚举 |
 | 账户清单 | 24h | /etc/passwd、/etc/shadow（需 root） | Win32_UserAccount + SAM 状态 |
+| 容器/本机工作负载 | 随资产快照（默认 6h） | Docker CLI 只读清点；本机 `kubectl` 按 `spec.nodeName` 只读清点 | 本期不采集 |
 | 登录日志 | 实时 tail | /var/log/secure（inotify）+ wtmp/btmp 增量解析 | Windows Event Log（Security 4624/4625/4720）订阅 |
 | 文件完整性 | 事件驱动 | inotify（目录递归 watch） | ReadDirectoryChangesW |
 
 **降级策略**：无 root/管理员权限时，敏感采集（shadow、/proc/net/tcp 完整信息）降级并在心跳中上报 `guard_status=degraded`，平台侧提示权限不足。
+
+容器数据仅用于宿主机安全研判。Docker 和 Kubernetes 查询彼此独立；Kubernetes 仅查询调度到本机节点的 Pod，默认节点名为宿主机 hostname，可通过 `kubernetes_node_name` 覆盖。Agent 不执行容器或 Kubernetes 生命周期操作。
 
 ## 3. 基线核查引擎（task/baseline）
 

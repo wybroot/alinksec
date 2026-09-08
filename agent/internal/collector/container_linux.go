@@ -4,6 +4,7 @@ package collector
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -11,9 +12,20 @@ import (
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 )
 
-// collectContainers uses Docker's CLI rather than its socket. This preserves a
-// read-only integration boundary and gracefully does nothing when unavailable.
+// collectContainers retains the default local-node behavior for callers outside
+// Snapshot. Docker and Kubernetes probes intentionally remain independent.
 func collectContainers(snap *pb.RptAssetSnapshot) {
+	collectContainersForNode(snap, "")
+}
+
+// collectContainersForNode reads only local runtime and host-local Kubernetes
+// context. Neither source can block the other when unavailable.
+func collectContainersForNode(snap *pb.RptAssetSnapshot, kubernetesNodeName string) {
+	collectDockerContainers(snap)
+	collectKubernetesContainers(snap, kubernetesNodeName)
+}
+
+func collectDockerContainers(snap *pb.RptAssetSnapshot) {
 	out, err := exec.Command("docker", "ps", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}").Output()
 	if err != nil {
 		return
@@ -30,7 +42,6 @@ func collectContainers(snap *pb.RptAssetSnapshot) {
 		fillContainerDetails(c)
 		snap.Containers = append(snap.Containers, c)
 	}
-	collectKubernetesContainers(snap)
 }
 
 type podList struct {
@@ -58,8 +69,16 @@ type podList struct {
 	} `json:"items"`
 }
 
-func collectKubernetesContainers(snap *pb.RptAssetSnapshot) {
-	out, err := exec.Command("kubectl", "get", "pods", "--all-namespaces", "-o", "json").Output()
+func collectKubernetesContainers(snap *pb.RptAssetSnapshot, configuredNodeName string) {
+	nodeName := strings.TrimSpace(configuredNodeName)
+	if nodeName == "" {
+		var err error
+		nodeName, err = os.Hostname()
+		if err != nil || strings.TrimSpace(nodeName) == "" {
+			return
+		}
+	}
+	out, err := exec.Command("kubectl", kubernetesPodArgs(nodeName)...).Output()
 	if err != nil {
 		return
 	}
@@ -80,6 +99,10 @@ func collectKubernetesContainers(snap *pb.RptAssetSnapshot) {
 			snap.Containers = append(snap.Containers, &pb.ContainerInfo{ContainerId: id, Name: pod.Metadata.Name + "/" + status.Name, Image: status.Image, ImageId: status.ImageID, Status: state, CreatedAt: dockerTime(pod.Metadata.CreationTimestamp), StartedAt: dockerTime(status.State.Running.StartedAt), Labels: pod.Metadata.Labels, Orchestrator: "kubernetes", Namespace: pod.Metadata.Namespace})
 		}
 	}
+}
+
+func kubernetesPodArgs(nodeName string) []string {
+	return []string{"get", "pods", "--all-namespaces", "--field-selector", "spec.nodeName=" + nodeName, "-o", "json"}
 }
 
 func fillContainerDetails(c *pb.ContainerInfo) {

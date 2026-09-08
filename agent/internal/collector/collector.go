@@ -36,6 +36,13 @@ var tasks = []task{
 
 // Snapshot 执行采集并组装快照；names 为空 = 全部，否则只跑指定采集器。
 func Snapshot(names []string, log *slog.Logger) *pb.RptAssetSnapshot {
+	return SnapshotWithKubernetesNode(names, log, "")
+}
+
+// SnapshotWithKubernetesNode collects host assets. Kubernetes data is limited to
+// workloads scheduled on kubernetesNodeName (or the local hostname when empty),
+// so a cluster-wide kubectl context never becomes a host asset snapshot.
+func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNodeName string) *pb.RptAssetSnapshot {
 	snap := &pb.RptAssetSnapshot{}
 	want := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -52,7 +59,11 @@ func Snapshot(names []string, log *slog.Logger) *pb.RptAssetSnapshot {
 					log.Error("采集器异常", "collector", t.name, "panic", r)
 				}
 			}()
-			t.fn(snap)
+			if t.name == "containers" {
+				collectContainersForNode(snap, kubernetesNodeName)
+			} else {
+				t.fn(snap)
+			}
 		}()
 		log.Info("采集完成",
 			"collector", t.name,

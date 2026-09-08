@@ -25,6 +25,8 @@ type Config struct {
 	DrainRatePerSec int `yaml:"drain_rate_per_sec"`
 	// 资产快照采集间隔（默认 6h；服务端 CmdCollectNow 可即时触发）
 	CollectInterval time.Duration `yaml:"collect_interval"`
+	// Kubernetes 节点名覆盖。为空时使用本机 hostname，只采集调度到该节点的工作负载。
+	KubernetesNodeName string `yaml:"kubernetes_node_name"`
 	// 勒索诱饵防护（docs/05 §2；空值用平台默认，本地响应不依赖服务端在线）
 	Decoy DecoyConfig `yaml:"decoy"`
 }

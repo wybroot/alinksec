@@ -69,7 +69,7 @@
         <el-button size="small" type="danger" v-if="curHost.status === 'online'" @click="isolate(curHost, true)">隔离主机</el-button>
       </div>
       <section class="container-assets">
-        <h4>运行容器 <span>{{ containers.length }}</span></h4>
+        <h4>本机容器与工作负载 <span>{{ containers.length }}</span></h4>
         <el-table v-if="containers.length" :data="containers" size="small" max-height="220">
           <el-table-column prop="name" label="容器" min-width="110" show-overflow-tooltip />
           <el-table-column label="来源" width="86"><template #default="{ row }"><el-tag size="small" effect="plain">{{ row.orchestrator === 'kubernetes' ? 'K8s' : 'Docker' }}</el-tag></template></el-table-column>
@@ -80,7 +80,7 @@
             <template #default="{ row }">{{ (row.ports || []).join(', ') || '—' }}</template>
           </el-table-column>
         </el-table>
-        <el-empty v-else :image-size="48" description="未发现运行中的 Docker 容器" />
+        <el-empty v-else :image-size="48" description="未发现本机 Docker 容器或 K8s 工作负载" />
       </section>
     </template>
   </el-drawer>
@@ -96,7 +96,7 @@ import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 
 const router = useRouter()
 
-// M2 数据源：GET /api/hosts → t_agent（注册/心跳/策略版本均来自 Agent 实采）
+// 数据源：GET /api/hosts → t_agent（注册/心跳/策略版本均来自 Agent 实采）
 const hosts = reactive([])
 const groups = ref([])
 const query = ref('')

@@ -56,7 +56,7 @@
 │   2  个平台         11  种指令类型        10  种上报类型        7  类安全事件   │
 │  Linux/Win        全 ACK 状态机闭环      心跳/资产/扫描/病毒   进程篡改/爆破/勒索…│
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  35  张业务表      500MB  断网落盘队列    90  天指标留存       15min  卸载口令  │
+│  37  张业务表      500MB  断网落盘队列    90  天指标留存       15min  卸载口令  │
 │  PG 全量建模       24h 环形淘汰补传      VictoriaMetrics      一次性防重放    │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  3  角色 RBAC      4×6  基线断言矩阵     3650 天客户端证书    30s  重连退避封顶│
@@ -79,7 +79,7 @@ flowchart LR
         NGINX["🔒 nginx :8443<br/>HTTPS 静态资源 + /api/ 反代"]
         SRV["⚙️ alinksec-server :8080<br/>REST · JWT · RBAC · 审计"]
         GRPC["🔒 gRPC Server :9443<br/>mTLS 双向认证"]
-        PG[("🐘 PostgreSQL :5432<br/>35 张业务表")]
+        PG[("🐘 PostgreSQL :5432<br/>37 张业务表")]
         VM[("📈 VictoriaMetrics<br/>时序指标 · 90 天")]
     end
 
@@ -314,7 +314,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 🖥️ 管理控制台 | `https://<IP>:8443/` | admin / `.env` 中的初始密码 |
 | 📺 安全大屏 | `https://<IP>:8443/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
 
-> 📖 **完整部署手册**：35 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
+> 📖 **完整部署手册**：37 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
 > **👉 [docs/06-部署文档.md](docs/06-部署文档.md)**
 
 <details>
@@ -338,7 +338,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | **Agent** | Go 1.24 · gopsutil v4 · grpc 1.66 | 单二进制零依赖，交叉编译覆盖 Linux/Windows，资源占用低 |
 | **服务端** | Java 21 · Spring Boot 3.3 · gRPC · protobuf | 虚拟线程承载长连接双向流，生态成熟易扩展 |
 | **前端** | Vue 3.4 · Element Plus 2.7 · ECharts 5.5 · Vite 5 | 组合式 API + 暗色大屏，开发体验与渲染性能兼得 |
-| **存储** | PostgreSQL 17（业务）· VictoriaMetrics（时序） | 关系建模 35 表 + 高压缩比指标存储，各司其职 |
+| **存储** | PostgreSQL 17（业务）· VictoriaMetrics（时序） | 关系建模 37 表 + 高压缩比指标存储，各司其职 |
 | **部署** | Docker Compose · nginx | 一条命令全家桶起，反代统一 8081 入口 |
 
 ---
@@ -349,7 +349,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 |---|---|---|
 | 01 | [总体架构与技术选型](docs/01-总体架构与技术选型.md) | 架构 · 里程碑 · 容量规划 · 安全设计 |
 | 02 | [通信协议设计](docs/02-通信协议设计.md) | gRPC 协议 · 指令/上报定义 · ACK 状态机 · mTLS |
-| 03 | [数据库设计](docs/03-数据库设计.md) | 35 张表结构 · 索引 · 幂等设计 |
+| 03 | [数据库设计](docs/03-数据库设计.md) | 37 张表结构 · 索引 · 幂等设计 |
 | 04 | [Agent设计与策略规范](docs/04-Agent设计与策略规范.md) | Agent 模块 · 策略下发 · 断线行为 |
 | 05 | [扩展能力设计](docs/05-扩展能力设计.md) | 病毒引擎 · 诱饵防护 · 升级 · 扩展路线 |
 | 06 | [部署文档](docs/06-部署文档.md) | ⭐ 逐步部署 · 端到端联调 · 排障手册 |
@@ -365,7 +365,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 - [x] 安全加固：卸载口令 / 断网队列 / RBAC 写拦截
 - [x] M5 告警通道（Webhook 配置、管理员权限与失败重试）
 - [x] Docker 容器清点与审计告警（Linux 只读采集）
-- [x] Kubernetes 工作负载清点（宿主机 Agent 通过 kubectl 只读采集）
+- [x] Kubernetes 本机工作负载清点（宿主机 Agent 通过 kubectl 按节点只读采集）
 - 容器信息仅作为宿主机安全研判上下文，不提供编排、发布、调度或生命周期管理
 - [ ] EDR 行为引擎（进程树 lineage + 规则热更）
 - [ ] 长期低优先级：多租户隔离（暂不纳入近期版本）

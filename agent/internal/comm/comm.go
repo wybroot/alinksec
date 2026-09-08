@@ -446,7 +446,7 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		// 同步执行采集（采集耗时秒级，指令频率极低），完成后经当前连接直接上报
 		names := p.CollectNow.GetCollectorNames()
 		start := time.Now()
-		snap := collector.Snapshot(names, c.log)
+		snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
 		r := &pb.Report{
 			AgentId:  c.state.AgentID,
 			ReportId: newUUID(),
@@ -867,7 +867,7 @@ func (c *Client) collectLoop(ctx context.Context) {
 				continue
 			}
 			start := time.Now()
-			snap := collector.Snapshot(names, c.log)
+			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
 			c.lastCollectAt = start
 			select {
 			case c.pendingReports <- &pb.Report{
