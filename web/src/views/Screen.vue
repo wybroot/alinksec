@@ -6,14 +6,14 @@
         <div class="mark">AS</div>
         <div><b>ALinkSec</b><br /><span style="font-size:11px;color:#4d7cb8;letter-spacing:1px">HOST SECURITY OPERATIONS</span></div>
       </div>
-      <div class="glow-title">主 机 安 全 态 势 感 知 大 屏</div>
+      <div class="glow-title">主机安全态势感知中心</div>
       <div class="clock">
         <div class="time">{{ clock.time }}</div>
         <div class="date">{{ clock.date }} {{ clock.week }} · 数据实时同步中</div>
       </div>
       <div class="deco-btn">
-        <a @click="$router.push('/')">‹ 返回控制台</a>
-        <a @click="toggleFullscreen">全屏</a>
+        <button type="button" @click="$router.push('/')">返回控制台</button>
+        <button type="button" @click="toggleFullscreen">全屏显示</button>
       </div>
     </div>
 
@@ -101,8 +101,8 @@ import { sevLabel } from '../utils/format'
 import { useChart } from '../composables/useChart'
 import { fetchScreen } from '../api'
 
-const C = { cyan: '#00e5ff', blue: '#2f7bff', green: '#00ffa3', red: '#ff4d6b', amber: '#ffb800', dim: '#7fa8d8' }
-const AXT = { color: '#5f88b8', fontSize: 11 }
+const C = { cyan: '#4dd5c0', blue: '#3b8a92', green: '#72c987', red: '#ef6c62', amber: '#e4ae4f', dim: '#89aaa2' }
+const AXT = { color: '#78948d', fontSize: 11 }
 const DEFAULT_DIMS = ['身份鉴别', '访问控制', '安全审计', '入侵防范', '剩余信息', '恶意代码']
 
 const clock = reactive({ time: '--:--:--', date: '', week: '' })
@@ -188,12 +188,12 @@ const pie = useChart(pieEl, () => {
   const data = sevPie.value.some(d => d.value > 0) ? sevPie.value : [{ value: 0, name: '暂无告警' }]
   const colors = { 严重: C.red, 高危: C.amber, 中危: C.cyan, 低危: '#3f6aa6' }
   return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c}（{d}%）', backgroundColor: '#071a38', borderColor: '#1d4f8a', textStyle: { color: '#cfe6ff' } },
+    tooltip: { trigger: 'item', formatter: '{b}: {c}（{d}%）', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
     legend: { bottom: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 12, itemHeight: 8, icon: 'roundRect' },
     series: [{
       type: 'pie', roseType: 'radius', radius: ['18%', '72%'], center: ['50%', '44%'],
       label: { color: C.dim, fontSize: 11, formatter: '{b}\n{c}' },
-      itemStyle: { borderColor: '#04102b', borderWidth: 2 },
+      itemStyle: { borderColor: '#0b241f', borderWidth: 2 },
       data: data.map(d => ({ ...d, itemStyle: { color: colors[d.name] || C.cyan } }))
     }]
   }
@@ -202,10 +202,10 @@ const pie = useChart(pieEl, () => {
 const trendEl = ref(null)
 const trend = useChart(trendEl, () => ({
   grid: { left: 40, right: 14, top: 34, bottom: 24 },
-  tooltip: { trigger: 'axis', backgroundColor: '#071a38', borderColor: '#1d4f8a', textStyle: { color: '#cfe6ff' } },
+  tooltip: { trigger: 'axis', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
   legend: { top: 0, right: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 14, data: ['病毒检出', '防护拦截'] },
-  xAxis: { type: 'category', data: trendRows.value.map(r => r.date), axisLine: { lineStyle: { color: '#1d4f8a' } }, axisLabel: AXT },
-  yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(0,229,255,.08)' } }, axisLabel: AXT },
+  xAxis: { type: 'category', data: trendRows.value.map(r => r.date), axisLine: { lineStyle: { color: '#38655a' } }, axisLabel: AXT },
+  yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(118, 167, 154, .12)' } }, axisLabel: AXT },
   series: [
     { name: '病毒检出', type: 'bar', barWidth: 12, data: trendRows.value.map(r => r.virus), itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: C.cyan }, { offset: 1, color: 'rgba(0,229,255,.15)' }] } } },
     { name: '防护拦截', type: 'line', smooth: true, data: trendRows.value.map(r => r.blocked), lineStyle: { color: C.red, width: 2 }, itemStyle: { color: C.red }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(255,77,107,.25)' }, { offset: 1, color: 'rgba(255,77,107,0)' }] } } },
@@ -217,12 +217,12 @@ const risk = useChart(riskEl, () => {
   const rows = riskHosts.value.length ? riskHosts.value : [{ hostname: '暂无风险主机', risk: 0, alerts: 0 }]
   return {
     grid: { left: 10, right: 56, top: 8, bottom: 8, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: '#071a38', borderColor: '#1d4f8a', textStyle: { color: '#cfe6ff' }, formatter: p => `${p[0].name}：待处置告警 ${rows[p[0].dataIndex].alerts} 条` },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' }, formatter: p => `${p[0].name}：待处置告警 ${rows[p[0].dataIndex].alerts} 条` },
     xAxis: { type: 'value', max: 100, show: false },
     yAxis: {
       type: 'category', inverse: true, data: rows.map(r => r.hostname),
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: '#cfe6ff', fontSize: 12, fontFamily: 'Consolas' }
+      axisLabel: { color: '#c8ddd7', fontSize: 12, fontFamily: 'Consolas' }
     },
     series: [{
       type: 'bar', barWidth: 12, data: rows.map(r => ({
@@ -233,7 +233,7 @@ const risk = useChart(riskEl, () => {
           shadowColor: r.risk > 80 ? 'rgba(255,77,107,.6)' : r.risk > 60 ? 'rgba(255,184,0,.5)' : 'rgba(0,229,255,.5)', shadowBlur: 8
         }
       })),
-      label: { show: true, position: 'right', color: '#dff3ff', fontFamily: 'Consolas', fontSize: 13, formatter: p => rows[p.dataIndex].alerts + ' 条' }
+      label: { show: true, position: 'right', color: '#dcece7', fontFamily: 'Consolas', fontSize: 13, formatter: p => rows[p.dataIndex].alerts + ' 条' }
     }]
   }
 })
@@ -245,7 +245,7 @@ const radar = useChart(radarEl, () => {
     : DEFAULT_DIMS.map(name => ({ name, rate: 0 }))
   const values = rows.map(r => r.rate)
   return {
-    tooltip: { backgroundColor: '#071a38', borderColor: '#1d4f8a', textStyle: { color: '#cfe6ff' } },
+    tooltip: { backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
     legend: { bottom: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 14, data: ['当前'] },
     radar: {
       center: ['50%', '46%'], radius: '64%',
@@ -276,13 +276,13 @@ const initMap = async () => {
   const renderMap = () => chart.setOption({
     geo: {
       map: 'china', roam: false, zoom: 1.18, center: [104.5, 36],
-      itemStyle: { areaColor: '#0b2350', borderColor: '#1d4f8a', borderWidth: 1, shadowColor: 'rgba(0,140,255,.35)', shadowBlur: 14 },
+      itemStyle: { areaColor: '#11342e', borderColor: '#38655a', borderWidth: 1, shadowColor: 'rgba(77, 213, 192, .16)', shadowBlur: 12 },
       emphasis: { disabled: true }, select: { disabled: true }, label: { show: false }
     },
     graphic: [
       { type: 'text', left: 'center', top: '36%', style: { text: `${kpi.hosts} / ${kpi.total}`, fill: '#e8f6ff', fontSize: 30, fontWeight: 700, fontFamily: 'Consolas', align: 'center' } },
       { type: 'text', left: 'center', top: '43%', style: { text: '在线 Agent / 接入总数', fill: C.dim, fontSize: 13, align: 'center' } },
-      { type: 'text', left: 'center', top: '47%', style: { text: `防护开启 ${kpi.protectOn} 台 · 接入率 ${kpi.coverage}%`, fill: '#9fd8ff', fontSize: 14, align: 'center' } },
+      { type: 'text', left: 'center', top: '47%', style: { text: `防护开启 ${kpi.protectOn} 台 · 接入率 ${kpi.coverage}%`, fill: '#a7ccc2', fontSize: 14, align: 'center' } },
     ]
   })
   renderMap()
@@ -316,69 +316,44 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* 大屏为独立全屏路由，样式不 scoped（需覆盖 body 背景） */
+/* 大屏为独立全屏路由，样式不 scoped（需覆盖 body 背景）。 */
 * { box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #020617; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #06120f; }
 #stage {
   position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: center center;
-  background: radial-gradient(1200px 700px at 50% -10%, #0a2547 0%, #04102b 45%, #020617 100%);
-  color: #cfe6ff; font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #081713; color: #d9e8e3; font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-#stage::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background-image: linear-gradient(rgba(0, 229, 255, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 229, 255, .035) 1px, transparent 1px);
-  background-size: 48px 48px;
-}
-.header { position: relative; height: 86px; display: flex; align-items: center; justify-content: center; }
-.header .glow-title { font-size: 34px; font-weight: 800; letter-spacing: 6px; color: #e8f6ff; text-shadow: 0 0 18px rgba(0, 229, 255, .85), 0 0 46px rgba(0, 229, 255, .35); }
-.header .sub { position: absolute; left: 28px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 10px; }
-.header .sub .mark { width: 38px; height: 38px; border-radius: 9px; background: linear-gradient(135deg, #00e5ff, #2f7bff); display: flex; align-items: center; justify-content: center; color: #04102b; font-weight: 800; font-size: 15px; box-shadow: 0 0 16px rgba(0, 229, 255, .5); }
-.header .sub b { font-size: 16px; color: #9fd8ff; letter-spacing: 2px; }
+#stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(133, 178, 164, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(133, 178, 164, .045) 1px, transparent 1px); background-size: 52px 52px; }
+.header { position: relative; height: 88px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #28453e; }
+.header .glow-title { font-size: 30px; font-weight: 700; letter-spacing: 4px; color: #eff7f4; }
+.header .sub { position: absolute; left: 28px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 11px; }
+.header .sub .mark { width: 38px; height: 38px; border-radius: 5px; border: 1px solid #4dd5c0; background: #11342e; display: flex; align-items: center; justify-content: center; color: #7ae3d1; font-weight: 800; font-size: 14px; }
+.header .sub b { font-size: 16px; color: #dceee8; letter-spacing: 1.5px; }
+.header .sub span { color: #789f95 !important; }
 .header .clock { position: absolute; right: 28px; top: 50%; transform: translateY(-50%); text-align: right; }
-.header .clock .time { font-family: Consolas, Menlo, monospace; font-size: 26px; color: #00e5ff; text-shadow: 0 0 12px rgba(0, 229, 255, .6); letter-spacing: 2px; }
-.header .clock .date { font-size: 12px; color: #5f88b8; margin-top: 2px; }
-.header::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, #00e5ff 18%, #2f7bff 50%, #00e5ff 82%, transparent); opacity: .7; }
+.header .clock .time { font-family: Consolas, Menlo, monospace; font-size: 25px; color: #8be2d0; letter-spacing: 1px; }
+.header .clock .date { font-size: 12px; color: #789f95; margin-top: 3px; }
+.header::after { content: ""; position: absolute; width: 240px; height: 3px; left: calc(50% - 120px); bottom: -2px; background: #4dd5c0; }
 .deco-btn { position: absolute; left: 28px; bottom: 14px; display: flex; gap: 8px; }
-.deco-btn a { font-size: 12px; color: #7fd4ff; text-decoration: none; border: 1px solid rgba(0, 229, 255, .35); padding: 3px 12px; border-radius: 3px; background: rgba(0, 229, 255, .06); cursor: pointer; }
-.deco-btn a:hover { background: rgba(0, 229, 255, .18); }
+.deco-btn button { color: #a4ccc1; border: 1px solid #385e55; padding: 4px 11px; border-radius: 3px; background: #0c2520; font: inherit; font-size: 12px; cursor: pointer; }
+.deco-btn button:hover { color: #e3f5ef; border-color: #65c9b7; background: #12352d; }
 .body { display: grid; grid-template-columns: 440px 1fr 440px; gap: 16px; padding: 14px 20px 18px; height: 994px; }
 .col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
-.panel { position: relative; border: 1px solid rgba(0, 229, 255, .22); background: linear-gradient(180deg, rgba(8, 28, 58, .72), rgba(4, 15, 38, .82)); box-shadow: inset 0 0 32px rgba(0, 120, 255, .08); display: flex; flex-direction: column; padding: 12px 14px 10px; }
-.panel::before, .panel::after { content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none; }
-.panel::before { left: -1px; top: -1px; border-left: 2px solid #00e5ff; border-top: 2px solid #00e5ff; }
-.panel::after { right: -1px; bottom: -1px; border-right: 2px solid #00e5ff; border-bottom: 2px solid #00e5ff; }
-.panel h3 { font-size: 15px; color: #dff3ff; font-weight: 700; letter-spacing: 2px; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
-.panel h3::before { content: ""; width: 4px; height: 15px; background: linear-gradient(180deg, #00e5ff, #2f7bff); box-shadow: 0 0 8px rgba(0, 229, 255, .8); }
-.panel h3 .tail { margin-left: auto; font-size: 11px; font-weight: 400; color: #4d7cb8; }
+.panel { position: relative; border: 1px solid #29473f; background: rgba(11, 34, 29, .94); box-shadow: inset 0 1px 0 rgba(140, 211, 194, .06), 0 12px 28px rgba(0, 0, 0, .15); display: flex; flex-direction: column; padding: 13px 14px 11px; overflow: hidden; }
+.panel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #48bca9; opacity: .85; }
+.panel::after { content: ""; position: absolute; right: 10px; top: 0; width: 34px; height: 2px; background: #4dd5c0; }
+.panel h3 { color: #e2efeb; font-size: 14px; font-weight: 700; letter-spacing: 1.4px; display: flex; align-items: center; gap: 8px; margin-bottom: 9px; flex-shrink: 0; }
+.panel h3::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #55c9b4; box-shadow: 0 0 0 4px rgba(85, 201, 180, .10); }
+.panel h3 .tail { margin-left: auto; color: #7a9b92; font-size: 11px; font-weight: 400; letter-spacing: 0; }
 .chart { flex: 1; min-height: 0; }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; height: 118px; flex-shrink: 0; }
-.kpi { position: relative; border: 1px solid rgba(0, 229, 255, .18); background: linear-gradient(180deg, rgba(9, 32, 66, .85), rgba(4, 14, 36, .9)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
-.kpi .v { font-family: Consolas, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1; color: #00e5ff; text-shadow: 0 0 14px rgba(0, 229, 255, .55); }
-.kpi .v.red { color: #ff4d6b; text-shadow: 0 0 14px rgba(255, 77, 107, .55); }
-.kpi .v.green { color: #00ffa3; text-shadow: 0 0 14px rgba(0, 255, 163, .45); }
-.kpi .v.amber { color: #ffb800; text-shadow: 0 0 14px rgba(255, 184, 0, .45); }
-.kpi .l { font-size: 13px; color: #7fa8d8; letter-spacing: 2px; }
-.kpi .delta { font-size: 11px; color: #4d7cb8; }
-.kpi .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, #00e5ff, transparent); opacity: .6; }
-.tick { flex: 1; min-height: 0; overflow: hidden; position: relative; }
-.tick table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.tick th { position: sticky; top: 0; background: #071a38; color: #7fa8d8; font-weight: 600; font-size: 12px; padding: 6px 8px; text-align: left; letter-spacing: 1px; }
-.tick td { padding: 7px 8px; border-bottom: 1px dashed rgba(0, 229, 255, .1); color: #cfe6ff; }
-.tick .num { font-family: Consolas, Menlo, monospace; }
-.sev { display: inline-block; padding: 1px 10px; border-radius: 2px; font-size: 12px; }
-.sev.critical { color: #ff4d6b; border: 1px solid rgba(255, 77, 107, .6); background: rgba(255, 77, 107, .12); }
-.sev.high { color: #ffb800; border: 1px solid rgba(255, 184, 0, .6); background: rgba(255, 184, 0, .1); }
-.sev.medium { color: #00e5ff; border: 1px solid rgba(0, 229, 255, .5); background: rgba(0, 229, 255, .08); }
-.sev.low { color: #7fa8d8; border: 1px solid rgba(127, 168, 216, .4); }
-.enter-anim { animation: slideIn .5s ease; }
-@keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
-.engines { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
-.eng { display: flex; flex-direction: column; gap: 5px; }
-.eng .row { display: flex; align-items: center; font-size: 13px; }
-.eng .row b { color: #dff3ff; font-weight: 600; width: 88px; }
-.eng .row .st { margin-left: auto; font-size: 11px; color: #00ffa3; }
-.eng .row .st.off { color: #ff4d6b; }
-.eng .track { height: 6px; background: rgba(0, 229, 255, .1); border-radius: 3px; overflow: hidden; }
-.eng .fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #2f7bff, #00e5ff); box-shadow: 0 0 8px rgba(0, 229, 255, .6); transition: width .8s; }
-.foot-note { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; font-size: 11px; color: #2e5386; letter-spacing: 2px; }
+.kpi { position: relative; border: 1px solid #29473f; border-top: 3px solid #4bbca9; background: #0b241f; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; overflow: hidden; }
+.kpi:nth-child(2) { border-top-color: #ef6c62; }.kpi:nth-child(3) { border-top-color: #e4ae4f; }.kpi:nth-child(4) { border-top-color: #72c987; }
+.kpi .v { font-family: Consolas, Menlo, monospace; font-size: 39px; font-weight: 700; line-height: 1; color: #68d7c4; }.kpi .v.red { color: #ef7b70; }.kpi .v.green { color: #83d594; }.kpi .v.amber { color: #e8b45b; }
+.kpi .l { color: #a7c1ba; font-size: 13px; letter-spacing: 1px; }.kpi .delta { color: #78978e; font-size: 11px; }.kpi .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: #48bca9; opacity: .55; }
+.tick { flex: 1; min-height: 0; overflow: hidden; position: relative; }.tick table { width: 100%; border-collapse: collapse; font-size: 13px; }.tick th { position: sticky; top: 0; background: #102f28; color: #91b5aa; font-size: 11px; font-weight: 600; padding: 7px 8px; text-align: left; letter-spacing: 1px; }.tick td { padding: 8px; border-bottom: 1px solid rgba(107, 154, 141, .16); color: #d9e8e3; }.tick tbody tr:hover { background: rgba(92, 191, 169, .05); }.tick .num { font-family: Consolas, Menlo, monospace; color: #a9c9c0; }
+.sev { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }.sev.critical { color: #ff958b; border: 1px solid rgba(239, 108, 98, .55); background: rgba(239, 108, 98, .10); }.sev.high { color: #f0c46f; border: 1px solid rgba(228, 174, 79, .55); background: rgba(228, 174, 79, .10); }.sev.medium { color: #7de2d0; border: 1px solid rgba(77, 213, 192, .45); background: rgba(77, 213, 192, .08); }.sev.low { color: #a9c9c0; border: 1px solid rgba(169, 201, 192, .35); }
+.enter-anim { animation: slideIn .5s ease; } @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.engines { display: flex; flex-direction: column; gap: 11px; overflow: hidden; }.eng { display: flex; flex-direction: column; gap: 6px; }.eng .row { display: flex; align-items: center; font-size: 13px; }.eng .row b { color: #d9e8e3; font-weight: 600; width: 88px; }.eng .row .st { margin-left: auto; color: #7bd294; font-size: 11px; }.eng .row .st.off { color: #ef7b70; }.eng .track { height: 5px; background: #183b33; border-radius: 3px; overflow: hidden; }.eng .fill { height: 100%; border-radius: 3px; background: #4bbca9; transition: width .8s; }
+.foot-note { position: absolute; left: 0; right: 0; bottom: 4px; color: #52746b; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
 </style>
