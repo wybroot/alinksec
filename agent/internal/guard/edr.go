@@ -2,6 +2,7 @@ package guard
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -73,8 +74,9 @@ func (g *Guard) evaluateProcess(proc *process.Process, created int64) {
 			continue
 		}
 		detail := map[string]any{
-			"process": takeForensics(proc),
-			"match":   map[string]any{"exe": obs.exe, "cmdline": redactCommandLine(strings.Fields(obs.cmdline))},
+			"process":     takeForensics(proc),
+			"process_key": fmt.Sprintf("%d:%d", obs.pid, obs.created),
+			"match":       map[string]any{"exe": obs.exe, "cmdline": redactCommandLine(strings.Fields(obs.cmdline))},
 		}
 		action := "alert_only"
 		if hasAction(rule.Actions, "kill") && KillProcess(proc.Pid) {

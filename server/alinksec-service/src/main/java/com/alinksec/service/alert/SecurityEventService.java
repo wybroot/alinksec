@@ -14,7 +14,8 @@ import java.sql.SQLException;
 /**
  * 安全事件入库与告警聚合（数据库设计 §2.5）：
  * 同源事件（agent+rule+fingerprint）5min 窗口内累加 count，不重复建告警。
- * fingerprint = type + detail 关键字段摘要，M1 直接取 rule_id+type（M2 引入事件指纹算法）。
+ * fingerprint = type + detail 关键字段摘要。EDR 进程事件使用 PID + 创建时间，
+ * 避免同一规则命中不同进程实例时错误合并。
  * 新告警触发 webhook 通知（M4，尽力而为不阻塞主流程）。
  */
 @Service
@@ -32,7 +33,7 @@ public class SecurityEventService {
 
     public void onEvent(String agentId, RptSecurityEvent event) {
         String detailJson = event.getDetail().isBlank() ? "{}" : event.getDetail();
-        String fingerprint = event.getType() + ":" + event.getRuleId();
+        String fingerprint = fingerprint(event, detailJson);
 
         // 聚合：未关闭的同源告警 count+1（uq_alert_dedup 兜底并发重复）
         int merged = jdbc.update("""
@@ -77,6 +78,19 @@ public class SecurityEventService {
             default -> "安全事件";
         };
         return "[" + type + "] " + (e.getRuleName().isBlank() ? e.getRuleId() : e.getRuleName());
+    }
+
+    private String fingerprint(RptSecurityEvent event, String detailJson) {
+        String base = event.getType() + ":" + event.getRuleId();
+        if (!"process".equals(event.getType())) {
+            return base;
+        }
+        try {
+            String processKey = JsonUtils.read(detailJson).path("process_key").asText();
+            return processKey.isBlank() ? base : base + ":" + processKey;
+        } catch (IllegalArgumentException e) {
+            return base;
+        }
     }
 
     private String withFingerprint(String detailJson, String fingerprint) {

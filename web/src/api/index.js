@@ -229,7 +229,7 @@ export async function fetchScreen() {
     id: a.id,
     sev: sev(a.severity),
     type: a.event_type,
-    text: a.title,
+    text: alertText(a),
     host: a.hostname || a.agent_id || '—',
     action: a.action_taken || '',
     time: fmtTime(a.last_time),
@@ -305,6 +305,14 @@ export async function fetchHosts() {
     riskyAccountCount: Number(h.risky_account_count || 0),
     containerCount: Number(h.container_count || 0),
   }))
+}
+
+function alertText(alert) {
+  if (alert.event_type !== 'process') return alert.title
+  const process = alert.detail?.process
+  if (!process) return alert.title
+  const exe = process.exe || process.cmdline || 'unknown'
+  return `${alert.title} · ${exe}${process.pid ? ` (PID ${process.pid})` : ''}`
 }
 
 export async function fetchGroups() {
