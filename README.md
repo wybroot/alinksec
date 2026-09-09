@@ -121,7 +121,7 @@ alinksec/
 ├── web/                       # 🎨 Vue3 前端（控制台 + 安全大屏 /screen）
 ├── deploy/
 │   ├── docker/                # compose + Dockerfile×2 + nginx.conf
-│   └── sql/                   # 001~006 建表脚本（首启自动初始化）
+│   └── sql/                   # 001_init.sql 首启建表脚本
 └── docs/                      # 📚 设计文档 01~05 + 部署文档 06
 ```
 
@@ -285,13 +285,15 @@ $env:GOOS=""; $env:GOARCH=""; cd ..
 ### ② 服务器部署（Docker Compose）
 
 ```bash
+# 发布包必须包含完整 server/、web/、deploy/ 目录；打包命令见部署文档 §2。
 unzip alinksec-release.zip -d ~/alinksec && cd ~/alinksec/deploy/docker
 
 cp .env.example .env && vim .env     # ⚠️ HOST_IP 必须改成服务器真实 IP（证书 SAN 仅首启生成一次）
 # 同时设置 ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD（至少 12 位）和
-# ALINKSEC_BOOTSTRAP_ENROLL_TOKEN（随机 ENROLL- 前缀字符串）
+# ALINKSEC_BOOTSTRAP_ENROLL_TOKEN（随机 ENROLL- 前缀字符串）、
+# ALINKSEC_POSTGRES_PASSWORD、ALINKSEC_JWT_SECRET；随后执行 chmod 600 .env
 
-docker compose build && docker compose up -d
+docker compose config -q && docker compose build && docker compose up -d
 
 docker compose logs server | grep -E "gRPC|Bootstrap"
 # 👉 仅确认初始化成功；凭据使用 .env 中配置的值，不会打印到日志

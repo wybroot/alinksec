@@ -54,7 +54,7 @@ services:
       # 特征库/补丁包下载地址：必须是 Agent 可达的 HTTPS 入口。
       ALINKSEC_SIG_BASE: "${HOST_IP:-alinksec-server}:8443"
       # 生产建议显式设置 JWT 密钥（不设则首次启动自动生成并持久化到 volume）
-      # ALINKSEC_JWT_SECRET: "change-me-to-a-long-random-string"
+      ALINKSEC_JWT_SECRET: ${ALINKSEC_JWT_SECRET:-}
       # 证书 SAN：必须在首次启动前带上宿主机 IP（证书只生成一次）！
       ALINKSEC_SERVER_TLS_SANS: "localhost,127.0.0.1,::1,alinksec-server,${HOST_IP:-alinksec-server}"
       TZ: Asia/Shanghai
