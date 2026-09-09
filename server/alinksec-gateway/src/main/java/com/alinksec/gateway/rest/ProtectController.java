@@ -36,7 +36,7 @@ public class ProtectController {
     public ApiResult<List<Map<String, Object>>> engines() {
         return ApiResult.ok(List.of(
                 Map.of("key", "process", "name", "恶意进程防护", "desc",
-                        "已知恶意进程名/路径黑名单实时拦截", "builtin", true),
+                        "EDR 进程行为规则匹配与父链取证，可按规则结束进程树", "builtin", true),
                 Map.of("key", "file_tamper", "name", "关键文件防篡改", "desc",
                         "系统关键配置文件变更监控与阻断", "builtin", true),
                 Map.of("key", "login", "name", "登录防护", "desc",

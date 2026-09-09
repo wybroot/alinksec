@@ -72,7 +72,7 @@ public class PolicyStoreService {
         return "v" + version;
     }
 
-    /** 聚合 t_protect_rule → policy_json（当前仅 decoy 段；后续规则类型扩展同构追加） */
+    /** 聚合 t_protect_rule → policy_json（诱饵配置 + EDR 进程规则）。 */
     private String buildFromRules() {
         ObjectNode root = MAPPER.createObjectNode();
         List<Map<String, Object>> rules = jdbc.queryForList(
@@ -84,7 +84,10 @@ public class PolicyStoreService {
         }
         Map<String, Object> decoyRule = byId.get("PR-0010");
         Map<String, Object> rateRule = byId.get("PR-0011");
-        if (decoyRule == null && rateRule == null) {
+        List<Map<String, Object>> processRules = jdbc.queryForList(
+                "SELECT rule_id, name, match::text AS match, actions::text AS actions, severity, enabled " +
+                        "FROM t_protect_rule WHERE type = 'process' ORDER BY rule_id");
+        if (decoyRule == null && rateRule == null && processRules.isEmpty()) {
             return "{}";
         }
 
@@ -110,6 +113,20 @@ public class PolicyStoreService {
             return "{}";
         }
         root.set("decoy", decoy);
+        ArrayNode process = root.putArray("process_rules");
+        for (Map<String, Object> rule : processRules) {
+            try {
+                ObjectNode out = process.addObject();
+                out.put("id", (String) rule.get("rule_id"));
+                out.put("name", (String) rule.get("name"));
+                out.put("severity", ((Number) rule.get("severity")).intValue());
+                out.put("enabled", Boolean.TRUE.equals(rule.get("enabled")));
+                out.set("match", MAPPER.readTree((String) rule.get("match")));
+                out.set("actions", MAPPER.readTree((String) rule.get("actions")));
+            } catch (Exception e) {
+                log.warn("跳过无效 EDR 进程规则: rule={}", rule.get("rule_id"), e);
+            }
+        }
         return JsonUtils.write(root);
     }
 

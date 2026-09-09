@@ -190,12 +190,38 @@ func snapshotProcess(p *process.Process) processLineage {
 		node.ExeSHA = fileSha256(exe)
 	}
 	if cl, err := p.CmdlineSlice(); err == nil {
-		node.Cmdline = strings.Join(cl, " ")
+		node.Cmdline = redactCommandLine(cl)
 	}
 	if u, err := p.Username(); err == nil {
 		node.User = u
 	}
 	return node
+}
+
+func redactCommandLine(args []string) string {
+	redacted := append([]string(nil), args...)
+	for i, arg := range redacted {
+		name := strings.TrimLeft(strings.SplitN(strings.ToLower(arg), "=", 2)[0], "-")
+		name = strings.ReplaceAll(name, "_", "-")
+		if !sensitiveArgument(name) {
+			continue
+		}
+		if equals := strings.Index(arg, "="); equals >= 0 {
+			redacted[i] = arg[:equals+1] + "***"
+		} else if i+1 < len(redacted) {
+			redacted[i+1] = "***"
+		}
+	}
+	return strings.Join(redacted, " ")
+}
+
+func sensitiveArgument(name string) bool {
+	for _, key := range []string{"password", "passwd", "pwd", "token", "secret", "api-key", "apikey", "access-key", "accesskey", "client-secret", "clientsecret", "private-key", "privatekey", "auth", "authorization", "bearer", "cookie"} {
+		if name == key || strings.HasSuffix(name, "-"+key) {
+			return true
+		}
+	}
+	return false
 }
 
 // attributeByRecency 启发式：最近 10 分钟启动的非系统进程（Windows/归因失败回退）

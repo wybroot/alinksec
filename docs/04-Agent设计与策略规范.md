@@ -218,8 +218,7 @@ rules:
 
 ### 5.2 进程防护实现
 
-- **Linux**：1s tick 扫描 /proc（读 `comm`、`exe`、`cmdline`；命中正则后再读完整信息取证）。可选启用 `auditd` 订阅（进程 exec 事件驱动，需客户允许安装 audit 规则）。
-- **Windows**：2s 轮询 WMI `Win32_Process`（ETW 为二期演进项）。
+- **Linux / Windows**：2s 轮询进程表；仅对 Agent 启动或策略热更新后的新增进程执行规则匹配，按 PID + 创建时间识别 PID 复用。Linux 通过进程接口读取 `exe`、`cmdline` 与父链；ETW / auditd 订阅为后续事件驱动增强项。
 - **处置**：`kill`（Linux: SIGKILL；Windows: TerminateProcess）；`quarantine`：进程二进制复制到证据目录并上报 MinIO。
 - **取证**：命中时采集进程五元组（pid、ppid、exe、cmdline、user）+ 文件 SHA256 + 最多 8 层父进程链，写入事件 detail 与证据文件。
 

@@ -40,6 +40,17 @@
         </div>
       </div>
     </div>
+    <div class="panel" style="margin-top:16px"><h4>EDR 进程行为规则</h4>
+      <el-table v-if="processRules.length" :data="processRules" size="small" v-loading="loading">
+        <el-table-column prop="name" label="规则" min-width="150" />
+        <el-table-column label="匹配条件" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }"><span class="mono">{{ row.match?.exe_regex || row.match?.cmdline_regex || '—' }}</span></template>
+        </el-table-column>
+        <el-table-column label="处置" width="120"><template #default="{ row }"><el-tag size="small" :type="(row.actions || []).includes('kill') ? 'danger' : 'info'">{{ (row.actions || []).includes('kill') ? '结束进程树' : '仅告警' }}</el-tag></template></el-table-column>
+        <el-table-column label="启用" width="90"><template #default="{ row }"><el-switch v-model="row.enabled" @change="toggleProcessRule(row)" /></template></el-table-column>
+      </el-table>
+      <el-empty v-else description="暂无 EDR 进程规则" :image-size="48" />
+    </div>
   </div>
 </template>
 
@@ -56,6 +67,7 @@ const ruleLoaded = ref(false)
 const decoyLevel = ref('kill_and_isolate')
 const decoyDirs = ref('')
 const decoyExcludes = ref('')
+const processRules = ref([])
 
 // 响应级别 ↔ PR-0010 actions 映射（docs/05 §2.4）
 const levelActions = {
@@ -80,6 +92,7 @@ onMounted(async () => {
     cards.value = res.cards
     blocks.value = res.blocks
     const decoy = (rules || []).find((r) => r.rule_id === 'PR-0010')
+    processRules.value = (rules || []).filter((r) => r.type === 'process')
     if (decoy) {
       decoyLevel.value = actionsLevel(decoy.actions)
       decoyDirs.value = (decoy.match?.dirs || []).join(', ')
@@ -105,6 +118,16 @@ const saveRule = async () => {
     })
     msg('诱饵防护配置已保存')
   } catch (e) {
+    msg(e.message || '保存失败', 'error')
+  }
+}
+
+const toggleProcessRule = async (row) => {
+  try {
+    await updateProtectRule(row.rule_id, { enabled: row.enabled })
+    msg(`${row.name}已${row.enabled ? '开启' : '关闭'}`)
+  } catch (e) {
+    row.enabled = !row.enabled
     msg(e.message || '保存失败', 'error')
   }
 }

@@ -29,6 +29,25 @@ type Config struct {
 	KubernetesNodeName string `yaml:"kubernetes_node_name"`
 	// 勒索诱饵防护（docs/05 §2；空值用平台默认，本地响应不依赖服务端在线）
 	Decoy DecoyConfig `yaml:"decoy"`
+	// ProcessRules 是平台热下发的 EDR 进程行为规则。
+	ProcessRules []ProcessRule `yaml:"process_rules"`
+}
+
+// ProcessRule 声明式进程行为规则。仅匹配新出现的进程，避免 Agent 启动或
+// 规则热更新时将已运行的正常业务进程重复告警。
+type ProcessRule struct {
+	ID       string       `yaml:"id" json:"id"`
+	Name     string       `yaml:"name" json:"name"`
+	Enabled  bool         `yaml:"enabled" json:"enabled"`
+	Severity int          `yaml:"severity" json:"severity"`
+	Match    ProcessMatch `yaml:"match" json:"match"`
+	Actions  []string     `yaml:"actions" json:"actions"`
+}
+
+type ProcessMatch struct {
+	ExeRegex     string   `yaml:"exe_regex" json:"exe_regex"`
+	CmdlineRegex string   `yaml:"cmdline_regex" json:"cmdline_regex"`
+	UserExclude  []string `yaml:"user_exclude" json:"user_exclude"`
 }
 
 // DecoyConfig 勒索诱饵防护配置（json tag 与平台 policy_json.decoy 段同构，热下发用）

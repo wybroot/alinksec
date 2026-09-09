@@ -838,6 +838,9 @@ INSERT INTO t_protect_rule (rule_id, name, type, match, actions, severity, enabl
    '["kill","alert"]'::jsonb, 4, TRUE, TRUE),
   ('PR-0011', '鍔犲瘑琛屼负鍒嗘瀽', 'ransom_behavior',
    '{"rate_window_sec":10,"rate_threshold":50,"ext_change_ratio":0.8}'::jsonb,
+   '["kill","alert"]'::jsonb, 4, TRUE, TRUE),
+  ('PR-0001', 'EDR miner process block', 'process',
+   '{"exe_regex":"(?i)(^|/)(xmrig|minerd|kdevtmpfsi|kinsing)$"}'::jsonb,
    '["kill","alert"]'::jsonb, 4, TRUE, TRUE)
 ON CONFLICT (rule_id) DO NOTHING;
 

@@ -25,7 +25,7 @@ func TestPolicySyncAppliesAndPersistsSnapshotBeforeVersion(t *testing.T) {
 		CmdId: "policy-success",
 		Payload: &pb.Command_PolicySync{PolicySync: &pb.CmdPolicySync{
 			PolicyVersion: "v42",
-			PolicyJson:    `{"decoy":{"enabled":false,"response":"alert_only","rate_threshold":7}}`,
+			PolicyJson:    `{"decoy":{"enabled":false,"response":"alert_only","rate_threshold":7},"process_rules":[{"id":"PR-0001","name":"miner","enabled":true,"severity":4,"match":{"exe_regex":"xmrig"},"actions":["kill","alert"]}]}`,
 		}},
 	}, nil, context.Background())
 
@@ -40,6 +40,9 @@ func TestPolicySyncAppliesAndPersistsSnapshotBeforeVersion(t *testing.T) {
 	}
 	if client.cfg.Decoy.Response != "alert_only" || client.cfg.Decoy.RateThreshold != 7 {
 		t.Fatalf("decoy config = %#v, want synced values", client.cfg.Decoy)
+	}
+	if len(client.cfg.ProcessRules) != 1 || client.cfg.ProcessRules[0].ID != "PR-0001" {
+		t.Fatalf("process rules = %#v, want synced EDR rule", client.cfg.ProcessRules)
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "policy.json")); err != nil {
 		t.Fatalf("persisted policy missing: %v", err)

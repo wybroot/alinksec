@@ -38,6 +38,8 @@ type Guard struct {
 
 	mu            sync.Mutex
 	isolated      bool // 当前隔离状态（marker 持久化）
+	processRules  []config.ProcessRule
+	processSeen   map[int32]int64 // pid -> create time; prevents PID reuse from being missed
 	watchDirs     []string
 	serverAddrVal string         // gRPC 连接地址（comm 注入，隔离放行解析用）
 	virusCheck    VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
@@ -46,13 +48,15 @@ type Guard struct {
 }
 
 // New 构建引擎并完成初始投放
-func New(cfg *config.DecoyConfig, workDir string, log *slog.Logger, report ReportFunc) *Guard {
+func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir string, log *slog.Logger, report ReportFunc) *Guard {
 	return &Guard{
-		cfg:      cfg,
-		workDir:  workDir,
-		log:      log,
-		report:   report,
-		ratePrev: map[string]treeSnapshot{},
+		cfg:          cfg,
+		workDir:      workDir,
+		log:          log,
+		report:       report,
+		processRules: append([]config.ProcessRule(nil), processRules...),
+		processSeen:  map[int32]int64{},
+		ratePrev:     map[string]treeSnapshot{},
 	}
 }
 
@@ -64,13 +68,17 @@ func (g *Guard) cur() config.DecoyConfig {
 }
 
 // UpdatePolicy 平台策略热更新（PolicySync）：替换配置 → 新目录补投 → 速率基线重置
-func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig) {
+func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.ProcessRule) {
 	if cfg == nil {
 		return
 	}
 	cfg.Normalize()
 	g.mu.Lock()
 	g.cfg = cfg
+	g.processRules = append([]config.ProcessRule(nil), processRules...)
+	// Rules apply to future execs. Re-baselining prevents retroactive actions
+	// against already-running business processes after a policy edit.
+	g.processSeen = map[int32]int64{}
 	g.mu.Unlock()
 
 	if cfg.Enabled == nil || *cfg.Enabled {
@@ -85,6 +93,7 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig) {
 		g.log.Info("策略热更新生效：诱饵防护已关闭")
 	}
 	g.ratePrev = map[string]treeSnapshot{} // 基线重置，避免目录/窗口切换误报
+	g.seedProcessBaseline()
 }
 
 // Run 主循环：初始投放 → 并行跑健康检查（60s）与速率监测（窗口周期）
@@ -99,6 +108,9 @@ func (g *Guard) Run(ctx context.Context) {
 	rateTick := time.NewTicker(rateWindow)
 	defer healthTick.Stop()
 	defer rateTick.Stop()
+	g.seedProcessBaseline()
+	processTick := time.NewTicker(processScanInterval)
+	defer processTick.Stop()
 
 	for {
 		select {
@@ -108,6 +120,8 @@ func (g *Guard) Run(ctx context.Context) {
 			g.healthLoop()
 		case <-rateTick.C:
 			g.rateLoop()
+		case <-processTick.C:
+			g.processLoop()
 		}
 		// 策略热更新可能改变监测窗口：不一致则重建 ticker
 		if w := time.Duration(g.cur().RateWindowSec) * time.Second; w != rateWindow && w > 0 {

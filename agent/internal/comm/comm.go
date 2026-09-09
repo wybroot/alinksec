@@ -88,7 +88,7 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	}
 	// 平台热下发策略优先于本地 agent.yml（重启后仍生效，直至下次同步覆盖）
 	c.loadPersistedPolicy(cfg)
-	c.grd = guard.New(&cfg.Decoy, workDir, log, c.reportSecurityEvent)
+	c.grd = guard.New(&cfg.Decoy, cfg.ProcessRules, workDir, log, c.reportSecurityEvent)
 	c.grd.SetServerAddr(cfg.ServerAddr)
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
 	vEngine := virusscan.NewEngine(workDir, log)
@@ -112,7 +112,8 @@ func (c *Client) loadPersistedPolicy(cfg *config.Config) {
 // not replace the last known-good local policy.
 func (c *Client) applyPolicyJson(js string, hot bool) error {
 	var p struct {
-		Decoy *config.DecoyConfig `json:"decoy"`
+		Decoy        *config.DecoyConfig   `json:"decoy"`
+		ProcessRules *[]config.ProcessRule `json:"process_rules"`
 	}
 	if err := json.Unmarshal([]byte(js), &p); err != nil {
 		return fmt.Errorf("解析 policy_json: %w", err)
@@ -122,14 +123,16 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 			return fmt.Errorf("持久化 policy_json: %w", err)
 		}
 	}
-	if p.Decoy == nil {
-		return nil // 策略未包含 decoy 段：保持现状（向后兼容）
+	if p.Decoy != nil {
+		c.cfg.Decoy = *p.Decoy
+		c.cfg.Decoy.Normalize()
 	}
-	c.cfg.Decoy = *p.Decoy
-	c.cfg.Decoy.Normalize()
+	if p.ProcessRules != nil {
+		c.cfg.ProcessRules = append([]config.ProcessRule(nil), (*p.ProcessRules)...)
+	}
 	if hot && c.grd != nil {
 		d := c.cfg.Decoy
-		c.grd.UpdatePolicy(&d)
+		c.grd.UpdatePolicy(&d, c.cfg.ProcessRules)
 	}
 	return nil
 }
@@ -196,6 +199,9 @@ func (c *Client) EnsureEnrolled(ctx context.Context) error {
 
 // Run 主循环：建流 → 收发 → 断线指数退避重连（协议设计 §5）
 func (c *Client) Run(ctx context.Context) error {
+	if c.grd != nil {
+		go c.grd.Run(ctx)
+	}
 	go c.collectLoop(ctx)
 	go c.metricsLoop(ctx)
 	go c.logLoop(ctx)
