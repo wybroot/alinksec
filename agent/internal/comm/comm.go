@@ -107,8 +107,9 @@ func (c *Client) loadPersistedPolicy(cfg *config.Config) {
 	c.applyPolicyJson(string(b), false)
 }
 
-// applyPolicyJson 应用全量策略快照：解析 decoy 段 → 覆盖 cfg.Decoy；
-// hot=true（运行中热下发）时持久化快照并触发 guard 引擎热更新
+// applyPolicyJson applies a complete policy snapshot. It validates and persists
+// the snapshot before changing the running configuration, so a failed sync does
+// not replace the last known-good local policy.
 func (c *Client) applyPolicyJson(js string, hot bool) error {
 	var p struct {
 		Decoy *config.DecoyConfig `json:"decoy"`
@@ -116,13 +117,13 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 	if err := json.Unmarshal([]byte(js), &p); err != nil {
 		return fmt.Errorf("解析 policy_json: %w", err)
 	}
-	if p.Decoy == nil {
-		return nil // 策略未包含 decoy 段：保持现状（向后兼容）
-	}
 	if hot { // 快照落盘，重启后仍生效直至下次同步
 		if err := os.WriteFile(filepath.Join(c.workDir, "policy.json"), []byte(js), 0600); err != nil {
 			return fmt.Errorf("持久化 policy_json: %w", err)
 		}
+	}
+	if p.Decoy == nil {
+		return nil // 策略未包含 decoy 段：保持现状（向后兼容）
 	}
 	c.cfg.Decoy = *p.Decoy
 	c.cfg.Decoy.Normalize()
@@ -435,6 +436,13 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 	received := &pb.RptAck{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_RECEIVED, Code: 0}
 	switch p := cmd.GetPayload().(type) {
 	case *pb.Command_PolicySync:
+		if policy := p.PolicySync.GetPolicyJson(); policy != "" {
+			if err := c.applyPolicyJson(policy, true); err != nil {
+				c.log.Error("策略同步失败", "policy_version", p.PolicySync.GetPolicyVersion(), "err", err)
+				return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1,
+					Message: "apply policy: " + err.Error()}}
+			}
+		}
 		c.state.PolicyVersion = p.PolicySync.GetPolicyVersion()
 		if err := c.state.Save(c.workDir); err != nil {
 			c.log.Error("策略版本持久化失败", "err", err)
