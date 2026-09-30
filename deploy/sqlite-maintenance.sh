@@ -15,8 +15,8 @@ Usage:
   deploy/sqlite-maintenance.sh restore <backup-name.db> --yes
 
 backup uses SQLite VACUUM INTO and is safe while the lightweight server is running.
-restore creates a pre-restore snapshot, stops the server, restores the selected file,
-checks database integrity, and starts the server again. Failed restores are rolled back.
+restore creates a pre-restore snapshot, stops server and web, restores the selected file,
+checks database integrity and application health. Failed restores are rolled back.
 EOF
 }
 
@@ -45,13 +45,24 @@ run_sqlite() {
   "${compose[@]}" run --rm -T --no-deps sqlite-maintenance "$@"
 }
 
+check_integrity() {
+  local result
+  if ! result=$(run_sqlite "$1" "PRAGMA integrity_check;"); then
+    return 1
+  fi
+  result=${result//$'\r'/}
+  [[ "$result" == "ok" ]]
+}
+
+start_server() {
+  "${compose[@]}" up -d --wait --wait-timeout 180 server web
+}
+
 verify_backup() {
   local name=$1
   validate_name "$name"
   [[ -f "$backup_dir/$name" ]] || fail "backup not found: $backup_dir/$name"
-  local result
-  result=$(run_sqlite "/backups/$name" "PRAGMA integrity_check;")
-  [[ "$result" == *"ok"* ]] || fail "integrity check failed for $name: $result"
+  check_integrity "/backups/$name" || fail "integrity check failed for $name"
   echo "Integrity check passed: $backup_dir/$name"
 }
 
@@ -67,12 +78,14 @@ create_backup() {
 rollback_restore() {
   local safety=$1
   local reason=$2
-  local result
+  "${compose[@]}" stop server web || fail "$reason; cannot stop server for rollback; restore $safety manually"
   if run_sqlite /data/alinksec.db ".restore /backups/$safety" && \
-      result=$(run_sqlite /data/alinksec.db "PRAGMA integrity_check;") && \
-      [[ "$result" == *"ok"* ]]; then
-    "${compose[@]}" up -d server
-    fail "$reason; rolled back from $safety"
+      check_integrity /data/alinksec.db; then
+    if start_server; then
+      fail "$reason; rolled back from $safety"
+    fi
+    "${compose[@]}" stop server web || fail "$reason; rollback health check and server stop failed; restore $safety manually"
+    fail "$reason; database rolled back from $safety but application health check failed; server remains stopped"
   fi
   fail "$reason; automatic rollback failed and the server remains stopped; restore $safety manually"
 }
@@ -94,15 +107,16 @@ case "$command" in
     verify_backup "$name"
     safety="pre-restore-$(date -u +%Y%m%dT%H%M%SZ).db"
     create_backup "$safety"
-    "${compose[@]}" stop server
+    "${compose[@]}" stop server web
     if ! run_sqlite /data/alinksec.db ".restore /backups/$name"; then
       rollback_restore "$safety" "restore command failed"
     fi
-    result=$(run_sqlite /data/alinksec.db "PRAGMA integrity_check;")
-    if [[ "$result" != *"ok"* ]]; then
+    if ! check_integrity /data/alinksec.db; then
       rollback_restore "$safety" "restored database failed integrity check"
     fi
-    "${compose[@]}" up -d server
+    if ! start_server; then
+      rollback_restore "$safety" "restored application failed health check"
+    fi
     echo "Restore completed from $backup_dir/$name"
     echo "Pre-restore snapshot: $backup_dir/$safety"
     ;;

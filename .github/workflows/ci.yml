@@ -34,6 +34,8 @@ jobs:
       - name: Check generated SQLite schema
         shell: pwsh
         run: ./deploy/sql/generate-sqlite-schema.ps1 -Check
+      - name: Check SQLite maintenance failure handling
+        run: bash deploy/tests/sqlite-maintenance.test.sh
       - run: mvn -B test
         working-directory: server
       - run: go test ./...
@@ -76,14 +78,25 @@ jobs:
       - name: Start lightweight SQLite deployment
         working-directory: deploy/docker
         run: docker compose -f docker-compose.lite.yml up -d --wait
-      - name: Check lightweight HTTPS health and backup
+      - name: Check lightweight HTTPS health, backup and restore
         run: |
           docker compose -f deploy/docker/docker-compose.lite.yml cp server:/app/data/certs/ca.crt "$RUNNER_TEMP/alinksec-lite-ca.crt"
           curl --fail --silent --show-error --cacert "$RUNNER_TEMP/alinksec-lite-ca.crt" \
             https://127.0.0.1:8443/api/health | jq -e '.code == 0' >/dev/null
           export ALINKSEC_BACKUP_DIR="$RUNNER_TEMP/alinksec-lite-backups"
+          docker compose -f deploy/docker/docker-compose.lite.yml run --rm -T --no-deps \
+            sqlite-maintenance /data/alinksec.db \
+            "CREATE TABLE ci_restore_probe(value TEXT NOT NULL); INSERT INTO ci_restore_probe VALUES ('before');"
           bash deploy/sqlite-maintenance.sh backup ci-smoke.db
           bash deploy/sqlite-maintenance.sh verify ci-smoke.db
+          docker compose -f deploy/docker/docker-compose.lite.yml run --rm -T --no-deps \
+            sqlite-maintenance /data/alinksec.db "UPDATE ci_restore_probe SET value = 'after';"
+          bash deploy/sqlite-maintenance.sh restore ci-smoke.db --yes
+          restored=$(docker compose -f deploy/docker/docker-compose.lite.yml run --rm -T --no-deps \
+            sqlite-maintenance /data/alinksec.db "SELECT value FROM ci_restore_probe;")
+          test "$restored" = before
+          curl --fail --silent --show-error --cacert "$RUNNER_TEMP/alinksec-lite-ca.crt" \
+            https://127.0.0.1:8443/api/health | jq -e '.code == 0' >/dev/null
       - name: Show Compose logs on failure
         if: failure()
         run: |
