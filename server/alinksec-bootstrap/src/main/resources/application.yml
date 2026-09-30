@@ -3,7 +3,7 @@ spring:
     name: alinksec-server
   datasource:
     url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/alinksec?stringtype=unspecified
-    username: ${PG_USER:alinksec}
+    username: ${PG_USER:alinksec_app}
     password: ${PG_PASSWORD}
     hikari:
       maximum-pool-size: 20
@@ -17,7 +17,8 @@ alinksec:
     port: 9443
     cert-dir: ${ALINKSEC_CERT_DIR:./data/certs}
     web-tls-dir: ${ALINKSEC_WEB_TLS_DIR:./data/web-tls}
-    tls-sans: localhost,127.0.0.1,::1,alinksec-server
+    tls-sans: ${ALINKSEC_SERVER_TLS_SANS:localhost,127.0.0.1,::1,alinksec-server}
+    public-host: ${ALINKSEC_PUBLIC_HOST:}
     agent-cert-days: 3650
   policy:
     current-version: v0

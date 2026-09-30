@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS t_agent (
   machine_id     VARCHAR(128),
   group_id       BIGINT       REFERENCES t_host_group(id),
   status         SMALLINT     NOT NULL DEFAULT 0,
+  isolation_status SMALLINT   NOT NULL DEFAULT 0,
+  isolation_command_id VARCHAR(64),
+  isolation_error VARCHAR(512),
+  isolation_updated_at TIMESTAMPTZ,
   deleted        BOOLEAN      NOT NULL DEFAULT FALSE,
   protect_enabled BOOLEAN      NOT NULL DEFAULT TRUE,
   policy_version VARCHAR(32),
@@ -34,6 +38,7 @@ CREATE TABLE IF NOT EXISTS t_agent (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_group ON t_agent(group_id);
 CREATE INDEX IF NOT EXISTS idx_agent_status ON t_agent(status);
+CREATE INDEX IF NOT EXISTS idx_agent_isolation_status ON t_agent(isolation_status);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_machine ON t_agent(machine_id) WHERE machine_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS t_asset_software (

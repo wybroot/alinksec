@@ -1,0 +1,3 @@
+deploy/migrations/*.sh text eol=lf
+deploy/migrations/*.sql text eol=lf
+deploy/firewall/*.sh text eol=lf

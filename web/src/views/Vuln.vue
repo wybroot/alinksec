@@ -162,7 +162,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchVulns, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask } from '../api'
+import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask } from '../api'
 import { sevType, sevLabel } from '../utils/format'
 
 const tab = ref('vuln')
@@ -175,6 +175,7 @@ const weakpwds = ref([])
 const ports = ref([])
 const riskyOnly = ref(false)
 const agents = ref([])
+const vulnStats = ref({ bySeverity: [], pending: 0, fixed: 0, total: 0 })
 
 // 发起扫描
 const scanDlg = ref(false)
@@ -193,13 +194,16 @@ const filteredVulns = computed(() =>
 
 const sevCount = computed(() => {
   const c = { c: 0, h: 0, m: 0, l: 0 }
-  for (const v of vulns.value) c[v.sev] = (c[v.sev] || 0) + 1
+  const keys = { 4: 'c', 3: 'h', 2: 'm', 1: 'l' }
+  for (const row of vulnStats.value.bySeverity || []) {
+    const key = keys[Number(row.severity)]
+    if (key) c[key] = Number(row.count || 0)
+  }
   return c
 })
 const fixRate = computed(() => {
-  if (!vulns.value.length) return 0
-  const fixed = vulns.value.filter(v => v.status === 'fixed').length
-  return Math.round((fixed / vulns.value.length) * 100)
+  const total = Number(vulnStats.value.total || 0)
+  return total ? Math.round((Number(vulnStats.value.fixed || 0) / total) * 100) : 0
 })
 
 const weakTypeLabel = {
@@ -230,7 +234,7 @@ const submitScan = async () => {
 
 const openFix = row => {
   if (row.fixType === 'pkg' && !row.findings?.length) {
-    return ElMessage({ message: '该漏洞各主机均已修复', type: 'info' })
+    return ElMessage({ message: '该漏洞暂无可自动修复项', type: 'info' })
   }
   fixRow.value = row
   fixDlg.value = true
@@ -294,8 +298,9 @@ const loadPorts = async () => {
 }
 
 const loadAll = async () => {
-  const [v, w] = await Promise.all([fetchVulns(), fetchWeakpwds()])
+  const [v, stats, w] = await Promise.all([fetchVulns(), fetchVulnStats(), fetchWeakpwds()])
   vulns.value = v
+  vulnStats.value = stats || vulnStats.value
   weakpwds.value = (w?.list || []).map(x => ({
     host: x.hostname || x.agent_id,
     account: x.account,

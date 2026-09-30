@@ -1,6 +1,5 @@
 package com.alinksec.gateway.rpc;
 
-import com.alinksec.common.error.ApiException;
 import com.alinksec.proto.AgentChannelGrpc;
 import com.alinksec.proto.Command;
 import com.alinksec.proto.Report;
@@ -42,16 +41,24 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
         return new StreamObserver<>() {
             volatile String authenticatedAgentId;
             volatile boolean authenticated;
+            volatile boolean closed;
 
             @Override
             public void onNext(Report report) {
+                if (closed) {
+                    return;
+                }
                 try {
                     if (!authenticate(report)) {
+                        closed = true;
+                        if (authenticatedAgentId != null) {
+                            registry.unregister(authenticatedAgentId, responseObserver);
+                        }
                         responseObserver.onError(Status.PERMISSION_DENIED
                                 .withDescription("agent_id 与证书不匹配").asRuntimeException());
                         return;
                     }
-                    dispatcher.dispatch(report.getAgentId(), report);
+                    dispatcher.dispatch(authenticatedAgentId, report);
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);
                     // 单条处理失败不拆流（Agent 无需重发：非关键路径靠下轮心跳/快照补偿）
@@ -61,6 +68,11 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
             /** 首条 Report 完成认证：证书 CN = agent_id，且主机未禁用 */
             private boolean authenticate(Report report) {
                 if (authenticated) {
+                    if (!authenticatedAgentId.equals(report.getAgentId())) {
+                        log.warn("流内身份校验失败: authenticated_agent={} report_agent={}",
+                                authenticatedAgentId, report.getAgentId());
+                        return false;
+                    }
                     return true;
                 }
                 String cn = AgentAuthInterceptor.agentId();
@@ -87,6 +99,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
 
             @Override
             public void onError(Throwable t) {
+                closed = true;
                 if (authenticatedAgentId != null) {
                     registry.unregister(authenticatedAgentId, responseObserver);
                 }
@@ -95,6 +108,10 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
 
             @Override
             public void onCompleted() {
+                if (closed) {
+                    return;
+                }
+                closed = true;
                 if (authenticatedAgentId != null) {
                     registry.unregister(authenticatedAgentId, responseObserver);
                 }

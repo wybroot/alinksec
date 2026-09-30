@@ -6,6 +6,7 @@ demo/
 # 前端本地产物与依赖（镜像内多阶段自行构建）
 web/node_modules/
 web/dist/
+server/**/target/
 
 # 版本控制 / IDE
 .git/

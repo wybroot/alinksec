@@ -35,7 +35,7 @@
       </el-tab-pane>
 
       <!-- ============ 操作审计 ============ -->
-      <el-tab-pane label="操作审计" name="audit">
+      <el-tab-pane v-if="isAdmin" label="操作审计" name="audit">
         <el-table :data="auditLogs" stripe size="small">
           <el-table-column prop="time" label="时间" width="150" />
           <el-table-column prop="username" label="操作人" width="110" />
@@ -257,7 +257,7 @@ async function deleteChannel(row) {
   }
 }
 
-onMounted(() => { loadUpgrade(); loadAudit(); loadChannels() })
+onMounted(() => { loadUpgrade(); if (isAdmin) loadAudit(); loadChannels() })
 </script>
 
 <style scoped>

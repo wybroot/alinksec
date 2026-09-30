@@ -49,6 +49,8 @@ public class AlinkSecProperties {
         private String webTlsDir = "./data/web-tls";
         /** 服务端证书 SAN 列表 */
         private List<String> tlsSans = List.of("localhost", "127.0.0.1", "::1", "alinksec-server");
+        /** Agent 可达的公网/内网 IPv4 或 DNS 名称；容器部署必填 */
+        private String publicHost = "";
         /** Agent 证书有效期（天），设计文档 §6：10 年 */
         private int agentCertDays = 3650;
 
@@ -60,6 +62,8 @@ public class AlinkSecProperties {
         public void setWebTlsDir(String webTlsDir) { this.webTlsDir = webTlsDir; }
         public List<String> getTlsSans() { return tlsSans; }
         public void setTlsSans(List<String> tlsSans) { this.tlsSans = tlsSans; }
+        public String getPublicHost() { return publicHost; }
+        public void setPublicHost(String publicHost) { this.publicHost = publicHost; }
         public int getAgentCertDays() { return agentCertDays; }
         public void setAgentCertDays(int agentCertDays) { this.agentCertDays = agentCertDays; }
     }

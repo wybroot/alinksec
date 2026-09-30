@@ -4,6 +4,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -18,9 +19,10 @@ public final class JwtUtil {
     private JwtUtil() {}
 
     public static String sign(String secret, Map<String, Object> claims, long ttlSeconds) {
-        claims.put("exp", System.currentTimeMillis() / 1000 + ttlSeconds);
+        Map<String, Object> payload = new HashMap<>(claims);
+        payload.put("exp", System.currentTimeMillis() / 1000 + ttlSeconds);
         String encodedHeader = b64(HEADER.getBytes(StandardCharsets.UTF_8));
-        String encodedPayload = b64(JsonUtils.write(claims).getBytes(StandardCharsets.UTF_8));
+        String encodedPayload = b64(JsonUtils.write(payload).getBytes(StandardCharsets.UTF_8));
         String signingInput = encodedHeader + "." + encodedPayload;
         return signingInput + "." + b64(hmac(secret, signingInput));
     }

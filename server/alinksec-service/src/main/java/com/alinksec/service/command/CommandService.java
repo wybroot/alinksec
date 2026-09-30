@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -33,31 +34,37 @@ public class CommandService {
     private final CommandSender sender;
     private final AgentDownloadTokenService downloadTokens;
     private final AlinkSecProperties props;
+    private final List<CommandLifecycleListener> lifecycleListeners;
 
     public CommandService(CommandRepository repository, CommandSender sender,
-                          AgentDownloadTokenService downloadTokens, AlinkSecProperties props) {
+                          AgentDownloadTokenService downloadTokens, AlinkSecProperties props,
+                          List<CommandLifecycleListener> lifecycleListeners) {
         this.repository = repository;
         this.sender = sender;
         this.downloadTokens = downloadTokens;
         this.props = props;
+        this.lifecycleListeners = lifecycleListeners;
     }
 
     /**
      * 下发指令。Agent 不在线 → 保持 PENDING（M2 接入 Redis 待推队列后由 gateway 消费补推）。
      */
-    public void dispatch(String agentId, Command.Builder command, Long issuedBy) {
+    @Transactional
+    public String dispatch(String agentId, Command.Builder command, Long issuedBy) {
         String cmdId = UUID.randomUUID().toString();
         Command cmd = command.setCmdId(cmdId)
                 .setIssuedAt(System.currentTimeMillis())
                 .build();
         repository.insert(cmdId, agentId, commandType(cmd),
                 com.alinksec.common.util.JsonUtils.write(payloadOf(cmd)), issuedBy);
+        lifecycleListeners.forEach(listener -> listener.onDispatched(agentId, cmd));
         if (sender.send(agentId, cmd)) {
             repository.markSent(cmdId);
             log.debug("指令已下发: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
         } else {
             log.info("指令挂起待推: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
         }
+        return cmdId;
     }
 
     /** 策略版本同步指令（心跳版本不一致时由 HeartbeatService / 规则编辑后触发）；policyJson 为空 = 仅版本同步（M1 兼容） */
@@ -69,13 +76,22 @@ public class CommandService {
     }
 
     /** Agent ACK 状态机推进 */
-    public void onAck(RptAck ack) {
+    @Transactional
+    public void onAck(String agentId, RptAck ack) {
         if (ack.getCmdId().isBlank()) {
             return;
         }
-        int rows = repository.onAck(ack);
+        int rows = repository.onAck(agentId, ack);
         if (rows == 0) {
             log.debug("ACK 未命中指令行（终态后重复 ACK）: cmd_id={}", ack.getCmdId());
+            return;
+        }
+        if (ack.getStage() == RptAck.Stage.DONE) {
+            notifyTerminal(agentId, ack.getCmdId(), CommandLifecycleListener.TerminalState.DONE,
+                    ack.getMessage());
+        } else if (ack.getStage() == RptAck.Stage.FAILED) {
+            notifyTerminal(agentId, ack.getCmdId(), CommandLifecycleListener.TerminalState.FAILED,
+                    ack.getMessage());
         }
     }
 
@@ -87,7 +103,10 @@ public class CommandService {
                 command = refreshDownloadCredentials(agentId, rebuild(row));
             } catch (IllegalStateException e) {
                 String cmdId = (String) row.get("cmd_id");
-                repository.markFailed(cmdId, e.getMessage());
+                if (repository.markFailed(cmdId, e.getMessage()) > 0) {
+                    notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.FAILED,
+                            e.getMessage());
+                }
                 log.error("Cannot deliver pending command: cmd_id={}", cmdId, e);
                 continue;
             }
@@ -107,8 +126,11 @@ public class CommandService {
             String agentId = (String) row.get("agent_id");
             int retry = ((Number) row.get("retry_count")).intValue();
             if (retry >= CommandRepository.MAX_RETRY) {
-                repository.markTimeout(cmdId);
-                log.warn("指令超时: cmd_id={} agent={} retry={}", cmdId, agentId, retry);
+                if (repository.markTimeout(cmdId) > 0) {
+                    notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.TIMEOUT,
+                            "指令 ACK 超时");
+                    log.warn("指令超时: cmd_id={} agent={} retry={}", cmdId, agentId, retry);
+                }
                 continue;
             }
             repository.findByCmdId(cmdId).ifPresent(cmdRow -> {
@@ -117,7 +139,10 @@ public class CommandService {
                 try {
                     command = refreshDownloadCredentials(agentId, rebuild(cmdRow));
                 } catch (IllegalStateException e) {
-                    repository.markFailed(cmdId, e.getMessage());
+                    if (repository.markFailed(cmdId, e.getMessage()) > 0) {
+                        notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.FAILED,
+                                e.getMessage());
+                    }
                     log.error("Cannot rebuild command for retry: cmd_id={}", cmdId, e);
                     return;
                 }
@@ -226,5 +251,10 @@ public class CommandService {
 
     private Map<String, Object> payloadOf(Command cmd) {
         return Map.of("command_b64", Base64.getEncoder().encodeToString(cmd.toByteArray()));
+    }
+
+    private void notifyTerminal(String agentId, String cmdId,
+                                CommandLifecycleListener.TerminalState state, String message) {
+        lifecycleListeners.forEach(listener -> listener.onTerminal(agentId, cmdId, state, message));
     }
 }

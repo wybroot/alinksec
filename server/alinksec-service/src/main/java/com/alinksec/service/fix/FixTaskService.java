@@ -186,9 +186,7 @@ public class FixTaskService {
         List<Long> findingIds = items.stream()
                 .map(it -> it.get("findingId") instanceof Number n ? n.longValue() : -1L)
                 .filter(id -> id > 0).distinct().toList();
-        if (findingIds.size() != items.stream()
-                .map(it -> it.get("findingId") instanceof Number n ? n.longValue() : -1L)
-                .filter(id -> id > 0).distinct().count() || findingIds.isEmpty()) {
+        if (findingIds.size() != items.size() || findingIds.isEmpty()) {
             throw new IllegalArgumentException("修复项格式非法（需 agentId + findingId）");
         }
         Map<Long, Map<String, Object>> findings = new LinkedHashMap<>();
@@ -209,6 +207,9 @@ public class FixTaskService {
             Map<String, Object> f = findings.get(fid);
             if (f == null || !agentId.equals(String.valueOf(f.get("agent_id")))) {
                 throw new IllegalArgumentException("漏洞项不存在或与主机不匹配: finding=" + fid);
+            }
+            if (((Number) f.get("status")).intValue() > 1) {
+                throw new IllegalArgumentException("漏洞项已处置，请刷新后重选: finding=" + fid);
             }
             if (f.get("fixed_version") == null || String.valueOf(f.get("fixed_version")).isBlank()) {
                 throw new IllegalArgumentException("漏洞 " + f.get("cve_id") + " 无修复版本信息，需人工处理");

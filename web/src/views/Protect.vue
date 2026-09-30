@@ -2,10 +2,8 @@
   <div>
     <div class="grid-4">
       <div class="prot-card" v-for="p in cards" :key="p.title">
-        <div class="hd"><b>{{ p.title }}</b><el-switch v-model="p.on" @change="msg((p.on ? '已开启 ' : '已关闭 ') + p.title)" /></div>
+        <div class="hd"><b>{{ p.title }}</b></div>
         <p>{{ p.desc }}</p>
-        <div class="stats">{{ p.stats }}</div>
-        <el-tag size="small" effect="plain" type="success" style="margin-top:8px">断网仍生效</el-tag>
       </div>
     </div>
     <div class="grid-2eq">

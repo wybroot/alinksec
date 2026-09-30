@@ -285,16 +285,17 @@ $env:GOOS=""; $env:GOARCH=""; cd ..
 ### ② 服务器部署（Docker Compose）
 
 ```bash
-# 发布包必须包含完整 server/、web/、deploy/ 目录；打包命令见部署文档 §2。
+# 发布包必须包含完整 server/、proto/、web/、deploy/ 目录；打包命令见部署文档 §2。
 unzip alinksec-release.zip -d ~/alinksec && cd ~/alinksec/deploy/docker
 
-cp .env.example .env && vim .env     # ⚠️ HOST_IP 必须改成服务器真实 IP（证书 SAN 仅首启生成一次）
+cp .env.example .env && vim .env     # ⚠️ HOST_IP / ALINKSEC_BIND_ADDRESS 必须改成服务器真实地址
 # 同时设置 ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD（至少 12 位）和
 # ALINKSEC_BOOTSTRAP_ENROLL_TOKEN（随机 ENROLL- 前缀字符串）、
-# ALINKSEC_POSTGRES_PASSWORD、ALINKSEC_JWT_SECRET；随后执行 chmod 600 .env
+# 两个不同的 PostgreSQL 初始化/应用密码、ALINKSEC_JWT_SECRET；随后执行 chmod 600 .env
 
 docker compose config -q && docker compose build && docker compose up -d
 
+docker compose ps -a               # migrate 必须为 Exited (0)
 docker compose logs server | grep -E "gRPC|Bootstrap"
 # 👉 仅确认初始化成功；凭据使用 .env 中配置的值，不会打印到日志
 docker cp alinksec-server:/app/data/certs/ca.crt ./alinksec-ca.crt
@@ -316,7 +317,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 🖥️ 管理控制台 | `https://<IP>:8443/` | admin / `.env` 中的初始密码 |
 | 📺 安全大屏 | `https://<IP>:8443/screen` | 暗色投屏版 · 大屏轮播 · 只读 |
 
-> 📖 **完整部署手册**：38 表初始化验证 → 端口放行策略 → 10 项端到端联调（含防卸载正向/绕过双验证、断网补传实测、RBAC 越权审计）→ 18 条排障表
+> 📖 **完整部署手册**：38 张业务表 + 版本化迁移 → 最小权限数据库账号 → 来源网段限制 → 10 项端到端联调
 > **👉 [docs/06-部署文档.md](docs/06-部署文档.md)**
 
 <details>
@@ -355,6 +356,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 04 | [Agent设计与策略规范](docs/04-Agent设计与策略规范.md) | Agent 模块 · 策略下发 · 断线行为 |
 | 05 | [扩展能力设计](docs/05-扩展能力设计.md) | 病毒引擎 · 诱饵防护 · 升级 · 扩展路线 |
 | 06 | [部署文档](docs/06-部署文档.md) | ⭐ 逐步部署 · 端到端联调 · 排障手册 |
+| 07 | [封版缺陷清单](docs/07-封版缺陷清单.md) | 封版阻断项 · 修复顺序 · 验收标准 |
 
 ---
 

@@ -22,6 +22,26 @@ services:
     restart: unless-stopped
     # 注意：不映射 5432 到宿主机（仅 compose 内网访问），验证 SQL 用 docker exec
 
+  # ---------- 版本化数据库迁移（使用初始化账号，一次性执行） ----------
+  migrate:
+    image: postgres:17
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: alinksec
+      PGUSER: alinksec
+      PGPASSWORD: ${ALINKSEC_POSTGRES_PASSWORD:?set ALINKSEC_POSTGRES_PASSWORD in .env}
+      ALINKSEC_APP_DB_USER: alinksec_app
+      ALINKSEC_APP_DB_PASSWORD: ${ALINKSEC_POSTGRES_APP_PASSWORD:?set ALINKSEC_POSTGRES_APP_PASSWORD in .env}
+      ALINKSEC_BIND_ADDRESS: ${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint: ["/bin/bash", "/migrations/run-migrations.sh"]
+    restart: "no"
+
   # ---------- VictoriaMetrics（时序指标，docs/03 §3） ----------
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.102.0
@@ -42,8 +62,8 @@ services:
     environment:
       PG_HOST: postgres
       PG_PORT: "5432"
-      PG_USER: alinksec
-      PG_PASSWORD: ${ALINKSEC_POSTGRES_PASSWORD:?set ALINKSEC_POSTGRES_PASSWORD in .env}
+      PG_USER: alinksec_app
+      PG_PASSWORD: ${ALINKSEC_POSTGRES_APP_PASSWORD:?set ALINKSEC_POSTGRES_APP_PASSWORD in .env}
       VM_HOST: victoriametrics
       ALINKSEC_METRICS_ENABLED: "true"
       ALINKSEC_WEB_TLS_DIR: /app/web-tls
@@ -52,17 +72,20 @@ services:
       ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:?set ALINKSEC_BOOTSTRAP_ENROLL_TOKEN in .env}
       ALINKSEC_LEGACY_COMMAND_POLICY: ${ALINKSEC_LEGACY_COMMAND_POLICY:-report}
       # 特征库/补丁包下载地址：必须是 Agent 可达的 HTTPS 入口。
-      ALINKSEC_SIG_BASE: "${HOST_IP:-alinksec-server}:8443"
+      ALINKSEC_SIG_BASE: "${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}:8443"
+      ALINKSEC_PUBLIC_HOST: "${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}"
       # 生产建议显式设置 JWT 密钥（不设则首次启动自动生成并持久化到 volume）
       ALINKSEC_JWT_SECRET: ${ALINKSEC_JWT_SECRET:-}
       # 证书 SAN：必须在首次启动前带上宿主机 IP（证书只生成一次）！
-      ALINKSEC_SERVER_TLS_SANS: "localhost,127.0.0.1,::1,alinksec-server,${HOST_IP:-alinksec-server}"
+      ALINKSEC_SERVER_TLS_SANS: "localhost,127.0.0.1,::1,alinksec-server,${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}"
       TZ: Asia/Shanghai
     ports:
-      - "9443:9443"      # gRPC mTLS，Agent 接入
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:9443:9443"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       victoriametrics:
         condition: service_started
     volumes:
@@ -77,8 +100,8 @@ services:
       dockerfile: deploy/docker/Dockerfile.web
     container_name: alinksec-web
     ports:
-      - "8081:80"         # redirects to HTTPS
-      - "8443:443"        # https://<服务器IP>:8443
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:8081:80"
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:8443:443"
     depends_on:
       - server
     volumes:

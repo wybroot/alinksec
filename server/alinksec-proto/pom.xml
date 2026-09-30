@@ -38,13 +38,27 @@
   </dependencies>
 
   <build>
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.1</version>
+      </extension>
+    </extensions>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>windows-protobuf</id>
+      <activation><os><family>Windows</family></os></activation>
+  <build>
     <!--
       Windows 中文路径下 protobuf-maven-plugin 传绝对路径给 protoc 会乱码，
-      故改用 dependency-plugin 解包 grpc 生成器 + exec 以相对路径调用仓库内 protoc.exe。
-      Linux/Mac 可将 protoc.path 换成 PATH 中的 protoc。
+      故用 dependency-plugin 将 protoc 与 gRPC 生成器复制到 ASCII 临时目录，
+      再由 exec 以相对路径处理仓库内的 proto 文件。
     -->
     <plugins>
-      <!-- 1) 复制 protoc-gen-grpc-java 生成器到无中文的临时目录
+      <!-- 1) 复制 protoc 与 protoc-gen-grpc-java 到无中文的临时目录
              （protoc 以 ANSI 命令行执行插件，路径含非 ASCII 时失败；exe 为单文件 artifact 用 copy） -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -57,6 +71,15 @@
             <goals><goal>copy</goal></goals>
             <configuration>
               <artifactItems>
+                <artifactItem>
+                  <groupId>com.google.protobuf</groupId>
+                  <artifactId>protoc</artifactId>
+                  <version>${protobuf.version}</version>
+                  <classifier>windows-x86_64</classifier>
+                  <type>exe</type>
+                  <destFileName>protoc.exe</destFileName>
+                  <outputDirectory>${java.io.tmpdir}/alinksec-protoc</outputDirectory>
+                </artifactItem>
                 <artifactItem>
                   <groupId>io.grpc</groupId>
                   <artifactId>protoc-gen-grpc-java</artifactId>
@@ -105,7 +128,7 @@
             <phase>generate-sources</phase>
             <goals><goal>exec</goal></goals>
             <configuration>
-              <executable>${project.basedir}${file.separator}..${file.separator}..${file.separator}tools${file.separator}protoc${file.separator}bin${file.separator}protoc.exe</executable>
+              <executable>${java.io.tmpdir}/alinksec-protoc/protoc.exe</executable>
               <workingDirectory>${project.basedir}</workingDirectory>
               <arguments>
                 <argument>-I../../proto</argument>
@@ -140,4 +163,30 @@
       </plugin>
     </plugins>
   </build>
+    </profile>
+    <profile>
+      <id>unix-protobuf</id>
+      <activation><os><family>unix</family></os></activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.xolstice.maven.plugins</groupId>
+            <artifactId>protobuf-maven-plugin</artifactId>
+            <version>0.6.1</version>
+            <configuration>
+              <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+              <pluginId>grpc-java</pluginId>
+              <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+              <protoSourceRoot>${project.basedir}/../../proto</protoSourceRoot>
+            </configuration>
+            <executions>
+              <execution>
+                <goals><goal>compile</goal><goal>compile-custom</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

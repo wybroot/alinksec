@@ -45,9 +45,11 @@ public class HostsController {
     @GetMapping
     public ApiResult<Map<String, Object>> list(@RequestParam(required = false) String keyword,
                                                @RequestParam(required = false) Integer status,
+                                               @RequestParam(required = false) Integer isolationStatus,
                                                @RequestParam(defaultValue = "1") int page,
                                                @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(query.list(keyword, status, page, Math.min(size, 100)));
+        return ApiResult.ok(query.list(keyword, status, isolationStatus,
+                Math.max(page, 1), Math.max(1, Math.min(size, 100))));
     }
 
     @GetMapping("/groups")
@@ -153,8 +155,8 @@ public class HostsController {
     public ApiResult<Map<String, Object>> isolate(@PathVariable String agentId,
                                                   jakarta.servlet.http.HttpServletRequest request) {
         Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
-        protectRuleService.dispatchAction(agentId, "isolate", "", "控制台手动隔离", uid);
-        return ApiResult.ok(Map.of("dispatched", true));
+        String cmdId = protectRuleService.dispatchAction(agentId, "isolate", "", "控制台手动隔离", uid);
+        return ApiResult.ok(Map.of("dispatched", true, "cmdId", cmdId, "isolationStatus", "isolating"));
     }
 
     /** 解除隔离：CmdProtectAction.RESTORE_ISOLATION */
@@ -162,7 +164,7 @@ public class HostsController {
     public ApiResult<Map<String, Object>> unisolate(@PathVariable String agentId,
                                                     jakarta.servlet.http.HttpServletRequest request) {
         Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
-        protectRuleService.dispatchAction(agentId, "restore", "", "控制台手动解除隔离", uid);
-        return ApiResult.ok(Map.of("dispatched", true));
+        String cmdId = protectRuleService.dispatchAction(agentId, "restore", "", "控制台手动解除隔离", uid);
+        return ApiResult.ok(Map.of("dispatched", true, "cmdId", cmdId, "isolationStatus", "restoring"));
     }
 }

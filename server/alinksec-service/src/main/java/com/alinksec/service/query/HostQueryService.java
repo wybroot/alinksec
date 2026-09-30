@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -19,22 +20,37 @@ public class HostQueryService {
         this.jdbc = jdbc;
     }
 
-    public Map<String, Object> list(String keyword, Integer status, int page, int size) {
+    public Map<String, Object> list(String keyword, Integer status, Integer isolationStatus,
+                                    int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE a.status <> 4");
+        List<Object> args = new ArrayList<>();
         if (keyword != null && !keyword.isBlank()) {
             where.append(" AND (a.hostname ILIKE ? OR a.ip ILIKE ? OR a.agent_id ILIKE ?)");
+            String pattern = "%" + keyword.trim() + "%";
+            args.add(pattern);
+            args.add(pattern);
+            args.add(pattern);
         }
         if (status != null) {
-            where.append(" AND a.status = ").append(status);
+            where.append(" AND a.status = ?");
+            args.add(status);
+        }
+        if (isolationStatus != null) {
+            where.append(" AND a.isolation_status = ?");
+            args.add(isolationStatus);
         }
         String cond = where.toString();
         Long total = jdbc.queryForObject(
                 "SELECT count(*) FROM t_agent a" + cond, Long.class,
-                pad(keyword), pad(keyword), pad(keyword));
+                args.toArray());
 
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT a.agent_id, a.hostname, a.ip, a.os_type, a.os_version, a.kernel, a.arch,
                        a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,
+                       a.isolation_status, a.isolation_command_id, a.isolation_error, a.isolation_updated_at,
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
                        (SELECT count(*) FROM t_asset_port p WHERE p.agent_id = a.agent_id) AS port_count,
                        (SELECT count(*) FROM t_asset_process p WHERE p.agent_id = a.agent_id) AS process_count,
@@ -50,7 +66,7 @@ public class HostQueryService {
                 ) e ON TRUE""" + cond + """
                 ORDER BY a.status, a.hostname
                 LIMIT ? OFFSET ?
-                """, pad(keyword), pad(keyword), pad(keyword), size, (page - 1) * size);
+                """, pageArgs.toArray());
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
@@ -61,7 +77,8 @@ public class HostQueryService {
     public Map<String, Object> detail(String agentId) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT agent_id, hostname, ip, os_type, os_version, kernel, arch, agent_version,
-                       machine_id, status, protect_enabled, policy_version, last_heartbeat, created_at
+                       machine_id, status, protect_enabled, policy_version, last_heartbeat, created_at,
+                       isolation_status, isolation_command_id, isolation_error, isolation_updated_at
                 FROM t_agent WHERE agent_id = ? AND status <> 4
                 """, agentId);
         if (rows.isEmpty()) {
@@ -113,10 +130,6 @@ public class HostQueryService {
                 SELECT container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons, updated_at
                 FROM t_asset_container WHERE agent_id = ? ORDER BY name
                 """, agentId);
-    }
-
-    private static String pad(String keyword) {
-        return keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
     }
 
     private static String blankToNull(String s) {

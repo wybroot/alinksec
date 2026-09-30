@@ -26,12 +26,12 @@ public class AuditService {
 
     /** 落一条审计记录（失败不影响业务） */
     public void record(Long uid, String username, String method, String path,
-                       String bodyDigest, String sourceIp, int status, int costMs) {
+                       String sourceIp, int status, int costMs) {
         try {
             jdbc.update("""
-                    INSERT INTO t_audit_log (uid, username, method, path, body_digest, source_ip, status, cost_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, uid, username, method, path, bodyDigest, sourceIp, status, costMs);
+                    INSERT INTO t_audit_log (uid, username, method, path, source_ip, status, cost_ms)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, uid, username, method, path, sourceIp, status, costMs);
         } catch (Exception e) {
             log.warn("审计记录失败（不影响业务）: {}", e.getMessage());
         }
@@ -49,7 +49,7 @@ public class AuditService {
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_audit_log" + where, Long.class);
         int offset = (page - 1) * size;
         List<Map<String, Object>> list = jdbc.queryForList(
-                "SELECT id, uid, username, method, path, body_digest, source_ip, status, cost_ms, created_at "
+                "SELECT id, uid, username, method, path, source_ip, status, cost_ms, created_at "
                         + "FROM t_audit_log" + where + " ORDER BY id DESC LIMIT " + size + " OFFSET " + offset);
         return Map.of("total", total == null ? 0 : total, "list", list);
     }

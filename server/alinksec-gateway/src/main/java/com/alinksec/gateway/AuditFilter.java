@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import java.io.IOException;
 
@@ -36,33 +35,16 @@ public class AuditFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        boolean multipart = request.getContentType() != null
-                && request.getContentType().startsWith("multipart/");
-        ContentCachingRequestWrapper wrapped = multipart ? null : new ContentCachingRequestWrapper(request);
-        HttpServletRequest effective = wrapped != null ? wrapped : request;
         long start = System.currentTimeMillis();
         try {
-            chain.doFilter(effective, response);
+            chain.doFilter(request, response);
         } finally {
-            String digest = bodyDigest(wrapped, request);
             Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
             String username = request.getAttribute("username") instanceof String s ? s : null;
             auditService.record(uid, username, request.getMethod(), request.getRequestURI(),
-                    digest, clientIp(request), response.getStatus(),
+                    clientIp(request), response.getStatus(),
                     (int) (System.currentTimeMillis() - start));
         }
-    }
-
-    /** 请求体摘要：multipart 不缓存；登录/改密等敏感路径脱敏；其余截断 500 字符 */
-    private String bodyDigest(ContentCachingRequestWrapper wrapped, HttpServletRequest request) {
-        if (wrapped == null) {
-            return "(multipart)";
-        }
-        if (request.getRequestURI().contains("/auth/")) {
-            return "(sensitive)";
-        }
-        String body = new String(wrapped.getContentAsByteArray(), java.nio.charset.StandardCharsets.UTF_8);
-        return body.isEmpty() ? null : (body.length() > 500 ? body.substring(0, 500) + "..." : body);
     }
 
     private String clientIp(HttpServletRequest request) {

@@ -57,12 +57,12 @@ public class CommandRepository {
     public int markTimeout(String cmdId) {
         return jdbc.update("""
                 UPDATE t_command SET status = ?, finished_at = now(), result = ?
-                WHERE cmd_id = ?
-                """, ST_TIMEOUT, JsonUtils.write(Map.of("reason", "ack-timeout")), cmdId);
+                WHERE cmd_id = ? AND status = ?
+                """, ST_TIMEOUT, JsonUtils.write(Map.of("reason", "ack-timeout")), cmdId, ST_SENT);
     }
 
     /** Agent ACK 推进状态机；终态附带结果 JSON */
-    public int onAck(RptAck ack) {
+    public int onAck(String agentId, RptAck ack) {
         short target = switch (ack.getStage()) {
             case RECEIVED -> ST_RECEIVED;
             case RUNNING -> ST_RUNNING;
@@ -82,14 +82,14 @@ public class CommandRepository {
                     UPDATE t_command
                     SET status = ?, acked_at = COALESCE(acked_at, now()), finished_at = now(),
                         result = ?
-                    WHERE cmd_id = ? AND status NOT IN (4, 5, 6)
-                    """, target, result, ack.getCmdId());
+                    WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
+                    """, target, result, ack.getCmdId(), agentId);
         }
         return jdbc.update("""
                 UPDATE t_command
                 SET status = ?, acked_at = COALESCE(acked_at, now())
-                WHERE cmd_id = ? AND status NOT IN (4, 5, 6)
-                """, target, ack.getCmdId());
+                WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
+                """, target, ack.getCmdId(), agentId);
     }
 
     /** 待超时判定的 SENT 指令：下发超过 30s 仍未 RECEIVED */

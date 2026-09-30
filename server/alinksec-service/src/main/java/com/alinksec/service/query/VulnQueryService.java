@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -22,25 +23,34 @@ public class VulnQueryService {
     public Map<String, Object> findings(Integer status, Integer severity, String agentId,
                                         String keyword, int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> args = new ArrayList<>();
         if (status != null) {
-            where.append(" AND f.status = ").append(status);
+            where.append(" AND f.status = ?");
+            args.add(status);
         } else {
             where.append(" AND f.status IN (0,1)");
         }
         if (severity != null) {
-            where.append(" AND f.severity >= ").append(severity);
+            where.append(" AND f.severity >= ?");
+            args.add(severity);
         }
         if (agentId != null && !agentId.isBlank()) {
-            where.append(" AND f.agent_id = '").append(agentId.replace("'", "''")).append("'");
+            where.append(" AND f.agent_id = ?");
+            args.add(agentId.trim());
         }
-        String kw = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-        if (kw != null) {
+        if (keyword != null && !keyword.isBlank()) {
             where.append(" AND (f.cve_id ILIKE ? OR f.software ILIKE ?)");
+            String pattern = "%" + keyword.trim() + "%";
+            args.add(pattern);
+            args.add(pattern);
         }
         String cond = where.toString();
 
         Long total = jdbc.queryForObject(
-                "SELECT count(*) FROM t_vuln_finding f" + cond, Long.class, kw, kw);
+                "SELECT count(*) FROM t_vuln_finding f" + cond, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT f.id, f.task_id, f.agent_id, a.hostname, f.cve_id, c.title, f.software,
                        f.installed_version, f.fixed_version, f.severity, c.cvss,
@@ -49,7 +59,7 @@ public class VulnQueryService {
                 LEFT JOIN t_agent a ON a.agent_id = f.agent_id
                 LEFT JOIN t_cve_db c ON c.cve_id = f.cve_id""" + cond + """
                 ORDER BY f.severity DESC, f.created_at DESC LIMIT ? OFFSET ?
-                """, kw, kw, size, (page - 1) * size);
+                """, pageArgs.toArray());
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
@@ -77,25 +87,33 @@ public class VulnQueryService {
     public Map<String, Object> portFindings(Boolean risky, String agentId,
                                             String keyword, int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> args = new ArrayList<>();
         if (Boolean.TRUE.equals(risky)) {
             where.append(" AND p.risky");
         }
         if (agentId != null && !agentId.isBlank()) {
-            where.append(" AND p.agent_id = '").append(agentId.replace("'", "''")).append("'");
+            where.append(" AND p.agent_id = ?");
+            args.add(agentId.trim());
         }
-        String kw = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-        if (kw != null) {
+        if (keyword != null && !keyword.isBlank()) {
             where.append(" AND (p.service ILIKE ? OR p.process ILIKE ? OR CAST(p.port AS TEXT) LIKE ?)");
+            String pattern = "%" + keyword.trim() + "%";
+            args.add(pattern);
+            args.add(pattern);
+            args.add(pattern);
         }
         String cond = where.toString();
         Long total = jdbc.queryForObject(
-                "SELECT count(*) FROM t_port_finding p" + cond, Long.class, kw, kw, kw);
+                "SELECT count(*) FROM t_port_finding p" + cond, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT p.id, p.task_id, p.agent_id, a.hostname, p.port, p.protocol, p.process,
                        p.service, p.risky, p.risky_reason, p.created_at
                 FROM t_port_finding p LEFT JOIN t_agent a ON a.agent_id = p.agent_id
                 """ + cond + " ORDER BY p.risky DESC, p.port LIMIT ? OFFSET ?",
-                kw, kw, kw, size, (page - 1) * size);
+                pageArgs.toArray());
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -118,6 +136,12 @@ public class VulnQueryService {
 
     public Map<String, Object> stats() {
         Map<String, Object> result = new HashMap<>();
+        result.putAll(jdbc.queryForMap("""
+                SELECT count(*) FILTER (WHERE status IN (0,1)) AS pending,
+                       count(*) FILTER (WHERE status = 3) AS fixed,
+                       count(*) FILTER (WHERE status IN (0,1,3)) AS total
+                FROM t_vuln_finding
+                """));
         result.put("bySeverity", jdbc.queryForList("""
                 SELECT severity, count(*) AS count
                 FROM t_vuln_finding WHERE status IN (0,1)

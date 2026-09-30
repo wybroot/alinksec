@@ -79,19 +79,20 @@ public class ProtectRuleService {
     }
 
     /** 下发安全处置指令 */
-    public void dispatchAction(String agentId, String action, String target, String reason, Long issuedBy) {
+    public String dispatchAction(String agentId, String action, String target, String reason, Long issuedBy) {
         CmdProtectAction.Action act = switch (action) {
             case "kill" -> CmdProtectAction.Action.KILL_PROCESS;
             case "isolate" -> CmdProtectAction.Action.ISOLATE_HOST;
             case "restore" -> CmdProtectAction.Action.RESTORE_ISOLATION;
             default -> throw new IllegalArgumentException("不支持的动作: " + action);
         };
-        commandService.dispatch(agentId, Command.newBuilder()
+        String cmdId = commandService.dispatch(agentId, Command.newBuilder()
                 .setProtectAction(CmdProtectAction.newBuilder()
                         .setAction(act)
                         .setTarget(target == null ? "" : target)
                         .setReason(reason == null ? "" : reason)),
                 issuedBy);
         log.info("安全处置已下发: agent={} action={} target={}", agentId, action, target);
+        return cmdId;
     }
 }

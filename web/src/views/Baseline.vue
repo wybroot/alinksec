@@ -213,7 +213,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
-  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchFixTaskRecords, fetchFixTasks, fetchHosts,
+  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
 } from '../api'
 import { useChart } from '../composables/useChart'
 
@@ -240,7 +240,7 @@ async function openCreate() {
   dlg.templateIds = []
   dlg.agentIds = []
   try {
-    const [tpls, list] = await Promise.all([fetchBaselineTemplates(), fetchHosts()])
+    const [tpls, list] = await Promise.all([fetchBaselineTemplates(), fetchAllHosts()])
     templates.value = (tpls || []).filter((t) => t.enabled !== false)
     hosts.value = list
   } catch (e) {

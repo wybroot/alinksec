@@ -100,6 +100,14 @@ function fmtAgo(iso) {
 }
 
 const HOST_STATUS = { 0: 'pending', 1: 'online', 2: 'offline', 3: 'offline' }
+const ISOLATION_STATUS = {
+  0: 'normal',
+  1: 'isolating',
+  2: 'isolated',
+  3: 'restoring',
+  4: 'isolate_failed',
+  5: 'restore_failed',
+}
 
 /* ---------------- 总览 ---------------- */
 
@@ -283,28 +291,56 @@ export async function isolateHost(agentId, isolated) {
   return post(`/api/hosts/${agentId}/${isolated ? 'isolate' : 'unisolate'}`, {})
 }
 
-export async function fetchHosts() {
-  const data = await get('/api/hosts?page=1&size=100')
-  return (data?.list || []).map((h) => ({
-    agentId: h.agent_id,
-    host: h.hostname,
-    ip: h.ip || '—',
-    os: OS[h.os_type]?.(h.os_version) || h.os_version || '—',
-    group: '—',
-    ver: h.agent_version || '—',
-    status: HOST_STATUS[h.status] || 'offline',
-    protect: !!h.protect_enabled,
-    hb: fmtAgo(h.last_heartbeat),
-    risk: Number(h.alert_count || 0),
-    alertCount: Number(h.alert_count || 0),
-    lastEvt: h.last_event || '',
-    softwareCount: h.software_count,
-    portCount: h.port_count,
-    processCount: Number(h.process_count || 0),
-    accountCount: h.account_count,
-    riskyAccountCount: Number(h.risky_account_count || 0),
-    containerCount: Number(h.container_count || 0),
-  }))
+export async function fetchHosts({ keyword = '', status = '', page = 1, size = 20 } = {}) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) })
+  if (keyword.trim()) params.set('keyword', keyword.trim())
+  const connectionFilter = { pending: 0, online: 1, offline: 2 }[status]
+  const isolationFilter = {
+    normal: 0, isolating: 1, isolated: 2, restoring: 3, isolate_failed: 4, restore_failed: 5,
+  }[status]
+  if (connectionFilter !== undefined) params.set('status', String(connectionFilter))
+  if (isolationFilter !== undefined) params.set('isolationStatus', String(isolationFilter))
+  const data = await get(`/api/hosts?${params}`)
+  const list = (data?.list || []).map((h) => {
+    const connectionStatus = HOST_STATUS[h.status] || 'offline'
+    const isolationStatus = ISOLATION_STATUS[Number(h.isolation_status)] || 'normal'
+    return {
+      agentId: h.agent_id,
+      host: h.hostname,
+      ip: h.ip || '—',
+      os: OS[h.os_type]?.(h.os_version) || h.os_version || '—',
+      group: '—',
+      ver: h.agent_version || '—',
+      connectionStatus,
+      isolationStatus,
+      isolationError: h.isolation_error || '',
+      status: isolationStatus === 'normal' ? connectionStatus : isolationStatus,
+      protect: !!h.protect_enabled,
+      hb: fmtAgo(h.last_heartbeat),
+      risk: Number(h.alert_count || 0),
+      alertCount: Number(h.alert_count || 0),
+      lastEvt: h.last_event || '',
+      softwareCount: h.software_count,
+      portCount: h.port_count,
+      processCount: Number(h.process_count || 0),
+      accountCount: h.account_count,
+      riskyAccountCount: Number(h.risky_account_count || 0),
+      containerCount: Number(h.container_count || 0),
+    }
+  })
+  return { list, total: Number(data?.total || 0), page, size }
+}
+
+export async function fetchAllHosts() {
+  const size = 100
+  const first = await fetchHosts({ page: 1, size })
+  const list = [...first.list]
+  for (let page = 2; list.length < first.total; page += 1) {
+    const next = await fetchHosts({ page, size })
+    if (!next.list.length) break
+    list.push(...next.list)
+  }
+  return list
 }
 
 function alertText(alert) {
@@ -428,28 +464,36 @@ export async function fetchVulns() {
   const data = await get('/api/vuln/findings?page=1&size=200')
   const grouped = new Map()
   for (const f of data?.list || []) {
-    if (!grouped.has(f.cve_id)) {
-      grouped.set(f.cve_id, {
+    const key = `${f.cve_id}\0${f.software}\0${f.fixed_version || ''}`
+    if (!grouped.has(key)) {
+      grouped.set(key, {
         cve: f.cve_id,
         desc: f.title || f.cve_id,
         pkg: f.software,
         cur: f.installed_version || '—',
-        target: f.cve_fixed || '—',
+        target: f.fixed_version || '—',
         sev: sev(f.severity),
         cvss: f.cvss ?? '-',
         fixType: 'pkg',
         hosts: 0,
         hostList: [],
+        findings: [],
         status: f.status >= 3 ? 'fixed' : 'todo',
       })
     }
-    const g = grouped.get(f.cve_id)
+    const g = grouped.get(key)
     g.hosts += 1
     if (!g.hostList.includes(f.hostname || f.agent_id)) g.hostList.push(f.hostname || f.agent_id)
-    if (f.status < 3 && g.status === 'fixed') g.status = 'todo'
-    if (f.status >= 3 && g.status === 'todo') g.status = 'fixing'
+    if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version) {
+      g.findings.push({ agentId: f.agent_id, findingId: Number(f.id) })
+      g.status = 'todo'
+    }
   }
   return [...grouped.values()]
+}
+
+export function fetchVulnStats() {
+  return get('/api/vuln/stats')
 }
 
 export async function fetchWeakpwds() {
@@ -475,8 +519,8 @@ export async function fetchPortFindings(riskyOnly) {
 }
 
 export async function fetchAgentsForSelect() {
-  const data = await get('/api/hosts?page=1&size=100')
-  return (data?.list || []).map((h) => ({ id: h.agent_id, name: h.hostname || h.agent_id, ip: h.ip }))
+  const hosts = await fetchAllHosts()
+  return hosts.map((h) => ({ id: h.agentId, name: h.host || h.agentId, ip: h.ip }))
 }
 
 /* ---------------- 病毒 ---------------- */
@@ -630,12 +674,10 @@ export async function downloadComplianceReport(from, to) {
 /* ---------------- 实时防护 ---------------- */
 
 export async function fetchProtect() {
-  const [engines, status, blocksRaw] = await Promise.all([
+  const [engines, blocks] = await Promise.all([
     get('/api/protect/engines'),
-    get('/api/protect/status'),
     get('/api/protect/blocks?limit=6'),
   ])
-  const protectOn = (status || []).filter((a) => a.protect_enabled).length
   const keyMap = { process: '进程防护', file_tamper: '文件完整性', login: '登录防护', decoy: '勒索诱饵' }
   const descMap = {
     process: '高危进程名/路径/命令行特征阻断，挖矿、反弹 Shell 特征内置',
@@ -645,9 +687,7 @@ export async function fetchProtect() {
   }
   const cards = (engines || []).map((e) => ({
     title: keyMap[e.key] || e.name,
-    on: true,
     desc: e.desc || descMap[e.key] || '',
-    stats: `已防护主机 ${protectOn} 台`,
   }))
   return { cards, blocks: blocks || [] }
 }

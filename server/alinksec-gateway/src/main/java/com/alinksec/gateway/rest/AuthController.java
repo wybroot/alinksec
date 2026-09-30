@@ -63,7 +63,7 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ApiResult<Void> logout(HttpServletRequest request) {
-        userService.audit(null, String.valueOf(request.getAttribute("username")), "logout", null,
+        userService.audit(null, String.valueOf(request.getAttribute("username")), "logout",
                 clientIp(request));
         return ApiResult.ok();
     }

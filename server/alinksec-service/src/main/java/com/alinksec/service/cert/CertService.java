@@ -5,27 +5,38 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
+import org.bouncycastle.util.io.pem.PemObject;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.StringReader;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Date;
+import java.util.Locale;
 
 import com.alinksec.service.config.AlinkSecProperties;
 
@@ -58,6 +69,13 @@ public class CertService {
 
     @PostConstruct
     void init() throws Exception {
+        String publicHost = props.getServer().getPublicHost();
+        if (publicHost != null && !publicHost.isBlank()) {
+            validatePublicHost(publicHost);
+            if (props.getServer().getTlsSans().stream().noneMatch(publicHost::equalsIgnoreCase)) {
+                throw new IllegalArgumentException("server TLS SANs do not include public host: " + publicHost);
+            }
+        }
         Path dir = Paths.get(props.getServer().getCertDir());
         Files.createDirectories(dir);
         if (Files.exists(dir.resolve("ca.crt"))) {
@@ -70,7 +88,52 @@ public class CertService {
         } else {
             createServer(dir);
         }
+        if (publicHost != null && !publicHost.isBlank() && !certificateContains(publicHost)) {
+            throw new IllegalStateException("existing server certificate SAN does not include public host: "
+                    + publicHost + "; restore the certificate with the documented TLS recovery procedure");
+        }
         publishWebTls(dir);
+    }
+
+    static void validatePublicHost(String host) {
+        String normalized = host == null ? "" : host.toLowerCase(Locale.ROOT);
+        if (host == null || host.isBlank() || !host.equals(host.trim())
+                || normalized.equals("localhost") || normalized.equals("alinksec-server")
+                || normalized.equals("192.168.1.100")) {
+            throw new IllegalArgumentException("HOST_IP must be a configured Agent-reachable IPv4 or DNS name");
+        }
+        if (host.matches("[0-9.]+")) {
+            String[] parts = host.split("\\.", -1);
+            if (parts.length != 4) {
+                throw new IllegalArgumentException("HOST_IP is not a valid IPv4 address: " + host);
+            }
+            for (String part : parts) {
+                if (part.isEmpty() || part.length() > 3 || (part.length() > 1 && part.charAt(0) == '0')) {
+                    throw new IllegalArgumentException("HOST_IP is not a valid IPv4 address: " + host);
+                }
+                int octet = Integer.parseInt(part);
+                if (octet > 255) {
+                    throw new IllegalArgumentException("HOST_IP is not a valid IPv4 address: " + host);
+                }
+            }
+            int first = Integer.parseInt(parts[0]);
+            if (first == 0 || first == 127 || first >= 224) {
+                throw new IllegalArgumentException("HOST_IP must be Agent-reachable: " + host);
+            }
+        } else if (host.length() > 253 || !host.matches(
+                "(?i)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*")) {
+            throw new IllegalArgumentException("HOST_IP is not a valid IPv4 or DNS name: " + host);
+        }
+    }
+
+    private boolean certificateContains(String host) throws java.security.cert.CertificateParsingException {
+        var names = serverCert.getSubjectAlternativeNames();
+        if (names == null) {
+            return false;
+        }
+        return names.stream().anyMatch(name -> (Integer.valueOf(2).equals(name.get(0))
+                || Integer.valueOf(7).equals(name.get(0)))
+                && host.equalsIgnoreCase(String.valueOf(name.get(1))));
     }
 
     public X509Certificate caCert() { return caCert; }
@@ -139,9 +202,22 @@ public class CertService {
         try (FileInputStream in = new FileInputStream(dir.resolve("ca.crt").toFile())) {
             caCert = (X509Certificate) cf.generateCertificate(in);
         }
-        byte[] der = parsePemDer(Files.readString(dir.resolve("ca.key")));
-        caPrivateKey = java.security.KeyFactory.getInstance("EC")
-                .generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(der));
+        try (PEMParser parser = new PEMParser(new StringReader(Files.readString(dir.resolve("ca.key"))))) {
+            Object key = parser.readObject();
+            JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+            if (key instanceof PEMKeyPair pair) {
+                var curve = SubjectPublicKeyInfo.getInstance(caCert.getPublicKey().getEncoded())
+                        .getAlgorithm().getParameters();
+                var info = new PrivateKeyInfo(
+                        new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, curve),
+                        pair.getPrivateKeyInfo().parsePrivateKey());
+                caPrivateKey = converter.getPrivateKey(info);
+            } else if (key instanceof PrivateKeyInfo info) {
+                caPrivateKey = converter.getPrivateKey(info);
+            } else {
+                throw new IllegalStateException("unsupported CA private key format");
+            }
+        }
     }
 
     private void loadServer(Path dir) throws Exception {
@@ -208,14 +284,12 @@ public class CertService {
 
     private static void writePem(Path path, Object obj) throws IOException {
         try (JcaPEMWriter pem = new JcaPEMWriter(new FileWriter(path.toFile()))) {
-            pem.writeObject(obj);
+            if (obj instanceof PrivateKey key) {
+                pem.writeObject(new PemObject("PRIVATE KEY", key.getEncoded()));
+            } else {
+                pem.writeObject(obj);
+            }
         }
     }
 
-    private static byte[] parsePemDer(String pem) {
-        String body = pem.replaceAll("-----BEGIN [A-Z ]*-----", "")
-                .replaceAll("-----END [A-Z ]*-----", "")
-                .replaceAll("\\s", "");
-        return java.util.Base64.getDecoder().decode(body);
-    }
 }

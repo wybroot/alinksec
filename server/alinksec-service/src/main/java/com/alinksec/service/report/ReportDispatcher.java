@@ -68,7 +68,7 @@ public class ReportDispatcher {
         }
         switch (report.getPayloadCase()) {
             case HEARTBEAT -> heartbeatService.onHeartbeat(agentId, report.getHeartbeat());
-            case ACK -> commandService.onAck(report.getAck());
+            case ACK -> commandService.onAck(agentId, report.getAck());
             case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
             case SECURITY_EVENT -> securityEventService.onEvent(agentId, report.getSecurityEvent());
             case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
