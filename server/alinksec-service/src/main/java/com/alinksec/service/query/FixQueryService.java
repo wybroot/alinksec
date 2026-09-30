@@ -45,8 +45,8 @@ public class FixQueryService {
                        r.status, r.log, r.finished_at, r.created_at
                 FROM t_fix_record r
                 LEFT JOIN t_agent a ON a.agent_id = r.agent_id
-                LEFT JOIN t_baseline_item i ON (r.ref_type = 'baseline_item' AND i.id = r.ref_id::bigint)
-                LEFT JOIN t_vuln_finding v ON (r.ref_type = 'vuln_finding' AND v.id = r.ref_id::bigint)
+                LEFT JOIN t_baseline_item i ON (r.ref_type = 'baseline_item' AND i.id = CAST(r.ref_id AS BIGINT))
+                LEFT JOIN t_vuln_finding v ON (r.ref_type = 'vuln_finding' AND v.id = CAST(r.ref_id AS BIGINT))
                 WHERE r.task_id = ? ORDER BY a.hostname NULLS LAST, code
                 """, taskId);
         Map<String, Object> task = jdbc.queryForMap(

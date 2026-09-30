@@ -39,7 +39,7 @@ public class VulnQueryService {
             args.add(agentId.trim());
         }
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (f.cve_id ILIKE ? OR f.software ILIKE ?)");
+            where.append(" AND (LOWER(f.cve_id) LIKE LOWER(?) OR LOWER(f.software) LIKE LOWER(?))");
             String pattern = "%" + keyword.trim() + "%";
             args.add(pattern);
             args.add(pattern);
@@ -57,9 +57,9 @@ public class VulnQueryService {
                        f.status, f.created_at
                 FROM t_vuln_finding f
                 LEFT JOIN t_agent a ON a.agent_id = f.agent_id
-                LEFT JOIN t_cve_db c ON c.cve_id = f.cve_id""" + cond + """
-                ORDER BY f.severity DESC, f.created_at DESC LIMIT ? OFFSET ?
-                """, pageArgs.toArray());
+                LEFT JOIN t_cve_db c ON c.cve_id = f.cve_id""" + cond
+                + " ORDER BY f.severity DESC, f.created_at DESC LIMIT ? OFFSET ?",
+                pageArgs.toArray());
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
@@ -96,7 +96,7 @@ public class VulnQueryService {
             args.add(agentId.trim());
         }
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (p.service ILIKE ? OR p.process ILIKE ? OR CAST(p.port AS TEXT) LIKE ?)");
+            where.append(" AND (LOWER(p.service) LIKE LOWER(?) OR LOWER(p.process) LIKE LOWER(?) OR CAST(p.port AS TEXT) LIKE ?)");
             String pattern = "%" + keyword.trim() + "%";
             args.add(pattern);
             args.add(pattern);
@@ -124,7 +124,7 @@ public class VulnQueryService {
     public Map<String, Object> tasks(int page, int size) {
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_scan_task", Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT id, task_no, name, type, scope::text AS scope, status, progress,
+                SELECT id, task_no, name, type, CAST(scope AS TEXT) AS scope, status, progress,
                        started_at, finished_at, created_at
                 FROM t_scan_task ORDER BY created_at DESC LIMIT ? OFFSET ?
                 """, size, (page - 1) * size);
@@ -137,9 +137,9 @@ public class VulnQueryService {
     public Map<String, Object> stats() {
         Map<String, Object> result = new HashMap<>();
         result.putAll(jdbc.queryForMap("""
-                SELECT count(*) FILTER (WHERE status IN (0,1)) AS pending,
-                       count(*) FILTER (WHERE status = 3) AS fixed,
-                       count(*) FILTER (WHERE status IN (0,1,3)) AS total
+                SELECT SUM(CASE WHEN status IN (0,1) THEN 1 ELSE 0 END) AS pending,
+                       SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) AS fixed,
+                       SUM(CASE WHEN status IN (0,1,3) THEN 1 ELSE 0 END) AS total
                 FROM t_vuln_finding
                 """));
         result.put("bySeverity", jdbc.queryForList("""

@@ -1,5 +1,6 @@
 package com.alinksec.service.query;
 
+import com.alinksec.service.config.DatabaseDialect;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -14,9 +15,11 @@ import java.util.Map;
 public class BaselineQueryService {
 
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
-    public BaselineQueryService(JdbcTemplate jdbc) {
+    public BaselineQueryService(JdbcTemplate jdbc, DatabaseDialect database) {
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     public List<Map<String, Object>> templates() {
@@ -37,8 +40,8 @@ public class BaselineQueryService {
         Long total = jdbc.queryForObject(
                 "SELECT count(*) FROM t_baseline_item" + where, Long.class);
         List<Map<String, Object>> items = jdbc.queryForList("""
-                SELECT id, code, name, category, severity, check::text AS check,
-                       remediation, fix_spec::text AS fix_spec, enabled
+                SELECT id, code, name, category, severity, CAST("check" AS TEXT) AS "check",
+                       remediation, CAST(fix_spec AS TEXT) AS fix_spec, enabled
                 FROM t_baseline_item""" + where + " ORDER BY code");
         Map<String, Object> result = new HashMap<>();
         result.put("list", items);
@@ -51,7 +54,7 @@ public class BaselineQueryService {
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
                        (SELECT count(*) FROM t_baseline_summary s WHERE s.task_id = t.id) AS agent_count,
-                       (SELECT avg(s.score)::numeric(5,2) FROM t_baseline_summary s WHERE s.task_id = t.id) AS avg_score,
+                       (SELECT ROUND(AVG(s.score), 2) FROM t_baseline_summary s WHERE s.task_id = t.id) AS avg_score,
                        t.created_at, t.started_at, t.finished_at
                 FROM t_baseline_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
                 """, size, (page - 1) * size);
@@ -65,7 +68,7 @@ public class BaselineQueryService {
     public Map<String, Object> taskDetail(long taskId) {
         List<Map<String, Object>> task = jdbc.queryForList("""
                 SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
-                       t.scope::text AS scope, t.created_at, t.started_at, t.finished_at
+                       CAST(t.scope AS TEXT) AS scope, t.created_at, t.started_at, t.finished_at
                 FROM t_baseline_task t WHERE t.id = ?
                 """, taskId);
         if (task.isEmpty()) {
@@ -92,24 +95,25 @@ public class BaselineQueryService {
         if (passed != null) {
             where.append(" AND r.passed = ").append(passed);
         }
-        return jdbc.queryForList("""
+        String sql = ("""
                 SELECT i.id AS item_id, i.code, i.name, i.category, i.severity, r.passed, r.actual, r.message,
-                       r.checked_at, i.fix_spec::text AS fix_spec,
+                       r.checked_at, CAST(i.fix_spec AS TEXT) AS fix_spec,
                        (i.fix_spec IS NOT NULL
-                        AND i.fix_spec::text NOT IN ('null', '')
-                        AND COALESCE(i.fix_spec->>'risk', 'auto') <> 'manual') AS fixable
+                        AND CAST(i.fix_spec AS TEXT) NOT IN ('null', '')
+                        AND COALESCE(%s, 'auto') <> 'manual') AS fixable
                 FROM t_baseline_result r
-                JOIN t_baseline_item i ON i.id = r.item_id""" + where + """
-                ORDER BY i.severity DESC, i.code
-                """);
+                JOIN t_baseline_item i ON i.id = r.item_id""" + where
+                + " ORDER BY i.severity DESC, i.code")
+                .formatted(database.jsonTextValue("i.fix_spec", "risk"));
+        return jdbc.queryForList(sql);
     }
 
     /** 类别维度失败统计（雷达图/柱状图） */
     public List<Map<String, Object>> taskCategoryStats(long taskId) {
         return jdbc.queryForList("""
                 SELECT i.category, count(*) AS total,
-                       count(*) FILTER (WHERE r.passed) AS passed,
-                       count(*) FILTER (WHERE NOT r.passed) AS failed
+                       SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS passed,
+                       SUM(CASE WHEN NOT r.passed THEN 1 ELSE 0 END) AS failed
                 FROM t_baseline_result r JOIN t_baseline_item i ON i.id = r.item_id
                 WHERE r.task_id = ?
                 GROUP BY i.category ORDER BY i.category
@@ -127,10 +131,10 @@ public class BaselineQueryService {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT s.agent_id, a.hostname, t.name AS tpl, s.total, s.passed_count, s.failed_count,
                        s.score, s.checked_at,
-                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 4) AS c,
-                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 3) AS h,
-                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 2) AS m,
-                       count(r.id) FILTER (WHERE NOT r.passed AND i.severity = 1) AS l
+                       SUM(CASE WHEN NOT r.passed AND i.severity = 4 THEN 1 ELSE 0 END) AS c,
+                       SUM(CASE WHEN NOT r.passed AND i.severity = 3 THEN 1 ELSE 0 END) AS h,
+                       SUM(CASE WHEN NOT r.passed AND i.severity = 2 THEN 1 ELSE 0 END) AS m,
+                       SUM(CASE WHEN NOT r.passed AND i.severity = 1 THEN 1 ELSE 0 END) AS l
                 FROM t_baseline_summary s
                 JOIN t_agent a ON a.agent_id = s.agent_id
                 JOIN t_baseline_task t ON t.id = s.task_id

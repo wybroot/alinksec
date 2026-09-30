@@ -39,21 +39,21 @@ public class FixResultService {
         for (FixResultItem item : result.getResultsList()) {
             int status = item.getSuccess() ? 1 : (item.getRolledBack() ? 2 : 3);
             int updated = jdbc.update("""
-                    UPDATE t_fix_record SET status = ?, log = ?, finished_at = now()
+                    UPDATE t_fix_record SET status = ?, log = ?, finished_at = CURRENT_TIMESTAMP
                     WHERE task_id = ? AND agent_id = ? AND ref_id = ?
                     """, status, truncate(item.getLog()), taskId, agentId, item.getRefId());
             if (updated == 0) {
                 // 兼容任务外单条补报（正常不出现）：补插记录
                 jdbc.update("""
                         INSERT INTO t_fix_record (task_id, agent_id, ref_id, ref_type, status, log, finished_at)
-                        VALUES (?, ?, ?, 'baseline_item', ?, ?, now())
+                        VALUES (?, ?, ?, 'baseline_item', ?, ?, CURRENT_TIMESTAMP)
                         """, taskId, agentId, item.getRefId(), status, truncate(item.getLog()));
             }
             // 软件包类（ref_type=vuln_finding）修复成功 → 漏洞清单置已修复（docs/05 §3.3）
             if (item.getSuccess()) {
                 jdbc.update("""
                         UPDATE t_vuln_finding SET status = 3
-                        WHERE id = ?::bigint AND agent_id = ?
+                        WHERE id = CAST(? AS BIGINT) AND agent_id = ?
                           AND EXISTS (SELECT 1 FROM t_fix_record r
                                       WHERE r.task_id = ? AND r.agent_id = ? AND r.ref_id = ?::varchar
                                         AND r.ref_type = 'vuln_finding')
@@ -74,7 +74,7 @@ public class FixResultService {
         Integer failed = jdbc.queryForObject(
                 "SELECT count(*) FROM t_fix_record WHERE task_id = ? AND status IN (2,3,5)", Integer.class, taskId);
         jdbc.update("""
-                UPDATE t_fix_task SET status = ?, finished_at = now()
+                UPDATE t_fix_task SET status = ?, finished_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status = 1
                 """, failed != null && failed > 0 ? 3 : 2, taskId);
     }

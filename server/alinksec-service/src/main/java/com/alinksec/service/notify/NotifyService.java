@@ -75,13 +75,13 @@ public class NotifyService {
             if (error == null) {
                 jdbc.update("""
                         UPDATE t_alert_notify_delivery
-                        SET attempts = attempts + 1, attempted_at = now(), delivered_at = now(), last_error = NULL
+                        SET attempts = attempts + 1, attempted_at = CURRENT_TIMESTAMP, delivered_at = CURRENT_TIMESTAMP, last_error = NULL
                         WHERE alert_no = ? AND channel_id = ?
                         """, alertNo, channelId);
             } else {
                 jdbc.update("""
                         UPDATE t_alert_notify_delivery
-                        SET attempts = attempts + 1, attempted_at = now(), last_error = ?
+                        SET attempts = attempts + 1, attempted_at = CURRENT_TIMESTAMP, last_error = ?
                         WHERE alert_no = ? AND channel_id = ?
                         """, error, alertNo, channelId);
             }

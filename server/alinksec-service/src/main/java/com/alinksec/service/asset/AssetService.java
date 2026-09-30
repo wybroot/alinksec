@@ -94,7 +94,7 @@ public class AssetService {
             for (var c : snapshot.getContainersList()) {
                 jdbc.update("""
                         INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?::jsonb)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getOrchestrator(),
                         c.getNamespace(), c.getStatus(), c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
                         c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,

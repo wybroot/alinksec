@@ -28,8 +28,8 @@ public class ComplianceReportService {
         sb.append("[主机资产]\n主机总数,在线,离线,在线率\n");
         Map<String, Object> hosts = jdbc.queryForMap("""
                 SELECT count(*) AS total,
-                       count(*) FILTER (WHERE status = 1) AS online,
-                       count(*) FILTER (WHERE status = 2) AS offline
+                       SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS online,
+                       SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS offline
                 FROM t_agent WHERE deleted = false
                 """);
         long total = ((Number) hosts.get("total")).longValue();
@@ -40,12 +40,14 @@ public class ComplianceReportService {
         // 2. 基线核查合规率（每主机最近一轮汇总）
         sb.append("\n[基线核查（每主机最近一轮）]\n主机,任务,检查项,通过,不通过,得分\n");
         List<Map<String, Object>> baselines = jdbc.queryForList("""
-                SELECT DISTINCT ON (s.agent_id) a.hostname, t.name AS task_name,
-                       s.total, s.passed_count, s.score
-                FROM t_baseline_summary s
-                JOIN t_agent a ON a.agent_id = s.agent_id
-                JOIN t_baseline_task t ON t.id = s.task_id
-                ORDER BY s.agent_id, s.checked_at DESC
+                SELECT hostname, task_name, total, passed_count, failed_count, score FROM (
+                    SELECT a.hostname, t.name AS task_name, s.total, s.passed_count,
+                           s.failed_count, s.score,
+                           ROW_NUMBER() OVER (PARTITION BY s.agent_id ORDER BY s.checked_at DESC) AS rn
+                    FROM t_baseline_summary s
+                    JOIN t_agent a ON a.agent_id = s.agent_id
+                    JOIN t_baseline_task t ON t.id = s.task_id
+                ) latest WHERE rn = 1
                 """);
         for (Map<String, Object> r : baselines) {
             sb.append(r.get("hostname")).append(',').append(r.get("task_name"))
@@ -57,7 +59,7 @@ public class ComplianceReportService {
         sb.append("\n[漏洞分布（区间内）]\n等级,数量\n");
         List<Map<String, Object>> vulns = jdbc.queryForList("""
                 SELECT severity, count(*) AS c FROM t_vuln_finding
-                WHERE created_at BETWEEN ?::timestamptz AND ?::timestamptz
+                WHERE created_at BETWEEN ? AND ?
                 GROUP BY severity ORDER BY severity DESC
                 """, from, to);
         for (Map<String, Object> r : vulns) {
@@ -69,8 +71,8 @@ public class ComplianceReportService {
         sb.append("\n[告警处置（区间内）]\n级别,新增,已处置,处置率\n");
         List<Map<String, Object>> alerts = jdbc.queryForList("""
                 SELECT severity, count(*) AS c,
-                       count(*) FILTER (WHERE status = 2) AS done
-                FROM t_alert WHERE first_time BETWEEN ?::timestamptz AND ?::timestamptz
+                       SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS done
+                FROM t_alert WHERE first_time BETWEEN ? AND ?
                 GROUP BY severity ORDER BY severity DESC
                 """, from, to);
         for (Map<String, Object> r : alerts) {

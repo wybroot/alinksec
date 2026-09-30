@@ -103,7 +103,7 @@ public class PatchRepoService {
             args.add(osType);
         }
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (pkg_name ILIKE ? OR target_version ILIKE ?)");
+            where.append(" AND (LOWER(pkg_name) LIKE LOWER(?) OR LOWER(target_version) LIKE LOWER(?))");
             String kw = "%" + keyword.trim() + "%";
             args.addAll(List.of(kw, kw));
         }

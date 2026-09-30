@@ -2,10 +2,12 @@ package com.alinksec.service.command;
 
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.proto.RptAck;
+import com.alinksec.service.config.DatabaseDialect;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,9 +32,11 @@ public class CommandRepository {
     public static final short ST_TIMEOUT = 6;
 
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
-    public CommandRepository(JdbcTemplate jdbc) {
+    public CommandRepository(JdbcTemplate jdbc, DatabaseDialect database) {
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     public void insert(String cmdId, String agentId, String type, String payloadJson, Long issuedBy) {
@@ -56,7 +60,7 @@ public class CommandRepository {
 
     public int markTimeout(String cmdId) {
         return jdbc.update("""
-                UPDATE t_command SET status = ?, finished_at = now(), result = ?
+                UPDATE t_command SET status = ?, finished_at = CURRENT_TIMESTAMP, result = ?
                 WHERE cmd_id = ? AND status = ?
                 """, ST_TIMEOUT, JsonUtils.write(Map.of("reason", "ack-timeout")), cmdId, ST_SENT);
     }
@@ -80,14 +84,14 @@ public class CommandRepository {
         if (terminal) {
             return jdbc.update("""
                     UPDATE t_command
-                    SET status = ?, acked_at = COALESCE(acked_at, now()), finished_at = now(),
+                    SET status = ?, acked_at = COALESCE(acked_at, CURRENT_TIMESTAMP), finished_at = CURRENT_TIMESTAMP,
                         result = ?
                     WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
                     """, target, result, ack.getCmdId(), agentId);
         }
         return jdbc.update("""
                 UPDATE t_command
-                SET status = ?, acked_at = COALESCE(acked_at, now())
+                SET status = ?, acked_at = COALESCE(acked_at, CURRENT_TIMESTAMP)
                 WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
                 """, target, ack.getCmdId(), agentId);
     }
@@ -97,8 +101,8 @@ public class CommandRepository {
         return jdbc.queryForList("""
                 SELECT id, cmd_id, agent_id, retry_count
                 FROM t_command
-                WHERE status = ? AND created_at < now() - ? * interval '1 second'
-                """, ST_SENT, ACK_TIMEOUT_SECONDS);
+                WHERE status = ? AND created_at < ?
+                """, ST_SENT, database.timestampBefore(Duration.ofSeconds(ACK_TIMEOUT_SECONDS)));
     }
 
     public Optional<Map<String, Object>> findByCmdId(String cmdId) {
@@ -107,7 +111,7 @@ public class CommandRepository {
 
     public int markFailed(String cmdId, String reason) {
         return jdbc.update("""
-                UPDATE t_command SET status = ?, finished_at = now(), result = ?
+                UPDATE t_command SET status = ?, finished_at = CURRENT_TIMESTAMP, result = ?
                 WHERE cmd_id = ? AND status NOT IN (?, ?, ?)
                 """, ST_FAILED, JsonUtils.write(Map.of("reason", reason)), cmdId,
                 ST_DONE, ST_FAILED, ST_TIMEOUT);
@@ -123,20 +127,23 @@ public class CommandRepository {
 
     /** Counts pending rows created before complete protobuf command persistence existed. */
     public int countLegacyPending() {
+        String commandPayload = database.jsonTextValue("payload", "command_b64");
         Integer count = jdbc.queryForObject("""
                 SELECT count(*) FROM t_command
-                WHERE status = ? AND COALESCE(payload ->> 'command_b64', '') = ''
-                """, Integer.class, ST_PENDING);
+                WHERE status = ? AND COALESCE(%s, '') = ''
+                """.formatted(commandPayload), Integer.class, ST_PENDING);
         return count == null ? 0 : count;
     }
 
     /** Explicitly resolves unrecoverable legacy commands instead of failing on each Agent reconnect. */
     public int failLegacyPending() {
+        String commandPayload = database.jsonTextValue("payload", "command_b64");
         return jdbc.update("""
                 UPDATE t_command
-                SET status = ?, finished_at = now(), result = ?
-                WHERE status = ? AND COALESCE(payload ->> 'command_b64', '') = ''
-                """, ST_FAILED, JsonUtils.write(Map.of("reason", "legacy command payload cannot be replayed")),
+                SET status = ?, finished_at = CURRENT_TIMESTAMP, result = ?
+                WHERE status = ? AND COALESCE(%s, '') = ''
+                """.formatted(commandPayload), ST_FAILED,
+                JsonUtils.write(Map.of("reason", "legacy command payload cannot be replayed")),
                 ST_PENDING);
     }
 

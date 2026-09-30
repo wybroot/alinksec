@@ -1,5 +1,6 @@
 package com.alinksec.service.query;
 
+import com.alinksec.service.config.DatabaseDialect;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -14,15 +15,17 @@ import java.util.Map;
 public class VirusQueryService {
 
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
-    public VirusQueryService(JdbcTemplate jdbc) {
+    public VirusQueryService(JdbcTemplate jdbc, DatabaseDialect database) {
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     public Map<String, Object> tasks(int page, int size) {
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_virus_scan_task", Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT t.id, t.task_no, t.name, t.mode, t.scope::text AS scope, t.status, t.progress,
+                SELECT t.id, t.task_no, t.name, t.mode, CAST(t.scope AS TEXT) AS scope, t.status, t.progress,
                        (SELECT count(*) FROM t_virus_finding f WHERE f.task_id = t.id) AS findings,
                        t.created_at, t.started_at, t.finished_at
                 FROM t_virus_scan_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
@@ -50,9 +53,8 @@ public class VirusQueryService {
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT f.id, f.task_id, f.agent_id, a.hostname, f.path, f.name, f.sha256, f.size,
                        f.engine, f.severity, f.action_taken, f.status, f.created_at
-                FROM t_virus_finding f LEFT JOIN t_agent a ON a.agent_id = f.agent_id""" + cond + """
-                ORDER BY f.created_at DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                FROM t_virus_finding f LEFT JOIN t_agent a ON a.agent_id = f.agent_id""" + cond
+                + " ORDER BY f.created_at DESC LIMIT ? OFFSET ?", size, (page - 1) * size);
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -76,8 +78,8 @@ public class VirusQueryService {
     public Map<String, Object> stats() {
         Map<String, Object> result = new HashMap<>();
         result.put("findings30d", jdbc.queryForObject(
-                "SELECT count(*) FROM t_virus_finding WHERE created_at >= now() - interval '30 day'",
-                Long.class));
+                "SELECT count(*) FROM t_virus_finding WHERE created_at >= ?",
+                Long.class, database.startOfDayDaysAgo(30)));
         result.put("quarantined", jdbc.queryForObject(
                 "SELECT count(*) FROM t_virus_finding WHERE status IN (1,2)", Long.class));
         result.put("latestDb", jdbc.queryForList("""

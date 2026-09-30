@@ -1,5 +1,7 @@
 package com.alinksec.service.fix;
 
+import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.config.DatabaseDialect;
 import com.alinksec.service.command.CommandService;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,7 +20,7 @@ class FixTaskServiceTest {
     @Test
     void rejectsDuplicateFindingBeforeQueryingDatabase() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), mock(PatchRepoService.class));
+        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), mock(PatchRepoService.class), database());
         Map<String, Object> item = Map.of("agentId", "agent-a", "findingId", 11);
 
         assertThrows(IllegalArgumentException.class, () ->
@@ -31,7 +33,7 @@ class FixTaskServiceTest {
     void rejectsAlreadyHandledFinding() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         PatchRepoService patches = mock(PatchRepoService.class);
-        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), patches);
+        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), patches, database());
         when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of(
                 Map.of("id", 11L, "agent_id", "agent-a", "status", 3)));
 
@@ -41,5 +43,9 @@ class FixTaskServiceTest {
                         "admin", null, null, 7L));
 
         verifyNoInteractions(patches);
+    }
+
+    private static DatabaseDialect database() {
+        return new DatabaseDialect(new AlinkSecProperties());
     }
 }

@@ -42,11 +42,10 @@ public class AlertQueryService {
                 "SELECT count(*) FROM t_alert t" + cond, Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.event_type, t.severity, t.title,
-                       t.detail::text AS detail, t.action_taken, t.status, t.count,
+                       CAST(t.detail AS TEXT) AS detail, t.action_taken, t.status, t.count,
                        t.first_time, t.last_time, t.handle_remark, t.handled_at
-                FROM t_alert t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond + """
-                ORDER BY t.last_time DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                FROM t_alert t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond
+                + " ORDER BY t.last_time DESC LIMIT ? OFFSET ?", size, (page - 1) * size);
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
@@ -66,7 +65,7 @@ public class AlertQueryService {
     public boolean handle(long id, long userId, String remark) {
         return jdbc.update("""
                 UPDATE t_alert
-                SET status = 2, handle_remark = ?, handled_by = ?, handled_at = now()
+                SET status = 2, handle_remark = ?, handled_by = ?, handled_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status IN (0,1)
                 """, remark, userId, id) > 0;
     }

@@ -23,6 +23,8 @@ alinksec-m1.zip
 
 # ---------- 运行时数据（证书/密钥/队列/特征库，绝不入库）----------
 data/
+backups/
+.tmp/
 *.crt
 *.key
 *.pem

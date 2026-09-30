@@ -1,6 +1,7 @@
 package com.alinksec.bootstrap;
 
 import com.alinksec.service.enroll.EnrollTokenService;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -20,6 +21,7 @@ public class DevSeedRunner implements CommandLineRunner {
 
     private final EnrollTokenService enrollTokenService;
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
     @Value("${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:}")
     private String bootstrapAdminPassword;
@@ -27,9 +29,10 @@ public class DevSeedRunner implements CommandLineRunner {
     @Value("${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:}")
     private String bootstrapEnrollToken;
 
-    public DevSeedRunner(EnrollTokenService enrollTokenService, JdbcTemplate jdbc) {
+    public DevSeedRunner(EnrollTokenService enrollTokenService, JdbcTemplate jdbc, DatabaseDialect database) {
         this.enrollTokenService = enrollTokenService;
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     @Override
@@ -66,8 +69,8 @@ public class DevSeedRunner implements CommandLineRunner {
         }
         jdbc.update("""
                 INSERT INTO t_enroll_token (token, max_uses, expire_at, created_by, status)
-                VALUES (?, 100, now() + interval '30 day', NULL, 1)
-                """, bootstrapEnrollToken.trim());
+                VALUES (?, 100, ?, NULL, 1)
+                """, bootstrapEnrollToken.trim(), database.timestampAfter(java.time.Duration.ofDays(30)));
         log.info("Bootstrap enrollment token created");
     }
 }

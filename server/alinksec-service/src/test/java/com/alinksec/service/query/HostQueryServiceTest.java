@@ -32,8 +32,10 @@ class HostQueryServiceTest {
         assertTrue(countSql.getValue().contains("a.status = ?"));
         assertArrayEquals(new Object[]{1}, countArgs.getValue());
 
+        ArgumentCaptor<String> pageSql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> pageArgs = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbc).queryForList(anyString(), pageArgs.capture());
+        verify(jdbc).queryForList(pageSql.capture(), pageArgs.capture());
+        assertTrue(pageSql.getValue().contains("a.status = ?\nORDER BY"));
         assertArrayEquals(new Object[]{1, 20, 20}, pageArgs.getValue());
     }
 }

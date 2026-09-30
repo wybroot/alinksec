@@ -92,7 +92,7 @@ public class VirusResultService {
             return;
         }
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT scope::text AS scope FROM t_virus_scan_task WHERE id = ?", taskId);
+                "SELECT CAST(scope AS TEXT) AS scope FROM t_virus_scan_task WHERE id = ?", taskId);
         if (rows.isEmpty()) {
             return;
         }
@@ -106,7 +106,7 @@ public class VirusResultService {
                 UPDATE t_virus_scan_task
                 SET progress = LEAST(100, progress + ?),
                     status = CASE WHEN progress + ? >= 100 THEN 2 ELSE 1 END,
-                    finished_at = CASE WHEN progress + ? >= 100 THEN now() ELSE finished_at END
+                    finished_at = CASE WHEN progress + ? >= 100 THEN CURRENT_TIMESTAMP ELSE finished_at END
                 WHERE id = ? AND status = 1
                 """, step, step, step, taskId);
     }

@@ -5,6 +5,7 @@ import com.alinksec.proto.BaselineCheckSpec;
 import com.alinksec.proto.CmdBaselineCheck;
 import com.alinksec.proto.Command;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,10 +35,12 @@ public class BaselineTaskService {
 
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
+    private final DatabaseDialect database;
 
-    public BaselineTaskService(JdbcTemplate jdbc, CommandService commandService) {
+    public BaselineTaskService(JdbcTemplate jdbc, CommandService commandService, DatabaseDialect database) {
         this.jdbc = jdbc;
         this.commandService = commandService;
+        this.database = database;
     }
 
     /**
@@ -66,8 +70,8 @@ public class BaselineTaskService {
         // 主机快照：agent_id + os_type（后续按 OS 过滤适用检查项）
         List<Map<String, Object>> agents = jdbc.queryForList("""
                 SELECT agent_id, os_type FROM t_agent
-                WHERE agent_id = ANY (?::varchar[])
-                """, toArrayLiteral(agentIds));
+                WHERE agent_id IN (%s)
+                """.formatted(DatabaseDialect.placeholders(agentIds.size())), agentIds.toArray());
         if (agents.size() != agentIds.size()) {
             throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
         }
@@ -76,12 +80,12 @@ public class BaselineTaskService {
                 + ThreadLocalRandom.current().nextInt(100, 1000);
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_baseline_task (task_no, name, scope, template_ids, status, created_by) "
-                        + "VALUES (?, ?, ?::jsonb, ?::bigint[], 1, ?) RETURNING id",
+                        + "VALUES (?, ?, ?, ?, 1, ?) RETURNING id",
                 Long.class, taskNo,
                 name == null || name.isBlank() ? taskNo + " 基线核查" : name,
                 JsonUtils.write(Map.of("group_ids", List.of(), "agent_ids", agentIds)),
-                toArrayLiteralLong(templateIds), createdBy);
-        jdbc.update("UPDATE t_baseline_task SET started_at = now() WHERE id = ?", taskId);
+                database.encodeLongList(templateIds), createdBy);
+        jdbc.update("UPDATE t_baseline_task SET started_at = CURRENT_TIMESTAMP WHERE id = ?", taskId);
 
         int dispatched = 0;
         for (Map<String, Object> agent : agents) {
@@ -106,13 +110,15 @@ public class BaselineTaskService {
 
     /** 组装 CmdBaselineCheck：模板 × 启用项 × 主机 OS */
     private CmdBaselineCheck.Builder buildCheckCommand(long taskId, List<Long> templateIds, int osType) {
+        List<Object> args = new ArrayList<>(templateIds);
+        args.add(osType);
         List<Map<String, Object>> items = jdbc.queryForList("""
-                SELECT i.id, i.check::text AS check
+                SELECT i.id, CAST(i."check" AS TEXT) AS "check"
                 FROM t_baseline_item i
                 JOIN t_baseline_template t ON t.id = i.template_id
-                WHERE t.id = ANY (?::bigint[]) AND t.os_type = ? AND i.enabled
+                WHERE t.id IN (%s) AND t.os_type = ? AND i.enabled
                 ORDER BY i.id
-                """, toArrayLiteralLong(templateIds), osType);
+                """.formatted(DatabaseDialect.placeholders(templateIds.size())), args.toArray());
         CmdBaselineCheck.Builder builder = CmdBaselineCheck.newBuilder()
                 .setTaskId(String.valueOf(taskId))
                 .addAllTemplateIds(templateIds.stream().map(String::valueOf)::iterator);
@@ -131,29 +137,12 @@ public class BaselineTaskService {
     @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
     public void sweepTimeout() {
         int rows = jdbc.update("""
-                UPDATE t_baseline_task SET status = 3, finished_at = now()
-                WHERE status = 1 AND created_at < now() - interval '30 minutes'
-                """);
+                UPDATE t_baseline_task SET status = 3, finished_at = CURRENT_TIMESTAMP
+                WHERE status = 1 AND created_at < ?
+                """, database.timestampBefore(Duration.ofMinutes(30)));
         if (rows > 0) {
             log.warn("基线任务超时置部分失败: count={}", rows);
         }
     }
 
-    /* ---------- 工具：List → PG 数组字面量 ---------- */
-
-    private static String toArrayLiteral(List<String> values) {
-        List<String> escaped = new ArrayList<>(values.size());
-        for (String v : values) {
-            escaped.add("\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"");
-        }
-        return "{" + String.join(",", escaped) + "}";
-    }
-
-    private static String toArrayLiteralLong(List<Long> values) {
-        List<String> nums = new ArrayList<>(values.size());
-        for (Long v : values) {
-            nums.add(String.valueOf(v));
-        }
-        return "{" + String.join(",", nums) + "}";
-    }
 }

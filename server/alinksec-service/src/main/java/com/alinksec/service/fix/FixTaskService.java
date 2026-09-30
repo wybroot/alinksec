@@ -5,6 +5,7 @@ import com.alinksec.proto.CmdVulnFix;
 import com.alinksec.proto.Command;
 import com.alinksec.proto.FixItem;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,11 +37,14 @@ public class FixTaskService {
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
     private final PatchRepoService patchRepo;
+    private final DatabaseDialect database;
 
-    public FixTaskService(JdbcTemplate jdbc, CommandService commandService, PatchRepoService patchRepo) {
+    public FixTaskService(JdbcTemplate jdbc, CommandService commandService, PatchRepoService patchRepo,
+                          DatabaseDialect database) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.patchRepo = patchRepo;
+        this.database = database;
     }
 
     /**
@@ -71,9 +76,10 @@ public class FixTaskService {
         List<Long> itemIds = targets.stream().map(Target::itemId).distinct().toList();
         Map<Long, Map<String, Object>> specs = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbc.queryForList("""
-                SELECT id, code, name, fix_spec::text AS fix_spec, check::text AS check
-                FROM t_baseline_item WHERE id = ANY (?::bigint[])
-                """, toArrayLiteralLong(itemIds))) {
+                SELECT id, code, name, CAST(fix_spec AS TEXT) AS fix_spec,
+                       CAST("check" AS TEXT) AS "check"
+                FROM t_baseline_item WHERE id IN (%s)
+                """.formatted(DatabaseDialect.placeholders(itemIds.size())), itemIds.toArray())) {
             specs.put(((Number) row.get("id")).longValue(), row);
         }
 
@@ -111,8 +117,9 @@ public class FixTaskService {
         // 主机存在性校验
         List<String> agentIds = List.copyOf(byAgent.keySet());
         Integer exists = jdbc.queryForObject(
-                "SELECT count(*) FROM t_agent WHERE agent_id = ANY (?::varchar[]) AND deleted = false",
-                Integer.class, toArrayLiteral(agentIds));
+                "SELECT count(*) FROM t_agent WHERE agent_id IN ("
+                        + DatabaseDialect.placeholders(agentIds.size()) + ") AND deleted = false",
+                Integer.class, agentIds.toArray());
         if (exists == null || exists != agentIds.size()) {
             throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
         }
@@ -121,12 +128,12 @@ public class FixTaskService {
                 + ThreadLocalRandom.current().nextInt(100, 1000);
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_fix_task (task_no, name, type, scope, targets, status, created_by) "
-                        + "VALUES (?, ?, 1, ?::jsonb, ?::jsonb, 1, ?) RETURNING id",
+                        + "VALUES (?, ?, 1, ?, ?, 1, ?) RETURNING id",
                 Long.class, taskNo,
                 name == null || name.isBlank() ? taskNo + " 配置修复" : name,
                 JsonUtils.write(Map.of("agent_ids", agentIds)),
                 JsonUtils.write(targetRows), createdBy);
-        jdbc.update("UPDATE t_fix_task SET started_at = now() WHERE id = ?", taskId);
+        jdbc.update("UPDATE t_fix_task SET started_at = CURRENT_TIMESTAMP WHERE id = ?", taskId);
 
         // 预写 t_fix_record（待执行），结果上报按 task+agent+ref 更新
         for (Map<String, Object> row : targetRows) {
@@ -152,9 +159,9 @@ public class FixTaskService {
     @Scheduled(fixedDelay = 120_000, initialDelay = 150_000)
     public void sweepTimeout() {
         int rows = jdbc.update("""
-                UPDATE t_fix_task SET status = 3, finished_at = now()
-                WHERE status = 1 AND created_at < now() - interval '30 minutes'
-                """);
+                UPDATE t_fix_task SET status = 3, finished_at = CURRENT_TIMESTAMP
+                WHERE status = 1 AND created_at < ?
+                """, database.timestampBefore(Duration.ofMinutes(30)));
         if (rows > 0) {
             log.warn("修复任务超时置部分失败: count={}", rows);
         }
@@ -194,8 +201,8 @@ public class FixTaskService {
                 SELECT f.id, f.agent_id, f.cve_id, f.software, f.installed_version, f.fixed_version, f.status,
                        a.os_type, a.os_version
                 FROM t_vuln_finding f JOIN t_agent a ON a.agent_id = f.agent_id AND a.deleted = false
-                WHERE f.id = ANY (?::bigint[])
-                """, toArrayLiteralLong(findingIds))) {
+                WHERE f.id IN (%s)
+                """.formatted(DatabaseDialect.placeholders(findingIds.size())), findingIds.toArray())) {
             findings.put(((Number) row.get("id")).longValue(), row);
         }
 
@@ -260,11 +267,11 @@ public class FixTaskService {
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_fix_task (task_no, name, type, scope, targets, status, created_by, approver, "
                         + "approved, window_start, window_end) "
-                        + "VALUES (?, ?, 2, ?::jsonb, ?::jsonb, 0, ?, ?, false, ?, ?) RETURNING id",
+                        + "VALUES (?, ?, 2, ?, ?, 0, ?, ?, false, ?, ?) RETURNING id",
                 Long.class, taskNo,
                 name == null || name.isBlank() ? taskNo + " 软件包修复" : name,
                 JsonUtils.write(Map.of("agent_ids", List.copyOf(byAgent.keySet()))),
-                JsonUtils.write(targetRows), createdBy, approver, ws, we);
+                JsonUtils.write(targetRows), createdBy, approver, database.timestamp(ws), database.timestamp(we));
 
         // 预写 t_fix_record（待执行/待审批派发）
         for (Map<String, Object> row : targetRows) {
@@ -286,13 +293,13 @@ public class FixTaskService {
         if (((Number) task.get("type")).intValue() != 2) {
             throw new IllegalArgumentException("仅软件包类任务需审批");
         }
-        if (Boolean.TRUE.equals(task.get("approved"))) {
+        if (isTrue(task.get("approved"))) {
             return Map.of("taskId", taskId, "state", "already");
         }
-        jdbc.update("UPDATE t_fix_task SET approved = true, approved_at = now(), approver = COALESCE(?, approver) "
+        jdbc.update("UPDATE t_fix_task SET approved = true, approved_at = CURRENT_TIMESTAMP, approver = COALESCE(?, approver) "
                 + "WHERE id = ?", operator, taskId);
         boolean inWindow = task.get("window_start") == null
-                || !OffsetDateTime.now().isBefore(((OffsetDateTime) task.get("window_start")));
+                || !OffsetDateTime.now().isBefore(database.readOffsetDateTime(task.get("window_start")));
         if (inWindow) {
             dispatchApproved(taskId);
             return Map.of("taskId", taskId, "state", "dispatched");
@@ -306,7 +313,7 @@ public class FixTaskService {
         List<Long> ids = jdbc.queryForList("""
                 SELECT id FROM t_fix_task
                 WHERE type = 2 AND approved = true AND dispatched_at IS NULL
-                  AND (window_start IS NULL OR window_start <= now())
+                  AND (window_start IS NULL OR window_start <= CURRENT_TIMESTAMP)
                   AND status = 0
                 """, Long.class);
         for (Long id : ids) {
@@ -321,7 +328,7 @@ public class FixTaskService {
     /** 派发已审批任务：按 targets 分组下发 CmdVulnFix（PACKAGE 项） */
     private void dispatchApproved(long taskId) {
         Map<String, Object> task = jdbc.queryForMap(
-                "SELECT targets::text AS targets FROM t_fix_task WHERE id = ?", taskId);
+                "SELECT CAST(targets AS TEXT) AS targets FROM t_fix_task WHERE id = ?", taskId);
         List<Map<String, Object>> targets = JsonUtils.read((String) task.get("targets"), List.class);
         Map<String, List<FixItem>> byAgent = new LinkedHashMap<>();
         for (Map<String, Object> t : targets) {
@@ -336,7 +343,7 @@ public class FixTaskService {
                 // payload 仅用于构造，无需额外处理
             }
         }
-        jdbc.update("UPDATE t_fix_task SET status = 1, started_at = now(), dispatched_at = now() "
+        jdbc.update("UPDATE t_fix_task SET status = 1, started_at = CURRENT_TIMESTAMP, dispatched_at = CURRENT_TIMESTAMP "
                 + "WHERE id = ? AND dispatched_at IS NULL", taskId);
         for (var e : byAgent.entrySet()) {
             commandService.dispatch(e.getKey(), Command.newBuilder()
@@ -354,24 +361,8 @@ public class FixTaskService {
         return OffsetDateTime.parse(s.contains("+") || s.endsWith("Z") ? s : s + ":00+08:00");
     }
 
-    /* ---------- 工具 ---------- */
-
-    private static String toArrayLiteral(List<String> values) {
-        StringBuilder sb = new StringBuilder("{");
-        for (int i = 0; i < values.size(); i++) {
-            if (i > 0) sb.append(',');
-            sb.append('"').append(values.get(i)
-                    .replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
-        }
-        return sb.append('}').toString();
-    }
-
-    private static String toArrayLiteralLong(List<Long> values) {
-        StringBuilder sb = new StringBuilder("{");
-        for (int i = 0; i < values.size(); i++) {
-            if (i > 0) sb.append(',');
-            sb.append(values.get(i));
-        }
-        return sb.append('}').toString();
+    private static boolean isTrue(Object value) {
+        return value instanceof Boolean bool ? bool
+                : value instanceof Number number && number.intValue() != 0;
     }
 }

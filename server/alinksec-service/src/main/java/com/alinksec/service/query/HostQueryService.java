@@ -25,7 +25,7 @@ public class HostQueryService {
         StringBuilder where = new StringBuilder(" WHERE a.status <> 4");
         List<Object> args = new ArrayList<>();
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (a.hostname ILIKE ? OR a.ip ILIKE ? OR a.agent_id ILIKE ?)");
+            where.append(" AND (LOWER(a.hostname) LIKE LOWER(?) OR LOWER(a.ip) LIKE LOWER(?) OR LOWER(a.agent_id) LIKE LOWER(?))");
             String pattern = "%" + keyword.trim() + "%";
             args.add(pattern);
             args.add(pattern);
@@ -58,12 +58,10 @@ public class HostQueryService {
                        (SELECT count(*) FROM t_asset_account c WHERE c.agent_id = a.agent_id AND c.risky = TRUE) AS risky_account_count,
                        (SELECT count(*) FROM t_asset_container c WHERE c.agent_id = a.agent_id) AS container_count,
                        (SELECT count(*) FROM t_alert ta WHERE ta.agent_id = a.agent_id AND ta.status IN (0,1)) AS alert_count,
-                       e.title AS last_event
+                       (SELECT title FROM t_alert t2 WHERE t2.agent_id = a.agent_id
+                        ORDER BY t2.last_time DESC LIMIT 1) AS last_event
                 FROM t_agent a
-                LEFT JOIN LATERAL (
-                    SELECT title FROM t_alert t2 WHERE t2.agent_id = a.agent_id
-                    ORDER BY t2.last_time DESC LIMIT 1
-                ) e ON TRUE""" + cond + """
+                """ + cond + "\n" + """
                 ORDER BY a.status, a.hostname
                 LIMIT ? OFFSET ?
                 """, pageArgs.toArray());
@@ -100,7 +98,7 @@ public class HostQueryService {
         return jdbc.queryForList("""
                 SELECT name, version, vendor, install_time, source
                 FROM t_asset_software WHERE agent_id = ?
-                  AND (? IS NULL OR name ILIKE '%' || ? || '%')
+                  AND (? IS NULL OR LOWER(name) LIKE LOWER('%' || ? || '%'))
                 ORDER BY name LIMIT ? OFFSET ?
                 """, agentId, blankToNull(keyword), keyword, size, (page - 1) * size);
     }

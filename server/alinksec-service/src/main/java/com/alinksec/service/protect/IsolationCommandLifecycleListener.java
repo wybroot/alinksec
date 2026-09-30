@@ -55,7 +55,7 @@ public class IsolationCommandLifecycleListener implements CommandLifecycleListen
         int rows = jdbc.update("""
                 UPDATE t_agent
                 SET isolation_status = ?, isolation_command_id = ?, isolation_error = NULL,
-                    isolation_updated_at = now(), updated_at = now()
+                    isolation_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE agent_id = ? AND status <> 4 AND isolation_status IN (?, ?)
                 """, target, cmdId, agentId, allowedA, allowedB);
         if (rows == 0) {
@@ -67,7 +67,7 @@ public class IsolationCommandLifecycleListener implements CommandLifecycleListen
         jdbc.update("""
                 UPDATE t_agent
                 SET isolation_status = ?, isolation_command_id = NULL, isolation_error = ?,
-                    isolation_updated_at = now(), updated_at = now()
+                    isolation_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE agent_id = ? AND isolation_command_id = ? AND isolation_status = ?
                 """, target, error, agentId, cmdId, expected);
     }

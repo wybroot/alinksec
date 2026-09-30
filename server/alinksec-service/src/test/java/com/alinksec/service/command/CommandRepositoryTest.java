@@ -1,6 +1,8 @@
 package com.alinksec.service.command;
 
 import com.alinksec.proto.RptAck;
+import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.config.DatabaseDialect;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,7 +16,7 @@ class CommandRepositoryTest {
     @Test
     void timeoutOnlyUpdatesCommandsThatAreStillSent() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        CommandRepository repository = new CommandRepository(jdbc);
+        CommandRepository repository = new CommandRepository(jdbc, database());
 
         repository.markTimeout("command-a");
 
@@ -28,7 +30,7 @@ class CommandRepositoryTest {
     @Test
     void receivedAckIsScopedToAuthenticatedAgent() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        CommandRepository repository = new CommandRepository(jdbc);
+        CommandRepository repository = new CommandRepository(jdbc, database());
         RptAck ack = RptAck.newBuilder().setCmdId("command-b").setStage(RptAck.Stage.RECEIVED).build();
 
         repository.onAck("agent-a", ack);
@@ -42,7 +44,7 @@ class CommandRepositoryTest {
     @Test
     void terminalAckIsScopedToAuthenticatedAgent() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        CommandRepository repository = new CommandRepository(jdbc);
+        CommandRepository repository = new CommandRepository(jdbc, database());
         RptAck ack = RptAck.newBuilder().setCmdId("command-b").setStage(RptAck.Stage.DONE).build();
 
         repository.onAck("agent-a", ack);
@@ -52,5 +54,9 @@ class CommandRepositoryTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("command-b"),
                 org.mockito.ArgumentMatchers.eq("agent-a"));
         assertTrue(sql.getValue().contains("cmd_id = ? AND agent_id = ?"));
+    }
+
+    private static DatabaseDialect database() {
+        return new DatabaseDialect(new AlinkSecProperties());
     }
 }

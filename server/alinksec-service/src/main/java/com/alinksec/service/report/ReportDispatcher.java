@@ -10,6 +10,7 @@ import com.alinksec.service.log.LogBatchService;
 import com.alinksec.service.metrics.MetricsForwarder;
 import com.alinksec.service.scan.ScanResultService;
 import com.alinksec.service.virus.VirusResultService;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,6 +38,7 @@ public class ReportDispatcher {
     private final MetricsForwarder metricsForwarder;
     private final LogBatchService logBatchService;
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
     public ReportDispatcher(HeartbeatService heartbeatService, AssetService assetService,
                             SecurityEventService securityEventService, CommandService commandService,
@@ -46,7 +48,7 @@ public class ReportDispatcher {
                             FixResultService fixResultService,
                             MetricsForwarder metricsForwarder,
                             LogBatchService logBatchService,
-                            JdbcTemplate jdbc) {
+                            JdbcTemplate jdbc, DatabaseDialect database) {
         this.heartbeatService = heartbeatService;
         this.assetService = assetService;
         this.securityEventService = securityEventService;
@@ -58,6 +60,7 @@ public class ReportDispatcher {
         this.metricsForwarder = metricsForwarder;
         this.logBatchService = logBatchService;
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
@@ -86,11 +89,11 @@ public class ReportDispatcher {
         try {
             int inserted = jdbc.update("""
                     INSERT INTO t_report_dedup (report_id, expire_at)
-                    VALUES (?, now() + ? * interval '1 second')
+                    VALUES (?, ?)
                     ON CONFLICT (report_id) DO NOTHING
-                    """, reportId, ttl.getSeconds());
+                    """, reportId, database.timestampAfter(ttl));
             // 顺手清理过期行（低频小表，代价可忽略）
-            jdbc.update("DELETE FROM t_report_dedup WHERE expire_at < now()");
+            jdbc.update("DELETE FROM t_report_dedup WHERE expire_at < CURRENT_TIMESTAMP");
             return inserted == 1;
         } catch (Exception e) {
             // 去重表异常不阻塞主链路（宁可重复处理，不可丢上报）

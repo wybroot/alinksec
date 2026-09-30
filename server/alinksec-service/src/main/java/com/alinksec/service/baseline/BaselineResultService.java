@@ -1,6 +1,8 @@
 package com.alinksec.service.baseline;
 
+import com.alinksec.common.util.JsonUtils;
 import com.alinksec.proto.RptBaselineResult;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -66,7 +68,7 @@ public class BaselineResultService {
         if (!rows.isEmpty()) {
             jdbc.batchUpdate("""
                     INSERT INTO t_baseline_result (task_id, agent_id, item_id, passed, actual, message, checked_at)
-                    VALUES (?, ?, ?, ?, ?, ?, now())
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """, rows);
         }
         int total = rows.size();
@@ -74,10 +76,10 @@ public class BaselineResultService {
         int score = total == 0 ? 0 : (int) Math.round(passed * 100.0 / total);
         jdbc.update("""
                 INSERT INTO t_baseline_summary (task_id, agent_id, total, passed_count, failed_count, score, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT (task_id, agent_id) DO UPDATE
                 SET total = EXCLUDED.total, passed_count = EXCLUDED.passed_count,
-                    failed_count = EXCLUDED.failed_count, score = EXCLUDED.score, checked_at = now()
+                    failed_count = EXCLUDED.failed_count, score = EXCLUDED.score, checked_at = CURRENT_TIMESTAMP
                 """, taskId, agentId, total, passed, failed, score);
 
         updateTaskProgress(taskId);
@@ -86,25 +88,36 @@ public class BaselineResultService {
 
     /** 进度 = 已上报主机数 / scope 主机数；全部收齐 → 完成 */
     private void updateTaskProgress(long taskId) {
-        Integer agentCount = jdbc.queryForObject("""
-                SELECT count(*) FROM t_agent a
-                WHERE a.agent_id = ANY (SELECT jsonb_array_elements_text(t.scope->'agent_ids')
-                                        FROM t_baseline_task t WHERE t.id = ?)
-                   OR a.group_id IN (SELECT (jsonb_array_elements_text(t.scope->'group_ids'))::bigint
-                                     FROM t_baseline_task t WHERE t.id = ?)
-                """, Integer.class, taskId, taskId);
+        String scope = jdbc.queryForObject(
+                "SELECT CAST(scope AS TEXT) FROM t_baseline_task WHERE id = ?", String.class, taskId);
+        var scopeJson = JsonUtils.read(scope == null ? "{}" : scope);
+        List<Object> targets = new ArrayList<>();
+        List<String> conditions = new ArrayList<>();
+        var agentIds = scopeJson.path("agent_ids");
+        if (agentIds.isArray() && !agentIds.isEmpty()) {
+            conditions.add("a.agent_id IN (" + DatabaseDialect.placeholders(agentIds.size()) + ")");
+            agentIds.forEach(value -> targets.add(value.asText()));
+        }
+        var groupIds = scopeJson.path("group_ids");
+        if (groupIds.isArray() && !groupIds.isEmpty()) {
+            conditions.add("a.group_id IN (" + DatabaseDialect.placeholders(groupIds.size()) + ")");
+            groupIds.forEach(value -> targets.add(value.asLong()));
+        }
+        Integer agentCount = conditions.isEmpty() ? 0 : jdbc.queryForObject(
+                "SELECT count(*) FROM t_agent a WHERE " + String.join(" OR ", conditions),
+                Integer.class, targets.toArray());
         Integer reported = jdbc.queryForObject(
                 "SELECT count(*) FROM t_baseline_summary WHERE task_id = ?", Integer.class, taskId);
         int total = agentCount == null ? 0 : agentCount;
         int done = reported == null ? 0 : reported;
         int progress = total == 0 ? 100 : Math.min(100, done * 100 / total);
         if (done >= total && total > 0) {
-            jdbc.update("UPDATE t_baseline_task SET progress = ?, status = 2, finished_at = now() WHERE id = ?",
+            jdbc.update("UPDATE t_baseline_task SET progress = ?, status = 2, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
                     progress, taskId);
         } else {
             jdbc.update("""
                     UPDATE t_baseline_task SET progress = ?, status = 1,
-                           started_at = COALESCE(started_at, now()), finished_at = NULL
+                           started_at = COALESCE(started_at, CURRENT_TIMESTAMP), finished_at = NULL
                     WHERE id = ? AND status IN (0, 1, 3)
                     """, progress, taskId);
         }

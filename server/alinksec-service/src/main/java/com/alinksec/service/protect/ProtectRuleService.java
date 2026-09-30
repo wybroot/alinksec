@@ -42,15 +42,15 @@ public class ProtectRuleService {
 
     /** 编辑规则（match/actions/enabled；内置规则不可删只可调），version 递增 */
     public void updateRule(String ruleId, Map<String, Object> body) {
-        StringBuilder sql = new StringBuilder("UPDATE t_protect_rule SET updated_at = now(), version = version + 1");
+        StringBuilder sql = new StringBuilder("UPDATE t_protect_rule SET updated_at = CURRENT_TIMESTAMP, version = version + 1");
         Object[] args = new Object[4];
         int n = 0;
         if (body.containsKey("match")) {
-            sql.append(", match = ?::jsonb");
+            sql.append(", match = ?");
             args[n++] = com.alinksec.common.util.JsonUtils.write(body.get("match"));
         }
         if (body.containsKey("actions")) {
-            sql.append(", actions = ?::jsonb");
+            sql.append(", actions = ?");
             args[n++] = com.alinksec.common.util.JsonUtils.write(body.get("actions"));
         }
         if (body.containsKey("enabled")) {

@@ -1,0 +1,58 @@
+name: alinksec-lite
+
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: alinksec-lite-server
+    environment:
+      SPRING_PROFILES_ACTIVE: sqlite
+      ALINKSEC_SQLITE_PATH: /app/data/alinksec.db
+      ALINKSEC_METRICS_ENABLED: "false"
+      ALINKSEC_WEB_TLS_DIR: /app/web-tls
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:?set ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD in .env.lite}
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:?set ALINKSEC_BOOTSTRAP_ENROLL_TOKEN in .env.lite}
+      ALINKSEC_LEGACY_COMMAND_POLICY: ${ALINKSEC_LEGACY_COMMAND_POLICY:-report}
+      ALINKSEC_SIG_BASE: "${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}:8443"
+      ALINKSEC_PUBLIC_HOST: "${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}"
+      ALINKSEC_JWT_SECRET: ${ALINKSEC_JWT_SECRET:-}
+      ALINKSEC_SERVER_TLS_SANS: "localhost,127.0.0.1,::1,alinksec-lite-server,${HOST_IP:?set HOST_IP to the Agent-reachable IPv4 or DNS name}"
+      TZ: Asia/Shanghai
+    ports:
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:9443:9443"
+    volumes:
+      - server-data:/app/data
+      - web-tls:/app/web-tls
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+    container_name: alinksec-lite-web
+    ports:
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:8081:80"
+      - "${ALINKSEC_BIND_ADDRESS:?set ALINKSEC_BIND_ADDRESS to a local IPv4}:8443:443"
+    depends_on:
+      - server
+    volumes:
+      - web-tls:/etc/nginx/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/api/health | grep -q '\"code\":0'"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    restart: unless-stopped
+
+  sqlite-maintenance:
+    image: keinos/sqlite3:3.46.1
+    profiles: ["maintenance"]
+    volumes:
+      - server-data:/data
+      - ${ALINKSEC_BACKUP_DIR:-../../backups}:/backups
+
+volumes:
+  server-data:
+  web-tls:

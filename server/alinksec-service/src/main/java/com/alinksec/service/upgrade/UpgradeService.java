@@ -107,7 +107,7 @@ public class UpgradeService {
     public List<Map<String, Object>> versionDistribution() {
         return jdbc.queryForList("""
                 SELECT agent_version AS version, count(*) AS count,
-                        bool_and(status = 1) FILTER (WHERE status = 1) AS all_online
+                        CASE WHEN SUM(CASE WHEN status <> 1 THEN 1 ELSE 0 END) = 0 THEN true ELSE false END AS all_online
                 FROM t_agent WHERE deleted = false
                 GROUP BY agent_version ORDER BY count DESC
                 """);

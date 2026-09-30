@@ -1,0 +1,24 @@
+spring:
+  config:
+    activate:
+      on-profile: sqlite
+  datasource:
+    url: jdbc:sqlite:${ALINKSEC_SQLITE_PATH:./data/alinksec.db}
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 1
+      connection-timeout: 5000
+      data-source-properties:
+        busy_timeout: 5000
+        foreign_keys: true
+        journal_mode: WAL
+        synchronous: NORMAL
+        date_class: TEXT
+        date_string_format: yyyy-MM-dd HH:mm:ss.SSS
+
+alinksec:
+  database:
+    type: sqlite
+  metrics:
+    enabled: ${ALINKSEC_METRICS_ENABLED:false}

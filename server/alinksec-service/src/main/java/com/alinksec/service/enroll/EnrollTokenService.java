@@ -2,12 +2,14 @@ package com.alinksec.service.enroll;
 
 import com.alinksec.common.error.ApiException;
 import com.alinksec.common.error.ErrorCode;
+import com.alinksec.service.config.DatabaseDialect;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -19,9 +21,11 @@ import java.util.Map;
 public class EnrollTokenService {
 
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
-    public EnrollTokenService(JdbcTemplate jdbc) {
+    public EnrollTokenService(JdbcTemplate jdbc, DatabaseDialect database) {
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     /** 校验并核销一次使用名额（幂等性由调用方事务保证：事务回滚则名额不消耗） */
@@ -30,7 +34,7 @@ public class EnrollTokenService {
         int updated = jdbc.update("""
                 UPDATE t_enroll_token
                 SET used_count = used_count + 1
-                WHERE token = ? AND status = 1 AND expire_at > now() AND used_count < max_uses
+                WHERE token = ? AND status = 1 AND expire_at > CURRENT_TIMESTAMP AND used_count < max_uses
                 """, token);
         if (updated == 1) {
             return;
@@ -43,7 +47,7 @@ public class EnrollTokenService {
         }
         var row = rows.get(0);
         if (((Number) row.get("status")).intValue() != 1
-                || ((OffsetDateTime) row.get("expire_at")).isBefore(OffsetDateTime.now())) {
+                || database.readOffsetDateTime(row.get("expire_at")).isBefore(OffsetDateTime.now())) {
             throw new ApiException(ErrorCode.ENROLL_TOKEN_INVALID);
         }
         throw new ApiException(ErrorCode.ENROLL_TOKEN_EXHAUSTED);
@@ -57,14 +61,14 @@ public class EnrollTokenService {
         String token = "ENROLL-" + randomToken();
         jdbc.update("""
                 INSERT INTO t_enroll_token (token, max_uses, expire_at, created_by, status)
-                VALUES (?, ?, now() + ? * interval '1 day', ?, 1)
-                """, token, maxUses, validDays, createdBy);
+                VALUES (?, ?, ?, ?, 1)
+                """, token, maxUses, database.timestampAfter(Duration.ofDays(validDays)), createdBy);
         return token;
     }
 
     public boolean anyExists() {
         Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM t_enroll_token WHERE status = 1 AND expire_at > now()", Integer.class);
+                "SELECT COUNT(*) FROM t_enroll_token WHERE status = 1 AND expire_at > CURRENT_TIMESTAMP", Integer.class);
         return count != null && count > 0;
     }
 

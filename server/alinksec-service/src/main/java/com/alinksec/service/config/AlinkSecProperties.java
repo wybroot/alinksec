@@ -13,6 +13,7 @@ import java.util.List;
 public class AlinkSecProperties {
 
     private Server server = new Server();
+    private Database database = new Database();
     private Policy policy = new Policy();
     private Metrics metrics = new Metrics();
     private Signature signature = new Signature();
@@ -20,11 +21,20 @@ public class AlinkSecProperties {
     private Upgrade upgrade = new Upgrade();
 
     public Server getServer() { return server; }
+    public Database getDatabase() { return database; }
     public Policy getPolicy() { return policy; }
     public Metrics getMetrics() { return metrics; }
     public Signature getSignature() { return signature; }
     public Patch getPatch() { return patch; }
     public Upgrade getUpgrade() { return upgrade; }
+
+    /** 关系数据库后端：postgres / sqlite。 */
+    public static class Database {
+        private String type = "postgres";
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+    }
 
     /** Agent 升级包（docs/01 §6.4：M4 本地磁盘存储，与 signature/patch 同模式） */
     public static class Upgrade {

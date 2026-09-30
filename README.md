@@ -268,6 +268,15 @@ iptables 专用链 `ALINKSEC_ISO` 挂载 INPUT/OUTPUT 首位：
 
 ---
 
+## 部署模式
+
+| 模式 | 组成 | 适用范围 | 启动文件 |
+|---|---|---|---|
+| 生产模式 | PostgreSQL 17 + VictoriaMetrics + server + web | 正式环境、持续运行与后续扩容 | `deploy/docker/docker-compose.yml` |
+| 轻量模式 | SQLite WAL + server + web | 开发、演示、初始 1～10 台受管主机 | `deploy/docker/docker-compose.lite.yml` |
+
+两种模式使用同一套业务接口与 Agent 协议。SQLite 为单实例部署，默认关闭时序指标，不支持高可用，数据库文件不得放在 NFS/SMB；正式上线与 PostgreSQL 兼容性仍以生产模式验证为准。
+
 ## �🚀 快速开始
 
 > ⏱️ **服务器两条命令 + 目标主机一条命令**，从零到平台跑起来
@@ -283,6 +292,8 @@ $env:GOOS=""; $env:GOARCH=""; cd ..
 ```
 
 ### ② 服务器部署（Docker Compose）
+
+生产模式：
 
 ```bash
 # 发布包必须包含完整 server/、proto/、web/、deploy/ 目录；打包命令见部署文档 §2。
@@ -300,6 +311,28 @@ docker compose logs server | grep -E "gRPC|Bootstrap"
 # 👉 仅确认初始化成功；凭据使用 .env 中配置的值，不会打印到日志
 docker cp alinksec-server:/app/data/certs/ca.crt ./alinksec-ca.crt
 # 浏览器访问控制台前，将 alinksec-ca.crt 导入其信任库。
+```
+
+轻量模式不需要 PostgreSQL 和 VictoriaMetrics：
+
+```bash
+cd ~/alinksec/deploy/docker
+cp .env.lite.example .env.lite
+vim .env.lite
+chmod 600 .env.lite
+
+docker compose --env-file .env.lite -f docker-compose.lite.yml config -q
+docker compose --env-file .env.lite -f docker-compose.lite.yml build
+docker compose --env-file .env.lite -f docker-compose.lite.yml up -d --wait
+```
+
+SQLite 在线备份与校验：
+
+```bash
+cd ~/alinksec
+bash deploy/sqlite-maintenance.sh backup
+# 恢复会先创建 pre-restore 快照，再停止 server；失败时自动回滚：
+bash deploy/sqlite-maintenance.sh restore <备份文件名.db> --yes
 ```
 
 ### ③ 目标主机接入（Linux 示例）
@@ -341,7 +374,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | **Agent** | Go 1.24 · gopsutil v4 · grpc 1.66 | 单二进制零依赖，交叉编译覆盖 Linux/Windows，资源占用低 |
 | **服务端** | Java 21 · Spring Boot 3.3 · gRPC · protobuf | 虚拟线程承载长连接双向流，生态成熟易扩展 |
 | **前端** | Vue 3.4 · Element Plus 2.7 · ECharts 5.5 · Vite 5 | 组合式 API + 暗色大屏，开发体验与渲染性能兼得 |
-| **存储** | PostgreSQL 17（业务）· VictoriaMetrics（时序） | 关系建模 38 表 + 高压缩比指标存储，各司其职 |
+| **存储** | PostgreSQL 17 / SQLite 3（业务）· VictoriaMetrics（时序） | 正式环境与轻量验证分档，生产模式保留独立时序存储 |
 | **部署** | Docker Compose · nginx | 一条命令全家桶起，反代统一 8081 入口 |
 
 ---
@@ -357,6 +390,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 05 | [扩展能力设计](docs/05-扩展能力设计.md) | 病毒引擎 · 诱饵防护 · 升级 · 扩展路线 |
 | 06 | [部署文档](docs/06-部署文档.md) | ⭐ 逐步部署 · 端到端联调 · 排障手册 |
 | 07 | [封版缺陷清单](docs/07-封版缺陷清单.md) | 封版阻断项 · 修复顺序 · 验收标准 |
+| 08 | [双数据库轻量化部署改造计划](docs/08-双数据库轻量化部署改造计划.md) | PostgreSQL / SQLite 边界 · 实施与验收 |
 
 ---
 

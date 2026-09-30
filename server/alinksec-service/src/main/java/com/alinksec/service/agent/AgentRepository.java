@@ -1,11 +1,13 @@
 package com.alinksec.service.agent;
 
+import com.alinksec.service.config.DatabaseDialect;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,9 +18,11 @@ import java.util.Optional;
 public class AgentRepository {
 
     private final JdbcTemplate jdbc;
+    private final DatabaseDialect database;
 
-    public AgentRepository(JdbcTemplate jdbc) {
+    public AgentRepository(JdbcTemplate jdbc, DatabaseDialect database) {
         this.jdbc = jdbc;
+        this.database = database;
     }
 
     private static final RowMapper<AgentEntity> MAPPER = (rs, i) -> new AgentEntity(
@@ -73,13 +77,13 @@ public class AgentRepository {
     public int heartbeat(String agentId, String agentVersion, String policyVersion) {
         return jdbc.update("""
                 UPDATE t_agent
-                SET status = 1, last_heartbeat = now(), agent_version = ?, policy_version = ?, updated_at = now()
+                SET status = 1, last_heartbeat = CURRENT_TIMESTAMP, agent_version = ?, policy_version = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE agent_id = ?
                 """, agentVersion, policyVersion, agentId);
     }
 
     public int updateStatus(String agentId, short status) {
-        return jdbc.update("UPDATE t_agent SET status = ?, updated_at = now() WHERE agent_id = ?",
+        return jdbc.update("UPDATE t_agent SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE agent_id = ?",
                 status, agentId);
     }
 
@@ -91,7 +95,7 @@ public class AgentRepository {
     public List<AgentEntity> findStaleOnline(int staleSeconds) {
         return jdbc.query("""
                 SELECT * FROM t_agent
-                WHERE status = 1 AND last_heartbeat < now() - ? * interval '1 second'
-                """, MAPPER, staleSeconds);
+                WHERE status = 1 AND last_heartbeat < ?
+                """, MAPPER, database.timestampBefore(Duration.ofSeconds(staleSeconds)));
     }
 }

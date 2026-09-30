@@ -7,6 +7,8 @@ demo/
 web/node_modules/
 web/dist/
 server/**/target/
+backups/
+.tmp/
 
 # 版本控制 / IDE
 .git/

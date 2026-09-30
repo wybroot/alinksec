@@ -40,7 +40,7 @@ public class PolicyStoreService {
     public void init() {
         Integer rows = jdbc.queryForObject("SELECT count(*) FROM t_policy_state WHERE id = 1", Integer.class);
         if (rows == null || rows == 0) {
-            jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}'::jsonb)");
+            jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}')");
         }
         if (contentJson() == null || contentJson().isBlank() || "{}".equals(contentJson())) {
             rebuild();
@@ -54,7 +54,7 @@ public class PolicyStoreService {
 
     /** 当前全量策略快照（policy_json；Agent 端解析 decoy 段热更新 guard） */
     public String contentJson() {
-        return jdbc.queryForObject("SELECT content::text FROM t_policy_state WHERE id = 1", String.class);
+        return jdbc.queryForObject("SELECT CAST(content AS TEXT) FROM t_policy_state WHERE id = 1", String.class);
     }
 
     /**
@@ -65,7 +65,7 @@ public class PolicyStoreService {
     public synchronized String rebuild() {
         String content = buildFromRules();
         Long version = jdbc.queryForObject(
-                "UPDATE t_policy_state SET version = version + 1, content = ?::jsonb, updated_at = now() " +
+                "UPDATE t_policy_state SET version = version + 1, content = ?, updated_at = CURRENT_TIMESTAMP " +
                         "WHERE id = 1 RETURNING version", Long.class, content);
         log.info("策略快照已重建: version={} content_bytes={}", version, content.length());
         pushToOnlineAgents();
@@ -76,7 +76,7 @@ public class PolicyStoreService {
     private String buildFromRules() {
         ObjectNode root = MAPPER.createObjectNode();
         List<Map<String, Object>> rules = jdbc.queryForList(
-                "SELECT rule_id, match::text AS match, actions::text AS actions, enabled FROM t_protect_rule " +
+                "SELECT rule_id, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, enabled FROM t_protect_rule " +
                         "WHERE rule_id IN ('PR-0010', 'PR-0011')");
         Map<String, Map<String, Object>> byId = new java.util.HashMap<>();
         for (Map<String, Object> r : rules) {
@@ -85,7 +85,7 @@ public class PolicyStoreService {
         Map<String, Object> decoyRule = byId.get("PR-0010");
         Map<String, Object> rateRule = byId.get("PR-0011");
         List<Map<String, Object>> processRules = jdbc.queryForList(
-                "SELECT rule_id, name, match::text AS match, actions::text AS actions, severity, enabled " +
+                "SELECT rule_id, name, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, severity, enabled " +
                         "FROM t_protect_rule WHERE type = 'process' ORDER BY rule_id");
         if (decoyRule == null && rateRule == null && processRules.isEmpty()) {
             return "{}";

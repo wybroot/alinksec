@@ -31,6 +31,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Check generated SQLite schema
+        shell: pwsh
+        run: ./deploy/sql/generate-sqlite-schema.ps1 -Check
       - run: mvn -B test
         working-directory: server
       - run: go test ./...
@@ -62,14 +65,35 @@ jobs:
           docker compose cp server:/app/data/certs/server.crt "$RUNNER_TEMP/alinksec-server.crt"
           openssl x509 -in "$RUNNER_TEMP/alinksec-server.crt" -noout -ext subjectAltName |
             grep -F "DNS:$HOST_IP"
+      - name: Stop production deployment before lightweight smoke test
+        working-directory: deploy/docker
+        run: docker compose down -v --remove-orphans
+      - name: Check and build lightweight Compose
+        working-directory: deploy/docker
+        run: |
+          docker compose -f docker-compose.lite.yml config -q
+          docker compose -f docker-compose.lite.yml build
+      - name: Start lightweight SQLite deployment
+        working-directory: deploy/docker
+        run: docker compose -f docker-compose.lite.yml up -d --wait
+      - name: Check lightweight HTTPS health and backup
+        run: |
+          docker compose -f deploy/docker/docker-compose.lite.yml cp server:/app/data/certs/ca.crt "$RUNNER_TEMP/alinksec-lite-ca.crt"
+          curl --fail --silent --show-error --cacert "$RUNNER_TEMP/alinksec-lite-ca.crt" \
+            https://127.0.0.1:8443/api/health | jq -e '.code == 0' >/dev/null
+          export ALINKSEC_BACKUP_DIR="$RUNNER_TEMP/alinksec-lite-backups"
+          bash deploy/sqlite-maintenance.sh backup ci-smoke.db
+          bash deploy/sqlite-maintenance.sh verify ci-smoke.db
       - name: Show Compose logs on failure
         if: failure()
-        run: docker compose logs --no-color --tail=200
-        working-directory: deploy/docker
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml logs --no-color --tail=200 || true
+          docker compose -f deploy/docker/docker-compose.lite.yml logs --no-color --tail=200 || true
       - name: Remove CI containers and volumes
         if: always()
-        run: docker compose down -v --remove-orphans
-        working-directory: deploy/docker
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml down -v --remove-orphans || true
+          docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   schema:
     runs-on: ubuntu-latest

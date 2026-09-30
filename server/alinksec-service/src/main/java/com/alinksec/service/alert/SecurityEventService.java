@@ -3,13 +3,11 @@ package com.alinksec.service.alert;
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.proto.RptSecurityEvent;
 import com.alinksec.service.notify.NotifyService;
-import org.postgresql.util.PGobject;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-
-import java.sql.SQLException;
 
 /**
  * 安全事件入库与告警聚合（数据库设计 §2.5）：
@@ -25,10 +23,12 @@ public class SecurityEventService {
 
     private final JdbcTemplate jdbc;
     private final NotifyService notifyService;
+    private final DatabaseDialect database;
 
-    public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService) {
+    public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService, DatabaseDialect database) {
         this.jdbc = jdbc;
         this.notifyService = notifyService;
+        this.database = database;
     }
 
     public void onEvent(String agentId, RptSecurityEvent event) {
@@ -36,14 +36,15 @@ public class SecurityEventService {
         String fingerprint = fingerprint(event, detailJson);
 
         // 聚合：未关闭的同源告警 count+1（uq_alert_dedup 兜底并发重复）
-        int merged = jdbc.update("""
+        String mergeSql = """
                 UPDATE t_alert
-                SET count = count + 1, last_time = now(),
+                SET count = count + 1, last_time = CURRENT_TIMESTAMP,
                     detail = ?
                 WHERE agent_id = ? AND rule_id = ?
-                  AND (detail->>'fingerprint') = ?
+                  AND (%s) = ?
                   AND status IN (0, 1)
-                """, jsonb(detailJson), agentId, event.getRuleId(), fingerprint);
+                """.formatted(database.jsonTextValue("detail", "fingerprint"));
+        int merged = jdbc.update(mergeSql, detailJson, agentId, event.getRuleId(), fingerprint);
         if (merged > 0) {
             log.debug("告警聚合: agent={} rule={} type={}", agentId, event.getRuleId(), event.getType());
             return;
@@ -58,7 +59,7 @@ public class SecurityEventService {
                 """,
                 alertNo, agentId, event.getRuleId(), event.getType(),
                 event.getSeverity().getNumber(),
-                buildTitle(event), jsonb(withFingerprint(detailJson, fingerprint)),
+                buildTitle(event), withFingerprint(detailJson, fingerprint),
                 event.getActionTaken());
         log.info("新告警: agent={} type={} severity={} rule={}",
                 agentId, event.getType(), event.getSeverity(), event.getRuleId());
@@ -103,14 +104,4 @@ public class SecurityEventService {
         return obj.toString();
     }
 
-    private static PGobject jsonb(String json) {
-        try {
-            PGobject pg = new PGobject();
-            pg.setType("jsonb");
-            pg.setValue(json);
-            return pg;
-        } catch (SQLException e) {
-            throw new IllegalArgumentException("jsonb 构造失败", e);
-        }
-    }
 }

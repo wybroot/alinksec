@@ -72,7 +72,7 @@ public class ScanResultService {
     /** 进度按 scope 主机数累加：每台主机首次结果 +ceil(100/N)，达 100 置完成 */
     private void advanceProgress(long taskId, String agentId) {
         List<Map<String, Object>> rows = taskId > 0
-                ? jdbc.queryForList("SELECT scope::text AS scope FROM t_scan_task WHERE id = ?", taskId)
+                ? jdbc.queryForList("SELECT CAST(scope AS TEXT) AS scope FROM t_scan_task WHERE id = ?", taskId)
                 : List.of();
         if (rows.isEmpty()) {
             return; // 任务行不存在（数据被清理）：只落库不推进
@@ -87,7 +87,7 @@ public class ScanResultService {
                 UPDATE t_scan_task
                 SET progress = LEAST(100, progress + ?),
                     status = CASE WHEN progress + ? >= 100 THEN 2 ELSE 1 END,
-                    finished_at = CASE WHEN progress + ? >= 100 THEN now() ELSE finished_at END
+                    finished_at = CASE WHEN progress + ? >= 100 THEN CURRENT_TIMESTAMP ELSE finished_at END
                 WHERE id = ? AND status = 1
                 """, step, step, step, taskId);
     }

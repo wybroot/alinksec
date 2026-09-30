@@ -4,6 +4,7 @@ import com.alinksec.common.util.JsonUtils;
 import com.alinksec.proto.CmdVulnScan;
 import com.alinksec.proto.Command;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.config.DatabaseDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -35,12 +37,14 @@ public class ScanTaskService {
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
     private final VulnMatchService vulnMatchService;
+    private final DatabaseDialect database;
 
     public ScanTaskService(JdbcTemplate jdbc, CommandService commandService,
-                           VulnMatchService vulnMatchService) {
+                           VulnMatchService vulnMatchService, DatabaseDialect database) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.vulnMatchService = vulnMatchService;
+        this.database = database;
     }
 
     /**
@@ -63,8 +67,9 @@ public class ScanTaskService {
             throw new IllegalArgumentException("请至少选择一项扫描内容");
         }
         int exists = jdbc.queryForObject(
-                "SELECT count(*) FROM t_agent WHERE agent_id = ANY (?::varchar[])",
-                Integer.class, toArrayLiteral(agentIds));
+                "SELECT count(*) FROM t_agent WHERE agent_id IN ("
+                        + DatabaseDialect.placeholders(agentIds.size()) + ")",
+                Integer.class, agentIds.toArray());
         if (exists != agentIds.size()) {
             throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
         }
@@ -75,7 +80,7 @@ public class ScanTaskService {
                 + ThreadLocalRandom.current().nextInt(100, 1000);
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_scan_task (task_no, name, type, scope, status, created_by) "
-                        + "VALUES (?, ?, ?, ?::jsonb, 1, ?) RETURNING id",
+                        + "VALUES (?, ?, ?, ?, 1, ?) RETURNING id",
                 Long.class, taskNo,
                 name == null || name.isBlank() ? taskNo + " 安全扫描" : name,
                 type, JsonUtils.write(Map.of(
@@ -83,7 +88,7 @@ public class ScanTaskService {
                         "include_weak_password", includeWeakPassword,
                         "include_port_service", includePortService)),
                 createdBy);
-        jdbc.update("UPDATE t_scan_task SET started_at = now() WHERE id = ?", taskId);
+        jdbc.update("UPDATE t_scan_task SET started_at = CURRENT_TIMESTAMP WHERE id = ?", taskId);
 
         // 漏洞比对：服务端即时完成（用最新软件快照）
         if (includeVuln) {
@@ -106,7 +111,7 @@ public class ScanTaskService {
                         createdBy);
             }
         } else {
-            jdbc.update("UPDATE t_scan_task SET status = 2, progress = 100, finished_at = now() "
+            jdbc.update("UPDATE t_scan_task SET status = 2, progress = 100, finished_at = CURRENT_TIMESTAMP "
                     + "WHERE id = ?", taskId);
         }
         log.info("安全扫描任务已下发: task_id={} task_no={} agents={} type={}",
@@ -118,25 +123,12 @@ public class ScanTaskService {
     @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
     public void sweepTimeout() {
         int rows = jdbc.update("""
-                UPDATE t_scan_task SET status = 3, finished_at = now()
-                WHERE status = 1 AND created_at < now() - interval '30 minutes'
-                """);
+                UPDATE t_scan_task SET status = 3, finished_at = CURRENT_TIMESTAMP
+                WHERE status = 1 AND created_at < ?
+                """, database.timestampBefore(Duration.ofMinutes(30)));
         if (rows > 0) {
             log.warn("扫描任务超时置部分失败: count={}", rows);
         }
     }
 
-    /* ---------- 工具：List → PG 数组字面量 ---------- */
-
-    private static String toArrayLiteral(List<String> values) {
-        StringBuilder sb = new StringBuilder("{");
-        for (int i = 0; i < values.size(); i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append('"').append(values.get(i)
-                    .replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
-        }
-        return sb.append('}').toString();
-    }
 }

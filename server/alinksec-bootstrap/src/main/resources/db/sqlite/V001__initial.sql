@@ -4,14 +4,14 @@
 
 -- ============ 璧勪骇鍩?============
 CREATE TABLE IF NOT EXISTS t_host_group (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        VARCHAR(128) NOT NULL UNIQUE,
   parent_id   BIGINT,
   description VARCHAR(512)
 );
 
 CREATE TABLE IF NOT EXISTS t_agent (
-  id             BIGSERIAL PRIMARY KEY,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id       VARCHAR(64)  NOT NULL UNIQUE,
   hostname       VARCHAR(255) NOT NULL,
   ip             VARCHAR(64),
@@ -26,15 +26,15 @@ CREATE TABLE IF NOT EXISTS t_agent (
   isolation_status SMALLINT   NOT NULL DEFAULT 0,
   isolation_command_id VARCHAR(64),
   isolation_error VARCHAR(512),
-  isolation_updated_at TIMESTAMPTZ,
+  isolation_updated_at TEXT,
   deleted        BOOLEAN      NOT NULL DEFAULT FALSE,
   protect_enabled BOOLEAN      NOT NULL DEFAULT TRUE,
   policy_version VARCHAR(32),
   cert_serial    VARCHAR(64),
-  last_heartbeat TIMESTAMPTZ,
-  tags           JSONB        NOT NULL DEFAULT '{}',
-  created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+  last_heartbeat TEXT,
+  tags           TEXT        NOT NULL DEFAULT '{}',
+  created_at     TEXT  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TEXT  NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_agent_group ON t_agent(group_id);
 CREATE INDEX IF NOT EXISTS idx_agent_status ON t_agent(status);
@@ -42,38 +42,38 @@ CREATE INDEX IF NOT EXISTS idx_agent_isolation_status ON t_agent(isolation_statu
 CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_machine ON t_agent(machine_id) WHERE machine_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS t_asset_software (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id     VARCHAR(64) NOT NULL,
   name         VARCHAR(255) NOT NULL,
   version      VARCHAR(64),
   vendor       VARCHAR(255),
-  install_time TIMESTAMPTZ,
+  install_time TEXT,
   source       VARCHAR(32),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_sw_agent ON t_asset_software(agent_id);
 CREATE INDEX IF NOT EXISTS idx_sw_name  ON t_asset_software(name, version);
 
 CREATE TABLE IF NOT EXISTS t_asset_port (
-  id        BIGSERIAL PRIMARY KEY,
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id  VARCHAR(64) NOT NULL,
   port      INTEGER NOT NULL,
   protocol  VARCHAR(8)  NOT NULL,
   process   VARCHAR(255),
   bind_addr VARCHAR(64),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_port_agent ON t_asset_port(agent_id);
 
 CREATE TABLE IF NOT EXISTS t_asset_process (
-  id BIGSERIAL PRIMARY KEY, agent_id VARCHAR(64) NOT NULL, pid INTEGER NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id VARCHAR(64) NOT NULL, pid INTEGER NOT NULL,
   name VARCHAR(255), exe TEXT, cmdline TEXT, username VARCHAR(255), rss_bytes BIGINT NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(agent_id, pid)
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(agent_id, pid)
 );
 CREATE INDEX IF NOT EXISTS idx_process_agent_rss ON t_asset_process(agent_id, rss_bytes DESC);
 
 CREATE TABLE IF NOT EXISTS t_asset_container (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id     VARCHAR(64) NOT NULL,
   container_id VARCHAR(128) NOT NULL,
   name         VARCHAR(255),
@@ -82,52 +82,52 @@ CREATE TABLE IF NOT EXISTS t_asset_container (
   orchestrator VARCHAR(32) NOT NULL DEFAULT 'docker',
   namespace    VARCHAR(255),
   status       VARCHAR(255),
-  created_at   TIMESTAMPTZ,
-  started_at   TIMESTAMPTZ,
-  ports        JSONB NOT NULL DEFAULT '[]',
-  labels       JSONB NOT NULL DEFAULT '{}',
+  created_at   TEXT,
+  started_at   TEXT,
+  ports        TEXT NOT NULL DEFAULT '[]',
+  labels       TEXT NOT NULL DEFAULT '{}',
   risky        BOOLEAN NOT NULL DEFAULT FALSE,
-  risk_reasons JSONB NOT NULL DEFAULT '[]',
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  risk_reasons TEXT NOT NULL DEFAULT '[]',
+  updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(agent_id, container_id)
 );
 CREATE INDEX IF NOT EXISTS idx_container_agent ON t_asset_container(agent_id);
 CREATE INDEX IF NOT EXISTS idx_container_orchestrator ON t_asset_container(orchestrator, namespace);
 
 CREATE TABLE IF NOT EXISTS t_asset_account (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id    VARCHAR(64) NOT NULL,
   name        VARCHAR(128) NOT NULL,
   uid         INTEGER,
   gid         INTEGER,
   shell       VARCHAR(128),
   login_enabled BOOLEAN,
-  last_login  TIMESTAMPTZ,
+  last_login  TEXT,
   risky       BOOLEAN DEFAULT FALSE,
   risky_reason VARCHAR(512),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(agent_id, name)
 );
 
 -- ============ 鍛婅鍩?============
 CREATE TABLE IF NOT EXISTS t_alert (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   alert_no    VARCHAR(64) NOT NULL UNIQUE,
   agent_id    VARCHAR(64),
   rule_id     VARCHAR(64),
   event_type  VARCHAR(32) NOT NULL,
   severity    SMALLINT NOT NULL,
   title       VARCHAR(255) NOT NULL,
-  detail      JSONB NOT NULL,
+  detail      TEXT NOT NULL,
   action_taken VARCHAR(255),
   status      SMALLINT NOT NULL DEFAULT 0,
   assignee    BIGINT,
   count       INTEGER NOT NULL DEFAULT 1,
-  first_time  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_time   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  first_time  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_time   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   handle_remark TEXT,
   handled_by   BIGINT,
-  handled_at   TIMESTAMPTZ,
+  handled_at   TEXT,
   notified     BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS idx_alert_status ON t_alert(status, severity);
@@ -135,42 +135,42 @@ CREATE INDEX IF NOT EXISTS idx_alert_agent ON t_alert(agent_id, last_time DESC);
 
 -- ============ 绯荤粺鍩?============
 CREATE TABLE IF NOT EXISTS t_enroll_token (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   token      VARCHAR(64) NOT NULL UNIQUE,
   max_uses   INTEGER NOT NULL DEFAULT 100,
   used_count INTEGER NOT NULL DEFAULT 0,
-  expire_at  TIMESTAMPTZ NOT NULL,
+  expire_at  TEXT NOT NULL,
   created_by BIGINT,
   status     SMALLINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS t_command (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   cmd_id      VARCHAR(64) NOT NULL UNIQUE,
   agent_id    VARCHAR(64) NOT NULL,
   type        VARCHAR(32) NOT NULL,
-  payload     JSONB NOT NULL,
+  payload     TEXT NOT NULL,
   status      SMALLINT NOT NULL DEFAULT 0,
-  result      JSONB,
+  result      TEXT,
   retry_count SMALLINT NOT NULL DEFAULT 0,
   issued_by   BIGINT,
-  acked_at    TIMESTAMPTZ,
-  finished_at TIMESTAMPTZ,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  acked_at    TEXT,
+  finished_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_cmd_agent_status ON t_command(agent_id, status);
 
 -- ============ 涓婃姤鍘婚噸锛坮eport_id 骞傜瓑锛孧2 杩?Redis锛?============
 CREATE TABLE IF NOT EXISTS t_report_dedup (
   report_id  VARCHAR(64) PRIMARY KEY,
-  expire_at  TIMESTAMPTZ NOT NULL
+  expire_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_report_dedup_expire ON t_report_dedup(expire_at);
 
 -- ============ 骞冲彴瀹¤ ============
 -- Platform audit records.
 CREATE TABLE IF NOT EXISTS t_audit_log (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   uid         BIGINT,
   username    VARCHAR(64),
   method      VARCHAR(16) NOT NULL,
@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
   source_ip   VARCHAR(64),
   status      INT NOT NULL,
   cost_ms     INT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_time ON t_audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_uid ON t_audit_log(uid);
@@ -189,8 +189,8 @@ CREATE TABLE IF NOT EXISTS t_agent_download_token (
   agent_id      VARCHAR(64) NOT NULL,
   resource_type VARCHAR(32) NOT NULL,
   resource_key  VARCHAR(255) NOT NULL,
-  expire_at     TIMESTAMPTZ NOT NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  expire_at     TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_agent_download_token_expire ON t_agent_download_token(expire_at);
 
@@ -205,35 +205,35 @@ CREATE INDEX IF NOT EXISTS idx_agent_download_token_expire ON t_agent_download_t
 -- 0. 鐢ㄦ埛鏉冮檺鍩燂紙REST 鐧诲綍锛?
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_role (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        VARCHAR(64) NOT NULL UNIQUE,
-  permissions JSONB       NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  permissions TEXT       NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_user (
-  id             BIGSERIAL PRIMARY KEY,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
   username       VARCHAR(64) NOT NULL UNIQUE,
   password_hash  VARCHAR(128) NOT NULL,          -- bcrypt锛堢敱鏈嶅姟绔惎鍔ㄦ椂绉嶅瓙鐢熸垚锛?
   real_name      VARCHAR(64),
   role_id        BIGINT      NOT NULL REFERENCES t_role(id),
   status         SMALLINT    NOT NULL DEFAULT 1, -- 1鍚敤 0绂佺敤
-  last_login_at  TIMESTAMPTZ,
+  last_login_at  TEXT,
   last_login_ip  VARCHAR(64),
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 
 INSERT INTO t_role (id, name, permissions) VALUES
-  (1, 'admin', '["*"]'::jsonb),
-  (2, 'viewer', '["asset:view","baseline:view","vuln:view","virus:view","alert:view"]'::jsonb)
+  (1, 'admin', '["*"]'),
+  (2, 'viewer', '["asset:view","baseline:view","vuln:view","virus:view","alert:view"]')
 ON CONFLICT (id) DO NOTHING;
 
 -- ------------------------------------------------------------
 -- 1. 鍩虹嚎鏍告煡鍩?
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_baseline_template (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   code       VARCHAR(64) NOT NULL UNIQUE,
   name       VARCHAR(128) NOT NULL,
   standard   VARCHAR(64),
@@ -244,42 +244,42 @@ CREATE TABLE IF NOT EXISTS t_baseline_template (
 );
 
 CREATE TABLE IF NOT EXISTS t_baseline_item (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   template_id BIGINT NOT NULL REFERENCES t_baseline_template(id),
   code        VARCHAR(64) NOT NULL,
   name        VARCHAR(255) NOT NULL,
   category    VARCHAR(64),
   severity    SMALLINT NOT NULL,                 -- 1浣?2涓?3楂?4涓ラ噸
-  "check"       JSONB   NOT NULL,                  -- Agent 绔В閲婃墽琛岋紙鐑洿鏂帮級
+  "check"       TEXT   NOT NULL,                  -- Agent 绔В閲婃墽琛岋紙鐑洿鏂帮級
   remediation TEXT,
-  fix_spec    JSONB,                             -- 鍙嚜鍔ㄤ慨澶嶆楠わ紙NULL=涓嶅彲鑷姩淇锛?
+  fix_spec    TEXT,                             -- 鍙嚜鍔ㄤ慨澶嶆楠わ紙NULL=涓嶅彲鑷姩淇锛?
   enabled     BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (template_id, code)
 );
 
 CREATE TABLE IF NOT EXISTS t_baseline_task (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   task_no      VARCHAR(64) NOT NULL UNIQUE,
   name         VARCHAR(128),
-  scope        JSONB NOT NULL,                   -- {"group_ids":[],"agent_ids":[]}
-  template_ids BIGINT[] NOT NULL,
+  scope        TEXT NOT NULL,                   -- {"group_ids":[],"agent_ids":[]}
+  template_ids TEXT NOT NULL,
   status       SMALLINT NOT NULL DEFAULT 0,      -- 0寰呮墽琛?1鎵ц涓?2瀹屾垚 3閮ㄥ垎澶辫触 4鍙栨秷
   progress     SMALLINT NOT NULL DEFAULT 0,
   created_by   BIGINT,
-  started_at   TIMESTAMPTZ,
-  finished_at  TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  started_at   TEXT,
+  finished_at  TEXT,
+  created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_baseline_result (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id    BIGINT NOT NULL,
   agent_id   VARCHAR(64) NOT NULL,
   item_id    BIGINT NOT NULL,
   passed     BOOLEAN NOT NULL,
   actual     TEXT,
   message    TEXT,                -- 澶辫触鍘熷洜锛圓gent 妫€鏌ュ紩鎿庝骇鍑猴級
-  checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_bl_result ON t_baseline_result(task_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_bl_result_fail ON t_baseline_result(task_id) WHERE passed = FALSE;
@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS t_baseline_summary (
   passed_count INTEGER NOT NULL,
   failed_count INTEGER NOT NULL,
   score        NUMERIC(5,2) NOT NULL,
-  checked_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  checked_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (task_id, agent_id)
 );
 
@@ -299,21 +299,21 @@ CREATE TABLE IF NOT EXISTS t_baseline_summary (
 -- 2. 瀹夊叏鎵弿鍩燂紙婕忔礊 / 寮卞彛浠わ級
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_scan_task (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   task_no    VARCHAR(64) NOT NULL UNIQUE,
   name       VARCHAR(128),
   type       SMALLINT NOT NULL,                  -- 1婕忔礊 2寮卞彛浠?3绔彛鏈嶅姟锛堝彲缁勫悎锛?
-  scope      JSONB NOT NULL,
+  scope      TEXT NOT NULL,
   status     SMALLINT NOT NULL DEFAULT 0,
   progress   SMALLINT NOT NULL DEFAULT 0,
   created_by BIGINT,
-  started_at TIMESTAMPTZ,
-  finished_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_vuln_finding (
-  id                BIGSERIAL PRIMARY KEY,
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id           BIGINT NOT NULL,
   agent_id          VARCHAR(64) NOT NULL,
   cve_id            VARCHAR(32) NOT NULL,
@@ -323,24 +323,24 @@ CREATE TABLE IF NOT EXISTS t_vuln_finding (
   severity          SMALLINT NOT NULL,
   cvss              NUMERIC(3,1),
   status            SMALLINT NOT NULL DEFAULT 0, -- 0鏂板 1宸茬‘璁?2宸插拷鐣?3宸蹭慨澶?
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_vuln_task ON t_vuln_finding(task_id);
 CREATE INDEX IF NOT EXISTS idx_vuln_agent ON t_vuln_finding(agent_id, status);
 
 CREATE TABLE IF NOT EXISTS t_weakpwd_finding (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id    BIGINT NOT NULL,
   agent_id   VARCHAR(64) NOT NULL,
   account    VARCHAR(128) NOT NULL,
   type       VARCHAR(32) NOT NULL,               -- system_empty / system_weak / uid0_nonroot / pwd_stale
   remark     VARCHAR(255),                      -- 琛ュ厖璇存槑锛堝 pwd_stale 鐨勬湭淇敼澶╂暟锛?
   status     SMALLINT NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_port_finding (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id      BIGINT NOT NULL,
   agent_id     VARCHAR(64) NOT NULL,
   port         INTEGER NOT NULL,
@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS t_port_finding (
   service      VARCHAR(64),                          -- 鎸囩汗璇嗗埆鍑虹殑鏈嶅姟鍚?
   risky        BOOLEAN NOT NULL DEFAULT FALSE,
   risky_reason VARCHAR(512),
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_port_finding_agent ON t_port_finding(agent_id);
 CREATE INDEX IF NOT EXISTS idx_port_finding_task ON t_port_finding(task_id);
@@ -359,18 +359,17 @@ CREATE TABLE IF NOT EXISTS t_cve_db (
   title        VARCHAR(512),
   severity     SMALLINT NOT NULL,
   cvss         NUMERIC(3,1),
-  affected     JSONB NOT NULL,                   -- [{"name":"openssl","vrange":"<1.1.1k","os":"centos7"}]
+  affected     TEXT NOT NULL,                   -- [{"name":"openssl","vrange":"<1.1.1k","os":"centos7"}]
   description  TEXT,
-  published_at TIMESTAMPTZ,
-  imported_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  published_at TEXT,
+  imported_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_cve_name ON t_cve_db USING GIN (affected jsonb_path_ops);
 
 -- ------------------------------------------------------------
 -- 3. 鐥呮瘨鏌ユ潃鍩?
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_virus_db (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   db_version  VARCHAR(32) NOT NULL UNIQUE,
   package_key VARCHAR(512) NOT NULL,             -- 鐗瑰緛鍖呮枃浠?key锛堟湰鍦板瓨鍌ㄨ矾寰勬爣璇嗭級
   sha256      VARCHAR(64) NOT NULL,
@@ -378,25 +377,25 @@ CREATE TABLE IF NOT EXISTS t_virus_db (
   hash_count  INTEGER,
   rule_count  INTEGER,
   imported_by BIGINT,
-  imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_virus_scan_task (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   task_no    VARCHAR(64) NOT NULL UNIQUE,
   name       VARCHAR(128),
   mode       SMALLINT NOT NULL,                  -- 1蹇€?2鍏ㄧ洏 3鑷畾涔?
-  scope      JSONB NOT NULL,
+  scope      TEXT NOT NULL,
   status     SMALLINT NOT NULL DEFAULT 0,
   progress   SMALLINT NOT NULL DEFAULT 0,
   created_by BIGINT,
-  started_at TIMESTAMPTZ,
-  finished_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_virus_finding (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id      BIGINT,                           -- NULL=瀹炴椂闃叉姢妫€鍑?
   agent_id     VARCHAR(64) NOT NULL,
   path         VARCHAR(512) NOT NULL,
@@ -407,52 +406,52 @@ CREATE TABLE IF NOT EXISTS t_virus_finding (
   severity     SMALLINT NOT NULL,
   action_taken VARCHAR(32),                      -- quarantined / deleted / alert_only
   status       SMALLINT NOT NULL DEFAULT 0,      -- 0鏂板 1宸查殧绂?2宸插垹闄?3宸叉仮澶?4宸插姞鐧?
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_virus_agent ON t_virus_finding(agent_id, status);
 
 CREATE TABLE IF NOT EXISTS t_virus_whitelist (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   type       VARCHAR(16) NOT NULL,               -- path / hash
   value      VARCHAR(512) NOT NULL,
   remark     VARCHAR(255),
   created_by BIGINT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ------------------------------------------------------------
 -- 4. 淇鍩燂紙M2 閰嶇疆绫伙紱杞欢鍖呯被 M4锛?
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_fix_task (
-  id           BIGSERIAL PRIMARY KEY,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
   task_no      VARCHAR(64) NOT NULL UNIQUE,
   name         VARCHAR(128),
   type         SMALLINT NOT NULL,                -- 1閰嶇疆绫?
-  scope        JSONB NOT NULL,
-  targets      JSONB NOT NULL,                   -- [{ref_type:"baseline_item", ref_id, fix_payload}]
+  scope        TEXT NOT NULL,
+  targets      TEXT NOT NULL,                   -- [{ref_type:"baseline_item", ref_id, fix_payload}]
   status       SMALLINT NOT NULL DEFAULT 0,      -- 0寰呮墽琛?1鎵ц涓?2瀹屾垚 3閮ㄥ垎澶辫触 4宸插彇娑?
   created_by   BIGINT,
   approver     VARCHAR(128),
   approved     BOOLEAN NOT NULL DEFAULT FALSE,
-  approved_at  TIMESTAMPTZ,
-  window_start TIMESTAMPTZ,
-  window_end   TIMESTAMPTZ,
-  dispatched_at TIMESTAMPTZ,
-  started_at   TIMESTAMPTZ,
-  finished_at  TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  approved_at  TEXT,
+  window_start TEXT,
+  window_end   TEXT,
+  dispatched_at TEXT,
+  started_at   TEXT,
+  finished_at  TEXT,
+  created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_fix_record (
-  id          BIGSERIAL PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id     BIGINT NOT NULL,
   agent_id    VARCHAR(64) NOT NULL,
   ref_id      VARCHAR(64) NOT NULL,
   ref_type    VARCHAR(16) NOT NULL,
   status      SMALLINT NOT NULL DEFAULT 0,       -- 0寰呮墽琛?1鎴愬姛 2澶辫触宸插洖婊?3澶辫触鏈洖婊?4璺宠繃 5澶嶆牳鏈€氳繃
   log         TEXT,
-  finished_at TIMESTAMPTZ,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  finished_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_fix_record ON t_fix_record(task_id, agent_id);
 
@@ -739,64 +738,64 @@ INSERT INTO t_baseline_item (template_id, code, name, category, severity, "check
 -- ------------------------------------------------------------
 INSERT INTO t_cve_db (cve_id, title, severity, cvss, affected, description, published_at) VALUES
 ('CVE-2024-6387','OpenSSH regreSSHion 杩滅▼浠ｇ爜鎵ц','4',8.1,
- '[{"name":"openssh","vrange":"<9.8p1","os":"*"}]'::jsonb,
+ '[{"name":"openssh","vrange":"<9.8p1","os":"*"}]',
  'OpenSSH 鏈嶅姟绔俊鍙峰鐞嗙▼搴忕珵浜夋潯浠讹紙SIGALRM/CVE-2024-6387锛夛紝鏈璇佽繙绋嬪埄鐢ㄥ彲鑳?RCE銆傚崌绾ц嚦 9.8p1 鍙婁互涓婃垨搴旂敤鍙戣鐗堣ˉ涓併€?','2024-07-01'),
 ('CVE-2024-1086','Linux 鍐呮牳 nf_tables UAF 鏈湴鎻愭潈','4',7.8,
- '[{"name":"kernel","vrange":"<6.7.10","os":"*"}]'::jsonb,
+ '[{"name":"kernel","vrange":"<6.7.10","os":"*"}]',
  'netfilter nf_tables 閫氱敤 set 鍨冨溇鍥炴敹 UAF锛屾湰鍦颁綆鏉冪敤鎴峰彲鎻愭潈鑷?root銆傚強鏃舵洿鏂板唴鏍稿苟閲嶅惎銆?','2024-02-01'),
 ('CVE-2023-4966','Citrix Bleed 浼氳瘽浠ょ墝娉勯湶','4',9.4,
- '[{"name":"netscaler-gateway","vrange":"<13.1-49.15","os":"*"}]'::jsonb,
+ '[{"name":"netscaler-gateway","vrange":"<13.1-49.15","os":"*"}]',
  'NetScaler ADC/Gateway 鏁忔劅淇℃伅娉勯湶锛屽彲缁曡繃 MFA 浼氳瘽鎺ョ銆?','2023-10-01'),
 ('CVE-2023-44487','HTTP/2 Rapid Reset 鎷掔粷鏈嶅姟','4',7.5,
- '[{"name":"nginx","vrange":"<1.25.3","os":"*"},{"name":"apache-httpd","vrange":"<2.4.58","os":"*"}]'::jsonb,
+ '[{"name":"nginx","vrange":"<1.25.3","os":"*"},{"name":"apache-httpd","vrange":"<2.4.58","os":"*"}]',
  'HTTP/2 鍗忚灞?DoS锛屾敾鍑昏€呭彲浣庢垚鏈墦鐦湇鍔°€傚崌绾ф垨璋冧綆骞跺彂娴佷笂闄愩€?','2023-10-01'),
 ('CVE-2023-38545','curl SOCKS5 鍫嗘孩鍑?','4',8.8,
- '[{"name":"curl","vrange":"<8.4.0","os":"*"}]'::jsonb,
+ '[{"name":"curl","vrange":"<8.4.0","os":"*"}]',
  'curl SOCKS5 浠ｇ悊鎻℃墜鍫嗙紦鍐插尯婧㈠嚭锛屾伓鎰忔湇鍔＄鍙帶婧㈠嚭闀垮害銆傚崌绾?curl 8.4.0+銆?','2023-10-01'),
 ('CVE-2022-0778','OpenSSL BN_mod_sqrt() 鏃犻檺寰幆 DoS','3',7.5,
- '[{"name":"openssl","vrange":"<1.1.1n","os":"*"}]'::jsonb,
+ '[{"name":"openssl","vrange":"<1.1.1n","os":"*"}]',
  '鐣稿舰璇佷功鍙Е鍙?OpenSSL CPU 绌鸿浆銆傚崌绾ц嚦淇鐗堟湰銆?','2022-03-01'),
 ('CVE-2021-4034','sudo Baron Samedit 鏈湴鎻愭潈','4',7.8,
- '[{"name":"sudo","vrange":"<1.9.5p2","os":"*"}]'::jsonb,
+ '[{"name":"sudo","vrange":"<1.9.5p2","os":"*"}]',
  'sudo 瀵逛互鍙嶆枩鏉犵粨灏剧殑鍙傛暟 argv[0] 鍫嗘孩鍑猴紝浠绘剰鏈湴鐢ㄦ埛鍏嶅瘑鎻愭潈 root銆?','2022-01-01'),
 ('CVE-2021-3156','sudo heap-based 婧㈠嚭锛堥厤鍚?4034 鍓嶇疆鎶湶锛?','4',7.8,
- '[{"name":"sudo","vrange":"<1.9.5p2","os":"*"}]'::jsonb,
+ '[{"name":"sudo","vrange":"<1.9.5p2","os":"*"}]',
  'sudoedit 鐜鍙橀噺杞箟鍫嗘孩鍑猴紝鏈湴鎻愭潈銆?','2021-01-01'),
 ('CVE-2021-44228','Apache Log4j2 JNDI RCE锛圠og4Shell锛?','4',10.0,
- '[{"name":"log4j-core","vrange":"<2.15.0","os":"*"}]'::jsonb,
+ '[{"name":"log4j-core","vrange":"<2.15.0","os":"*"}]',
  'JNDI 娉ㄥ叆杩滅▼浠ｇ爜鎵ц锛屽奖鍝嶉潰鏋佸箍銆傚崌绾?2.17.1+銆?','2021-12-01'),
 ('CVE-2019-5716','OpenSSH 瀹㈡埛绔唴瀛樼牬鍧?','3',6.5,
- '[{"name":"openssh","vrange":"<7.9p1","os":"*"}]'::jsonb,
+ '[{"name":"openssh","vrange":"<7.9p1","os":"*"}]',
  '鎭舵剰 SSH 鏈嶅姟绔彲閫犳垚瀹㈡埛绔唴瀛樼牬鍧忋€?','2019-01-01'),
 ('CVE-2018-15473','OpenSSH 鐢ㄦ埛鍚嶆灇涓?','2',5.3,
- '[{"name":"openssh","vrange":"<7.8","os":"*"}]'::jsonb,
+ '[{"name":"openssh","vrange":"<7.8","os":"*"}]',
  '鍙繙绋嬫灇涓炬湁鏁堢敤鎴峰悕锛岄厤鍚堝瓧鍏哥垎鐮淬€?','2018-08-01'),
 ('CVE-2016-5195','Linux 鍐呮牳 Dirty COW 鏈湴鎻愭潈','4',7.8,
- '[{"name":"kernel","vrange":"<4.8.3","os":"*"}]'::jsonb,
+ '[{"name":"kernel","vrange":"<4.8.3","os":"*"}]',
  'get_user_page() 绔炰簤鏉′欢鍐欏彧璇诲唴瀛樻槧灏勶紝鏈湴鎻愭潈銆?','2016-10-01'),
 ('CVE-2014-6271','Bash Shellshock RCE','4',9.8,
- '[{"name":"bash","vrange":"<4.3","os":"*"}]'::jsonb,
+ '[{"name":"bash","vrange":"<4.3","os":"*"}]',
  '鐜鍙橀噺鍑芥暟瀹氫箟灏鹃儴娉ㄥ叆鍛戒护鎵ц銆?','2014-09-01'),
 ('CVE-2023-5678','OpenSSL DH 妫€鏌?DoS','3',5.3,
- '[{"name":"openssl","vrange":"<3.0.12","os":"*"}]'::jsonb,
+ '[{"name":"openssl","vrange":"<3.0.12","os":"*"}]',
  'DH 瀵嗛挜鍙傛暟鏍￠獙鍙Е鍙戦暱鏃堕棿璁＄畻銆?','2023-11-01'),
 ('CVE-2020-1472','Zerologon 鍩熸帶鎻愭潈','4',10.0,
- '[{"name":"samba","vrange":"<4.12.11","os":"*"}]'::jsonb,
+ '[{"name":"samba","vrange":"<4.12.11","os":"*"}]',
  'Netlogon 鐗规潈鎻愬崌锛圵indows 鍩熸帶/Samba DC锛夛紝閲嶇疆鍩熸帶鏈哄櫒璐︽埛瀵嗙爜銆?','2020-08-01'),
 ('CVE-2022-22965','Spring Framework RCE锛圫pring4Shell锛?','4',9.8,
- '[{"name":"spring-core","vrange":"<5.2.20","os":"*"}]'::jsonb,
+ '[{"name":"spring-core","vrange":"<5.2.20","os":"*"}]',
  '鏁版嵁缁戝畾缁曡繃 ClassLoader 灞炴€ц闂?RCE锛孞DK9+ + Tomcat 閮ㄧ讲褰㈡€佸彈褰卞搷銆?','2022-03-01'),
 ('CVE-2023-34362','MOVEit Transfer SQL 娉ㄥ叆','4',9.8,
- '[{"name":"moveit-transfer","vrange":"<2023.0.1","os":"*"}]'::jsonb,
+ '[{"name":"moveit-transfer","vrange":"<2023.0.1","os":"*"}]',
  '鏈璇?SQL 娉ㄥ叆瀵艰嚧 RCE 涓庢暟鎹獌鍙栥€?','2023-05-01'),
 ('CVE-2024-21762','Fortinet FortiOS 璺緞绌胯秺 RCE','4',9.6,
- '[{"name":"fortios","vrange":"<7.4.2","os":"*"}]'::jsonb,
+ '[{"name":"fortios","vrange":"<7.4.2","os":"*"}]',
  'SSL VPN 璺緞绌胯秺鍐欐枃浠?RCE銆?','2024-02-01'),
 ('CVE-2021-34527','Windows Print Spooler RCE锛圥rintNightmare锛?','4',8.8,
- '[{"name":"spooler","vrange":"<10.0","os":"windows"}]'::jsonb,
+ '[{"name":"spooler","vrange":"<10.0","os":"windows"}]',
  '鎵撳嵃鍚庡彴澶勭悊鏈嶅姟 RCE/鏈湴鎻愭潈锛岀鐢?Print Spooler 鎴栨墦琛ヤ竵銆?','2021-06-01'),
 ('CVE-2017-0144','Windows SMBv1 杩滅▼鎵ц锛圗ternalBlue锛?','4',8.1,
- '[{"name":"smb","vrange":"<6.0.0","os":"windows"}]'::jsonb,
+ '[{"name":"smb","vrange":"<6.0.0","os":"windows"}]',
  'MS17-010锛屽嫆绱㈣爼铏紙WannaCry/Petya锛変富瑕佷紶鎾€斿緞銆?','2017-04-01')
 ON CONFLICT (cve_id) DO NOTHING;
 
@@ -806,13 +805,13 @@ ON CONFLICT (cve_id) DO NOTHING;
 
 -- Agent 閲囬泦鏃ュ織锛圠OG_BATCH 钀藉簱锛涚櫥褰?瀹夊叏鏃ュ織锛屼緵鎺掗殰涓庡叆渚垫娴嬪洖婧級
 CREATE TABLE IF NOT EXISTS t_agent_log (
-    id          BIGSERIAL PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id    VARCHAR(64)  NOT NULL,
     source      VARCHAR(64)  NOT NULL,                 -- secure / windows-security / custom:<path>
     content     VARCHAR(4000) NOT NULL,                -- 鍗曡鍐呭锛堣秴闀垮凡鍦?Agent 渚ф埅鏂級
-    fields      JSONB,                                 -- 缁撴瀯鍖栧瓧娈碉紙瑙ｆ瀽鍚庯紝鍙┖锛?
+    fields      TEXT,                                 -- 缁撴瀯鍖栧瓧娈碉紙瑙ｆ瀽鍚庯紝鍙┖锛?
     log_ts      BIGINT       NOT NULL,                 -- 琛屾椂闂存埑锛坢s锛?
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at  TEXT  NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_log_agent_time ON t_agent_log (agent_id, log_ts DESC);
@@ -827,39 +826,39 @@ CREATE INDEX IF NOT EXISTS idx_agent_log_source     ON t_agent_log (source);
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS t_protect_rule (
-  id         BIGSERIAL PRIMARY KEY,
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   rule_id    VARCHAR(64) NOT NULL UNIQUE,       -- PR-0010
   name       VARCHAR(128) NOT NULL,
   type       VARCHAR(32) NOT NULL,              -- process/file_integrity/login/decoy/ransom_behavior
-  match      JSONB NOT NULL,                    -- 鍖归厤鏉′欢锛坉irs/count_per_dir/exclude_exes 绛夛級
-  actions    JSONB NOT NULL,                    -- ["kill","alert"]
+  match      TEXT NOT NULL,                    -- 鍖归厤鏉′欢锛坉irs/count_per_dir/exclude_exes 绛夛級
+  actions    TEXT NOT NULL,                    -- ["kill","alert"]
   severity   SMALLINT NOT NULL DEFAULT 3,       -- 1浣?2涓?3楂?4涓ラ噸
   enabled    BOOLEAN NOT NULL DEFAULT TRUE,
   built_in   BOOLEAN NOT NULL DEFAULT FALSE,
   version    BIGINT NOT NULL DEFAULT 1,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 鍐呯疆瑙勫垯锛氳楗甸槻鎶?/ 鍔犲瘑琛屼负鍒嗘瀽锛坉ocs/05 搂2锛宮atch 瀛楁鍚屾椂浣滀负鍓嶇缂栬緫婧愶級
 INSERT INTO t_protect_rule (rule_id, name, type, match, actions, severity, enabled, built_in) VALUES
   ('PR-0010', '鍕掔储璇遍サ闃叉姢', 'decoy',
-   '{"dirs":["/home","/srv","/opt"],"count_per_dir":4,"exclude_exes":["/usr/bin/rsync","D:\\\\backup\\\\agent.exe"]}'::jsonb,
-   '["kill","alert"]'::jsonb, 4, TRUE, TRUE),
+   '{"dirs":["/home","/srv","/opt"],"count_per_dir":4,"exclude_exes":["/usr/bin/rsync","D:\\\\backup\\\\agent.exe"]}',
+   '["kill","alert"]', 4, TRUE, TRUE),
   ('PR-0011', '鍔犲瘑琛屼负鍒嗘瀽', 'ransom_behavior',
-   '{"rate_window_sec":10,"rate_threshold":50,"ext_change_ratio":0.8}'::jsonb,
-   '["kill","alert"]'::jsonb, 4, TRUE, TRUE),
+   '{"rate_window_sec":10,"rate_threshold":50,"ext_change_ratio":0.8}',
+   '["kill","alert"]', 4, TRUE, TRUE),
   ('PR-0001', 'EDR miner process block', 'process',
-   '{"exe_regex":"(?i)(^|/)(xmrig|minerd|kdevtmpfsi|kinsing)$"}'::jsonb,
-   '["kill","alert"]'::jsonb, 4, TRUE, TRUE)
+   '{"exe_regex":"(?i)(^|/)(xmrig|minerd|kdevtmpfsi|kinsing)$"}',
+   '["kill","alert"]', 4, TRUE, TRUE)
 ON CONFLICT (rule_id) DO NOTHING;
 
 -- 绛栫暐鐗堟湰涓庡叏閲忓揩鐓э紙鍗曡琛紱t_protect_rule 鍙樻洿 鈫?version 閫掑 + content 閲嶅缓锛孭olicySync 鐑笅鍙戯級
 CREATE TABLE IF NOT EXISTS t_policy_state (
   id         INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),   -- 鍗曡绾︽潫
   version    BIGINT NOT NULL DEFAULT 1,                  -- 绛栫暐鐗堟湰锛圓gent 蹇冭烦 policy_version 姣斿锛?
-  content    JSONB  NOT NULL DEFAULT '{}'::jsonb,        -- 鍏ㄩ噺绛栫暐蹇収锛坧olicy_json锛歞ecoy 娈电瓑锛?
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  content    TEXT  NOT NULL DEFAULT '{}',        -- 鍏ㄩ噺绛栫暐蹇収锛坧olicy_json锛歞ecoy 娈电瓑锛?
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT INTO t_policy_state (id, version) VALUES (1, 1) ON CONFLICT (id) DO NOTHING;
 
@@ -870,7 +869,7 @@ INSERT INTO t_policy_state (id, version) VALUES (1, 1) ON CONFLICT (id) DO NOTHI
 -- 绂荤嚎琛ヤ竵浠撳簱娓呭崟锛堟枃浠惰惤骞冲彴瀛樺偍鐩綍锛宼_patch_package 璁板厓鏁版嵁锛?
 -- 瀵煎叆涓哄疄鏂?杩愮淮绂荤嚎鎿嶄綔锛孲OW 鏄庣‘绾﹀畾锛?
 CREATE TABLE IF NOT EXISTS t_patch_package (
-  id             BIGSERIAL PRIMARY KEY,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
   os_type        SMALLINT NOT NULL,              -- 1 Linux 2 Windows
   os_version     VARCHAR(64) NOT NULL DEFAULT '',-- centos7 / ubuntu2204 / win2019锛堢┖ = 閫氱敤锛?
   pkg_name       VARCHAR(255) NOT NULL,          -- openssl / openssl-devel / KB5034441
@@ -880,14 +879,13 @@ CREATE TABLE IF NOT EXISTS t_patch_package (
   sha256         VARCHAR(64)  NOT NULL,
   size           BIGINT NOT NULL DEFAULT 0,
   imported_by    BIGINT,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (os_type, os_version, pkg_name, target_version)
 );
 CREATE INDEX IF NOT EXISTS idx_patch_pkg ON t_patch_package(pkg_name);
 
 -- 淇浠诲姟瀹℃壒涓庣淮鎶ょ獥鍙ｏ紙杞欢鍖呯被蹇呭～瀹℃壒锛涢厤缃被娌跨敤鐜版湁瀛楁涓嶅彈褰卞搷锛?
 -- type 鎵╁睍锛?閰嶇疆绫?2杞欢鍖呯被锛泂tatus 璇箟鎵╁睍锛?寰呮墽琛?寰呭鎵?
-COMMENT ON COLUMN t_fix_task.type IS '1閰嶇疆绫?2杞欢鍖呯被';
 
 -- =====================================================================
 -- 006 M4锛欰gent 鐏板害鍗囩骇 + 骞冲彴鎿嶄綔瀹¤ + 閫氱煡娓犻亾
@@ -895,7 +893,7 @@ COMMENT ON COLUMN t_fix_task.type IS '1閰嶇疆绫?2杞欢鍖呯被';
 
 -- Agent 鍗囩骇鍖咃紙docs/01 搂6.4锛氫笂浼?鈫?鐏板害涓嬪彂 鈫?蹇冭烦涓婃姤鏂扮増鏈級
 CREATE TABLE IF NOT EXISTS t_agent_upgrade_package (
-    id            BIGSERIAL PRIMARY KEY,
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
     version       VARCHAR(64)  NOT NULL UNIQUE,     -- 鍖呯増鏈紙濡?1.2.0锛?
     platform      VARCHAR(32)  NOT NULL,            -- linux-amd64 / linux-arm64 / windows-amd64
     package_key   VARCHAR(200) NOT NULL,            -- 瀛樺偍鏂囦欢鍚嶏紙涓嬭浇绔偣鐢級
@@ -903,31 +901,31 @@ CREATE TABLE IF NOT EXISTS t_agent_upgrade_package (
     size          BIGINT       NOT NULL,
     notes         TEXT,                             -- 鍙戝竷璇存槑
     uploaded_by   BIGINT,
-    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at    TEXT  NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 骞冲彴鎿嶄綔瀹¤锛坉ocs/01 搂6.1锛氭墍鏈夊啓鎿嶄綔鍏ュ璁¤〃锛屽惈鏉ユ簮 IP锛?
 
 -- 閫氱煡娓犻亾锛圡4锛氬憡璀?webhook 閫氱煡锛沞nabled 鍏抽棴鏃朵笉鍙戦€侊級
 CREATE TABLE IF NOT EXISTS t_notify_channel (
-    id          BIGSERIAL PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        VARCHAR(64)  NOT NULL,
     type        VARCHAR(16)  NOT NULL DEFAULT 'webhook',
     webhook_url TEXT         NOT NULL,
     min_severity SMALLINT    NOT NULL DEFAULT 3,    -- 閫氱煡闂ㄦ锛氣墺high锛?=critical锛?
     enabled     BOOLEAN      NOT NULL DEFAULT true,
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at  TEXT  NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Delivery state is tracked per alert and channel so a retry does not resend
 -- notifications that were already accepted by another channel.
 CREATE TABLE IF NOT EXISTS t_alert_notify_delivery (
-    id           BIGSERIAL PRIMARY KEY,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
     alert_no     VARCHAR(64) NOT NULL,
     channel_id   BIGINT      NOT NULL,
     attempts     INTEGER     NOT NULL DEFAULT 0,
-    attempted_at TIMESTAMPTZ,
-    delivered_at TIMESTAMPTZ,
+    attempted_at TEXT,
+    delivered_at TEXT,
     last_error   TEXT,
     UNIQUE (alert_no, channel_id)
 );
@@ -938,5 +936,5 @@ CREATE INDEX IF NOT EXISTS idx_alert_notify_pending
 -- RBAC 涓夎鑹茶ˉ鍏紙docs/01 搂6.1锛夛細瀹夊叏杩愮淮瑙掕壊锛坴iewer 鍙宸插湪 002 鍒濆鍖栵級
 -- 鏉冮檺鐐逛负澹版槑寮忚鏄庯紱鎺ュ彛绾у己鍒剁敱 JwtAuthInterceptor 鍐欐潈闄愮煩闃垫墽琛?
 INSERT INTO t_role (id, name, permissions) VALUES
-  (3, 'operator', '["*:view","scan:run","fix:apply","alert:handle","report:export"]'::jsonb)
+  (3, 'operator', '["*:view","scan:run","fix:apply","alert:handle","report:export"]')
 ON CONFLICT (id) DO NOTHING;

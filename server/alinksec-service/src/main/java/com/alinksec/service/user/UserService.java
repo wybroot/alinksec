@@ -42,7 +42,7 @@ public class UserService {
             return Optional.empty();
         }
         long uid = ((Number) row.get("id")).longValue();
-        jdbc.update("UPDATE t_user SET last_login_at = now(), last_login_ip = ? WHERE id = ?", sourceIp, uid);
+        jdbc.update("UPDATE t_user SET last_login_at = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?", sourceIp, uid);
         audit(uid, username, "login", sourceIp);
         return Optional.of(new UserProfile(
                 uid, username, (String) row.get("real_name"), (String) row.get("role_name"),

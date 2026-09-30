@@ -1,18 +1,15 @@
 spring:
   application:
     name: alinksec-server
-  datasource:
-    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/alinksec?stringtype=unspecified
-    username: ${PG_USER:alinksec_app}
-    password: ${PG_PASSWORD}
-    hikari:
-      maximum-pool-size: 20
-      connection-timeout: 5000
+  profiles:
+    default: postgres
 
 server:
   port: 8080   # M2 REST API 占位
 
 alinksec:
+  database:
+    type: postgres
   server:
     port: 9443
     cert-dir: ${ALINKSEC_CERT_DIR:./data/certs}

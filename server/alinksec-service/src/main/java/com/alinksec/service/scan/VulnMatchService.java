@@ -38,7 +38,7 @@ public class VulnMatchService {
     @Transactional
     public void matchAgent(String agentId, long taskId) {
         List<Map<String, Object>> cves = jdbc.queryForList(
-                "SELECT cve_id, severity, cvss, affected::text AS affected FROM t_cve_db");
+                "SELECT cve_id, severity, cvss, CAST(affected AS TEXT) AS affected FROM t_cve_db");
         if (cves.isEmpty()) {
             return;
         }
