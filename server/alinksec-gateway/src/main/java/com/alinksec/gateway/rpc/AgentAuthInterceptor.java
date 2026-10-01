@@ -1,8 +1,8 @@
 package com.alinksec.gateway.rpc;
 
+import com.alinksec.proto.EnrollServiceGrpc;
 import io.grpc.Context;
 import io.grpc.Contexts;
-import io.grpc.Grpc;
 import io.grpc.Metadata;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
@@ -33,7 +33,7 @@ public class AgentAuthInterceptor implements ServerInterceptor {
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
         // Enroll 用 token 认证，放行
         String fullMethod = call.getMethodDescriptor().getFullMethodName();
-        if (fullMethod.endsWith("/EnrollService/Enroll")) {
+        if (EnrollServiceGrpc.getEnrollMethod().getFullMethodName().equals(fullMethod)) {
             return next.startCall(call, headers);
         }
         Optional<String> cn = clientCertCn(call);

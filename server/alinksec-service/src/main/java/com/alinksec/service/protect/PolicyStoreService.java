@@ -2,6 +2,7 @@ package com.alinksec.service.protect;
 
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.config.DatabaseDialect;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -42,7 +43,9 @@ public class PolicyStoreService {
         if (rows == null || rows == 0) {
             jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}')");
         }
-        if (contentJson() == null || contentJson().isBlank() || "{}".equals(contentJson())) {
+        String stored = contentJson();
+        if (stored == null || stored.isBlank()
+                || !JsonUtils.read(stored).equals(JsonUtils.read(buildFromRules()))) {
             rebuild();
         }
     }
@@ -92,7 +95,7 @@ public class PolicyStoreService {
         }
 
         ObjectNode decoy = MAPPER.createObjectNode();
-        boolean enabled = decoyRule == null || Boolean.TRUE.equals(decoyRule.get("enabled"));
+        boolean enabled = decoyRule == null || DatabaseDialect.readBoolean(decoyRule.get("enabled"));
         decoy.put("enabled", enabled);
         try {
             if (decoyRule != null) {
@@ -102,7 +105,7 @@ public class PolicyStoreService {
                 copyTextArray(match, "exclude_exes", decoy.putArray("exclude_exes"));
                 decoy.put("response", responseOf((String) decoyRule.get("actions")));
             }
-            if (rateRule != null && Boolean.TRUE.equals(rateRule.get("enabled"))) {
+            if (rateRule != null && DatabaseDialect.readBoolean(rateRule.get("enabled"))) {
                 JsonNode match = MAPPER.readTree((String) rateRule.get("match"));
                 if (match.hasNonNull("rate_window_sec")) decoy.put("rate_window_sec", match.get("rate_window_sec").asInt());
                 if (match.hasNonNull("rate_threshold")) decoy.put("rate_threshold", match.get("rate_threshold").asInt());
@@ -120,7 +123,7 @@ public class PolicyStoreService {
                 out.put("id", (String) rule.get("rule_id"));
                 out.put("name", (String) rule.get("name"));
                 out.put("severity", ((Number) rule.get("severity")).intValue());
-                out.put("enabled", Boolean.TRUE.equals(rule.get("enabled")));
+                out.put("enabled", DatabaseDialect.readBoolean(rule.get("enabled")));
                 out.set("match", MAPPER.readTree((String) rule.get("match")));
                 out.set("actions", MAPPER.readTree((String) rule.get("actions")));
             } catch (Exception e) {

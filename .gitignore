@@ -30,6 +30,7 @@ backups/
 *.pem
 jwt.secret
 deploy/docker/.env
+deploy/docker/.env.lite
 
 # ---------- IDE / 编辑器 ----------
 .idea/

@@ -47,8 +47,21 @@ services:
     restart: unless-stopped
 
   sqlite-maintenance:
-    image: keinos/sqlite3:3.46.1
+    image: alinksec-sqlite-maintenance:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.sqlite-maintenance
     profiles: ["maintenance"]
+    entrypoint: ["/usr/bin/sqlite3"]
+    # The server creates its data volume as root.
+    user: "0:0"
+    network_mode: none
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    memswap_limit: 96m
+    cpus: 1
+    pids_limit: 32
     volumes:
       - server-data:/data
       - ${ALINKSEC_BACKUP_DIR:-../../backups}:/backups

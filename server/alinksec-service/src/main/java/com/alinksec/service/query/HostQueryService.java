@@ -95,12 +95,13 @@ public class HostQueryService {
     }
 
     public List<Map<String, Object>> software(String agentId, String keyword, int page, int size) {
+        String normalizedKeyword = blankToNull(keyword);
         return jdbc.queryForList("""
                 SELECT name, version, vendor, install_time, source
                 FROM t_asset_software WHERE agent_id = ?
-                  AND (? IS NULL OR LOWER(name) LIKE LOWER('%' || ? || '%'))
+                  AND (CAST(? AS TEXT) IS NULL OR LOWER(name) LIKE LOWER('%' || ? || '%'))
                 ORDER BY name LIMIT ? OFFSET ?
-                """, agentId, blankToNull(keyword), keyword, size, (page - 1) * size);
+                """, agentId, normalizedKeyword, normalizedKeyword, size, (page - 1) * size);
     }
 
     public List<Map<String, Object>> ports(String agentId) {

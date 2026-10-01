@@ -8,11 +8,12 @@ WORKDIR /app
 
 # 先装依赖（利用层缓存）：package-lock.json 保证可复现安装
 COPY web/package.json web/package-lock.json web/.npmrc ./
-RUN npm ci --no-fund --no-audit
+RUN --mount=type=cache,id=alinksec-npm,target=/root/.npm,sharing=locked \
+    NODE_OPTIONS="--max-old-space-size=384" npm ci --no-fund --no-audit
 
 # 再拷源码构建（dist/ 已由 .dockerignore 排除，避免旧产物干扰）
 COPY web/ ./
-RUN npm run build
+RUN NODE_OPTIONS="--max-old-space-size=768" npm run build
 
 # ---------- 运行阶段 ----------
 FROM nginx:1.27-alpine

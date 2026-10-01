@@ -8,7 +8,9 @@
       </div>
       <nav class="nav">
         <div v-for="m in menus" :key="m.path" class="nav-item"
-             :class="{ active: route.path === m.path }" @click="router.push(m.path)">
+             :class="{ active: route.path === m.path }" :title="m.title" :aria-label="m.title"
+             role="button" tabindex="0" @click="router.push(m.path)"
+             @keydown.enter="router.push(m.path)" @keydown.space.prevent="router.push(m.path)">
           <el-icon><component :is="m.icon" /></el-icon><span>{{ m.title }}</span>
         </div>
       </nav>

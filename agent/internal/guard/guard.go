@@ -79,6 +79,7 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 	// Rules apply to future execs. Re-baselining prevents retroactive actions
 	// against already-running business processes after a policy edit.
 	g.processSeen = map[int32]int64{}
+	g.ratePrev = map[string]treeSnapshot{}
 	g.mu.Unlock()
 
 	if cfg.Enabled == nil || *cfg.Enabled {
@@ -92,7 +93,6 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 	} else {
 		g.log.Info("策略热更新生效：诱饵防护已关闭")
 	}
-	g.ratePrev = map[string]treeSnapshot{} // 基线重置，避免目录/窗口切换误报
 	g.seedProcessBaseline()
 }
 
@@ -199,7 +199,11 @@ func (g *Guard) rateLoop() {
 	)
 	for _, t := range trees {
 		cur := snapshotTree(t)
-		if prev, ok := g.ratePrev[t]; ok {
+		g.mu.Lock()
+		prev, ok := g.ratePrev[t]
+		g.ratePrev[t] = cur
+		g.mu.Unlock()
+		if ok {
 			r := diffSnapshot(prev, cur)
 			if merged == nil {
 				merged = r
@@ -212,7 +216,6 @@ func (g *Guard) rateLoop() {
 				merged.Churn += r.Churn
 			}
 		}
-		g.ratePrev[t] = cur
 	}
 	if merged == nil {
 		return
@@ -233,7 +236,9 @@ func (g *Guard) rateLoop() {
 		g.report(ev)
 	}
 	// 触发后重置基线，避免持续告警风暴
+	g.mu.Lock()
 	g.ratePrev = map[string]treeSnapshot{}
+	g.mu.Unlock()
 }
 
 /* ---- 隔离 / 恢复 ---- */
@@ -265,13 +270,15 @@ func (g *Guard) IsolateHost(reason string) error {
 
 // RestoreIsolation 解除隔离（comm 的 CmdProtectAction RESTORE_ISOLATION 调用）
 func (g *Guard) RestoreIsolation() error {
-	err := restorePlatform()
+	if err := restorePlatform(); err != nil {
+		return err
+	}
 	g.mu.Lock()
 	g.isolated = false
 	g.mu.Unlock()
 	_ = os.Remove(filepath.Join(g.workDir, "isolated.json"))
 	g.log.Info("主机隔离已解除")
-	return err
+	return nil
 }
 
 // Isolated 当前隔离状态（心跳 guard_status 上报用）

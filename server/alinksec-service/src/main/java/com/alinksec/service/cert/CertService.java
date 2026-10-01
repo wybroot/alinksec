@@ -157,7 +157,9 @@ public class CertService {
         ContentSigner signer = new JcaContentSignerBuilder("SHA256withECDSA").build(caPrivateKey);
         X509Certificate cert = new JcaX509CertificateConverter()
                 .getCertificate(builder.build(signer));
-        return new IssuedCert(toPem(cert), toPem(keyPair), cert.getSerialNumber().toString(16));
+        return new IssuedCert(toPem(cert),
+                toPem(new PemObject("PRIVATE KEY", keyPair.getPrivate().getEncoded())),
+                cert.getSerialNumber().toString(16));
     }
 
     public record IssuedCert(String certPem, String keyPem, String serial) {}

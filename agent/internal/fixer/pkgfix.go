@@ -111,6 +111,11 @@ func parsePkgPayload(payload string) (*PkgPayload, error) {
 	if p.PkgName == "" || p.TargetVersion == "" || p.DownloadURL == "" || p.Sha256 == "" {
 		return nil, fmt.Errorf("payload 缺少 pkg_name/target_version/download_url")
 	}
+	switch p.RepoType {
+	case "rpm", "deb", "msu":
+	default:
+		return nil, fmt.Errorf("不支持的补丁类型: %s", p.RepoType)
+	}
 	return &p, nil
 }
 
@@ -124,7 +129,7 @@ func downloadPatch(workDir string, p *PkgPayload) (string, error) {
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("下载返回 %s", resp.Status)
 	}
-	tmp, err := os.CreateTemp("", "alinksec-patch-*-"+filepath.Base(p.DownloadURL))
+	tmp, err := os.CreateTemp("", "alinksec-patch-*."+p.RepoType)
 	if err != nil {
 		return "", err
 	}
@@ -134,7 +139,10 @@ func downloadPatch(workDir string, p *PkgPayload) (string, error) {
 		os.Remove(tmp.Name())
 		return "", err
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
 	if p.Sha256 != "" && !stringsEqualFold(hex.EncodeToString(h.Sum(nil)), p.Sha256) {
 		os.Remove(tmp.Name())
 		return "", fmt.Errorf("sha256 校验失败（包损坏或被篡改）")

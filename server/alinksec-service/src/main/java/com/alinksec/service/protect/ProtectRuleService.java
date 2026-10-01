@@ -3,9 +3,11 @@ package com.alinksec.service.protect;
 import com.alinksec.proto.CmdProtectAction;
 import com.alinksec.proto.Command;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.common.util.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ColumnMapRowMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,11 +35,19 @@ public class ProtectRuleService {
 
     /** 规则清单（按类型分组展示：诱饵/加密行为在前） */
     public List<Map<String, Object>> listRules() {
-        return jdbc.queryForList("""
-                SELECT id, rule_id, name, type, match, actions, severity, enabled, built_in, version, updated_at
+        return jdbc.query("""
+                SELECT id, rule_id, name, type, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions,
+                       severity, enabled, built_in, version, updated_at
                 FROM t_protect_rule
                 ORDER BY (type = 'decoy') DESC, (type = 'ransom_behavior') DESC, rule_id
-                """);
+                """, (rs, index) -> {
+            Map<String, Object> row = new ColumnMapRowMapper().mapRow(rs, index);
+            row.put("match", JsonUtils.read(rs.getString("match"), Object.class));
+            row.put("actions", JsonUtils.read(rs.getString("actions"), Object.class));
+            row.put("enabled", rs.getBoolean("enabled"));
+            row.put("built_in", rs.getBoolean("built_in"));
+            return row;
+        });
     }
 
     /** 编辑规则（match/actions/enabled；内置规则不可删只可调），version 递增 */

@@ -33,6 +33,10 @@ public class DatabaseDialect {
         return sqlite;
     }
 
+    public static boolean readBoolean(Object value) {
+        return Boolean.TRUE.equals(value) || value instanceof Number number && number.intValue() != 0;
+    }
+
     public String jsonTextValue(String column, String key) {
         if (!column.matches("[A-Za-z0-9_.]+") || !key.matches("[A-Za-z0-9_]+")) {
             throw new IllegalArgumentException("Unsafe JSON SQL identifier");

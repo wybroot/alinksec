@@ -27,7 +27,51 @@ if [[ "$PGUSER" == "$ALINKSEC_APP_DB_USER" || "$PGPASSWORD" == "$ALINKSEC_APP_DB
   exit 1
 fi
 
-psql -v ON_ERROR_STOP=1 \
+if [[ ! -d "$MIGRATIONS_DIR" ]]; then
+  echo "Migration directory does not exist: $MIGRATIONS_DIR" >&2
+  exit 1
+fi
+shopt -s nullglob
+migrations=("$MIGRATIONS_DIR"/V*.sql)
+if ((${#migrations[@]} == 0)); then
+  echo "No migration files found: $MIGRATIONS_DIR" >&2
+  exit 1
+fi
+declare -A migration_checksums
+for migration in "${migrations[@]}"; do
+  filename="$(basename "$migration")"
+  version="${filename%.sql}"
+  if [[ ! "$version" =~ ^V[0-9]+__[A-Za-z0-9_]+$ || ! -f "$migration" || ! -r "$migration" || ! -s "$migration" ]]; then
+    echo "Invalid, empty or unreadable migration file: $filename" >&2
+    exit 1
+  fi
+  migration_checksums["$version"]="$(sed -e 's/\r$//' "$migration" | sha256sum | awk '{print $1}')"
+done
+
+# Check the entire released history before changing roles or applying pending SQL.
+history_exists="$(psql -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT to_regclass('public.t_schema_migration') IS NOT NULL;
+SQL
+)"
+if [[ "$history_exists" == "t" ]]; then
+  applied_migrations="$(psql -X -v ON_ERROR_STOP=1 -At -F $'\t' <<'SQL'
+SELECT version, checksum FROM public.t_schema_migration ORDER BY version;
+SQL
+)"
+  while IFS=$'\t' read -r applied_version applied_checksum; do
+    [[ -n "$applied_version" ]] || continue
+    if [[ -z "${migration_checksums[$applied_version]+present}" ]]; then
+      echo "Applied migration file is missing: $applied_version" >&2
+      exit 1
+    fi
+    if [[ "${migration_checksums[$applied_version]}" != "$applied_checksum" ]]; then
+      echo "Migration checksum mismatch: $applied_version" >&2
+      exit 1
+    fi
+  done <<< "$applied_migrations"
+fi
+
+psql -X -v ON_ERROR_STOP=1 \
   --set=app_user="$ALINKSEC_APP_DB_USER" \
   --set=app_password="$ALINKSEC_APP_DB_PASSWORD" <<'SQL'
 SELECT format(
@@ -46,13 +90,11 @@ CREATE TABLE IF NOT EXISTS public.t_schema_migration (
 );
 SQL
 
-shopt -s nullglob
-migrations=("$MIGRATIONS_DIR"/V*.sql)
 for migration in "${migrations[@]}"; do
   filename="$(basename "$migration")"
   version="${filename%.sql}"
-  checksum="$(sed -e 's/\r$//' "$migration" | sha256sum | awk '{print $1}')"
-  applied_checksum="$(psql -v ON_ERROR_STOP=1 -At \
+  checksum="${migration_checksums[$version]}"
+  applied_checksum="$(psql -X -v ON_ERROR_STOP=1 -At \
     --set=migration_version="$version" <<'SQL'
 SELECT checksum FROM public.t_schema_migration WHERE version = :'migration_version';
 SQL
@@ -72,12 +114,12 @@ SQL
     printf '\\set ON_ERROR_STOP on\nBEGIN;\n'
     sed -e 's/\r$//' "$migration"
     printf '\nINSERT INTO public.t_schema_migration (version, checksum) VALUES (:\047migration_version\047, :\047migration_checksum\047);\nCOMMIT;\n'
-  } | psql \
+  } | psql -X \
       --set=migration_version="$version" \
       --set=migration_checksum="$checksum"
 done
 
-psql -v ON_ERROR_STOP=1 --set=app_user="$ALINKSEC_APP_DB_USER" <<'SQL'
+psql -X -v ON_ERROR_STOP=1 --set=app_user="$ALINKSEC_APP_DB_USER" <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM :"app_user";
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM :"app_user";

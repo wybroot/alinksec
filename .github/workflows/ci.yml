@@ -36,16 +36,67 @@ jobs:
         run: ./deploy/sql/generate-sqlite-schema.ps1 -Check
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
-      - run: mvn -B test
+      - name: Check deployment configuration and least-privilege boundaries
+        run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
+      - run: mvn -B package
         working-directory: server
+      - name: Check local SQLite validation workflow
+        run: bash deploy/tests/api-smoke-local.sh
+      - name: Check real SQLite maintenance and restored application
+        run: |
+          docker build -f deploy/docker/Dockerfile.sqlite-maintenance -t alinksec-sqlite-maintenance:latest .
+          bash deploy/tests/sqlite-maintenance-local.sh
+        env:
+          ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
       - run: go test ./...
         working-directory: agent
-      - run: npm ci && npm test && npm run build
+      - name: Check concurrent guard policy updates
+        run: go test -race ./internal/guard
+        working-directory: agent
+      - name: Build and validate actual Agents serially
+        run: |
+          mkdir -p .tmp
+          (cd agent && CGO_ENABLED=0 go build -o ../.tmp/alinksec-agent ./cmd/agent)
+          docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-agent-validation .
+          bash deploy/tests/agent-workflow-local.sh
+          bash deploy/tests/firewall-local.sh
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
+      - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
         working-directory: web
+      - name: Install serial browser validation runtime
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
       - run: docker compose config -q
         working-directory: deploy/docker
       - run: docker compose build
         working-directory: deploy/docker
+      - name: Check standalone server image and restart persistence
+        run: bash deploy/tests/server-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server:latest
+      - name: Check second clean server build with a changed version
+        run: |
+          mkdir -p .tmp/changed-version
+          node deploy/tests/snapshot-source.mjs .tmp/changed-version
+          java -Xmx128m deploy/tests/ChangeSnapshotVersion.java .tmp/changed-version 0.1.1-VALIDATION
+          docker build --no-cache -f deploy/docker/Dockerfile.server -t alinksec-server-changed-version .tmp/changed-version
+          bash deploy/tests/server-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server-changed-version
+      - name: Check standalone web image and HTTPS API proxy
+        run: bash deploy/tests/web-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_WEB_IMAGE: alinksec-web:latest
+          ALINKSEC_SMOKE_BROWSER: 'true'
+      - name: Retain browser validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-validation
+          path: .tmp/browser-artifacts-*
+          if-no-files-found: ignore
       - run: docker compose up -d --wait
         working-directory: deploy/docker
       - name: Check HTTPS health with the platform CA
@@ -67,6 +118,12 @@ jobs:
           docker compose cp server:/app/data/certs/server.crt "$RUNNER_TEMP/alinksec-server.crt"
           openssl x509 -in "$RUNNER_TEMP/alinksec-server.crt" -noout -ext subjectAltName |
             grep -F "DNS:$HOST_IP"
+      - name: Check PostgreSQL API contracts
+        run: node --test --test-concurrency=1 deploy/tests/api-smoke.test.mjs
+        env:
+          ALINKSEC_SMOKE_DB: postgres
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-ca.crt
       - name: Stop production deployment before lightweight smoke test
         working-directory: deploy/docker
         run: docker compose down -v --remove-orphans
@@ -97,6 +154,12 @@ jobs:
           test "$restored" = before
           curl --fail --silent --show-error --cacert "$RUNNER_TEMP/alinksec-lite-ca.crt" \
             https://127.0.0.1:8443/api/health | jq -e '.code == 0' >/dev/null
+      - name: Check SQLite API contracts
+        run: node --test --test-concurrency=1 deploy/tests/api-smoke.test.mjs
+        env:
+          ALINKSEC_SMOKE_DB: sqlite
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-lite-ca.crt
       - name: Show Compose logs on failure
         if: failure()
         run: |
@@ -158,7 +221,7 @@ jobs:
         run: |
           test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "1"
           test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")" = "39"
-          test "$(psql -Atc "SELECT concat_ws('|', rolsuper, rolcreatedb, rolcreaterole, rolreplication) FROM pg_roles WHERE rolname='alinksec_app'")" = "false|false|false|false"
+          test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_schema_migration', 'SELECT')")" = "f"
@@ -172,3 +235,30 @@ jobs:
           PGDATABASE: alinksec
           PGUSER: alinksec
           PGPASSWORD: alinksec-test
+      - name: Check PostgreSQL migration failures and backup restore
+        env:
+          PG_TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_TEST_CONTAINER" mkdir -p /tmp/alinksec-validation/deploy
+          docker cp deploy/sql "$PG_TEST_CONTAINER:/tmp/alinksec-validation/deploy/sql"
+          docker cp deploy/migrations "$PG_TEST_CONTAINER:/tmp/alinksec-validation/deploy/migrations"
+          docker cp deploy/tests "$PG_TEST_CONTAINER:/tmp/alinksec-validation/deploy/tests"
+          docker exec -e PGHOST=127.0.0.1 -e PGDATABASE=alinksec -e PGUSER=alinksec \
+            -e PGPASSWORD=alinksec-test -e ALINKSEC_MIGRATION_TEST_ALLOW_FIXTURES=true \
+            "$PG_TEST_CONTAINER" bash /tmp/alinksec-validation/deploy/tests/postgres-migrations.test.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Check Agent mTLS identity with the PostgreSQL application role
+        working-directory: server
+        run: >-
+          mvn -B -T1 -pl alinksec-bootstrap -am
+          -Dtest=AgentChannelSecurityIntegrationTest
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Dalinksec.integration.database=postgres test
+        env:
+          ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/alinksec?stringtype=unspecified
+          ALINKSEC_INTEGRATION_PG_USER: alinksec_app
+          ALINKSEC_INTEGRATION_PG_PASSWORD: alinksec-app-test

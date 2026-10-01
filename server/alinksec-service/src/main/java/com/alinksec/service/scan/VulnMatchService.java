@@ -21,7 +21,7 @@ import java.util.Set;
  *   2. 漏洞扫描任务创建时比对（task_id=任务 id）
  *
  * 状态保留：已忽略(2)/已修复(3) 的 (agent,cve,software) 组合不重复插入；
- * 新一轮比对前清除该 agent 未处置(0/1)记录后重插。
+ * 新一轮比对前清除该 agent 未处置(0/1)记录后重插，但保留待审批/执行修复引用的记录。
  */
 @Service
 public class VulnMatchService {
@@ -48,16 +48,22 @@ public class VulnMatchService {
             return;
         }
 
-        // 已忽略/已修复组合：新一轮不再重复报
+        String pendingRepair = """
+                EXISTS (SELECT 1 FROM t_fix_record r JOIN t_fix_task t ON t.id = r.task_id
+                        WHERE r.agent_id = f.agent_id AND r.ref_id = CAST(f.id AS TEXT)
+                          AND r.ref_type = 'vuln_finding' AND r.status = 0 AND t.status IN (0, 1))
+                """;
+        // 保留修复引用的 finding ID，重连时的资产扫描不能让结果失去回写目标。
         Set<String> dismissed = new HashSet<>();
         jdbc.query("""
-                        SELECT cve_id, software FROM t_vuln_finding
-                        WHERE agent_id = ? AND status IN (2, 3)
-                        """, (rs, i) -> dismissed.add(rs.getString(1) + "|" + rs.getString(2)),
+                        SELECT cve_id, software FROM t_vuln_finding f
+                        WHERE agent_id = ? AND (status IN (2, 3) OR %s)
+                        """.formatted(pendingRepair), (rs, i) -> dismissed.add(rs.getString(1) + "|" + rs.getString(2)),
                 agentId);
 
         // 未处置记录先清后插（快照全量替换语义）
-        jdbc.update("DELETE FROM t_vuln_finding WHERE agent_id = ? AND status IN (0, 1)", agentId);
+        jdbc.update("DELETE FROM t_vuln_finding AS f WHERE agent_id = ? AND status IN (0, 1) AND NOT "
+                + pendingRepair, agentId);
 
         int inserted = 0;
         for (Map<String, Object> cve : cves) {

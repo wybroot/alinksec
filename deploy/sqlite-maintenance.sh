@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
-compose_file="$script_dir/docker/docker-compose.lite.yml"
+compose_file="${ALINKSEC_LITE_COMPOSE_FILE:-$script_dir/docker/docker-compose.lite.yml}"
 env_file="${ALINKSEC_LITE_ENV_FILE:-$script_dir/docker/.env.lite}"
 backup_dir="${ALINKSEC_BACKUP_DIR:-$repo_root/backups}"
 
@@ -24,6 +24,8 @@ fail() {
   echo "ERROR: $*" >&2
   exit 1
 }
+
+[[ -f "$compose_file" ]] || fail "Compose file not found: $compose_file"
 
 validate_name() {
   [[ "$1" =~ ^[A-Za-z0-9._-]+\.db$ ]] || fail "backup name must contain only letters, numbers, dot, underscore, or dash and end in .db"

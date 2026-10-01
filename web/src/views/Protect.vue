@@ -29,7 +29,7 @@
       <div class="panel"><h4>最近拦截记录</h4>
         <el-empty v-if="!blocks.length" description="暂无拦截记录" :image-size="60" />
         <div v-for="b in blocks" :key="b.id" class="evt-item">
-          <span class="t">{{ fmtTime(b.last_time) }}</span>
+          <span class="t">{{ b.time }}</span>
           <div style="flex:1">
             <el-tag size="small" :type="sevType(b.severity)">{{ sevLabel(b.severity) }}</el-tag> {{ b.title }}<br />
             <span style="color:#94a3b8;font-size:11px">{{ b.hostname || b.agent_id }} · </span>

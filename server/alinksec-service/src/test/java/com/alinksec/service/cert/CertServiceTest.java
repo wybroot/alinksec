@@ -14,8 +14,11 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -70,6 +73,18 @@ class CertServiceTest {
         var cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(
                 new ByteArrayInputStream(issued.certPem().getBytes(StandardCharsets.UTF_8)));
         cert.verify(restored.caCert().getPublicKey());
+        try (PEMParser parser = new PEMParser(new StringReader(issued.keyPem()))) {
+            var keyInfo = (PrivateKeyInfo) parser.readObject();
+            var key = KeyFactory.getInstance("EC").generatePrivate(new PKCS8EncodedKeySpec(keyInfo.getEncoded()));
+            byte[] challenge = "client-key-round-trip".getBytes(StandardCharsets.UTF_8);
+            Signature signature = Signature.getInstance("SHA256withECDSA");
+            signature.initSign(key);
+            signature.update(challenge);
+            byte[] signed = signature.sign();
+            signature.initVerify(cert.getPublicKey());
+            signature.update(challenge);
+            assertTrue(signature.verify(signed));
+        }
 
         props.getServer().setPublicHost("192.168.56.11");
         props.getServer().setTlsSans(List.of("localhost", "192.168.56.11"));

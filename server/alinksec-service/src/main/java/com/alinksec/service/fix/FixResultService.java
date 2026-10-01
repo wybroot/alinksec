@@ -40,22 +40,24 @@ public class FixResultService {
             int status = item.getSuccess() ? 1 : (item.getRolledBack() ? 2 : 3);
             int updated = jdbc.update("""
                     UPDATE t_fix_record SET status = ?, log = ?, finished_at = CURRENT_TIMESTAMP
-                    WHERE task_id = ? AND agent_id = ? AND ref_id = ?
-                    """, status, truncate(item.getLog()), taskId, agentId, item.getRefId());
+                    WHERE task_id = ? AND agent_id = ? AND ref_id = ? AND status = 0
+                      AND EXISTS (SELECT 1 FROM t_fix_task t WHERE t.id = ? AND t.status = 1)
+                    """, status, truncate(item.getLog()), taskId, agentId, item.getRefId(), taskId);
             if (updated == 0) {
-                // 兼容任务外单条补报（正常不出现）：补插记录
-                jdbc.update("""
-                        INSERT INTO t_fix_record (task_id, agent_id, ref_id, ref_type, status, log, finished_at)
-                        VALUES (?, ?, ?, 'baseline_item', ?, ?, CURRENT_TIMESTAMP)
-                        """, taskId, agentId, item.getRefId(), status, truncate(item.getLog()));
+                log.warn("忽略未下发、越权或重复的修复结果: task={} agent={} ref={}",
+                        taskId, agentId, item.getRefId());
+                continue;
             }
             // 软件包类（ref_type=vuln_finding）修复成功 → 漏洞清单置已修复（docs/05 §3.3）
-            if (item.getSuccess()) {
+            String refType = jdbc.queryForObject("""
+                    SELECT ref_type FROM t_fix_record WHERE task_id = ? AND agent_id = ? AND ref_id = ?
+                    """, String.class, taskId, agentId, item.getRefId());
+            if (item.getSuccess() && "vuln_finding".equals(refType)) {
                 jdbc.update("""
                         UPDATE t_vuln_finding SET status = 3
                         WHERE id = CAST(? AS BIGINT) AND agent_id = ?
                           AND EXISTS (SELECT 1 FROM t_fix_record r
-                                      WHERE r.task_id = ? AND r.agent_id = ? AND r.ref_id = ?::varchar
+                                      WHERE r.task_id = ? AND r.agent_id = ? AND r.ref_id = CAST(? AS TEXT)
                                         AND r.ref_type = 'vuln_finding')
                         """, item.getRefId(), agentId, taskId, agentId, item.getRefId());
             }

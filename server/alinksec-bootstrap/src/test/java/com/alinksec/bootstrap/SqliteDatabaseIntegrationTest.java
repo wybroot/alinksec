@@ -19,6 +19,9 @@ import com.alinksec.service.query.HostQueryService;
 import com.alinksec.service.query.VirusQueryService;
 import com.alinksec.service.query.VulnQueryService;
 import com.alinksec.service.user.UserService;
+import com.alinksec.service.command.CommandService;
+import com.alinksec.service.protect.PolicyStoreService;
+import com.alinksec.common.util.JsonUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -100,6 +103,18 @@ class SqliteDatabaseIntegrationTest {
                 new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor()
                         .postProcessAfterInitialization(dataSource, "dataSource"));
         assertTrue(hasMessage(error, "Checksum mismatch"));
+    }
+
+    @Test
+    void refreshesStaleSqlitePolicyWithoutChangingMatchingSnapshotsOnRestart() {
+        jdbc.update("UPDATE t_policy_state SET version=7,content=? WHERE id=1",
+                "{\"decoy\":{\"enabled\":false}}");
+        PolicyStoreService policy = new PolicyStoreService(jdbc, mock(CommandService.class));
+        policy.init();
+        assertTrue(JsonUtils.read(policy.contentJson()).get("decoy").get("enabled").asBoolean());
+        assertEquals("v8", policy.currentVersion());
+        policy.init();
+        assertEquals("v8", policy.currentVersion());
     }
 
     @Test

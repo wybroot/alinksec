@@ -11,7 +11,7 @@ test('protection cards show engine details and recent blocks without editable st
     paths.push(path)
     const data = path.endsWith('/engines')
       ? [{ key: 'process', name: '进程防护', desc: '进程行为规则' }]
-      : [{ id: 1, title: '已阻断异常进程' }]
+      : [{ id: 1, title: '已阻断异常进程', severity: 4, last_time: '2026-10-01T12:34:00Z' }]
     return { ok: true, status: 200, json: async () => ({ code: 0, data }) }
   }
 
@@ -19,7 +19,9 @@ test('protection cards show engine details and recent blocks without editable st
     const result = await fetchProtect()
     assert.deepEqual(paths, ['/api/protect/engines', '/api/protect/blocks?limit=6'])
     assert.deepEqual(result.cards, [{ title: '进程防护', desc: '进程行为规则' }])
-    assert.deepEqual(result.blocks, [{ id: 1, title: '已阻断异常进程' }])
+    assert.equal(result.blocks[0].title, '已阻断异常进程')
+    assert.equal(result.blocks[0].severity, 'critical')
+    assert.match(result.blocks[0].time, /^10-01 \d{2}:34$/)
   } finally {
     globalThis.fetch = oldFetch
     globalThis.localStorage = oldStorage

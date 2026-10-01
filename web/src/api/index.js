@@ -689,7 +689,7 @@ export async function fetchProtect() {
     title: keyMap[e.key] || e.name,
     desc: e.desc || descMap[e.key] || '',
   }))
-  return { cards, blocks: blocks || [] }
+  return { cards, blocks: (blocks || []).map((b) => ({ ...b, severity: sev(b.severity), time: fmtTime(b.last_time) })) }
 }
 
 /** 防护规则清单（PR-0010 诱饵 / PR-0011 加密行为） */

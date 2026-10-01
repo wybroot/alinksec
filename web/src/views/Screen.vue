@@ -1,4 +1,5 @@
 <template>
+  <div class="screen-viewport">
   <div id="stage" :style="stageStyle">
     <!-- 顶栏 -->
     <div class="header">
@@ -92,6 +93,7 @@
     </div>
     <div class="foot-note">ALINKSEC SECURITY OPERATIONS CENTER · 数据来源：AGENT 实采实时上报</div>
   </div>
+  </div>
 </template>
 
 <script setup>
@@ -175,17 +177,18 @@ const gauge = useChart(gaugeEl, () => {
       axisLine: { lineStyle: { width: 14, color: [[1, 'rgba(0,229,255,.12)']] } },
       pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
       anchor: { show: false },
-      title: { offsetCenter: [0, '34%'], fontSize: 13, color: C.dim },
+      title: { offsetCenter: [0, '20%'], fontSize: 13, color: C.dim },
       detail: { valueAnimation: true, fontSize: 44, fontWeight: 700, offsetCenter: [0, '-2%'], color: '#e8f6ff', formatter: val => val, fontFamily: 'Consolas' },
       data: [{ value: v, name: '基线合规评分' }]
     }],
-    graphic: [{ type: 'text', left: 'center', top: '72%', style: { text: `风险等级：${level}`, fill: color, fontSize: 13 } }]
+    graphic: [{ type: 'text', left: 'center', top: '84%', style: { text: `风险等级：${level}`, fill: color, fontSize: 13 } }]
   }
 })
 
 const pieEl = ref(null)
 const pie = useChart(pieEl, () => {
-  const data = sevPie.value.some(d => d.value > 0) ? sevPie.value : [{ value: 0, name: '暂无告警' }]
+  const nonzero = sevPie.value.filter(d => d.value > 0)
+  const data = nonzero.length ? nonzero : [{ value: 0, name: '暂无告警' }]
   const colors = { 严重: C.red, 高危: C.amber, 中危: C.cyan, 低危: '#3f6aa6' }
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c}（{d}%）', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
@@ -217,12 +220,12 @@ const risk = useChart(riskEl, () => {
   const rows = riskHosts.value.length ? riskHosts.value : [{ hostname: '暂无风险主机', risk: 0, alerts: 0 }]
   return {
     grid: { left: 10, right: 56, top: 8, bottom: 8, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' }, formatter: p => `${p[0].name}：待处置告警 ${rows[p[0].dataIndex].alerts} 条` },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, confine: true, extraCssText: 'max-width:260px;white-space:normal;overflow-wrap:anywhere;', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' }, formatter: p => `${echarts.format.encodeHTML(p[0].name)}：待处置告警 ${rows[p[0].dataIndex].alerts} 条` },
     xAxis: { type: 'value', max: 100, show: false },
     yAxis: {
       type: 'category', inverse: true, data: rows.map(r => r.hostname),
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: '#c8ddd7', fontSize: 12, fontFamily: 'Consolas' }
+      axisLabel: { color: '#c8ddd7', fontSize: 12, fontFamily: 'Consolas', width: 110, overflow: 'truncate' }
     },
     series: [{
       type: 'bar', barWidth: 12, data: rows.map(r => ({
@@ -315,10 +318,10 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style>
-/* 大屏为独立全屏路由，样式不 scoped（需覆盖 body 背景）。 */
+<style scoped>
+/* 大屏主题只作用于当前路由，返回控制台后恢复原布局。 */
 * { box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #06120f; }
+.screen-viewport { position: fixed; inset: 0; overflow: hidden; background: #06120f; }
 #stage {
   position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: center center;
   background: #081713; color: #d9e8e3; font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -334,7 +337,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #06120f; }
 .header .clock .time { font-family: Consolas, Menlo, monospace; font-size: 25px; color: #8be2d0; letter-spacing: 1px; }
 .header .clock .date { font-size: 12px; color: #789f95; margin-top: 3px; }
 .header::after { content: ""; position: absolute; width: 240px; height: 3px; left: calc(50% - 120px); bottom: -2px; background: #4dd5c0; }
-.deco-btn { position: absolute; left: 28px; bottom: 14px; display: flex; gap: 8px; }
+.deco-btn { position: absolute; left: 340px; top: 50%; transform: translateY(-50%); display: flex; gap: 8px; }
 .deco-btn button { color: #a4ccc1; border: 1px solid #385e55; padding: 4px 11px; border-radius: 3px; background: #0c2520; font: inherit; font-size: 12px; cursor: pointer; }
 .deco-btn button:hover { color: #e3f5ef; border-color: #65c9b7; background: #12352d; }
 .body { display: grid; grid-template-columns: 440px 1fr 440px; gap: 16px; padding: 14px 20px 18px; height: 994px; }

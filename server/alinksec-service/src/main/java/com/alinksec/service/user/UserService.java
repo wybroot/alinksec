@@ -26,7 +26,7 @@ public class UserService {
     public Optional<UserProfile> login(String username, String rawPassword, String sourceIp) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT u.id, u.username, u.real_name, u.password_hash, u.status,
-                       u.role_id, r.name AS role_name, r.permissions
+                       u.role_id, r.name AS role_name, CAST(r.permissions AS TEXT) AS permissions
                 FROM t_user u JOIN t_role r ON r.id = u.role_id
                 WHERE u.username = ?
                 """, username);

@@ -422,7 +422,7 @@ const { render: renderScore } = useChart(scoreEl, () => ({
 const catEl = ref(null)
 const { render: renderCat } = useChart(catEl, () => ({
   grid: { left: 40, right: 16, top: 30, bottom: 26 },
-  tooltip: { trigger: 'axis', formatter: (ps) => `${ps[0].name}：通过率 ${ps[0].value}%` },
+  tooltip: { trigger: 'axis', formatter: (ps) => `${echarts.format.encodeHTML(ps[0].name)}：通过率 ${ps[0].value}%` },
   xAxis: { type: 'category', data: catStats.value.map((c) => c.category), axisLabel: { color: '#64748b', fontSize: 11 }, axisLine: { lineStyle: { color: '#e2e8f0' } } },
   yAxis: { type: 'value', max: 100, splitLine: { lineStyle: { color: '#eef2f7' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
   series: [{

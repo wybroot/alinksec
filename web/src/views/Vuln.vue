@@ -184,6 +184,7 @@ const scanForm = ref({ agentIds: [], includeVuln: true, includeWeakPassword: tru
 
 // 一键修复
 const fixDlg = ref(false)
+const fixSubmitting = ref(false)
 const fixRow = ref({})
 const fixForm = ref({ version: '9.8p1', approver: '', win: [] })
 
