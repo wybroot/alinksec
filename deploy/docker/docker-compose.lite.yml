@@ -57,6 +57,8 @@ services:
     user: "0:0"
     network_mode: none
     cap_drop: ["ALL"]
+    # Host-owned backup directories can use a different UID from the server volume.
+    cap_add: ["DAC_OVERRIDE"]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 64m
     memswap_limit: 96m

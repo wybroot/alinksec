@@ -164,7 +164,7 @@ async function assertHost(token, version, isolationStatus) {
 
 try {
   mkdirSync(dataDir)
-  mkdirSync(backupDir)
+  mkdirSync(backupDir, { mode: 0o700 })
   writeFileSync(envFile, '')
   const config = JSON.parse(await command('docker', ['compose', '-f',
     join(repoDir, 'deploy/docker/docker-compose.lite.yml'), '--profile', 'maintenance',
@@ -176,6 +176,7 @@ try {
   const service = config.services['sqlite-maintenance']
   assert.deepEqual(service.entrypoint, ['/usr/bin/sqlite3'])
   assert.equal(service.user, '0:0')
+  assert.deepEqual(service.cap_add, ['DAC_OVERRIDE'])
   assert.equal(Number(service.mem_limit), 64 * 1024 * 1024)
   service.image = process.env.ALINKSEC_MAINTENANCE_TEST_IMAGE || service.image
   await command('docker', ['image', 'inspect', service.image])

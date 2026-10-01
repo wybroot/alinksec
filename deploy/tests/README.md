@@ -162,6 +162,8 @@ fixture directories. It never starts the full deployment or touches its volumes.
 A native SQLite server uses a 256 MiB heap; tool containers run serially with
 64 MiB memory, 96 MiB memory plus swap, and one CPU. A shared lock excludes other
 local validation scenarios.
+Default capabilities are dropped; only `DAC_OVERRIDE` is added so the root CLI
+can access private backup directories owned by a different host UID.
 
 The six checks cover the configured CLI/volume user, online `VACUUM INTO` backup
 of committed WAL data, duplicate/unsafe/missing/corrupt backup rejection, CLI
@@ -176,6 +178,9 @@ directly. Automatic Compose stop/start and rollback remain covered by the
 
 The production image is built from checksum-pinned official SQLite 3.46.1 sources
 with a static CLI and no shell or network tools. Build it before running checks.
+The build defaults to the Aliyun Alpine mirror; set
+`--build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org` to use the official mirror,
+as the CI runner does.
 `ALINKSEC_MAINTENANCE_TEST_IMAGE` can select a controlled alternative; the script
 checks the CLI version and prints the selected image. CI builds and tests the
 production image. Containers and Java are stopped on exit, successful

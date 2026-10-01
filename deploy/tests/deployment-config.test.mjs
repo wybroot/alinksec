@@ -47,6 +47,7 @@ test('SQLite: maintenance profile is isolated and resource limited', () => {
   assert.equal(tool.user, '0:0')
   assert.equal(tool.network_mode, 'none')
   assert.deepEqual(tool.cap_drop, ['ALL'])
+  assert.deepEqual(tool.cap_add, ['DAC_OVERRIDE'])
   assert.ok(tool.security_opt.includes('no-new-privileges:true'))
   assert.equal(Number(tool.mem_limit), 64 * 1024 * 1024)
   assert.equal(Number(tool.memswap_limit), 96 * 1024 * 1024)
