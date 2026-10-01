@@ -237,6 +237,10 @@ Agent/server restarts. SAN/CA recovery rejects old trust before re-enrollment.
 Fixture hardware identities and all writable state belong to the temporary
 scenario. Only test containers receive `NET_ADMIN`; host firewall rules,
 production volumes, and other services are not changed.
+Protected Agent state and CA files are read inside the container, keeping their
+private file permissions compatible with a non-root host runner. After all
+Agents and the server stop, one isolated 64 MiB container removes only the
+scenario's Agent work directories before the host removes the remaining fixtures.
 
 The separate 64 MiB firewall check applies the production script to an isolated
 container chain. Real DNAT traffic verifies original destination ports,

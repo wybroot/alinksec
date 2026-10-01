@@ -19,6 +19,7 @@ const root = mkdtempSync(join(repo, '.tmp/agent-workflow.'))
 const image = process.env.ALINKSEC_SMOKE_AGENT_IMAGE || 'alinksec-agent-validation'
 const exec = promisify(execFile)
 const containers = []
+const agentWorkDirs = []
 const password = 'agent-workflow-admin-password'
 let server, proxy, business, token, passed = false
 let accessHost = 'ci.alinksec.test'
@@ -30,6 +31,9 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
 async function command(exe, args, options = {}) {
   return (await exec(exe, args, { encoding: 'utf8', timeout: 60_000,
     maxBuffer: 1024 * 1024, signal: controller.signal, ...options })).stdout.trim()
+}
+async function agentFile(container, file) {
+  return command('docker', ['exec', container, 'cat', `/work/${file}`])
 }
 async function port(host) {
   const listener = net.createServer()
@@ -116,6 +120,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   const fixtures = join(dir, 'fixtures')
   mkdirSync(fixtures, { recursive: true })
   mkdirSync(join(dir, 'work'))
+  agentWorkDirs.push(`/cleanup/${label}/work`)
   copyFileSync(process.env.ALINKSEC_SMOKE_AGENT_BIN, join(fixtures, 'alinksec-agent'))
   copyFileSync(join(repo, 'deploy/tests/fixtures/agent-entry.sh'), join(fixtures, 'agent-entry.sh'))
   copyFileSync(join(root, 'data/certs/ca.crt'), join(fixtures, 'ca.crt'))
@@ -134,7 +139,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     '-e', `ALINKSEC_TEST_SERVER=${accessHost}:${grpcPort}`, '-e', `ALINKSEC_TEST_TOKEN=${enrollment.token}`, image])
   containers.push(container)
   await until(() => existsSync(join(dir, 'work/state.yml')), 'Actual Agent did not enroll')
-  const id = readFileSync(join(dir, 'work/state.yml'), 'utf8').match(/^agent_id: (.+)$/m)?.[1]
+  const id = (await agentFile(container, 'state.yml')).match(/^agent_id: (.+)$/m)?.[1]
   assert.match(id, /^[\da-f-]{36}$/)
   const agent = { id, dir, fixtures, container }
   await until(() => sql('SELECT status FROM t_agent WHERE agent_id=?', id)[0]?.status === 1,
@@ -180,10 +185,10 @@ try {
   const first = await makeAgent('first')
   await until(() => existsSync(join(first.dir, 'work/policy.json')), 'Initial policy was not applied')
   await api('/api/protect/rules/PR-0010', { enabled: true, actions: ['alert'], match: { dirs: ['/work/decoys'], count_per_dir: 2 } }, 'PUT')
-  await until(() => JSON.parse(readFileSync(join(first.dir, 'work/policy.json'), 'utf8')).decoy.enabled === true,
+  await until(async () => JSON.parse(await agentFile(first.container, 'policy.json')).decoy.enabled === true,
     'Enabled policy did not reach Agent')
   await api('/api/protect/rules/PR-0010', { enabled: false }, 'PUT')
-  await until(() => JSON.parse(readFileSync(join(first.dir, 'work/policy.json'), 'utf8')).decoy.enabled === false,
+  await until(async () => JSON.parse(await agentFile(first.container, 'policy.json')).decoy.enabled === false,
     'Disabled policy did not reach Agent')
   console.log('ok - actual Go Agent TLS enrollment, mTLS heartbeat and enabled/disabled policy persistence')
   const businessAddress = Object.values(networkInterfaces()).flat().find(a => a.family === 'IPv4' && !a.internal && a.address !== gateway)?.address
@@ -258,7 +263,7 @@ try {
   sql('DELETE FROM t_agent WHERE agent_id=? RETURNING id', first.id)
   const repaired = await makeAgent('repaired', machineId)
   assert.notEqual(repaired.id, first.id)
-  assert.equal(new X509Certificate(readFileSync(join(repaired.dir, 'work/certs/ca.crt'))).fingerprint256, newCA)
+  assert.equal(new X509Certificate(await agentFile(repaired.container, 'certs/ca.crt')).fingerprint256, newCA)
   assert.equal(new X509Certificate(readFileSync(join(root, 'data/certs/server.crt'))).checkHost(accessHost), accessHost)
   console.log('ok - stale SAN blocks startup; new CA rejects old Agent trust and permits re-enrollment')
   passed = true
@@ -271,7 +276,15 @@ try {
   if (proxy) await new Promise(ok => proxy.close(ok))
   if (business) await new Promise(ok => business.close(ok))
   await stopServer()
-  if (passed && !cleanupFailed) rmSync(root, { recursive: true, force: true })
-  else console.error(`Validation artifacts: ${root}`)
+  if (passed && !cleanupFailed) {
+    try {
+      await command('docker', ['run', '--rm', '--network=none', '--memory=64m', '--memory-swap=96m',
+        '--cpus=1', '--pids-limit=32', '--cap-drop=ALL', '--cap-add=DAC_OVERRIDE',
+        '--security-opt=no-new-privileges:true', '--mount', `type=bind,src=${root},dst=/cleanup`,
+        '--entrypoint=/bin/rm', image, '-rf', ...agentWorkDirs])
+      rmSync(root, { recursive: true, force: true })
+    } catch (error) { cleanupFailed = true; console.error(error.message) }
+  }
+  if (!passed || cleanupFailed) console.error(`Validation artifacts: ${root}`)
   if (cleanupFailed) throw new Error('Could not remove Agent validation containers')
 }
