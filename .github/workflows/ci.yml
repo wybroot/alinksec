@@ -5,6 +5,12 @@ on:
     paths-ignore:
       - '**/*.md'
   pull_request:
+  workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Run only native Windows Agent validation
+        type: boolean
+        default: false
 
 jobs:
   windows-agent:
@@ -27,9 +33,10 @@ jobs:
         working-directory: agent
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
-          ALINKSEC_SMOKE_AGENT_BIN: alinksec-agent-windows-amd64.exe
+          ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
 
   build-and-test:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
     runs-on: ubuntu-latest
     env:
       HOST_IP: ci.alinksec.test
@@ -204,6 +211,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   schema:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
     runs-on: ubuntu-latest
     services:
       postgres:

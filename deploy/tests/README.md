@@ -30,6 +30,8 @@ fixture writes are explicitly enabled. The Windows CI job runs it against the
 native executable; Linux hosts can only cross-compile this test.
 
 Pure Markdown pushes skip CI; pull requests continue to run validation.
+For a Windows-only change, `gh workflow run CI -f windows_only=true` executes
+only the native Windows checks. Normal push and pull-request runs keep all jobs.
 
 ## Local SQLite
 

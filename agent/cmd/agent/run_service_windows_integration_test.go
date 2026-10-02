@@ -40,9 +40,9 @@ func TestNativeWindowsService(t *testing.T) {
 	if os.Getenv("ALINKSEC_SMOKE_ALLOW_FIXTURES") != "true" {
 		t.Skip("requires an explicitly authorized disposable Windows host")
 	}
-	source, err := filepath.Abs(os.Getenv("ALINKSEC_SMOKE_AGENT_BIN"))
-	if err != nil || os.Getenv("ALINKSEC_SMOKE_AGENT_BIN") == "" {
-		t.Fatal("ALINKSEC_SMOKE_AGENT_BIN must reference the built Agent exe")
+	source := os.Getenv("ALINKSEC_SMOKE_AGENT_BIN")
+	if !filepath.IsAbs(source) {
+		t.Fatal("ALINKSEC_SMOKE_AGENT_BIN must be the absolute path to the built Agent exe")
 	}
 	manager, err := mgr.Connect()
 	if err != nil {
