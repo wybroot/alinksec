@@ -157,6 +157,8 @@ try {
   await page.reload()
   await expect(fileSettings.locator('textarea')).toHaveValue('/work/browser-protected')
   await expect(loginSettings.locator('input[role="spinbutton"]').first()).toHaveValue('4')
+  await expect(page.locator('.protection-settings .el-loading-mask')).toHaveCount(0)
+  await page.screenshot({path:`${artifacts}/protection-desktop.png`,fullPage:true})
   await page.setViewportSize({width:390,height:844})
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile protection settings overflow')
   await page.screenshot({path:`${artifacts}/protection-mobile.png`,fullPage:true})

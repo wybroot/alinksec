@@ -103,6 +103,7 @@ jobs:
         with:
           name: browser-validation
           path: .tmp/browser-artifacts-*
+          include-hidden-files: true
           if-no-files-found: ignore
       - run: docker compose up -d --wait
         working-directory: deploy/docker
