@@ -45,9 +45,31 @@
 
 Linux 部署说明改为复制发布单元，修复 systemd 行内注释使 Restart 设置无效的问题；SIGTERM 正常退出不再输出 context canceled 错误。Linux 实际安装、正常退出自动拉起和通信均在本机验证。
 
-Windows Agent 的 run 增加 SCM 服务处理，并保留命令行前台模式。服务控制测试覆盖 Running、Interrogate、Stop、Shutdown、取消主循环和失败退出码；本机已交叉编译 Windows 成品与测试程序，测试执行接入独立 Windows CI job。本机 Linux 无法执行该 Windows 测试程序，这与已经完成的 Linux 原生验收分开记录。
+Windows Agent 的 run 增加 SCM 服务处理，并保留命令行前台模式。服务控制测试覆盖 Running、Interrogate、Stop、Shutdown、取消主循环和失败退出码。本机交叉编译 Windows 成品与测试程序并完成静态检查，Windows 执行证据见下节，与 Linux 本机测量独立记录。
 
 后续构建优先本机串行完成；原生构建使用一个 worker、256 MiB 语言堆上限，保留至少 384 MiB 可用内存并观察 PSI，遇到压力停止。其他平台执行或超出本机安全容量的检查才使用 CI。约定见 [AGENTS.md](../AGENTS.md)。
+
+## Windows 服务补充实测
+
+提交 `f480735` 的[完整 CI](https://github.com/wybroot/alinksec/actions/runs/36970504397)已通过，包含 Windows 服务单元测试。随后补充 `TestNativeWindowsService`，使用实际构建的成品 exe 在 Windows Server 2025 上进行 SCM 验证。
+
+测试启动时 Go 会切换到包目录，首次相对路径配置未找到 exe；已修正为绝对路径，并在测试入口拒绝相对路径。修正后提交 `2f71ab7` 的 [Windows job](https://github.com/wybroot/alinksec/actions/runs/36973031084/job/110730859500)通过，实际测试耗时 6.34 秒。
+
+| 实测节点 | 证据 |
+| --- | --- |
+| 成品安装与注册 | exe 和工作目录均包含空格，真实 install 子命令通过临时 CA 注册，注册码从配置清除 |
+| SCM 运行与查询 | 实际服务 RUNNING，支持 Interrogate |
+| 实际通信与资产 | 校验客户端证书 CN 与上报身份的 mTLS 通道，回传 401 个软件、144 个进程、4 个账户 |
+| 采集指令 | 指定 software 采集器实际回传数据，collect_now ACK 为 DONE |
+| 手动停止与启动 | 停止退出码为零且进程退出；再次启动得到新进程和新心跳 |
+| 自动恢复 | Agent 收到 RESTART 后正常退出，SCM 自动拉起新进程，重新建立 mTLS 通道 |
+| 身份保持 | 客户端证书 SHA-256 不变，服务重启全程只注册一次 |
+| 手动停止保持停止 | 等待超过恢复延时，服务保持 STOPPED，没有额外通信会话 |
+| 清理 | 关闭恢复动作，停止、删除测试服务，关闭 TLS fixture，删除临时文件 |
+
+专项采用 Go 协议 fixture，不是 Java 管理平台；不将此结果宣称为完整 Windows 安全引擎验收。测试仅允许显式启用的临时 Windows 环境，并拒绝覆盖已有 alinksec-agent 服务。重现命令见 [验证说明](../deploy/tests/README.md#native-windows-service)。
+
+本次通过 windows_only 手动入口只运行 Windows job，Linux 构建和数据库 job 为 skipped，沿用 `f480735` 的完整验证证据。纯 Markdown 推送跳过 CI，避免验收文档更新重新触发整套构建。
 
 ## 复核
 
