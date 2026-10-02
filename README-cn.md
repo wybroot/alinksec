@@ -96,6 +96,8 @@ Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 G
 
 当前开发分支新增 **Linux ARM64（aarch64）** Agent、amd64/arm64 双架构容器构建与原生 CI。ARM64 尚未包含在已发布的 v0.0.1 中；新版本发布前请按 [ARM64 部署说明](docs/14-ARM64支持.md)从当前源码构建。
 
+提交 `bb8cf91` 已通过[原生 ARM64、amd64、Windows 及数据库 CI](https://github.com/wybroot/alinksec/actions/runs/37026819693)；ARM64 文档记录了验收范围和已复核的 Agent 校验值。
+
 <details>
 <summary><b>📦 项目目录结构</b></summary>
 

@@ -111,6 +111,9 @@ amd64/arm64 container builds, with native CI for both architectures. ARM64 is
 not included in the existing v0.0.1 release. Until a new release is published,
 use the source build instructions in the [ARM64 guide](docs/14-ARM64支持.md).
 
+Commit `bb8cf91` passed [native ARM64, amd64, Windows and database CI](https://github.com/wybroot/alinksec/actions/runs/37026819693);
+the guide records the acceptance scope and verified Agent checksums.
+
 <details>
 <summary><b>📦 Explore the Repository</b></summary>
 
