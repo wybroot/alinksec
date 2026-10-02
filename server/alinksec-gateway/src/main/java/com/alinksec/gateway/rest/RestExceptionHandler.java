@@ -10,6 +10,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * REST 全局异常 → 统一 ApiResult。
@@ -36,5 +37,11 @@ public class RestExceptionHandler {
     public ApiResult<Void> handleOther(Exception e) {
         log.error("REST 处理异常", e);
         return ApiResult.error(ErrorCode.INTERNAL_ERROR.code(), "服务内部错误");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+    public ApiResult<Void> handleUploadLimit(MaxUploadSizeExceededException e) {
+        return ApiResult.error(ErrorCode.INVALID_ARGUMENT.code(), "上传文件超过大小限制");
     }
 }

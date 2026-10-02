@@ -11,6 +11,7 @@ spring:
       connection-timeout: 5000
       data-source-properties:
         busy_timeout: 5000
+        transaction_mode: IMMEDIATE
         foreign_keys: true
         journal_mode: WAL
         synchronous: NORMAL

@@ -4,6 +4,7 @@ import com.alinksec.proto.CmdVirusAction;
 import com.alinksec.proto.Command;
 import com.alinksec.proto.VirusTarget;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.protect.PolicyStoreService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,10 +28,12 @@ public class VirusActionService {
 
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
+    private final PolicyStoreService policyStore;
 
-    public VirusActionService(JdbcTemplate jdbc, CommandService commandService) {
+    public VirusActionService(JdbcTemplate jdbc, CommandService commandService, PolicyStoreService policyStore) {
         this.jdbc = jdbc;
         this.commandService = commandService;
+        this.policyStore = policyStore;
     }
 
     /**
@@ -84,7 +87,7 @@ public class VirusActionService {
         log.info("病毒处置指令已下发: action={} findings={} agents={}", act, findings.size(), byAgent.size());
     }
 
-    /** 加白：写平台全局白名单表 + finding 状态置 4（后续扫描结果落库时自动过滤） */
+    /** 加白：写全局白名单、同步 Agent 策略，并将 finding 状态置 4。 */
     private void addWhitelist(List<Map<String, Object>> findings, Long operatedBy) {
         String marks = findings.stream().map(f -> String.valueOf(f.get("id")))
                 .reduce((a, b) -> a + "," + b).orElse("");
@@ -96,6 +99,7 @@ public class VirusActionService {
                     """, f.get("sha256"), "检出记录加白: " + f.get("path"), operatedBy);
         }
         jdbc.update("UPDATE t_virus_finding SET status = 4 WHERE id IN (" + marks + ")");
+        policyStore.rebuild();
         log.info("病毒检出已加白: findings={}", findings.size());
     }
 
@@ -113,6 +117,7 @@ public class VirusActionService {
         }
         jdbc.update("INSERT INTO t_virus_whitelist (type, value, remark, created_by) VALUES (?, ?, ?, ?)",
                 type, value, remark, operatedBy);
+        policyStore.rebuild();
     }
 
     /** 删除白名单 */
@@ -122,5 +127,6 @@ public class VirusActionService {
         if (rows == 0) {
             throw new IllegalArgumentException("白名单记录不存在");
         }
+        policyStore.rebuild();
     }
 }

@@ -1,6 +1,11 @@
 package com.alinksec.bootstrap;
 
 import com.alinksec.proto.RptAck;
+import com.alinksec.proto.RptScanResult;
+import com.alinksec.proto.RptVirusResult;
+import com.alinksec.proto.WeakPwdFinding;
+import com.alinksec.proto.PortServiceFinding;
+import com.alinksec.proto.VirusFinding;
 import com.alinksec.proto.RptSecurityEvent;
 import com.alinksec.proto.Severity;
 import com.alinksec.service.agent.AgentEntity;
@@ -19,6 +24,9 @@ import com.alinksec.service.query.HostQueryService;
 import com.alinksec.service.query.VirusQueryService;
 import com.alinksec.service.query.VulnQueryService;
 import com.alinksec.service.user.UserService;
+import com.alinksec.service.scan.ScanResultService;
+import com.alinksec.service.virus.VirusResultService;
+import com.alinksec.service.virus.VirusActionService;
 import com.alinksec.service.command.CommandService;
 import com.alinksec.service.protect.PolicyStoreService;
 import com.alinksec.common.util.JsonUtils;
@@ -28,6 +36,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.nio.file.Path;
@@ -36,6 +46,10 @@ import java.sql.DriverManager;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -54,17 +68,22 @@ class SqliteDatabaseIntegrationTest {
     private SingleConnectionDataSource dataSource;
     private JdbcTemplate jdbc;
     private DatabaseDialect database;
+    private Properties settings;
 
     @BeforeEach
     void setUp() throws Exception {
         Class.forName("org.sqlite.JDBC");
-        Properties settings = new Properties();
+        settings = new Properties();
         settings.setProperty("busy_timeout", "5000");
         settings.setProperty("foreign_keys", "true");
         settings.setProperty("journal_mode", "WAL");
         settings.setProperty("synchronous", "NORMAL");
         settings.setProperty("date_class", "TEXT");
         settings.setProperty("date_string_format", "yyyy-MM-dd HH:mm:ss.SSS");
+        YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new ClassPathResource("application-sqlite.yml"));
+        settings.setProperty("transaction_mode", yaml.getObject().getProperty(
+                "spring.datasource.hikari.data-source-properties.transaction_mode"));
         Connection connection = DriverManager.getConnection(
                 "jdbc:sqlite:" + tempDir.resolve("alinksec.db").toAbsolutePath(), settings);
         dataSource = new SingleConnectionDataSource(connection, true);
@@ -80,6 +99,103 @@ class SqliteDatabaseIntegrationTest {
     @AfterEach
     void tearDown() {
         dataSource.destroy();
+    }
+
+    @Test
+    void serializesReadThenWriteTransactionsDuringAgentReports() throws Exception {
+        assertEquals("IMMEDIATE", settings.getProperty("transaction_mode"));
+        String url = "jdbc:sqlite:" + tempDir.resolve("alinksec.db").toAbsolutePath();
+        try (var executor = Executors.newSingleThreadExecutor();
+             Connection first = DriverManager.getConnection(url, settings);
+             Connection second = DriverManager.getConnection(url, settings)) {
+            first.setAutoCommit(false);
+            try (var stmt = first.createStatement(); var result = stmt.executeQuery("SELECT version FROM t_policy_state WHERE id=1")) {
+                assertTrue(result.next());
+            }
+            CountDownLatch started = new CountDownLatch(1);
+            var otherWrite = executor.submit(() -> {
+                started.countDown();
+                second.setAutoCommit(false);
+                try (var stmt = second.createStatement()) {
+                    stmt.executeUpdate("UPDATE t_policy_state SET version=version+1 WHERE id=1");
+                    second.commit();
+                    second.setAutoCommit(true);
+                }
+                return true;
+            });
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> otherWrite.get(200, TimeUnit.MILLISECONDS));
+            try (var stmt = first.createStatement()) {
+                stmt.executeUpdate("UPDATE t_policy_state SET version=version+1 WHERE id=1");
+            }
+            first.commit();
+            first.setAutoCommit(true);
+            assertTrue(otherWrite.get(5, TimeUnit.SECONDS));
+            assertEquals(3, jdbc.queryForObject("SELECT version FROM t_policy_state WHERE id=1", Integer.class));
+        }
+    }
+
+    @Test
+    void publishesWhitelistChangesInAgentPolicySnapshots() {
+        CommandService commands = mock(CommandService.class);
+        PolicyStoreService policy = new PolicyStoreService(jdbc, commands);
+        policy.init();
+        VirusActionService actions = new VirusActionService(jdbc, commands, policy);
+        String before = policy.currentVersion();
+        actions.addWhitelistEntry("hash", "a".repeat(64), "local test", 1L);
+        var entries = JsonUtils.read(policy.contentJson()).path("virus_whitelist");
+        assertEquals(1, entries.size());
+        assertEquals("a".repeat(64), entries.get(0).path("value").asText());
+        assertFalse(before.equals(policy.currentVersion()));
+        long id = jdbc.queryForObject("SELECT id FROM t_virus_whitelist", Long.class);
+        actions.removeWhitelist(id);
+        assertEquals(0, JsonUtils.read(policy.contentJson()).path("virus_whitelist").size());
+    }
+
+    @Test
+    void persistsAgentScanAndVirusResultsAndCompletesTasks() {
+        String scope = "{\"agent_ids\":[\"agent-scan-1\"]}";
+        long scanTask = jdbc.queryForObject("""
+                INSERT INTO t_scan_task(task_no, type, scope, status)
+                VALUES ('SC-LIVE', 7, ?, 1) RETURNING id
+                """, Long.class, scope);
+        new ScanResultService(jdbc).onResult("agent-scan-1", RptScanResult.newBuilder()
+                .setTaskId(String.valueOf(scanTask))
+                .addWeakPasswords(WeakPwdFinding.newBuilder()
+                        .setAccount("empty-test").setType("system_empty"))
+                .addPortServices(PortServiceFinding.newBuilder()
+                        .setPort(4444).setProtocol("tcp").setRisky(true))
+                .build());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_weakpwd_finding", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_port_finding", Integer.class));
+        assertEquals(100, jdbc.queryForObject("SELECT progress FROM t_scan_task WHERE id=?", Integer.class, scanTask));
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM t_scan_task WHERE id=?", Integer.class, scanTask));
+        assertNotNull(jdbc.queryForObject("SELECT finished_at FROM t_scan_task WHERE id=?", String.class, scanTask));
+
+        long virusTask = jdbc.queryForObject("""
+                INSERT INTO t_virus_scan_task(task_no, mode, scope, status)
+                VALUES ('VS-LIVE', 3, ?, 1) RETURNING id
+                """, Long.class, scope);
+        VirusResultService viruses = new VirusResultService(jdbc);
+        viruses.onResult("agent-scan-1", RptVirusResult.newBuilder()
+                .setTaskId(String.valueOf(virusTask)).setFilesScanned(1)
+                .addFindings(VirusFinding.newBuilder().setPath("/tmp/harmless-fixture")
+                        .setName("Test.Fixture").setSha256("a".repeat(64)).setEngine("hash")
+                        .setSeverity(Severity.SEV_HIGH).setActionTaken("quarantined"))
+                .build());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_virus_finding", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT status FROM t_virus_finding", Integer.class));
+        assertEquals(100, jdbc.queryForObject("SELECT progress FROM t_virus_scan_task WHERE id=?", Integer.class, virusTask));
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?", Integer.class, virusTask));
+        assertNotNull(jdbc.queryForObject("SELECT finished_at FROM t_virus_scan_task WHERE id=?", String.class, virusTask));
+
+        long cleanTask = jdbc.queryForObject("""
+                INSERT INTO t_virus_scan_task(task_no, mode, scope, status)
+                VALUES ('VS-CLEAN', 3, ?, 1) RETURNING id
+                """, Long.class, scope);
+        viruses.onResult("agent-scan-1", RptVirusResult.newBuilder()
+                .setTaskId(String.valueOf(cleanTask)).setFilesScanned(1).build());
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?", Integer.class, cleanTask));
     }
 
     @Test

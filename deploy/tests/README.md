@@ -112,8 +112,9 @@ ALINKSEC_SMOKE_WEB_IMAGE=alinksec-web-validation \
 
 Requires a local Linux Docker engine with an IPv4 bridge, Bash, Java 21, `flock`,
 Node.js 22.22 or later, and the packaged server JAR. Set `JAVA_BIN` if Java is not
-on `PATH`. Bridge port 8080 must be available because the production Nginx
-configuration connects to `server:8080`.
+on `PATH`. Bridge port 8080 must be available. The production Nginx template
+defaults to `server:8080` and refreshes Docker DNS every five seconds; this native
+server check sets `ALINKSEC_BACKEND_HOST` to the bridge address.
 
 The script starts one native SQLite server with a 256 MiB heap, bound to Docker's
 bridge address, and one 96 MiB Nginx container with one CPU and worker autotuning.

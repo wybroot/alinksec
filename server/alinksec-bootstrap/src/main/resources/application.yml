@@ -3,6 +3,11 @@ spring:
     name: alinksec-server
   profiles:
     default: postgres
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 512MB
+      file-size-threshold: 0B
 
 server:
   port: 8080   # M2 REST API 占位

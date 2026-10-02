@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,17 +54,21 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 	if err != nil {
 		return ItemResult{ItemID: spec.GetItemId(), Passed: false, Actual: spec.GetCheck(), Message: err.Error()}
 	}
+	var result ItemResult
 	switch cs.Type {
 	case "file_content":
-		return checkFileContent(cs)
+		result = checkFileContent(cs)
 	case "file_line":
-		return checkFileLine(cs)
+		result = checkFileLine(cs)
 	case "file_perm":
-		return checkFilePerm(cs)
+		result = checkFilePerm(cs)
 	case "cmd_output":
-		return checkCmdOutput(cs)
+		result = checkCmdOutput(cs)
+	default:
+		result = ItemResult{Passed: false, Message: "未知检查类型 " + cs.Type}
 	}
-	return ItemResult{ItemID: spec.GetItemId(), Passed: false, Message: "未知检查类型 " + cs.Type}
+	result.ItemID = spec.GetItemId()
+	return result
 }
 
 // Verify 复核入口（fixer 修复后重跑检查用）：checkJSON 是否通过。
@@ -163,7 +169,10 @@ func checkCmdOutput(cs *CheckSpec) ItemResult {
 	if err != nil {
 		return ItemResult{Passed: false, Actual: output, Message: "命令执行失败: " + err.Error()}
 	}
+	return evaluateOutput(output, cs)
+}
 
+func evaluateOutput(output string, cs *CheckSpec) ItemResult {
 	var re *regexp.Regexp
 	if cs.Operator == "regex" {
 		var rerr error
@@ -190,6 +199,17 @@ func checkCmdOutput(cs *CheckSpec) ItemResult {
 		}
 	case "regex":
 		if re != nil && re.MatchString(output) {
+			return ItemResult{Passed: true, Actual: output}
+		}
+	case "gt", "gte", "lt", "lte":
+		actual, actualErr := strconv.ParseFloat(output, 64)
+		expected, expectedErr := strconv.ParseFloat(cs.Expected, 64)
+		if actualErr != nil || expectedErr != nil || math.IsNaN(actual) || math.IsNaN(expected) || math.IsInf(actual, 0) || math.IsInf(expected, 0) {
+			return ItemResult{Passed: false, Actual: output, Message: "数值比较需要有限数值输出与期望值"}
+		}
+		passed := cs.Operator == "gt" && actual > expected || cs.Operator == "gte" && actual >= expected ||
+			cs.Operator == "lt" && actual < expected || cs.Operator == "lte" && actual <= expected
+		if passed {
 			return ItemResult{Passed: true, Actual: output}
 		}
 	default:

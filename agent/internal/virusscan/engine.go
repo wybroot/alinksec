@@ -33,23 +33,27 @@ type cacheEntry struct {
 
 // Engine 扫描引擎（无状态，每次任务独立实例；缓存跨任务复用由 LoadCache/SaveCache 承担）
 type Engine struct {
-	db    *SigDB
-	cache map[string]cacheEntry
-	log   *slog.Logger
+	db        *SigDB
+	cache     map[string]cacheEntry
+	whitelist []whitelistEntry
+	log       *slog.Logger
 }
 
 // NewEngine 创建引擎并加载 clean 缓存
 func NewEngine(workDir string, log *slog.Logger) *Engine {
+	db := LoadDB(workDir)
 	return &Engine{
-		db:    LoadDB(workDir),
-		cache: loadCache(workDir),
-		log:   log,
+		db:        db,
+		cache:     loadCache(workDir, db.Version),
+		whitelist: loadWhitelist(workDir),
+		log:       log,
 	}
 }
 
 // Scan 执行扫描：mode QUICK/FULL/CUSTOM；paths 仅 CUSTOM 生效。
 // 检出默认隔离（docs/05 §1.4：隔离为默认动作）。
 func (e *Engine) Scan(taskID string, mode pb.CmdVirusScan_Mode, paths []string, workDir string) *pb.RptVirusResult {
+	e.refresh(workDir)
 	result := &pb.RptVirusResult{TaskId: taskID, Mode: rptMode(mode)}
 	start := time.Now()
 
@@ -77,7 +81,7 @@ func (e *Engine) Scan(taskID string, mode pb.CmdVirusScan_Mode, paths []string, 
 		e.walk(root, result, q)
 	}
 	result.DurationMs = uint32(time.Since(start).Milliseconds())
-	saveCache(workDir, e.cache, e.log)
+	saveCache(workDir, e.db.Version, e.cache, e.log)
 	e.log.Info("病毒扫描完成", "task", taskID, "mode", mode.String(),
 		"files", result.GetFilesScanned(), "findings", len(result.GetFindings()),
 		"duration", time.Since(start).Round(time.Millisecond))
@@ -99,6 +103,9 @@ func (e *Engine) walk(root string, result *pb.RptVirusResult, q *quarantine) {
 		if d.Type() != 0 { // 符号链接/设备文件等非普通文件
 			return nil
 		}
+		if e.whitelisted(path, "") {
+			return nil
+		}
 		info, err := d.Info()
 		if err != nil || info.Size() > maxFileSize || info.Size() == 0 {
 			return nil
@@ -112,6 +119,9 @@ func (e *Engine) walk(root string, result *pb.RptVirusResult, q *quarantine) {
 		}
 		sum, err := hashFileLimited(path)
 		if err != nil {
+			return nil
+		}
+		if e.whitelisted(path, sum) {
 			return nil
 		}
 		if entry, hit := e.db.Lookup(sum); hit {
@@ -170,8 +180,12 @@ func (e *Engine) dropHalfCache() {
 // 大小过滤 → clean 缓存 → L1 哈希 → L2 规则（可扫描扩展且 < 50MB）→ 命中默认隔离。
 // 与 walk 共用 db/cache；线程安全由调用侧（单 goroutine 周期触发）保证。
 func (e *Engine) CheckAndQuarantine(path, workDir string) *pb.VirusFinding {
+	e.refresh(workDir)
 	if e.db == nil || (len(e.db.hashes) == 0 && len(e.db.rules) == 0) {
 		return nil // 特征库未安装：实时防护静默跳过
+	}
+	if e.whitelisted(path, "") {
+		return nil
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.Size() > maxFileSize || info.Size() == 0 || !info.Mode().IsRegular() {
@@ -183,6 +197,9 @@ func (e *Engine) CheckAndQuarantine(path, workDir string) *pb.VirusFinding {
 	}
 	sum, err := hashFileLimited(path)
 	if err != nil {
+		return nil
+	}
+	if e.whitelisted(path, sum) {
 		return nil
 	}
 	entry, hit := e.db.Lookup(sum)
@@ -277,23 +294,28 @@ func fileSha256(path string) (string, error) {
 
 func cachePath(workDir string) string { return filepath.Join(workDir, "virus", "cache.json") }
 
-func loadCache(workDir string) map[string]cacheEntry {
+type persistedCache struct {
+	Version string                `json:"db_version"`
+	Entries map[string]cacheEntry `json:"entries"`
+}
+
+func loadCache(workDir, version string) map[string]cacheEntry {
 	b, err := os.ReadFile(cachePath(workDir))
 	if err != nil {
 		return map[string]cacheEntry{}
 	}
-	var c map[string]cacheEntry
-	if json.Unmarshal(b, &c) != nil {
+	var c persistedCache
+	if json.Unmarshal(b, &c) != nil || c.Version != version || c.Entries == nil {
 		return map[string]cacheEntry{}
 	}
-	return c
+	return c.Entries
 }
 
-func saveCache(workDir string, c map[string]cacheEntry, log *slog.Logger) {
+func saveCache(workDir, version string, c map[string]cacheEntry, log *slog.Logger) {
 	if len(c) == 0 {
 		return
 	}
-	b, err := json.Marshal(c)
+	b, err := json.Marshal(persistedCache{Version: version, Entries: c})
 	if err != nil {
 		return
 	}

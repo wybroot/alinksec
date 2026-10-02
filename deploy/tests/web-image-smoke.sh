@@ -102,7 +102,7 @@ NODE
 
 container_id="$(docker run --detach --rm --init --name "alinksec-web-smoke-${BASHPID}-${RANDOM}" \
   --memory=96m --memory-swap=128m --cpus=1 --pids-limit=64 \
-  --add-host "server:$gateway" \
+  --env "ALINKSEC_BACKEND_HOST=$gateway" \
   --mount "type=bind,src=$test_root/data/web-tls,dst=/etc/nginx/tls,readonly" \
   --publish 127.0.0.1::80 --publish 127.0.0.1::443 \
   --env NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE=1 "$image")"

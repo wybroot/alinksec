@@ -104,10 +104,10 @@ public class VirusResultService {
         int step = (int) Math.ceil(100.0 / total);
         jdbc.update("""
                 UPDATE t_virus_scan_task
-                SET progress = LEAST(100, progress + ?),
+                SET progress = CASE WHEN progress + ? >= 100 THEN 100 ELSE progress + ? END,
                     status = CASE WHEN progress + ? >= 100 THEN 2 ELSE 1 END,
                     finished_at = CASE WHEN progress + ? >= 100 THEN CURRENT_TIMESTAMP ELSE finished_at END
                 WHERE id = ? AND status = 1
-                """, step, step, step, taskId);
+                """, step, step, step, step, taskId);
     }
 }

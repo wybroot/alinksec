@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -44,10 +45,12 @@ type Client struct {
 	log     *slog.Logger
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
-	// pendingReports 承接采集产物等待任一活跃连接发出（断线期间阻塞，重连后补发）
+	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
 	collectTrigger chan []string
 	pendingReports chan *pb.Report
 	lastCollectAt  time.Time
+	reportMu       sync.Mutex
+	channelActive  bool
 
 	// 基线核查单飞：同一时刻仅允许一个核查任务执行（串行执行避免检测命令并发放大负载）
 	baselineBusy atomic.Bool
@@ -119,8 +122,12 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 		return fmt.Errorf("解析 policy_json: %w", err)
 	}
 	if hot { // 快照落盘，重启后仍生效直至下次同步
-		if err := os.WriteFile(filepath.Join(c.workDir, "policy.json"), []byte(js), 0600); err != nil {
+		path := filepath.Join(c.workDir, "policy.json")
+		if err := os.WriteFile(path+".tmp", []byte(js), 0600); err != nil {
 			return fmt.Errorf("持久化 policy_json: %w", err)
+		}
+		if err := os.Rename(path+".tmp", path); err != nil {
+			return fmt.Errorf("替换 policy_json: %w", err)
 		}
 	}
 	if p.Decoy != nil {
@@ -247,6 +254,8 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("建立 Channel 流: %w", err)
 	}
+	c.setChannelActive(true)
+	defer c.setChannelActive(false)
 
 	sendCh := make(chan *pb.Report, 256)
 	sendErr := make(chan error, 1)
@@ -846,12 +855,41 @@ func (c *Client) executeVulnFix(vf *pb.CmdVulnFix, received *pb.RptAck) []*pb.Rp
 }
 
 func (c *Client) pushReport(r *pb.Report) {
-	select {
-	case c.pendingReports <- r:
-	default: // 缓冲满（连接长期断开）：核查结果改投离线队列
-		if err := c.queue.Push(r); err != nil {
-			c.log.Error("基线结果入离线队列失败", "err", err)
+	c.reportMu.Lock()
+	defer c.reportMu.Unlock()
+	if c.channelActive {
+		select {
+		case c.pendingReports <- r:
+			return
+		default:
 		}
+	}
+	c.persistReport(r)
+}
+
+// Disconnect after the sender stops, then persist anything it did not consume.
+func (c *Client) setChannelActive(active bool) {
+	c.reportMu.Lock()
+	defer c.reportMu.Unlock()
+	c.channelActive = active
+	if active {
+		return
+	}
+	for {
+		select {
+		case r := <-c.pendingReports:
+			if r.GetMetrics() == nil && !isTransient(r) {
+				c.persistReport(r)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (c *Client) persistReport(r *pb.Report) {
+	if err := c.queue.Push(r); err != nil {
+		c.log.Error("业务上报入离线队列失败", "err", err)
 	}
 }
 
@@ -883,16 +921,12 @@ func (c *Client) collectLoop(ctx context.Context) {
 			start := time.Now()
 			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
 			c.lastCollectAt = start
-			select {
-			case c.pendingReports <- &pb.Report{
+			c.pushReport(&pb.Report{
 				AgentId:  c.state.AgentID,
 				ReportId: newUUID(),
 				Ts:       time.Now().UnixMilli(),
 				Payload:  &pb.Report_Asset{Asset: snap},
-			}:
-			case <-ctx.Done():
-				return
-			}
+			})
 		}
 	}
 }

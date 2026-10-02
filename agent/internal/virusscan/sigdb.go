@@ -79,24 +79,29 @@ func LocalVersion(workDir string) string {
 }
 
 var (
-	dbOnce   sync.Once
+	dbMu     sync.Mutex
 	dbCached *SigDB
 	dbPath   string
 )
 
 // LoadDB 加载特征库到内存（进程内单例：特征库更新后调 ReloadDB 失效重载）
 func LoadDB(workDir string) *SigDB {
-	dbOnce.Do(func() {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	if dbCached == nil || dbPath != DBDir(workDir) {
 		dbPath = DBDir(workDir)
 		dbCached = parseDB(dbPath)
-	})
+	}
 	return dbCached
 }
 
 // ReloadDB 特征库更新后重载（next 单例重建）
 func ReloadDB(workDir string) *SigDB {
-	dbOnce = sync.Once{}
-	return LoadDB(workDir)
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	dbPath = DBDir(workDir)
+	dbCached = parseDB(dbPath)
+	return dbCached
 }
 
 // parseDB 解析 hashes.txt + manifest.json（损坏时返回空库，不报错：断网沿用旧库语义）

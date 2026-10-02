@@ -78,6 +78,10 @@ public class PolicyStoreService {
     /** 聚合 t_protect_rule → policy_json（诱饵配置 + EDR 进程规则）。 */
     private String buildFromRules() {
         ObjectNode root = MAPPER.createObjectNode();
+        ArrayNode whitelist = root.putArray("virus_whitelist");
+        for (Map<String, Object> entry : jdbc.queryForList("SELECT type, value FROM t_virus_whitelist ORDER BY id")) {
+            whitelist.addObject().put("type", (String) entry.get("type")).put("value", (String) entry.get("value"));
+        }
         List<Map<String, Object>> rules = jdbc.queryForList(
                 "SELECT rule_id, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, enabled FROM t_protect_rule " +
                         "WHERE rule_id IN ('PR-0010', 'PR-0011')");
@@ -91,7 +95,7 @@ public class PolicyStoreService {
                 "SELECT rule_id, name, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, severity, enabled " +
                         "FROM t_protect_rule WHERE type = 'process' ORDER BY rule_id");
         if (decoyRule == null && rateRule == null && processRules.isEmpty()) {
-            return "{}";
+            return JsonUtils.write(root);
         }
 
         ObjectNode decoy = MAPPER.createObjectNode();
