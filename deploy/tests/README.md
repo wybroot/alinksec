@@ -3,6 +3,34 @@
 Run checks serially on low-memory machines. Build the server before starting API
 validation, and stop one scenario before starting another.
 
+## Native Windows Service
+
+On a disposable Windows host, run in `agent/` with administrator permissions:
+
+```powershell
+go build -o alinksec-agent-windows-amd64.exe ./cmd/agent
+$env:ALINKSEC_SMOKE_ALLOW_FIXTURES = 'true'
+$env:ALINKSEC_SMOKE_AGENT_BIN = (Resolve-Path .\alinksec-agent-windows-amd64.exe).Path
+go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
+```
+
+The test refuses to replace an existing `alinksec-agent` service. It copies the
+actual executable to a path containing spaces, enrolls it against a loopback
+gRPC fixture with a temporary CA, and starts it through Windows SCM. It verifies
+mTLS heartbeats, native software/process/account assets, a software collection
+command and ACK, SCM interrogation, successful stop/start, automatic recovery
+after the Agent RESTART command, retained certificates, and no recovery after
+an explicit service stop. Decoy and active-response rules remain disabled.
+
+The fixture implements the Agent protocol; it is not the Java platform, and this
+check does not claim a complete Windows security-engine acceptance. On exit the
+test disables recovery, stops and deletes its service, closes the TLS listener,
+and removes temporary files. Ordinary `go test` runs skip the integration unless
+fixture writes are explicitly enabled. The Windows CI job runs it against the
+native executable; Linux hosts can only cross-compile this test.
+
+Pure Markdown pushes skip CI; pull requests continue to run validation.
+
 ## Local SQLite
 
 Requires Bash, Java 21, Node.js 22.22 or later, and `flock`. After `mvn -B package`

@@ -2,11 +2,14 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - '**/*.md'
   pull_request:
 
 jobs:
   windows-agent:
     runs-on: windows-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -19,6 +22,12 @@ jobs:
       - name: Build native Windows Agent
         run: go build -o alinksec-agent-windows-amd64.exe ./cmd/agent
         working-directory: agent
+      - name: Check actual Windows SCM service and TLS communication
+        run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
+        working-directory: agent
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_SMOKE_AGENT_BIN: alinksec-agent-windows-amd64.exe
 
   build-and-test:
     runs-on: ubuntu-latest
