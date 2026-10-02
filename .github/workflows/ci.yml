@@ -5,6 +5,21 @@ on:
   pull_request:
 
 jobs:
+  windows-agent:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Check Windows service lifecycle
+        run: go test ./cmd/agent
+        working-directory: agent
+      - name: Build native Windows Agent
+        run: go build -o alinksec-agent-windows-amd64.exe ./cmd/agent
+        working-directory: agent
+
   build-and-test:
     runs-on: ubuntu-latest
     env:

@@ -1,0 +1,16 @@
+[Unit]
+Description=ALinkSec Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/alinksec-agent run --workdir /var/lib/alinksec-agent
+# A successfully applied Agent update exits with code zero and needs a restart.
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -12,9 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/signal"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/comm"
@@ -89,24 +87,21 @@ func cmdRun(args []string) error {
 	if *cfgPath == "" {
 		*cfgPath = *workDir + string(os.PathSeparator) + "agent.yml"
 	}
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		return err
-	}
-
-	client, err := comm.New(cfg, *workDir, log)
-	if err != nil {
-		return err
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	if err := client.EnsureEnrolled(ctx); err != nil {
-		return fmt.Errorf("注册失败: %w", err)
-	}
-	log.Info("agent 启动", "agent_id", client.AgentID(), "server", cfg.ServerAddr)
-	return client.Run(ctx)
+	return runManaged(func(ctx context.Context) error {
+		cfg, err := config.Load(*cfgPath)
+		if err != nil {
+			return err
+		}
+		client, err := comm.New(cfg, *workDir, log)
+		if err != nil {
+			return err
+		}
+		if err := client.EnsureEnrolled(ctx); err != nil {
+			return fmt.Errorf("注册失败: %w", err)
+		}
+		log.Info("agent 启动", "agent_id", client.AgentID(), "server", cfg.ServerAddr)
+		return client.Run(ctx)
+	})
 }
 
 /* -------------------- install -------------------- */

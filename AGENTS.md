@@ -10,6 +10,11 @@
   memory and use the smallest required set, starting services sequentially.
 - Run builds serially as well; do not overlap Docker builds, application builds,
   or integration tests.
+- Prefer local builds and validation when the platform supports them. Use CI for
+  other platforms or checks that still exceed safe local limits after tuning.
+- Native build watchdogs may use a 384 MiB minimum available-memory threshold
+  with a 256 MiB language heap and one build worker. Stop on full memory PSI
+  above 10%; do not increase concurrency just because CPU load is low.
 - Pause the application server before frontend bundling or race-test compilation.
   Native builds also need a resource watchdog; a language heap limit alone does
   not bound total process memory. Prefer Docker memory/CPU limits for heavy builds.

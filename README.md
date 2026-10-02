@@ -279,7 +279,7 @@ iptables 专用链 `ALINKSEC_ISO` 挂载 INPUT/OUTPUT 首位：
 
 两种模式使用同一套业务接口与 Agent 协议。SQLite 为单实例部署，默认关闭时序指标，不支持高可用，数据库文件不得放在 NFS/SMB；正式上线与 PostgreSQL 兼容性仍以生产模式验证为准。
 
-项目处于开发阶段，当前验收以全新部署和本机实际 Agent 联动为范围。提交 `5f0a38a` 的[远端 CI](https://github.com/wybroot/alinksec/actions/runs/36953382781)已通过，包含完整部署与实测缺陷回归。Linux 登录防护及关键文件完整性已补齐，新增 12 项本机 Agent 联动检查通过；新增提交的完整生产构建和浏览器真实 API 验收以其对应 CI 结果为准。部署主机 Docker 转发规则挂载仍需验收，尚不宣布正式封版。详情见 [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md)及 [登录与文件防护](docs/11-登录与文件防护.md)。
+项目处于开发阶段，当前验收以全新部署和实际 Agent 联动为范围。提交 `4b47e8c` 的[生产构建与浏览器 CI](https://github.com/wybroot/alinksec/actions/runs/36964579252)和 `411cd0b` 的[产物保留修复 CI](https://github.com/wybroot/alinksec/actions/runs/36965943303)均已通过。Linux 登录及文件完整性防护完成，原生 Agent 已在本机安装并通过实际通信、采集、基线、告警、服务重启及负载验收。交付时 server/web 使用容器，Agent 原生安装到目标主机；网络来源限制按交付环境配置。Windows 服务处理已补充，本机完成交叉编译，运行测试由独立 Windows CI job 执行。详情见 [全功能联动](docs/10-本机全功能联动验收记录.md)、[登录与文件防护](docs/11-登录与文件防护.md)及 [原生 Agent 本机验收](docs/12-原生Agent本机验收记录.md)。
 
 低内存机器使用 `deploy/tests/release-validation.sh` 串行验证，默认最多一个验收容器，不启动完整 Compose；工具和运行条件见 [验证说明](deploy/tests/README.md)，完成情况见 [剩余节点验收记录](docs/09-剩余节点验收记录.md)。
 
@@ -400,6 +400,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 09 | [剩余节点验收记录](docs/09-剩余节点验收记录.md) | 串行本地验证结果 · 外部验收边界 |
 | 10 | [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md) | 实际 Agent 业务链路 · 实测修复 · 验收边界 |
 | 11 | [登录与文件防护](docs/11-登录与文件防护.md) | Linux SSH 与文件完整性 · 配置 · 响应与资源上限 |
+| 12 | [原生 Agent 本机验收](docs/12-原生Agent本机验收记录.md) | 原生成品安装 · 常驻服务 · 实际功能与资源采样 |
 
 ---
 
