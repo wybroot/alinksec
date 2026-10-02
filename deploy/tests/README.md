@@ -1,20 +1,25 @@
 # Deployment Validation
 
-Release baseline: v0.0.1. The publication workflow requires all three full CI
-jobs to pass on the exact tagged main commit. It reuses the tested Linux and
-Windows native Agents, builds and smoke-tests the release containers serially,
-then publishes component tags in `wangyanbiao/alinksec` and GitHub assets.
+Release baseline: v0.0.1 (amd64). The current branch adds Linux ARM64; it is not
+part of that existing release. Publication now requires `windows-agent`,
+`build-and-test (amd64)`, `build-and-test (arm64)` and `schema` to pass on the
+exact tagged main commit. It reuses all three tested native Agents, builds and
+smoke-tests containers serially on each native architecture, then merges the
+tested digests into multi-platform component tags and publishes GitHub assets.
 See [release process](../../docs/13-版本发布流程.md).
 
 ```sh
 node deploy/release/check-version.mjs v0.0.1
-node --test deploy/tests/release-gate.test.mjs
+node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
 ```
 
 `check-version.mjs` needs Java 21 and Docker Compose; it starts no containers.
 It parses Maven XML and npm JSON and checks product versions and image defaults.
 The release gate tests reject mismatched commits, failed or skipped jobs and
-successful Windows-only runs. CI keeps tested native binary artifacts for 14 days.
+successful Windows-only or legacy amd64-only runs. Platform tests reject
+mislabeled binaries, images from the wrong commit and incomplete image indexes.
+CI keeps tested native binary artifacts for 14 days. See the
+[ARM64 guide](../../docs/14-ARM64支持.md) for source builds and native CI coverage.
 
 Source validation uses local image overrides `ALINKSEC_SERVER_IMAGE`,
 `ALINKSEC_WEB_IMAGE` and `ALINKSEC_SQLITE_MAINTENANCE_IMAGE`; production Compose
@@ -308,7 +313,8 @@ the host's Docker FORWARD/DOCKER-USER wiring must also be checked at deployment.
 
 Protection configuration checks cover file paths, SSH thresholds, response mode,
 block duration, save/refresh persistence, numeric control accessibility and mobile
-layout. CI retains the full production bundle as `web-dist` for seven days. On
+layout. CI retains the full production bundle as `web-dist-amd64` and
+`web-dist-arm64` for seven days. On
 very small machines, validate the protection page with the backend paused and
 captured API responses, then use the successful matching commit's CI bundle;
 keep full-build and real-API browser checks on CI when local resource limits stop

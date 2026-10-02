@@ -6,6 +6,7 @@ package upgrade
 import (
 	"context"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -38,6 +39,10 @@ func Apply(workDir, downloadURL, wantSHA, version string) (string, error) {
 		return "", fmt.Errorf("下载失败: %w", err)
 	}
 	if err := verifySHA256(newPath, wantSHA); err != nil {
+		os.Remove(newPath)
+		return "", err
+	}
+	if err := verifyPlatform(newPath, runtime.GOOS, runtime.GOARCH); err != nil {
 		os.Remove(newPath)
 		return "", err
 	}
@@ -89,6 +94,27 @@ func Rollback() (string, error) {
 }
 
 func currentVersionHint() string { return "current" }
+
+// Reject a mislabeled package before replacing the running Agent.
+func verifyPlatform(path, wantOS, wantArch string) error {
+	info, err := buildinfo.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取升级包平台失败: %w", err)
+	}
+	var goos, goarch string
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "GOOS":
+			goos = setting.Value
+		case "GOARCH":
+			goarch = setting.Value
+		}
+	}
+	if goos != wantOS || goarch != wantArch {
+		return fmt.Errorf("升级包平台 %s/%s 与当前 Agent %s/%s 不匹配", goos, goarch, wantOS, wantArch)
+	}
+	return nil
+}
 
 // downloadLimited 限速下载到目标路径（与 virusscan.update 同模式：读 chunk → sleep）
 func downloadLimited(workDir, url, dst string) error {

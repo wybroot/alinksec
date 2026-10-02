@@ -4,7 +4,7 @@ import { findValidatedRun, passesReleaseGate } from '../release/ci-gate.mjs'
 
 const sha = 'a'.repeat(40)
 const run = { id: 123, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success' }
-const jobs = ['windows-agent', 'build-and-test', 'schema'].map(name => ({ name, conclusion: 'success' }))
+const jobs = ['windows-agent', 'build-and-test (amd64)', 'build-and-test (arm64)', 'schema'].map(name => ({ name, conclusion: 'success' }))
 test('release requires all jobs on the exact main commit', () => {
   assert.equal(passesReleaseGate(run, jobs, sha), true)
   for (const changes of [{ head_sha: 'b'.repeat(40) }, { head_branch: 'other' }, { event: 'pull_request' },
@@ -21,6 +21,10 @@ test('release requires all jobs on the exact main commit', () => {
 test('Windows-only successful dispatch cannot satisfy publication', () => {
   assert.equal(passesReleaseGate({ ...run, event: 'workflow_dispatch' },
     jobs.map(job => ({ ...job, conclusion: job.name === 'windows-agent' ? 'success' : 'skipped' })), sha), false)
+})
+test('legacy amd64-only CI cannot publish a multi-platform release', () => {
+  const legacy = ['windows-agent', 'build-and-test', 'schema'].map(name => ({ name, conclusion: 'success' }))
+  assert.equal(passesReleaseGate(run, legacy, sha), false)
 })
 test('release chooses a full successful run and fails when none exists', async () => {
   const github = { rest: { actions: { listWorkflowRuns: 'runs', listJobsForWorkflowRun: 'jobs' } },

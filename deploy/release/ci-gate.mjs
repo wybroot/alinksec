@@ -1,4 +1,4 @@
-const required = ['windows-agent', 'build-and-test', 'schema']
+const required = ['windows-agent', 'build-and-test (amd64)', 'build-and-test (arm64)', 'schema']
 
 export function passesReleaseGate(run, jobs, sha) {
   return run.head_sha === sha && run.head_branch === 'main' &&
@@ -17,5 +17,5 @@ export async function findValidatedRun(github, owner, repo, sha) {
     })
     if (passesReleaseGate(run, jobs, sha)) return run
   }
-  throw new Error(`No successful full CI for ${sha}. All three jobs must pass on main; Windows-only CI cannot release.`)
+  throw new Error(`No successful full CI for ${sha}. Windows, both Linux architectures and schema must pass on main; partial CI cannot release.`)
 }

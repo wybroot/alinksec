@@ -94,6 +94,10 @@ flowchart LR
 
 Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.1** 提供 Linux amd64 容器，以及 Linux amd64 / Windows amd64 Agent 成品。
 
+当前开发分支新增 **Linux ARM64（aarch64）** Agent、amd64/arm64 双架构容器构建与原生 CI。ARM64 尚未包含在已发布的 v0.0.1 中；新版本发布前请按 [ARM64 部署说明](docs/14-ARM64支持.md)从当前源码构建。
+
+提交 `bb8cf91` 已通过[原生 ARM64、amd64、Windows 及数据库 CI](https://github.com/wybroot/alinksec/actions/runs/37026819693)；ARM64 文档记录了验收范围和已复核的 Agent 校验值。
+
 <details>
 <summary><b>📦 项目目录结构</b></summary>
 
@@ -300,6 +304,8 @@ docker compose --env-file .env.lite -f docker-compose.lite.yml cp server:/app/da
 
 将对应系统的 Agent 成品与 `alinksec-ca.crt` 传到目标主机。Linux 主机还需将发布包中的 `deploy/agent/alinksec-agent.service` 复制到当前工作目录，文件名为 `alinksec-agent.service`：
 
+ARM64 主机使用当前源码构建或后续 ARM64 版本提供的 `alinksec-agent-linux-arm64`；现有 v0.0.1 的 Linux 成品为 amd64。
+
 ```bash
 sudo install -m 0755 alinksec-agent-linux-amd64 /usr/local/bin/alinksec-agent
 sudo /usr/local/bin/alinksec-agent install \
@@ -424,6 +430,7 @@ cd ../web && npm ci && npm test && npm run build
 | [11 · 登录与文件防护](docs/11-登录与文件防护.md) | Linux SSH、文件完整性与响应策略 |
 | [12 · 原生 Agent 验收](docs/12-原生Agent本机验收记录.md) | Linux 资源采样与 Windows 实际 SCM 验证 |
 | [13 · 发布流程](docs/13-版本发布流程.md) | CI 门禁、镜像、附件与凭据 |
+| [14 · ARM64 支持](docs/14-ARM64支持.md) | 源码构建、安装与双架构验证 |
 | [验证命令参考](deploy/tests/README.md) | 本机检查、fixture 与资源约束 |
 
 </details>

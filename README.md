@@ -106,6 +106,14 @@ The Agent is a native single binary. Managed hosts do not need Docker, a JRE,
 Node.js or a Go toolchain. **v0.0.1** ships Linux amd64 containers and Linux
 amd64 / Windows amd64 Agents.
 
+The current development branch adds **Linux ARM64 (aarch64)** Agents and
+amd64/arm64 container builds, with native CI for both architectures. ARM64 is
+not included in the existing v0.0.1 release. Until a new release is published,
+use the source build instructions in the [ARM64 guide](docs/14-ARM64支持.md).
+
+Commit `bb8cf91` passed [native ARM64, amd64, Windows and database CI](https://github.com/wybroot/alinksec/actions/runs/37026819693);
+the guide records the acceptance scope and verified Agent checksums.
+
 <details>
 <summary><b>📦 Explore the Repository</b></summary>
 
@@ -340,6 +348,9 @@ Transfer the matching binary and `alinksec-ca.crt` to each managed host. For
 Linux, also copy `deploy/agent/alinksec-agent.service` from the release bundle
 into that host's working directory as `alinksec-agent.service`:
 
+On ARM64, use `alinksec-agent-linux-arm64` from the current source build or a
+future release that includes ARM64; the published v0.0.1 Linux binary is amd64.
+
 ```bash
 sudo install -m 0755 alinksec-agent-linux-amd64 /usr/local/bin/alinksec-agent
 sudo /usr/local/bin/alinksec-agent install \
@@ -491,6 +502,7 @@ validation reference is in English.
 | [11 · File & Login Protection](docs/11-登录与文件防护.md) | Linux SSH, file integrity and response policies |
 | [12 · Native Agent Evidence](docs/12-原生Agent本机验收记录.md) | Linux resource sampling and actual Windows SCM checks |
 | [13 · Releases](docs/13-版本发布流程.md) | CI gates, images, assets and credentials |
+| [14 · ARM64](docs/14-ARM64支持.md) | Source builds, installation and multi-platform validation |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>
