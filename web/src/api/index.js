@@ -681,8 +681,8 @@ export async function fetchProtect() {
   const keyMap = { process: '进程防护', file_tamper: '文件完整性', login: '登录防护', decoy: '勒索诱饵' }
   const descMap = {
     process: '高危进程名/路径/命令行特征阻断，挖矿、反弹 Shell 特征内置',
-    file_tamper: '关键文件（passwd、sudoers、启动项）防篡改，篡改自动还原',
-    login: 'SSH/RDP 暴力破解识别，阈值触发自动封禁来源 IP',
+    file_tamper: 'Linux 关键文件内容与权限监控，可按规则自动恢复',
+    login: 'Linux SSH 爆破与异常时段登录检测，可按规则限时封禁来源',
     decoy: '诱饵文件触碰即阻断加密进程（本地响应）',
   }
   const cards = (engines || []).map((e) => ({

@@ -10,6 +10,12 @@
   memory and use the smallest required set, starting services sequentially.
 - Run builds serially as well; do not overlap Docker builds, application builds,
   or integration tests.
+- Pause the application server before frontend bundling or race-test compilation.
+  Native builds also need a resource watchdog; a language heap limit alone does
+  not bound total process memory. Prefer Docker memory/CPU limits for heavy builds.
+- If a full frontend build hits the watchdog, use the matching CI `web-dist`
+  artifact. For browser checks, pause the backend and use a page-scoped preview
+  with captured API responses. Do not repeatedly increase local memory limits.
 - Check memory and swap before container validation. Swap is an emergency buffer,
   not a reason to increase concurrency. Stop validation if memory pressure rises.
 - Stop containers created for a completed check; preserve existing user services

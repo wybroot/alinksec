@@ -235,6 +235,10 @@ changes, install approved CA-verified packages, and complete the correct
 findings, including commands queued while offline. Isolation uses actual
 iptables inside the container and preserves the platform channel through
 Agent/server restarts. SAN/CA recovery rejects old trust before re-enrollment.
+The same Agent also verifies file change alerts, permission-preserving restoration,
+deletion and symlink replacement, persistent baselines, approved file changes,
+SSH thresholds and exceptions, off-hours login alerts, actual SSH-port firewall
+rules, restart persistence, automatic expiry and allowlist release.
 Fixture hardware identities and all writable state belong to the temporary
 scenario. Only test containers receive `NET_ADMIN`; host firewall rules,
 production volumes, and other services are not changed.
@@ -250,6 +254,14 @@ idempotence, and removal. The chain is attached to the container INPUT hook;
 the host's Docker FORWARD/DOCKER-USER wiring must also be checked at deployment.
 
 ## Browser Workflows
+
+Protection configuration checks cover file paths, SSH thresholds, response mode,
+block duration, save/refresh persistence, numeric control accessibility and mobile
+layout. CI retains the full production bundle as `web-dist` for seven days. On
+very small machines, validate the protection page with the backend paused and
+captured API responses, then use the successful matching commit's CI bundle;
+keep full-build and real-API browser checks on CI when local resource limits stop
+them.
 
 After `npm ci` in `web/`, install the browser once with
 `npx playwright install --with-deps --only-shell chromium`. Then run:

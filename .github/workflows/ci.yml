@@ -66,6 +66,12 @@ jobs:
           ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
         working-directory: web
+      - name: Retain validated web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 7
       - name: Install serial browser validation runtime
         working-directory: web
         run: npx playwright install --with-deps --only-shell chromium

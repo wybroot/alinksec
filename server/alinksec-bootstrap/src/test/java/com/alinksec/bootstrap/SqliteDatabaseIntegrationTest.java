@@ -234,6 +234,40 @@ class SqliteDatabaseIntegrationTest {
     }
 
     @Test
+    void protectionDefaultsAreSeededOnceAndPreserveEditedRulesOnRestart() {
+        PolicyStoreService policy = new PolicyStoreService(jdbc, mock(CommandService.class));
+        policy.init();
+        assertEquals(1, JsonUtils.read(policy.contentJson()).path("file_rules").size());
+        assertEquals(1, JsonUtils.read(policy.contentJson()).path("login_rules").size());
+        jdbc.update("UPDATE t_protect_rule SET enabled=false WHERE rule_id='PR-0002'");
+        policy.init();
+        String version = policy.currentVersion();
+        policy.init();
+        assertEquals(version, policy.currentVersion());
+        assertFalse(JsonUtils.read(policy.contentJson()).path("file_rules").get(0).path("enabled").asBoolean());
+        assertEquals("alert",JsonUtils.read(policy.contentJson()).path("login_rules").get(0).path("actions").get(0).asText());
+    }
+
+    @Test
+    void repeatedProtectionEventsKeepTargetIdentityAndLatestAction() {
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,status) VALUES ('agent-protection','protection',1,1)");
+        SecurityEventService service = new SecurityEventService(jdbc,mock(NotifyService.class),database);
+        for (String target : List.of("/etc/passwd","/etc/group")) {
+            for (String action : List.of("alert_only","restored","restore_failed")) {
+                service.onEvent("agent-protection",RptSecurityEvent.newBuilder().setRuleId("PR-0002").setType("file_tamper")
+                        .setSeverity(Severity.SEV_HIGH).setDetail(JsonUtils.write(Map.of("path",target))).setActionTaken(action).build());
+            }
+        }
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM t_alert",Integer.class));
+        for (Map<String,Object> row : jdbc.queryForList("SELECT count,detail,action_taken FROM t_alert")) {
+            assertEquals(3,((Number)row.get("count")).intValue());
+            assertEquals("restore_failed",row.get("action_taken"));
+            var detail=JsonUtils.read((String)row.get("detail"));
+            assertEquals("file_tamper:PR-0002:"+detail.path("path").asText(),detail.path("fingerprint").asText());
+        }
+    }
+
+    @Test
     void supportsAuthenticationEnrollmentAgentsCommandsAndAlertAggregation() {
         String hash = new BCryptPasswordEncoder().encode("sqlite-test-password");
         jdbc.update("""

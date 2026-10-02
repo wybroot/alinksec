@@ -39,6 +39,7 @@ public class PolicyStoreService {
     /** 启动时确保策略行存在并完成首次聚合 */
     @PostConstruct
     public void init() {
+        ensureProtectionRules();
         Integer rows = jdbc.queryForObject("SELECT count(*) FROM t_policy_state WHERE id = 1", Integer.class);
         if (rows == null || rows == 0) {
             jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}')");
@@ -48,6 +49,23 @@ public class PolicyStoreService {
                 || !JsonUtils.read(stored).equals(JsonUtils.read(buildFromRules()))) {
             rebuild();
         }
+    }
+
+    private void ensureProtectionRules() {
+        jdbc.update("""
+                INSERT INTO t_protect_rule(rule_id, name, type, match, actions, severity, enabled, built_in)
+                VALUES ('PR-0002', '关键文件完整性防护', 'file_integrity',
+                  '{"platforms":["linux"],"paths":["/etc/passwd","/etc/group","/etc/shadow","/etc/sudoers","/etc/ssh/sshd_config"],"max_file_bytes":1048576}',
+                  '["alert"]', 3, true, true)
+                ON CONFLICT(rule_id) DO NOTHING
+                """);
+        jdbc.update("""
+                INSERT INTO t_protect_rule(rule_id, name, type, match, actions, severity, enabled, built_in)
+                VALUES ('PR-0003', 'SSH 登录防护', 'login',
+                  '{"platforms":["linux"],"window_sec":300,"failure_threshold":5,"cooldown_sec":300,"block_duration_sec":600,"ssh_ports":[22],"trusted_ips":[],"user_exclude":[],"off_hours_enabled":false,"allowed_start_hour":8,"allowed_end_hour":20,"timezone":"Local"}',
+                  '["alert"]', 3, true, true)
+                ON CONFLICT(rule_id) DO NOTHING
+                """);
     }
 
     /** 当前策略版本（"vN"；t_protect_rule 变更 → rebuild 递增） */
@@ -91,10 +109,10 @@ public class PolicyStoreService {
         }
         Map<String, Object> decoyRule = byId.get("PR-0010");
         Map<String, Object> rateRule = byId.get("PR-0011");
-        List<Map<String, Object>> processRules = jdbc.queryForList(
-                "SELECT rule_id, name, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, severity, enabled " +
-                        "FROM t_protect_rule WHERE type = 'process' ORDER BY rule_id");
-        if (decoyRule == null && rateRule == null && processRules.isEmpty()) {
+        List<Map<String, Object>> protectionRules = jdbc.queryForList(
+                "SELECT rule_id, name, type, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions, severity, enabled " +
+                        "FROM t_protect_rule WHERE type IN ('process', 'file_integrity', 'login') ORDER BY rule_id");
+        if (decoyRule == null && rateRule == null && protectionRules.isEmpty()) {
             return JsonUtils.write(root);
         }
 
@@ -121,9 +139,16 @@ public class PolicyStoreService {
         }
         root.set("decoy", decoy);
         ArrayNode process = root.putArray("process_rules");
-        for (Map<String, Object> rule : processRules) {
+        ArrayNode files = root.putArray("file_rules");
+        ArrayNode logins = root.putArray("login_rules");
+        for (Map<String, Object> rule : protectionRules) {
             try {
-                ObjectNode out = process.addObject();
+                ArrayNode target = switch ((String) rule.get("type")) {
+                    case "file_integrity" -> files;
+                    case "login" -> logins;
+                    default -> process;
+                };
+                ObjectNode out = target.addObject();
                 out.put("id", (String) rule.get("rule_id"));
                 out.put("name", (String) rule.get("name"));
                 out.put("severity", ((Number) rule.get("severity")).intValue());

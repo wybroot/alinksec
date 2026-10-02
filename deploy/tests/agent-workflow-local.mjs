@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { protectionWorkflow } from './protection-workflow.mjs'
 
 assert.equal(process.env.ALINKSEC_SMOKE_ALLOW_FIXTURES, 'true')
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -191,6 +192,15 @@ try {
   await until(async () => JSON.parse(await agentFile(first.container, 'policy.json')).decoy.enabled === false,
     'Disabled policy did not reach Agent')
   console.log('ok - actual Go Agent TLS enrollment, mTLS heartbeat and enabled/disabled policy persistence')
+  await protectionWorkflow({ api, command, until, agent:first,
+    alerts: type => sql('SELECT count, detail, action_taken FROM t_alert WHERE agent_id=? AND event_type=? ORDER BY last_time DESC',first.id,type),
+    restart: async()=>{
+      const before = sql('SELECT last_heartbeat FROM t_agent WHERE agent_id=?',first.id)[0].last_heartbeat
+      await stopAgent(first);await startAgent(first)
+      await until(()=>sql('SELECT last_heartbeat FROM t_agent WHERE agent_id=?',first.id)[0].last_heartbeat!==before,'No fresh heartbeat after protection restart')
+    },
+    pass: text => console.log('ok - '+text),
+  })
   const businessAddress = Object.values(networkInterfaces()).flat().find(a => a.family === 'IPv4' && !a.internal && a.address !== gateway)?.address
   assert.ok(businessAddress, 'An additional local IPv4 is required to check blocked business traffic')
   business = http.createServer((req, res) => res.end('business-fixture'))

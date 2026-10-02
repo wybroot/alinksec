@@ -7,8 +7,10 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -43,13 +45,15 @@ type Guard struct {
 	watchDirs     []string
 	serverAddrVal string         // gRPC 连接地址（comm 注入，隔离放行解析用）
 	virusCheck    VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
+	files         *fileMonitor
+	login         *loginMonitor
 
 	ratePrev map[string]treeSnapshot // 各监测树上一快照
 }
 
 // New 构建引擎并完成初始投放
 func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir string, log *slog.Logger, report ReportFunc) *Guard {
-	return &Guard{
+	g := &Guard{
 		cfg:          cfg,
 		workDir:      workDir,
 		log:          log,
@@ -58,6 +62,51 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 		processSeen:  map[int32]int64{},
 		ratePrev:     map[string]treeSnapshot{},
 	}
+	g.files = newFileMonitor(workDir, log)
+	g.login = newLoginMonitor(workDir, log, g.applyLoginBlock)
+	g.login.reset = ClearLoginFirewall
+	return g
+}
+
+func (g *Guard) UpdateProtection(files []config.FileRule, logins []config.LoginRule) {
+	g.files.update(files)
+	g.login.update(logins)
+}
+
+func (g *Guard) ObserveLoginLogs(source string, lines []*proto.LogLine) {
+	for _, event := range g.login.observe(source, lines) {
+		if g.report != nil {
+			g.report(event)
+		}
+	}
+}
+
+func (g *Guard) applyLoginBlock(block loginBlock, enabled bool) error {
+	if enabled {
+		ip, err := netip.ParseAddr(block.IP)
+		if err != nil || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			return fmt.Errorf("拒绝封禁特殊或无效来源 IP")
+		}
+		g.mu.Lock()
+		address := g.serverAddrVal
+		g.mu.Unlock()
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("无法核验管理服务器地址，拒绝封禁")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		management, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return fmt.Errorf("无法解析管理服务器地址，拒绝封禁")
+		}
+		for _, peer := range management {
+			if peer.Unmap() == ip.Unmap() {
+				return fmt.Errorf("拒绝封禁管理服务器 IP")
+			}
+		}
+	}
+	return loginBlockPlatform(block, enabled)
 }
 
 // cur 当前配置快照（值拷贝；多 goroutine 读安全）
@@ -111,6 +160,12 @@ func (g *Guard) Run(ctx context.Context) {
 	g.seedProcessBaseline()
 	processTick := time.NewTicker(processScanInterval)
 	defer processTick.Stop()
+	fileTick := time.NewTicker(5 * time.Second)
+	loginTick := time.NewTicker(5 * time.Second)
+	defer fileTick.Stop()
+	defer loginTick.Stop()
+	g.fileLoop()
+	g.login.tick()
 
 	for {
 		select {
@@ -122,12 +177,24 @@ func (g *Guard) Run(ctx context.Context) {
 			g.rateLoop()
 		case <-processTick.C:
 			g.processLoop()
+		case <-fileTick.C:
+			g.fileLoop()
+		case <-loginTick.C:
+			g.login.tick()
 		}
 		// 策略热更新可能改变监测窗口：不一致则重建 ticker
 		if w := time.Duration(g.cur().RateWindowSec) * time.Second; w != rateWindow && w > 0 {
 			rateWindow = w
 			rateTick.Reset(w)
 			g.log.Info("速率监测窗口已调整", "window", w.String())
+		}
+	}
+}
+
+func (g *Guard) fileLoop() {
+	for _, event := range g.files.check() {
+		if g.report != nil {
+			g.report(event)
 		}
 	}
 }

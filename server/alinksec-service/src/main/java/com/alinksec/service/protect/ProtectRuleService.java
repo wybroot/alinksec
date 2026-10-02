@@ -52,6 +52,13 @@ public class ProtectRuleService {
 
     /** 编辑规则（match/actions/enabled；内置规则不可删只可调），version 递增 */
     public void updateRule(String ruleId, Map<String, Object> body) {
+        var existing = jdbc.queryForList("SELECT type, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions FROM t_protect_rule WHERE rule_id = ?", ruleId);
+        if (existing.isEmpty()) throw new IllegalArgumentException("规则不存在: " + ruleId);
+        var rule = existing.getFirst();
+        ProtectionPolicyValidator.validate((String) rule.get("type"),
+                body.containsKey("match") ? body.get("match") : JsonUtils.read((String) rule.get("match"), Object.class),
+                body.containsKey("actions") ? body.get("actions") : JsonUtils.read((String) rule.get("actions"), Object.class));
+        if (body.containsKey("enabled") && !(body.get("enabled") instanceof Boolean)) throw new IllegalArgumentException("enabled 必须为布尔值");
         StringBuilder sql = new StringBuilder("UPDATE t_protect_rule SET updated_at = CURRENT_TIMESTAMP, version = version + 1");
         Object[] args = new Object[4];
         int n = 0;
@@ -83,7 +90,7 @@ public class ProtectRuleService {
                 SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.rule_id, t.event_type, t.severity,
                        t.title, t.detail, t.action_taken, t.first_time, t.last_time, t.count
                 FROM t_alert t LEFT JOIN t_agent a ON a.agent_id = t.agent_id
-                WHERE t.event_type IN ('decoy_tamper', 'ransom_behavior', 'process')
+                WHERE t.event_type IN ('decoy_tamper', 'ransom_behavior', 'process', 'file_tamper', 'login_crack', 'login_anomaly')
                 ORDER BY t.last_time DESC LIMIT ?
                 """, limit);
     }

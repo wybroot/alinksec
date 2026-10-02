@@ -31,6 +31,8 @@ type Config struct {
 	Decoy DecoyConfig `yaml:"decoy"`
 	// ProcessRules 是平台热下发的 EDR 进程行为规则。
 	ProcessRules []ProcessRule `yaml:"process_rules"`
+	FileRules    []FileRule    `yaml:"file_rules"`
+	LoginRules   []LoginRule   `yaml:"login_rules"`
 }
 
 // ProcessRule 声明式进程行为规则。仅匹配新出现的进程，避免 Agent 启动或
@@ -121,6 +123,9 @@ func Load(path string) (*Config, error) {
 		c.CollectInterval = 6 * time.Hour
 	}
 	c.Decoy.Normalize()
+	if err := ValidateProtection(c.FileRules, c.LoginRules); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 

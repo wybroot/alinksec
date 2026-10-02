@@ -201,7 +201,9 @@ sequenceDiagram
 - ⚡ **加密速率监控**：检测文件被高频改写的勒索特征（`ransom_behavior`），速率超阈自动告警
 - � **自动响应**：可配置自动查杀恶意进程 / 一键主机隔离，把损失半径压到最小
 
-**7 类安全事件全覆盖**：`process` 可疑进程 · `file_tamper` 文件篡改 · `login_crack` 登录爆破 · `self_defense` 自保护触发 · `virus` 病毒检出 · `decoy_tamper` 诱饵触碰 · `ransom_behavior` 勒索行为
+**安全事件类型**：`process` 可疑进程 · `file_tamper` 文件篡改 · `login_crack` 登录爆破 · `login_anomaly` 异常时段登录 · `self_defense` 自保护触发 · `virus` 病毒检出 · `decoy_tamper` 诱饵触碰 · `ransom_behavior` 勒索行为
+
+Linux 关键文件完整性与 SSH 登录防护已实现，默认仅告警；规则可明确启用文件自动恢复或 SSH 来源限时封禁。支持基准及封禁状态持久化、信任来源、排除账户、时区与允许时段，配置与边界见 [登录与文件防护](docs/11-登录与文件防护.md)。
 
 ---
 
@@ -277,7 +279,7 @@ iptables 专用链 `ALINKSEC_ISO` 挂载 INPUT/OUTPUT 首位：
 
 两种模式使用同一套业务接口与 Agent 协议。SQLite 为单实例部署，默认关闭时序指标，不支持高可用，数据库文件不得放在 NFS/SMB；正式上线与 PostgreSQL 兼容性仍以生产模式验证为准。
 
-项目处于开发阶段，当前验收以全新部署和本机实际 Agent 联动为范围。提交 `023ae39` 的[远端 CI](https://github.com/wybroot/alinksec/actions/runs/36893111608)已通过，包含 PostgreSQL/SQLite 完整部署及轻量模式备份恢复。本机联动已完成已实现业务链路的实测，并修复八组问题；登录爆破防护和关键文件防篡改尚未实现，部署主机 Docker 转发规则挂载仍需验收，因此不能宣布全部功能通过或正式封版。新增修复的远端 CI 以其提交对应的实际运行结果为准，见 [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md)。
+项目处于开发阶段，当前验收以全新部署和本机实际 Agent 联动为范围。提交 `5f0a38a` 的[远端 CI](https://github.com/wybroot/alinksec/actions/runs/36953382781)已通过，包含完整部署与实测缺陷回归。Linux 登录防护及关键文件完整性已补齐，新增 12 项本机 Agent 联动检查通过；新增提交的完整生产构建和浏览器真实 API 验收以其对应 CI 结果为准。部署主机 Docker 转发规则挂载仍需验收，尚不宣布正式封版。详情见 [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md)及 [登录与文件防护](docs/11-登录与文件防护.md)。
 
 低内存机器使用 `deploy/tests/release-validation.sh` 串行验证，默认最多一个验收容器，不启动完整 Compose；工具和运行条件见 [验证说明](deploy/tests/README.md)，完成情况见 [剩余节点验收记录](docs/09-剩余节点验收记录.md)。
 
@@ -396,7 +398,8 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 | 07 | [封版缺陷清单](docs/07-封版缺陷清单.md) | 封版阻断项 · 修复顺序 · 验收标准 |
 | 08 | [双数据库轻量化部署改造计划](docs/08-双数据库轻量化部署改造计划.md) | PostgreSQL / SQLite 边界 · 实施与验收 |
 | 09 | [剩余节点验收记录](docs/09-剩余节点验收记录.md) | 串行本地验证结果 · 外部验收边界 |
-| 10 | [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md) | 实际 Agent 业务链路 · 实测修复 · 未实现功能 |
+| 10 | [本机全功能联动验收记录](docs/10-本机全功能联动验收记录.md) | 实际 Agent 业务链路 · 实测修复 · 验收边界 |
+| 11 | [登录与文件防护](docs/11-登录与文件防护.md) | Linux SSH 与文件完整性 · 配置 · 响应与资源上限 |
 
 ---
 
@@ -412,6 +415,7 @@ sudo ./alinksec-agent install --server <服务器IP>:9443 --token <ENROLL-注册
 - [x] Kubernetes 本机工作负载清点（宿主机 Agent 通过 kubectl 按节点只读采集）
 - 容器信息仅作为宿主机安全研判上下文，不提供编排、发布、调度或生命周期管理
 - [x] EDR 行为引擎（进程树 lineage + 规则热更）
+- [x] Linux 关键文件完整性与 SSH 登录防护（默认告警、可选恢复/限时封禁）
 - [ ] 长期低优先级：多租户隔离（暂不纳入近期版本）
 
 ---

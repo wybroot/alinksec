@@ -39,12 +39,12 @@ public class SecurityEventService {
         String mergeSql = """
                 UPDATE t_alert
                 SET count = count + 1, last_time = CURRENT_TIMESTAMP,
-                    detail = ?
+                    detail = ?, action_taken = ?
                 WHERE agent_id = ? AND rule_id = ?
                   AND (%s) = ?
                   AND status IN (0, 1)
                 """.formatted(database.jsonTextValue("detail", "fingerprint"));
-        int merged = jdbc.update(mergeSql, detailJson, agentId, event.getRuleId(), fingerprint);
+        int merged = jdbc.update(mergeSql, withFingerprint(detailJson, fingerprint), event.getActionTaken(), agentId, event.getRuleId(), fingerprint);
         if (merged > 0) {
             log.debug("告警聚合: agent={} rule={} type={}", agentId, event.getRuleId(), event.getType());
             return;
@@ -72,6 +72,7 @@ public class SecurityEventService {
             case "process" -> "可疑进程";
             case "file_tamper" -> "文件篡改";
             case "login_crack" -> "登录暴力破解";
+            case "login_anomaly" -> "异常时段登录";
             case "self_defense" -> "Agent 自保护触发";
             case "virus" -> "恶意文件检出";
             case "decoy_tamper" -> "勒索诱饵被触碰";
@@ -83,12 +84,15 @@ public class SecurityEventService {
 
     private String fingerprint(RptSecurityEvent event, String detailJson) {
         String base = event.getType() + ":" + event.getRuleId();
-        if (!"process".equals(event.getType())) {
-            return base;
-        }
         try {
-            String processKey = JsonUtils.read(detailJson).path("process_key").asText();
-            return processKey.isBlank() ? base : base + ":" + processKey;
+            String key = switch (event.getType()) {
+                case "process" -> "process_key";
+                case "file_tamper" -> "path";
+                case "login_crack", "login_anomaly" -> "source_ip";
+                default -> "";
+            };
+            String value = key.isEmpty() ? "" : JsonUtils.read(detailJson).path(key).asText();
+            return value.isBlank() ? base : base + ":" + value;
         } catch (IllegalArgumentException e) {
             return base;
         }

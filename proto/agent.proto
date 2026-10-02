@@ -321,7 +321,7 @@ message PortServiceFinding {
 message RptSecurityEvent {
   string rule_id   = 1;
   string rule_name = 2;
-  string type      = 3;      // process / file_tamper / login_crack / self_defense / virus / decoy_tamper / ransom_behavior
+  string type      = 3;      // process / file_tamper / login_crack / login_anomaly / self_defense / virus / decoy_tamper / ransom_behavior
   Severity severity = 4;
   string detail    = 5;      // JSON：进程五元组/文件前后哈希/登录来源等
   string action_taken = 6;   // killed / blocked_ip / restored / alert_only

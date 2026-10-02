@@ -25,7 +25,7 @@ func TestPolicySyncAppliesAndPersistsSnapshotBeforeVersion(t *testing.T) {
 		CmdId: "policy-success",
 		Payload: &pb.Command_PolicySync{PolicySync: &pb.CmdPolicySync{
 			PolicyVersion: "v42",
-			PolicyJson:    `{"decoy":{"enabled":false,"response":"alert_only","rate_threshold":7},"process_rules":[{"id":"PR-0001","name":"miner","enabled":true,"severity":4,"match":{"exe_regex":"xmrig"},"actions":["kill","alert"]}]}`,
+			PolicyJson:    `{"decoy":{"enabled":false,"response":"alert_only","rate_threshold":7},"process_rules":[{"id":"PR-0001","name":"miner","enabled":true,"severity":4,"match":{"exe_regex":"xmrig"},"actions":["kill","alert"]}],"file_rules":[{"id":"PR-0002","enabled":true,"match":{"platforms":["linux"],"paths":["/work/protected"]},"actions":["alert"]}],"login_rules":[{"id":"PR-0003","enabled":true,"match":{"failure_threshold":3,"timezone":"UTC"},"actions":["alert"]}]}`,
 		}},
 	}, nil, context.Background())
 
@@ -46,6 +46,33 @@ func TestPolicySyncAppliesAndPersistsSnapshotBeforeVersion(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "policy.json")); err != nil {
 		t.Fatalf("persisted policy missing: %v", err)
+	}
+	reloaded, err := New(&config.Config{}, workDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil || len(reloaded.cfg.FileRules) != 1 || len(reloaded.cfg.LoginRules) != 1 || reloaded.cfg.LoginRules[0].Match.FailureThreshold != 3 {
+		t.Fatalf("persisted protection policy did not reload: %v", err)
+	}
+}
+
+func TestInvalidProtectionSnapshotPreservesLastGoodPolicyAndVersion(t *testing.T) {
+	workDir := t.TempDir()
+	client, err := New(&config.Config{}, workDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := `{"login_rules":[{"id":"login","enabled":true,"match":{"failure_threshold":5},"actions":["alert"]}]}`
+	if err := client.applyPolicyJson(good, true); err != nil {
+		t.Fatal(err)
+	}
+	client.state.PolicyVersion = "v1"
+	for _, bad := range []string{`{"login_rules":[{"id":"login","match":{"failure_threshold":1}}]}`, `{"file_rules":[{"id":"file","match":{"paths":["relative"]}}]}`} {
+		acks := client.executeCommand(&pb.Command{CmdId: "bad-protection", Payload: &pb.Command_PolicySync{PolicySync: &pb.CmdPolicySync{PolicyVersion: "v2", PolicyJson: bad}}}, nil, context.Background())
+		if acks[len(acks)-1].GetStage() != pb.RptAck_FAILED || client.state.PolicyVersion != "v1" {
+			t.Fatal("invalid policy advanced version")
+		}
+		stored, err := os.ReadFile(filepath.Join(workDir, "policy.json"))
+		if err != nil || string(stored) != good || client.cfg.LoginRules[0].Match.FailureThreshold != 5 {
+			t.Fatal("invalid policy replaced last good state")
+		}
 	}
 }
 

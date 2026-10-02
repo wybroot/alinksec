@@ -93,6 +93,7 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	c.loadPersistedPolicy(cfg)
 	c.grd = guard.New(&cfg.Decoy, cfg.ProcessRules, workDir, log, c.reportSecurityEvent)
 	c.grd.SetServerAddr(cfg.ServerAddr)
+	c.grd.UpdateProtection(cfg.FileRules, cfg.LoginRules)
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
 	vEngine := virusscan.NewEngine(workDir, log)
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
@@ -117,9 +118,21 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 	var p struct {
 		Decoy        *config.DecoyConfig   `json:"decoy"`
 		ProcessRules *[]config.ProcessRule `json:"process_rules"`
+		FileRules    *[]config.FileRule    `json:"file_rules"`
+		LoginRules   *[]config.LoginRule   `json:"login_rules"`
 	}
 	if err := json.Unmarshal([]byte(js), &p); err != nil {
 		return fmt.Errorf("解析 policy_json: %w", err)
+	}
+	files, logins := c.cfg.FileRules, c.cfg.LoginRules
+	if p.FileRules != nil {
+		files = *p.FileRules
+	}
+	if p.LoginRules != nil {
+		logins = *p.LoginRules
+	}
+	if err := config.ValidateProtection(files, logins); err != nil {
+		return err
 	}
 	if hot { // 快照落盘，重启后仍生效直至下次同步
 		path := filepath.Join(c.workDir, "policy.json")
@@ -133,6 +146,10 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 	if p.Decoy != nil {
 		c.cfg.Decoy = *p.Decoy
 		c.cfg.Decoy.Normalize()
+	}
+	c.cfg.FileRules, c.cfg.LoginRules = files, logins
+	if c.grd != nil {
+		c.grd.UpdateProtection(files, logins)
 	}
 	if p.ProcessRules != nil {
 		c.cfg.ProcessRules = append([]config.ProcessRule(nil), (*p.ProcessRules)...)
@@ -983,6 +1000,7 @@ func (c *Client) pushMetrics(samples []*pb.MetricSample) {
 // 日志含入侵检测线索，经 pushReport 走离线队列保全路径。
 func (c *Client) logLoop(ctx context.Context) {
 	lc := logcollect.New(c.workDir, c.log, func(source string, lines []*pb.LogLine) {
+		c.grd.ObserveLoginLogs(source, lines)
 		c.pushReport(&pb.Report{
 			AgentId:  c.state.AgentID,
 			ReportId: newUUID(),

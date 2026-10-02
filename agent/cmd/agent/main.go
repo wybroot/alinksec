@@ -19,6 +19,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/comm"
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/guard"
 )
 
 func main() {
@@ -181,6 +182,9 @@ func cmdUninstall(args []string) error {
 
 	stopService() // 停服务（等 Agent 进程退出释放文件句柄）
 	time.Sleep(2 * time.Second)
+	if err := guard.ClearLoginFirewall(); err != nil {
+		return fmt.Errorf("清理登录来源封禁失败: %w", err)
+	}
 
 	if err := os.RemoveAll(*workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "WARN: 工作目录清理不完整: %v\n", err)

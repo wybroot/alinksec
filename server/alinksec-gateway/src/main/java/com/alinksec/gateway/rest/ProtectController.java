@@ -38,9 +38,9 @@ public class ProtectController {
                 Map.of("key", "process", "name", "恶意进程防护", "desc",
                         "EDR 进程行为规则匹配与父链取证，可按规则结束进程树", "builtin", true),
                 Map.of("key", "file_tamper", "name", "关键文件防篡改", "desc",
-                        "系统关键配置文件变更监控与阻断", "builtin", true),
+                        "Linux 关键文件内容与权限监控，可按规则自动恢复", "builtin", true),
                 Map.of("key", "login", "name", "登录防护", "desc",
-                        "SSH 爆破识别与异常时段登录告警", "builtin", true),
+                        "Linux SSH 爆破与异常时段登录检测，可按规则限时封禁来源", "builtin", true),
                 Map.of("key", "decoy", "name", "勒索诱饵防护", "desc",
                         "诱饵文件触碰即阻断加密进程（本地响应）", "builtin", true)));
     }

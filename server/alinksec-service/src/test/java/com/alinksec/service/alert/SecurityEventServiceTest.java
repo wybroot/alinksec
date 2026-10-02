@@ -39,7 +39,7 @@ class SecurityEventServiceTest {
 
         ArgumentCaptor<String> fingerprint = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), any(String.class),
-                eq("agent-1"), eq("PR-0001"), fingerprint.capture());
+                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture());
         assertEquals("process:PR-0001:4321:1720000000000", fingerprint.getValue());
     }
 
@@ -57,11 +57,30 @@ class SecurityEventServiceTest {
 
         ArgumentCaptor<String> fingerprint = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), any(String.class),
-                eq("agent-1"), eq("PR-0001"), fingerprint.capture());
+                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture());
         assertEquals("process:PR-0001", fingerprint.getValue());
     }
 
     private static DatabaseDialect database() {
         return new DatabaseDialect(new AlinkSecProperties());
+    }
+
+    @Test
+    void fileAndLoginEventsUseTheirTargetAndPreserveFingerprintAndLatestAction() {
+        for (String type : java.util.List.of("file_tamper", "login_crack", "login_anomaly")) {
+            JdbcTemplate targetJdbc = org.mockito.Mockito.mock(JdbcTemplate.class);
+            String key = type.equals("file_tamper") ? "path" : "source_ip";
+            String value = type.equals("file_tamper") ? "/etc/passwd" : "203.0.113.8";
+            String expected = type + ":PR-test:" + value;
+            SecurityEventService service = new SecurityEventService(targetJdbc, notifyService, database());
+            service.onEvent("agent-1", RptSecurityEvent.newBuilder().setRuleId("PR-test").setType(type)
+                    .setSeverity(Severity.SEV_HIGH).setDetail(JsonUtils.write(java.util.Map.of(key, value)))
+                    .setActionTaken("restored").build());
+            ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
+            verify(targetJdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), detail.capture(),
+                    eq("restored"), eq("agent-1"), eq("PR-test"), eq(expected));
+            assertEquals(expected, JsonUtils.read(detail.getValue()).path("fingerprint").asText());
+            assertEquals(value, JsonUtils.read(detail.getValue()).path(key).asText());
+        }
     }
 }
