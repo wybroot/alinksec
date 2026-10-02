@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 增加 Linux ARM64（aarch64）Agent、原生 ARM64 CI，以及 server/web/SQLite 维护镜像的 amd64 + arm64 发布流程。
+- 发布门禁要求两种 Linux 架构均通过，镜像清单记录各架构实际验证过的 digest，Agent 附件校验真实二进制架构。
+- 主机详情显示实际架构；升级下发预先核对全部目标的平台，Agent 替换自身前再次检查升级包平台。
+- ARM64 尚未发布；现有 v0.0.1 成品仍为 amd64。当前分支的构建与验证方式见 [ARM64 部署](docs/14-ARM64支持.md)。
+
 ## v0.0.1 - 2026-10-02
 
 首次开发阶段发布。server/web 提供 Linux amd64 容器镜像，Agent 提供 Linux amd64 与 Windows amd64 原生二进制。

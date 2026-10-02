@@ -35,7 +35,7 @@ func HostInfo() *pb.HostInfo {
 		OsType:       osType,
 		OsVersion:    hi.Platform + " " + hi.PlatformVersion,
 		Kernel:       hi.KernelVersion,
-		Arch:         hi.KernelArch,
+		Arch:         runtime.GOARCH,
 		AgentVersion: AgentVersion,
 		IpList:       ips,
 		MacList:      macs,

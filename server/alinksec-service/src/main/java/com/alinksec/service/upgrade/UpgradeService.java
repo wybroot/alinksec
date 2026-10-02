@@ -17,7 +17,9 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -30,6 +32,7 @@ import java.util.UUID;
 public class UpgradeService {
 
     private static final Logger log = LoggerFactory.getLogger(UpgradeService.class);
+    private static final Set<String> PLATFORMS = Set.of("linux-amd64", "linux-arm64", "windows-amd64");
 
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
@@ -50,6 +53,7 @@ public class UpgradeService {
         if (version == null || version.isBlank() || platform == null || platform.isBlank()) {
             throw new IllegalArgumentException("version 与 platform 必填（如 1.2.0 / linux-amd64）");
         }
+        requirePlatform(platform);
         Path dir = Path.of(props.getUpgrade().getStorageDir());
         Files.createDirectories(dir);
         Path tmp = dir.resolve("upload-" + UUID.randomUUID() + ".pkg");
@@ -81,9 +85,26 @@ public class UpgradeService {
         Map<String, Object> pkg = jdbc.queryForMap(
                 "SELECT version, platform, package_key, sha256 FROM t_agent_upgrade_package WHERE id = ?",
                 packageId);
-        agentIds = agentIds == null ? List.of() : agentIds.stream().filter(a -> !a.isBlank()).toList();
+        String platform = (String) pkg.get("platform");
+        requirePlatform(platform);
+        agentIds = agentIds == null ? List.of() : agentIds.stream()
+                .filter(a -> a != null && !a.isBlank()).distinct().toList();
         if (agentIds.isEmpty()) {
             throw new IllegalArgumentException("请选择升级目标主机");
+        }
+        // Validate every target before creating any command in a mixed-architecture batch.
+        for (String agentId : agentIds) {
+            List<Map<String, Object>> hosts = jdbc.queryForList(
+                    "SELECT os_type, arch FROM t_agent WHERE agent_id = ? AND status <> 4", agentId);
+            if (hosts.isEmpty()) {
+                throw new IllegalArgumentException("升级目标主机不存在: " + agentId);
+            }
+            Map<String, Object> host = hosts.get(0);
+            String target = hostPlatform(((Number) host.get("os_type")).intValue(), (String) host.get("arch"));
+            if (!platform.equals(target)) {
+                throw new IllegalArgumentException("升级包平台 " + platform + " 与主机 " + agentId
+                        + " 的平台 " + target + " 不匹配");
+            }
         }
         for (String agentId : agentIds) {
             CmdAgentUpgrade cmd = CmdAgentUpgrade.newBuilder()
@@ -95,6 +116,27 @@ public class UpgradeService {
         }
         log.info("升级指令已下发: version={} agents={}", pkg.get("version"), agentIds.size());
         return Map.of("dispatched", agentIds.size(), "version", pkg.get("version"));
+    }
+
+    private static void requirePlatform(String platform) {
+        if (platform == null || !PLATFORMS.contains(platform)) {
+            throw new IllegalArgumentException("不支持的 Agent 平台: " + platform);
+        }
+    }
+
+    private static String hostPlatform(int osType, String arch) {
+        String os = switch (osType) {
+            case 1 -> "linux";
+            case 2 -> "windows";
+            default -> "unknown";
+        };
+        // Older Agents reported kernel names from gopsutil instead of Go architecture names.
+        String normalized = switch (arch == null ? "" : arch.toLowerCase(Locale.ROOT)) {
+            case "amd64", "x86_64", "x64" -> "amd64";
+            case "arm64", "aarch64" -> "arm64";
+            default -> "unknown";
+        };
+        return os + "-" + normalized;
     }
 
     public List<Map<String, Object>> packages() {

@@ -23,8 +23,8 @@ jobs:
         with:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
-      - name: Check Windows service lifecycle
-        run: go test ./cmd/agent
+      - name: Check Windows Agent and service lifecycle
+        run: go test ./cmd/agent ./internal/upgrade
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -48,8 +48,20 @@ jobs:
 
   build-and-test:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
-    runs-on: ubuntu-latest
+    name: build-and-test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
+      GOARCH: ${{ matrix.arch }}
+      COMPOSE_PARALLEL_LIMIT: '1'
       HOST_IP: ci.alinksec.test
       ALINKSEC_BIND_ADDRESS: 127.0.0.1
       ALINKSEC_POSTGRES_PASSWORD: ci-postgres-password
@@ -77,12 +89,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Check generated SQLite schema
+        if: matrix.arch == 'amd64'
         shell: pwsh
         run: ./deploy/sql/generate-sqlite-schema.ps1 -Check
       - name: Check release versions and publication gate
         run: |
           node deploy/release/check-version.mjs
-          node --test deploy/tests/release-gate.test.mjs
+          node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
       - name: Check deployment configuration and least-privilege boundaries
@@ -107,17 +120,19 @@ jobs:
         run: |
           mkdir -p .tmp
           (cd agent && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../.tmp/alinksec-agent ./cmd/agent)
+          test "$(.tmp/alinksec-agent version)" = "alinksec-agent $(cat VERSION)"
           docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-agent-validation .
           bash deploy/tests/agent-workflow-local.sh
           bash deploy/tests/firewall-local.sh
+          cp .tmp/alinksec-agent ".tmp/alinksec-agent-linux-$GOARCH"
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
       - name: Retain validated native Linux Agent
         uses: actions/upload-artifact@v4
         with:
-          name: agent-linux-amd64
-          path: .tmp/alinksec-agent
+          name: agent-linux-${{ matrix.arch }}
+          path: .tmp/alinksec-agent-linux-${{ matrix.arch }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -126,7 +141,7 @@ jobs:
       - name: Retain validated web bundle
         uses: actions/upload-artifact@v4
         with:
-          name: web-dist
+          name: web-dist-${{ matrix.arch }}
           path: web/dist/
           retention-days: 7
       - name: Install serial browser validation runtime
@@ -158,7 +173,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-validation
+          name: browser-validation-${{ matrix.arch }}
           path: .tmp/browser-artifacts-*
           include-hidden-files: true
           if-no-files-found: ignore

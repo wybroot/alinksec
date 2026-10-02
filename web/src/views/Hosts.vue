@@ -69,7 +69,7 @@
     <template v-if="curHost.host">
       <el-descriptions :column="1" border size="small">
         <el-descriptions-item label="IP">{{ curHost.ip }}</el-descriptions-item>
-        <el-descriptions-item label="操作系统">{{ curHost.os }} · x86_64</el-descriptions-item>
+        <el-descriptions-item label="操作系统">{{ curHost.os }} · {{ curHost.arch }}</el-descriptions-item>
         <el-descriptions-item label="Agent 版本">{{ curHost.ver }}（策略 v20260820）</el-descriptions-item>
         <el-descriptions-item label="状态">连接 {{ hostStatusLabel(curHost.connectionStatus) }} · 隔离 {{ hostStatusLabel(curHost.isolationStatus) }} · 心跳 {{ curHost.hb }}</el-descriptions-item>
       </el-descriptions>

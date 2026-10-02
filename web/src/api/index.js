@@ -309,6 +309,7 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
       host: h.hostname,
       ip: h.ip || '—',
       os: OS[h.os_type]?.(h.os_version) || h.os_version || '—',
+      arch: h.arch || '—',
       group: '—',
       ver: h.agent_version || '—',
       connectionStatus,

@@ -5,6 +5,8 @@
 当前 Agent 产品版本为 `0.0.1`，可执行 `alinksec-agent version` 查询。发行成品为 Linux amd64 和 Windows amd64 原生二进制；Linux 使用随包 systemd 单元，Windows `run` 自动接入 SCM。安装与服务配置见 [部署文档第 8 节](06-部署文档.md)。内置默认告警策略、实际 Linux 文件/SSH 防护配置见 [防护说明](11-登录与文件防护.md)。本文资源指标是设计目标，已测资源与平台覆盖以 [原生 Agent 验收](12-原生Agent本机验收记录.md)为准。
 > 语言/运行时：Go 1.24+，CGO_ENABLED=0 原生成品（linux/amd64、windows/amd64）。
 
+当前开发分支增加 `linux/arm64` 构建与原生 CI；Agent 按自身构建架构上报 `amd64` / `arm64`，平台兼容旧版本上报的 `x86_64` / `aarch64`。升级下发核对 OS 与架构，Agent 替换自身前再次校验包内构建平台。ARM64 尚未包含在已有 v0.0.1 成品中，见 [ARM64 部署](14-ARM64支持.md)。
+
 ## 1. 工程结构
 
 ```text

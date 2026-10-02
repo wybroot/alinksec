@@ -60,7 +60,7 @@ jobs:
             const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               ...context.repo, run_id: run.id, per_page: 100
             });
-            for (const name of ['agent-linux-amd64', 'agent-windows-amd64']) {
+            for (const name of ['agent-linux-amd64', 'agent-linux-arm64', 'agent-windows-amd64']) {
               if (!artifacts.some(artifact => artifact.name === name && !artifact.expired)) {
                 throw new Error(`Validated artifact ${name} is unavailable; rerun full CI on the release commit.`);
               }
@@ -75,18 +75,24 @@ jobs:
           test "$DOCKERHUB_USERNAME" = wangyanbiao || { echo 'Docker Hub username must match wangyanbiao/alinksec.' >&2; exit 1; }
           test -n "$DOCKERHUB_TOKEN" || { echo 'Configure DOCKERHUB_TOKEN or DOCKERHUB_PASSWORD with push access to wangyanbiao/alinksec.' >&2; exit 1; }
 
-  publish:
+  build-images:
     needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    permissions:
-      contents: write
-      actions: read
+    name: release-images (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     env:
       RELEASE_TAG: ${{ needs.verify.outputs.tag }}
       RELEASE_SHA: ${{ needs.verify.outputs.sha }}
-      ALINKSEC_CI_RUN_ID: ${{ needs.verify.outputs.ci-run }}
-      GH_TOKEN: ${{ github.token }}
+      RELEASE_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,25 +105,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Download the tested native Linux Agent
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-linux-amd64
-          path: release/bin
-          run-id: ${{ needs.verify.outputs.ci-run }}
-          github-token: ${{ github.token }}
-      - name: Download the tested native Windows Agent
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-windows-amd64
-          path: release/bin
-          run-id: ${{ needs.verify.outputs.ci-run }}
-          github-token: ${{ github.token }}
-      - name: Verify native Agent version
-        run: |
-          mv release/bin/alinksec-agent release/bin/alinksec-agent-linux-amd64
-          chmod 755 release/bin/alinksec-agent-linux-amd64
-          test "$(release/bin/alinksec-agent-linux-amd64 version)" = "alinksec-agent $(cat VERSION)"
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
@@ -126,13 +113,13 @@ jobs:
       - name: Build all release images serially before pushing
         run: |
           for component in server web sqlite-maintenance; do
-            docker build --platform linux/amd64 \
+            docker build --platform "linux/$RELEASE_ARCH" --provenance=false \
               --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org \
               --label "org.opencontainers.image.version=$RELEASE_TAG" \
               --label "org.opencontainers.image.revision=$RELEASE_SHA" \
               --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
               -f "deploy/docker/Dockerfile.$component" \
-              -t "wangyanbiao/alinksec:$component-$RELEASE_TAG" .
+              -t "wangyanbiao/alinksec:$component-$RELEASE_TAG-$RELEASE_ARCH" .
           done
       - name: Smoke test the actual release images serially
         run: |
@@ -141,15 +128,62 @@ jobs:
           bash deploy/tests/web-image-smoke.sh
           bash deploy/tests/sqlite-maintenance-local.sh
         env:
-          ALINKSEC_SMOKE_SERVER_IMAGE: wangyanbiao/alinksec:server-${{ needs.verify.outputs.tag }}
-          ALINKSEC_SMOKE_WEB_IMAGE: wangyanbiao/alinksec:web-${{ needs.verify.outputs.tag }}
-          ALINKSEC_SQLITE_MAINTENANCE_IMAGE: wangyanbiao/alinksec:sqlite-maintenance-${{ needs.verify.outputs.tag }}
+          ALINKSEC_SMOKE_SERVER_IMAGE: wangyanbiao/alinksec:server-${{ needs.verify.outputs.tag }}-${{ matrix.arch }}
+          ALINKSEC_SMOKE_WEB_IMAGE: wangyanbiao/alinksec:web-${{ needs.verify.outputs.tag }}-${{ matrix.arch }}
+          ALINKSEC_SQLITE_MAINTENANCE_IMAGE: wangyanbiao/alinksec:sqlite-maintenance-${{ needs.verify.outputs.tag }}-${{ matrix.arch }}
           ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
       - name: Push verified versioned images serially
         run: |
           for component in server web sqlite-maintenance; do
-            docker push "wangyanbiao/alinksec:$component-$RELEASE_TAG"
+            docker push "wangyanbiao/alinksec:$component-$RELEASE_TAG-$RELEASE_ARCH"
           done
+          node deploy/release/images.mjs record "$RELEASE_ARCH"
+      - name: Retain tested image digests
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-images-${{ matrix.arch }}
+          path: release/images-${{ matrix.arch }}.json
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, build-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+      ALINKSEC_CI_RUN_ID: ${{ needs.verify.outputs.ci-run }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || 'wangyanbiao' }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
+      - name: Download the three tested native Agents
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-*
+          merge-multiple: true
+          path: release/bin
+          run-id: ${{ needs.verify.outputs.ci-run }}
+          github-token: ${{ github.token }}
+      - name: Download both sets of tested image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-images-*
+          merge-multiple: true
+          path: release
+      - name: Publish and verify multi-platform image indexes
+        run: node deploy/release/images.mjs merge
       - name: Assemble deployment source, manifest and SHA256 checksums
         run: |
           node deploy/release/make-assets.mjs
@@ -161,6 +195,7 @@ jobs:
             --notes-file "docs/releases/$RELEASE_TAG.md" \
             "release/alinksec-$RELEASE_TAG.tar.gz" \
             release/alinksec-agent-linux-amd64 \
+            release/alinksec-agent-linux-arm64 \
             release/alinksec-agent-windows-amd64.exe \
             release/release-manifest.json release/SHA256SUMS
       - name: Retain release checksums and manifest
