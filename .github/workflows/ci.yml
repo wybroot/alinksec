@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ['**']
     paths-ignore:
       - '**/*.md'
   pull_request:
@@ -26,14 +27,24 @@ jobs:
         run: go test ./cmd/agent
         working-directory: agent
       - name: Build native Windows Agent
-        run: go build -o alinksec-agent-windows-amd64.exe ./cmd/agent
+        run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
         working-directory: agent
+        env:
+          CGO_ENABLED: '0'
+          GOARCH: amd64
       - name: Check actual Windows SCM service and TLS communication
         run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
         working-directory: agent
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
+      - name: Retain validated native Windows Agent
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-windows-amd64
+          path: agent/alinksec-agent-windows-amd64.exe
+          if-no-files-found: error
+          retention-days: 14
 
   build-and-test:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
@@ -46,6 +57,9 @@ jobs:
       ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
       ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ENROLL-ci-smoke-test
       ALINKSEC_JWT_SECRET: ci-jwt-secret-for-compose-smoke-test
+      ALINKSEC_SERVER_IMAGE: alinksec-server:latest
+      ALINKSEC_WEB_IMAGE: alinksec-web:latest
+      ALINKSEC_SQLITE_MAINTENANCE_IMAGE: alinksec-sqlite-maintenance:latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -65,6 +79,10 @@ jobs:
       - name: Check generated SQLite schema
         shell: pwsh
         run: ./deploy/sql/generate-sqlite-schema.ps1 -Check
+      - name: Check release versions and publication gate
+        run: |
+          node deploy/release/check-version.mjs
+          node --test deploy/tests/release-gate.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
       - name: Check deployment configuration and least-privilege boundaries
@@ -88,13 +106,21 @@ jobs:
       - name: Build and validate actual Agents serially
         run: |
           mkdir -p .tmp
-          (cd agent && CGO_ENABLED=0 go build -o ../.tmp/alinksec-agent ./cmd/agent)
+          (cd agent && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../.tmp/alinksec-agent ./cmd/agent)
           docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-agent-validation .
           bash deploy/tests/agent-workflow-local.sh
           bash deploy/tests/firewall-local.sh
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
+      - name: Retain validated native Linux Agent
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-linux-amd64
+          path: .tmp/alinksec-agent
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
         working-directory: web
       - name: Retain validated web bundle

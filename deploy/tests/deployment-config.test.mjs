@@ -28,6 +28,15 @@ for (const file of ['docker-compose.yml', 'docker-compose.lite.yml']) {
     assert.equal(services.server.environment.ALINKSEC_SIG_BASE, `${environment.HOST_IP}:8443`)
     assert.equal(services.web.volumes.find(volume => volume.target === '/etc/nginx/tls').read_only, true)
   })
+  test(`${file}: image digest overrides are preserved`, () => {
+    const overrides = { ALINKSEC_SERVER_IMAGE: `wangyanbiao/alinksec@sha256:${'a'.repeat(64)}`,
+      ALINKSEC_WEB_IMAGE: `wangyanbiao/alinksec@sha256:${'b'.repeat(64)}`,
+      ALINKSEC_SQLITE_MAINTENANCE_IMAGE: `wangyanbiao/alinksec@sha256:${'c'.repeat(64)}` }
+    const services = config(file, overrides).services
+    assert.equal(services.server.image, overrides.ALINKSEC_SERVER_IMAGE)
+    assert.equal(services.web.image, overrides.ALINKSEC_WEB_IMAGE)
+    if (services['sqlite-maintenance']) assert.equal(services['sqlite-maintenance'].image, overrides.ALINKSEC_SQLITE_MAINTENANCE_IMAGE)
+  })
 }
 test('PostgreSQL: application credentials are separate and migration gates startup', () => {
   const services = config('docker-compose.yml').services
@@ -53,4 +62,16 @@ test('SQLite: maintenance profile is isolated and resource limited', () => {
   assert.equal(Number(tool.memswap_limit), 96 * 1024 * 1024)
   assert.equal(Number(tool.cpus), 1)
   assert.equal(tool.pids_limit, 32)
+})
+test('SQLite: application containers keep bounded memory and CPU', () => {
+  const services = config('docker-compose.lite.yml').services
+  assert.equal(Number(services.server.mem_limit), 512 * 1024 * 1024)
+  assert.equal(Number(services.server.memswap_limit), 768 * 1024 * 1024)
+  assert.equal(Number(services.server.cpus), 1)
+  assert.equal(services.server.pids_limit, 128)
+  assert.ok(services.server.environment.JAVA_TOOL_OPTIONS.includes('-Xmx256m'))
+  assert.equal(Number(services.web.mem_limit), 96 * 1024 * 1024)
+  assert.equal(Number(services.web.memswap_limit), 128 * 1024 * 1024)
+  assert.equal(Number(services.web.cpus), 0.25)
+  assert.equal(services.web.pids_limit, 64)
 })

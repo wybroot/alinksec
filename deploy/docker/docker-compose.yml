@@ -55,6 +55,7 @@ services:
 
   # ---------- 服务端 ----------
   server:
+    image: ${ALINKSEC_SERVER_IMAGE:-wangyanbiao/alinksec:server-v0.0.1}
     build:
       context: ../..                      # 仓库根
       dockerfile: deploy/docker/Dockerfile.server
@@ -95,6 +96,7 @@ services:
 
   # ---------- 前端 ----------
   web:
+    image: ${ALINKSEC_WEB_IMAGE:-wangyanbiao/alinksec:web-v0.0.1}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.web

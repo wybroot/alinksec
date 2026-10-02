@@ -18,6 +18,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/comm"
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/guard"
+	"github.com/alinksec/alinksec-agent/internal/identity"
 )
 
 func main() {
@@ -33,6 +34,8 @@ func main() {
 		err = cmdInstall(os.Args[2:])
 	case "uninstall":
 		err = cmdUninstall(os.Args[2:])
+	case "version", "--version":
+		fmt.Println("alinksec-agent " + identity.AgentVersion)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -47,9 +50,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Print(`alinksec-agent ` + runtime.Version() + `
+	fmt.Print(`alinksec-agent ` + identity.AgentVersion + `
 
 用法:
+  alinksec-agent version                                   显示产品版本
   alinksec-agent run       --config <path>  --workdir <dir>   前台运行（开发/容器）
 	  alinksec-agent install   --server <addr> --token <code> --ca-file <ca.pem> [--workdir <dir>]
                                                           写入配置并完成注册

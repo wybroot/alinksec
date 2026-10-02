@@ -1,62 +1,47 @@
 # ALinkSec Agent 详细设计与策略规范
 
-> 版本：V1.0（设计评审稿）
-> 日期：2026-08-25
-> 语言/运行时：Go 1.22+，静态编译单二进制（linux/amd64、linux/arm64、windows/amd64）
+> 适用版本：v0.0.1；更新日期：2026-10-02。
+
+当前 Agent 产品版本为 `0.0.1`，可执行 `alinksec-agent version` 查询。发行成品为 Linux amd64 和 Windows amd64 原生二进制；Linux 使用随包 systemd 单元，Windows `run` 自动接入 SCM。安装与服务配置见 [部署文档第 8 节](06-部署文档.md)。内置默认告警策略、实际 Linux 文件/SSH 防护配置见 [防护说明](11-登录与文件防护.md)。本文资源指标是设计目标，已测资源与平台覆盖以 [原生 Agent 验收](12-原生Agent本机验收记录.md)为准。
+> 语言/运行时：Go 1.24+，CGO_ENABLED=0 原生成品（linux/amd64、windows/amd64）。
 
 ## 1. 工程结构
 
-```
-alinksec-agent/
-├── cmd/agent/main.go              # 入口：安装/卸载/运行 子命令
-├── internal/
-│   ├── comm/                      # gRPC 长连接、mTLS、重连、收发循环
-│   ├── config/                    # 配置加载（agent.yml）
-│   ├── scheduler/                 # 采集调度器（频率/暂停/立即触发）
-│   ├── collector/                 # 采集器
-│   │   ├── cpu.go  mem.go  disk.go  net.go  process.go  port.go
-│   │   ├── software_linux.go  software_windows.go
-│   │   └── account_linux.go  account_windows.go
-│   ├── logcollect/                # 登录日志采集解析（secure/wtmp/WinEventLog）
-│   ├── task/                      # 任务执行器：基线核查引擎、扫描引擎
-│   │   ├── baseline/              #   核查项解释器（check JSONB → 执行）
-│   │   └── scan/                  #   漏洞比对、弱口令、端口服务
-│   ├── virusscan/                 # 病毒查杀引擎：L1 哈希情报 + L2 YARA（详见 05 §1）
-│   ├── fixer/                     # 漏洞/基线修复执行器：备份/执行/回滚/复核（详见 05 §3）
-│   ├── guard/                     # 实时防护引擎：进程/文件完整性/登录防护/勒索诱饵
-│   ├── policystore/               # 本地策略缓存（SQLite）+ 版本比对
-│   ├── offlineq/                  # 断网数据缓存队列（SQLite 环形）
-│   ├── upgrade/                   # 自升级（下载/校验/替换/回滚）
-│   ├── selfprotect/               # 自我保护（防卸载/防篡改配置）
-│   └── winutil/                   # Windows API 封装（服务、防火墙、事件日志）
-└── packaging/                     # systemd unit、Windows 服务安装脚本
+```text
+agent/
+├── cmd/agent/          # run / install / uninstall / version，平台服务入口
+└── internal/
+    ├── comm/          # gRPC、注册、状态、指令、策略与 JSONL 离线队列
+    ├── config/        # agent.yml、默认值与约束
+    ├── identity/      # 身份与概要指标、AgentVersion
+    ├── collector/     # 主机资产、容器和本机工作负载
+    ├── baseline/      # 结构化基线与白名单命令检查
+    ├── scan/          # 漏洞、弱口令与端口扫描
+    ├── virusscan/     # SHA256、内部规则、白名单与隔离
+    ├── fixer/         # 配置及软件包修复
+    ├── guard/         # 进程、文件、SSH、诱饵与隔离
+    ├── logcollect/    # 日志采集与上报
+    ├── sysmetrics/    # 性能指标
+    ├── upgrade/       # 下载、SHA256 校验和二进制替换
+    └── proto/         # 当前生成的 Go 协议类型
 ```
 
-**核心依赖库**：
+实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys 及 Windows WMI。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
 
-| 库 | 用途 |
-|----|------|
-| `github.com/shirou/gopsutil/v3` | CPU/内存/磁盘/网络/进程（跨平台） |
-| `google.golang.org/grpc` | 通信 |
-| `modernc.org/sqlite` | 本地 SQLite（纯 Go，交叉编译免 CGO） |
-| `github.com/kardianos/service` | systemd / Windows 服务统一封装 |
-| `github.com/hillu/go-yara/v4` | YARA 规则引擎（CGO 静态链接 libyara；BSD-3 可闭源嵌入；构建标签 `yara`，可降级 hash-only 构建） |
-| `gopkg.in/natefinch/lumberjack.v2` | 日志轮转 |
+| 平台 | 默认配置与工作目录 | 常驻日志 |
+| --- | --- | --- |
+| Linux | `/var/lib/alinksec-agent/agent.yml`，工作目录 `/var/lib/alinksec-agent` | systemd journal |
+| Windows | `C:\\ProgramData\\alinksec-agent\\agent.yml`，工作目录 `C:\\ProgramData\\alinksec-agent` | 按服务部署环境配置输出采集 |
 
-**目录约定**：
-
-| 平台 | 配置 | 工作目录（SQLite/证书/缓存） | 日志 |
-|------|------|------------------------------|------|
-| Linux | `/etc/alinksec/agent.yml` | `/var/lib/alinksec/` | `/var/log/alinksec/`（lumberjack 轮转，单文件 50MB×3） |
-| Windows | `C:\ProgramData\ALinkSec\agent.yml` | `C:\ProgramData\ALinkSec\` | 同目录 `\logs\` |
+工作目录保存 `state.yml`、`policy.json`、`certs/`、`queue/pending.jsonl` 与病毒/防护状态，可用 `--workdir` 显式覆盖。敏感状态和证书由权限控制，不打入发布包。
 
 ## 2. 模块设计
 
 ### 2.1 comm（通信）
 
-- 维护单条 gRPC 双向流；发送通道 `chan *Report`（容量 1024），接收 goroutine 分发 Command。
+- 维护单条 gRPC 双向流，发送通道容量 256；接收循环按 Command 类型分发。
 - 重连：指数退避 1s→30s（±20% 抖动）；重连成功先发心跳并触发策略版本比对。
-- 出口统一走 `offlineq`：发送失败（断网/服务端拒绝）→ 落 SQLite 队列；队列管理器负责补传（限速 100 msg/s）。
+- 业务报告先持久化到 `queue/pending.jsonl`，发送失败保留、重连后补传；默认限速 100 msg/s。心跳等实时状态按当前连接采样。
 
 ### 2.2 scheduler（采集调度）
 
@@ -300,13 +285,13 @@ offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
 | CPU 平均占用 | < 2%（8C 参考机） |
 | 磁盘占用 | 工作目录 < 500MB（含缓存，环形覆盖） |
 | 断网数据保全 | 安全事件 ≥ 24h，指标 ≥ 1h |
-| 断电恢复 | SQLite WAL 模式，重启自动 recover 队列 |
+| 重启恢复 | JSONL 业务队列重新加载，持久化策略与证书保持 |
 
 ## 9. 病毒查杀引擎（virusscan，详见 05-扩展能力设计 §1）
 
-- **双层引擎**：L1 哈希情报（纯 Go，SHA256 精确匹配 + clean 文件缓存跳扫，命中率 >95%）；L2 YARA 规则（CGO 静态链接，规则按平台分片，仅对 PE/ELF/脚本/office 类且 <50MB 对象执行）。
+- **双层引擎**：L1 SHA256 精确匹配与按特征库版本失效的 clean 缓存；L2 `rules.json` 内部字符串/十六进制规则，不链接 libyara。缓存命中率取决于实际工作负载。
 - **模式**：快速（关键路径）/ 全盘（IO 限速默认 10MB/s，排除目录/扩展/大文件可配）/ 实时（复用 guard 文件事件通道，CLOSE_WRITE 触发，单文件超时 2s 放行并计数）/ 自定义路径。
-- **处置**：隔离（本地隔离目录权限拒绝 + 样本限速上传 MinIO）/ 删除 / 恢复 / 加白（平台全局生效，防本机白名单绕过）。
+- **处置**：本地受控隔离 / 删除 / 恢复 / 平台全局白名单。Agent 持久化白名单并在主动扫描和实时检测前应用，不提供 MinIO 样本上传。
 - **特征库**：`CmdSignatureUpdate` 全量更新（包体 <20MB，sha256 校验，原子替换）；断网沿用本地库；心跳携带 db_version，落后自动触发更新。
 - **边界**：定位已知样本查杀（挖矿/蠕虫/后门/勒索家族），未知威胁由勒索诱饵与行为防护补位。
 

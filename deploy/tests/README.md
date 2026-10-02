@@ -1,5 +1,26 @@
 # Deployment Validation
 
+Release baseline: v0.0.1. The publication workflow requires all three full CI
+jobs to pass on the exact tagged main commit. It reuses the tested Linux and
+Windows native Agents, builds and smoke-tests the release containers serially,
+then publishes component tags in `wangyanbiao/alinksec` and GitHub assets.
+See [release process](../../docs/13-版本发布流程.md).
+
+```sh
+node deploy/release/check-version.mjs v0.0.1
+node --test deploy/tests/release-gate.test.mjs
+```
+
+`check-version.mjs` needs Java 21 and Docker Compose; it starts no containers.
+It parses Maven XML and npm JSON and checks product versions and image defaults.
+The release gate tests reject mismatched commits, failed or skipped jobs and
+successful Windows-only runs. CI keeps tested native binary artifacts for 14 days.
+
+Source validation uses local image overrides `ALINKSEC_SERVER_IMAGE`,
+`ALINKSEC_WEB_IMAGE` and `ALINKSEC_SQLITE_MAINTENANCE_IMAGE`; production Compose
+defaults to the published component tags. When testing a locally built maintenance
+image, set `ALINKSEC_SQLITE_MAINTENANCE_IMAGE=alinksec-sqlite-maintenance:latest`.
+
 Run checks serially on low-memory machines. Build the server before starting API
 validation, and stop one scenario before starting another.
 
@@ -328,6 +349,5 @@ bash deploy/tests/release-validation.sh
 Set `JAVA_BIN`, `MAVEN_BIN`, `GO_BIN`, `ALINKSEC_MAVEN_REPO`, and
 `ALINKSEC_SMOKE_POSTGRES_IMAGE` when local tools or cached images use custom
 paths. The PostgreSQL wrapper uses one 256 MiB database container and runs
-migration/permission, mTLS, and API checks before removing it. A formal backup
-from the previous supported release and successful remote CI remain separate
-release requirements.
+migration/permission, mTLS, and API checks before removing it. Publication also
+requires successful full CI on the exact release commit and the Release workflow.

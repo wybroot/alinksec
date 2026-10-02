@@ -2,6 +2,7 @@ name: alinksec-lite
 
 services:
   server:
+    image: ${ALINKSEC_SERVER_IMAGE:-wangyanbiao/alinksec:server-v0.0.1}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.server
@@ -10,6 +11,7 @@ services:
       SPRING_PROFILES_ACTIVE: sqlite
       ALINKSEC_SQLITE_PATH: /app/data/alinksec.db
       ALINKSEC_METRICS_ENABLED: "false"
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=1"
       ALINKSEC_WEB_TLS_DIR: /app/web-tls
       ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:?set ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD in .env.lite}
       ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:?set ALINKSEC_BOOTSTRAP_ENROLL_TOKEN in .env.lite}
@@ -25,8 +27,15 @@ services:
       - server-data:/app/data
       - web-tls:/app/web-tls
     restart: unless-stopped
+    mem_limit: 512m
+    memswap_limit: 768m
+    cpus: 1
+    pids_limit: 128
 
   web:
+    image: ${ALINKSEC_WEB_IMAGE:-wangyanbiao/alinksec:web-v0.0.1}
+    environment:
+      NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.web
@@ -45,9 +54,13 @@ services:
       retries: 24
       start_period: 20s
     restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
 
   sqlite-maintenance:
-    image: alinksec-sqlite-maintenance:latest
+    image: ${ALINKSEC_SQLITE_MAINTENANCE_IMAGE:-wangyanbiao/alinksec:sqlite-maintenance-v0.0.1}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.sqlite-maintenance

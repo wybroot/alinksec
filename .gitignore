@@ -16,8 +16,8 @@ web/dist/
 *.local
 
 # ---------- 发布产物（本机构建，不入库）----------
-release/
-release-bin/
+/release/
+/release-bin/
 alinksec-release.zip
 alinksec-m1.zip
 

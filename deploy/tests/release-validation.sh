@@ -15,6 +15,7 @@ export ALINKSEC_SMOKE_SERVER_IMAGE=alinksec-server-validation
 export ALINKSEC_SMOKE_WEB_IMAGE=alinksec-web-validation
 export ALINKSEC_SMOKE_BROWSER=true
 export ALINKSEC_SMOKE_AGENT_IMAGE=alinksec-agent-validation
+export ALINKSEC_SQLITE_MAINTENANCE_IMAGE=alinksec-sqlite-maintenance:latest
 mkdir -p "$repo_dir/.tmp"
 exec 8>"$repo_dir/.tmp/release-validation.lock"
 flock -n 8 || { echo 'Another release validation is already running.' >&2; exit 1; }
@@ -82,4 +83,4 @@ step 'Real SQLite maintenance and recovery' bash "$script_dir/sqlite-maintenance
 step 'Maintenance failure handling' bash "$script_dir/sqlite-maintenance.test.sh"
 step 'Diff whitespace' git diff --check
 printf '\nLocal validation completed: %s\n' "$artifacts/completed.log"
-printf 'Formal previous-version backup and remote CI are separate release requirements.\n'
+printf 'Release publication also requires the matching full CI and release workflow.\n'
