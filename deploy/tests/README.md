@@ -1,7 +1,7 @@
 # Deployment Validation
 
-Release baseline: v0.0.1 (amd64). The current branch adds Linux ARM64; it is not
-part of that existing release. Publication now requires `windows-agent`,
+Release target: v0.0.2, adding Linux ARM64 to the earlier
+v0.0.1 amd64 release. Publication requires `windows-agent`,
 `build-and-test (amd64)`, `build-and-test (arm64)` and `schema` to pass on the
 exact tagged main commit. It reuses all three tested native Agents, builds and
 smoke-tests containers serially on each native architecture, then merges the
@@ -9,7 +9,7 @@ tested digests into multi-platform component tags and publishes GitHub assets.
 See [release process](../../docs/13-版本发布流程.md).
 
 ```sh
-node deploy/release/check-version.mjs v0.0.1
+node deploy/release/check-version.mjs v0.0.2
 node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
 ```
 
@@ -23,8 +23,9 @@ CI keeps tested native binary artifacts for 14 days. See the
 
 Source validation uses local image overrides `ALINKSEC_SERVER_IMAGE`,
 `ALINKSEC_WEB_IMAGE` and `ALINKSEC_SQLITE_MAINTENANCE_IMAGE`; production Compose
-defaults to the published component tags. When testing a locally built maintenance
-image, set `ALINKSEC_SQLITE_MAINTENANCE_IMAGE=alinksec-sqlite-maintenance:latest`.
+defaults to component tags for `VERSION`, which must be published before pulling.
+When testing a locally built maintenance image, set
+`ALINKSEC_SQLITE_MAINTENANCE_IMAGE=alinksec-sqlite-maintenance:latest`.
 
 Run checks serially on low-memory machines. Build the server before starting API
 validation, and stop one scenario before starting another.

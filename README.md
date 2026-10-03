@@ -10,7 +10,7 @@ Asset inventory · Security baselines · Vulnerability remediation · Malware sc
 
 [English](README.md) · [简体中文](README-cn.md)
 
-[![Release](https://img.shields.io/badge/Release-v0.0.1-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.1) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v0.0.2-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.2) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
 
 ![Go](https://img.shields.io/badge/Agent-Go_1.24-00ADD8?style=for-the-badge&logo=go&logoColor=white) ![Java](https://img.shields.io/badge/Server-Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white) ![Vue](https://img.shields.io/badge/Console-Vue_3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white) ![Docker](https://img.shields.io/badge/Deploy-Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
@@ -103,16 +103,14 @@ flowchart LR
 ```
 
 The Agent is a native single binary. Managed hosts do not need Docker, a JRE,
-Node.js or a Go toolchain. **v0.0.1** ships Linux amd64 containers and Linux
-amd64 / Windows amd64 Agents.
+Node.js or a Go toolchain. **v0.0.2** supports Linux
+amd64 / **ARM64 (aarch64)** containers and Linux amd64 / arm64 / Windows amd64
+Agents. See the [v0.0.2 release notes](docs/releases/v0.0.2.md).
 
-The current development branch adds **Linux ARM64 (aarch64)** Agents and
-amd64/arm64 container builds, with native CI for both architectures. ARM64 is
-not included in the existing v0.0.1 release. Until a new release is published,
-use the source build instructions in the [ARM64 guide](docs/14-ARM64支持.md).
-
-Commit `bb8cf91` passed [native ARM64, amd64, Windows and database CI](https://github.com/wybroot/alinksec/actions/runs/37026819693);
-the guide records the acceptance scope and verified Agent checksums.
+Linux amd64 and arm64 use native CI runners for validation and image builds.
+Choose the Agent matching the managed host's OS and architecture; the
+[ARM64 guide](docs/14-ARM64支持.md) covers installation, source builds and
+acceptance scope. The earlier v0.0.1 release is amd64-only.
 
 <details>
 <summary><b>📦 Explore the Repository</b></summary>
@@ -278,30 +276,34 @@ For standard deployment, follow sections 5 and 6 of the
 
 ### 1. Download Verified Release Assets
 
-Get all five attachments from **[v0.0.1](https://github.com/wybroot/alinksec/releases/tag/v0.0.1)**:
+Download all six attachments from **[v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)**
+after its release workflow succeeds. Keep source, Compose files, images and
+Agents on the same version.
 
 | Asset | Contents |
 | --- | --- |
-| `alinksec-v0.0.1.tar.gz` | Source, deployment files and documentation |
-| `alinksec-agent-linux-amd64` | Native Linux Agent |
-| `alinksec-agent-windows-amd64.exe` | Native Windows Agent |
-| `release-manifest.json` | Source commit, CI reference and image digests |
-| `SHA256SUMS` | Checksums for the other four attachments |
+| `alinksec-v0.0.2.tar.gz` | Source, deployment files and documentation |
+| `alinksec-agent-linux-amd64` | Native Linux x86_64 Agent |
+| `alinksec-agent-linux-arm64` | Native Linux aarch64 Agent |
+| `alinksec-agent-windows-amd64.exe` | Native Windows x64 Agent |
+| `release-manifest.json` | Source commit, CI reference, image index and platform digests |
+| `SHA256SUMS` | Checksums for the other five attachments |
 
 Verify and extract them in the download directory:
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.1.tar.gz
-cd alinksec-v0.0.1/deploy/docker
+tar -xzf alinksec-v0.0.2.tar.gz
+cd alinksec-v0.0.2/deploy/docker
 ```
 
-Published images are ready to pull; deployment hosts do not need to compile:
+After publication, pull these images; Docker selects Linux amd64 or arm64 for
+the deployment host, which does not need to compile:
 
 ```text
-wangyanbiao/alinksec:server-v0.0.1
-wangyanbiao/alinksec:web-v0.0.1
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.1
+wangyanbiao/alinksec:server-v0.0.2
+wangyanbiao/alinksec:web-v0.0.2
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.2
 ```
 
 ### 2. Start the Management Platform
@@ -348,8 +350,9 @@ Transfer the matching binary and `alinksec-ca.crt` to each managed host. For
 Linux, also copy `deploy/agent/alinksec-agent.service` from the release bundle
 into that host's working directory as `alinksec-agent.service`:
 
-On ARM64, use `alinksec-agent-linux-arm64` from the current source build or a
-future release that includes ARM64; the published v0.0.1 Linux binary is amd64.
+Run `uname -m` on the managed host: `x86_64` uses `alinksec-agent-linux-amd64`,
+while `aarch64` uses `alinksec-agent-linux-arm64`. For ARM64, replace the binary
+filename in the first command below.
 
 ```bash
 sudo install -m 0755 alinksec-agent-linux-amd64 /usr/local/bin/alinksec-agent
@@ -396,6 +399,12 @@ VERIFY items. The [full CI](https://github.com/wybroot/alinksec/actions/runs/369
 and [release workflow](https://github.com/wybroot/alinksec/actions/runs/36993494771)
 passed for the published release.
 
+**v0.0.2 adds native ARM64 validation and multi-platform publication.** All four
+CI jobs must pass on the release commit before publication. The attached
+`release-manifest.json` identifies that commit, the validated CI run and each
+image digest; see the [release notes](docs/releases/v0.0.2.md) and
+[ARM64 evidence](docs/14-ARM64支持.md).
+
 | Verified Area | Evidence |
 | --- | --- |
 | **Linux workflows** | Actual Agent tasks, scanning, remediation and protection workflows in [functional acceptance](docs/10-本机全功能联动验收记录.md). |
@@ -422,7 +431,7 @@ distribution or Windows version have not been validated. Multi-tenancy is not
 implemented. See [acceptance status](docs/07-封版缺陷清单.md) and
 [native Agent measurements](docs/12-原生Agent本机验收记录.md) for details.
 
-Release CI checks all three full CI jobs on the exact source commit, reuses
+Release CI checks all four full CI jobs on the exact source commit, reuses
 the tested Agent binaries and smoke-tests the actual release containers before
 publication. Artifacts include checksums and an image-digest manifest.
 
@@ -457,7 +466,7 @@ for each check. Complete commands and prerequisites are in the
 
 ```bash
 node deploy/release/check-version.mjs
-node --test deploy/tests/release-gate.test.mjs
+node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
 
 # Run the following stages sequentially.
 cd server && mvn -B package

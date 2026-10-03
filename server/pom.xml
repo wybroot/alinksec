@@ -6,7 +6,7 @@
 
   <groupId>com.alinksec</groupId>
   <artifactId>alinksec-server-parent</artifactId>
-  <version>0.0.1</version>
+  <version>0.0.2</version>
   <packaging>pom</packaging>
   <name>ALinkSec Server Parent</name>
 

@@ -17,7 +17,7 @@ import (
 )
 
 // AgentVersion 当前 Agent 版本（升级任务比对依据）
-const AgentVersion = "0.0.1"
+const AgentVersion = "0.0.2"
 
 // HostInfo 采集主机静态信息（注册时上报，内容与 proto HostInfo 对齐）
 func HostInfo() *pb.HostInfo {

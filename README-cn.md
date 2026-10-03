@@ -10,7 +10,7 @@
 
 [English](README.md) · [简体中文](README-cn.md)
 
-[![Release](https://img.shields.io/badge/Release-v0.0.1-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.1) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v0.0.2-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.2) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
 
 ![Go](https://img.shields.io/badge/Agent-Go_1.24-00ADD8?style=for-the-badge&logo=go&logoColor=white) ![Java](https://img.shields.io/badge/Server-Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white) ![Vue](https://img.shields.io/badge/Console-Vue_3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white) ![Docker](https://img.shields.io/badge/Deploy-Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
@@ -92,11 +92,9 @@ flowchart LR
     WINDOWS -->|HTTPS 下载| WEB
 ```
 
-Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.1** 提供 Linux amd64 容器，以及 Linux amd64 / Windows amd64 Agent 成品。
+Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.2** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.2 发布说明](docs/releases/v0.0.2.md)。
 
-当前开发分支新增 **Linux ARM64（aarch64）** Agent、amd64/arm64 双架构容器构建与原生 CI。ARM64 尚未包含在已发布的 v0.0.1 中；新版本发布前请按 [ARM64 部署说明](docs/14-ARM64支持.md)从当前源码构建。
-
-提交 `bb8cf91` 已通过[原生 ARM64、amd64、Windows 及数据库 CI](https://github.com/wybroot/alinksec/actions/runs/37026819693)；ARM64 文档记录了验收范围和已复核的 Agent 校验值。
+Linux amd64 与 arm64 分别使用原生 CI runner 验证和构建镜像。Agent 需匹配目标主机的系统与架构，安装、源码构建及验收范围见 [ARM64 部署说明](docs/14-ARM64支持.md)。此前 v0.0.1 成品仅支持 amd64。
 
 <details>
 <summary><b>📦 项目目录结构</b></summary>
@@ -237,30 +235,31 @@ SHA256 特征与规则匹配支持**快速扫描、全盘扫描和自定义目�
 
 ### 1. 下载并校验发布成品
 
-从 **[v0.0.1 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.1)** 下载全部五个附件：
+确认发布工作流成功后，从 **[v0.0.2 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)** 下载全部六个附件。源码、Compose、镜像与 Agent 应使用同一版本。
 
 | 附件 | 内容 |
 | --- | --- |
-| `alinksec-v0.0.1.tar.gz` | 源码、部署配置与文档 |
-| `alinksec-agent-linux-amd64` | Linux 原生 Agent |
-| `alinksec-agent-windows-amd64.exe` | Windows 原生 Agent |
-| `release-manifest.json` | 源码提交、CI 引用与镜像摘要 |
-| `SHA256SUMS` | 其他四个附件的校验和 |
+| `alinksec-v0.0.2.tar.gz` | 源码、部署配置与文档 |
+| `alinksec-agent-linux-amd64` | Linux x86_64 原生 Agent |
+| `alinksec-agent-linux-arm64` | Linux aarch64 原生 Agent |
+| `alinksec-agent-windows-amd64.exe` | Windows x64 原生 Agent |
+| `release-manifest.json` | 源码提交、CI 引用、镜像索引及各平台摘要 |
+| `SHA256SUMS` | 其他五个附件的校验和 |
 
 在下载目录校验并解压：
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.1.tar.gz
-cd alinksec-v0.0.1/deploy/docker
+tar -xzf alinksec-v0.0.2.tar.gz
+cd alinksec-v0.0.2/deploy/docker
 ```
 
-镜像已由发布 CI 构建，部署主机无需现场编译：
+发布完成后可直接拉取以下镜像，Docker 自动选择 Linux amd64 或 arm64，部署主机无需现场编译：
 
 ```text
-wangyanbiao/alinksec:server-v0.0.1
-wangyanbiao/alinksec:web-v0.0.1
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.1
+wangyanbiao/alinksec:server-v0.0.2
+wangyanbiao/alinksec:web-v0.0.2
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.2
 ```
 
 ### 2. 启动管理平台
@@ -304,7 +303,7 @@ docker compose --env-file .env.lite -f docker-compose.lite.yml cp server:/app/da
 
 将对应系统的 Agent 成品与 `alinksec-ca.crt` 传到目标主机。Linux 主机还需将发布包中的 `deploy/agent/alinksec-agent.service` 复制到当前工作目录，文件名为 `alinksec-agent.service`：
 
-ARM64 主机使用当前源码构建或后续 ARM64 版本提供的 `alinksec-agent-linux-arm64`；现有 v0.0.1 的 Linux 成品为 amd64。
+在目标主机执行 `uname -m`：`x86_64` 使用 `alinksec-agent-linux-amd64`，`aarch64` 使用 `alinksec-agent-linux-arm64`。ARM64 请将下面第一条命令中的文件名替换为对应成品。
 
 ```bash
 sudo install -m 0755 alinksec-agent-linux-amd64 /usr/local/bin/alinksec-agent
@@ -343,6 +342,8 @@ systemctl status alinksec-agent
 
 **v0.0.1 是首次开发阶段发布版本。**开发验收清单共 28 项：**26 项 CLOSED、1 项 ACCEPTED、1 项 N/A**，无 OPEN 或 VERIFY 项。发布版本对应的[完整 CI](https://github.com/wybroot/alinksec/actions/runs/36978905551)和[发布工作流](https://github.com/wybroot/alinksec/actions/runs/36993494771)均已通过。
 
+**v0.0.2 增加 ARM64 原生验证与双架构发布。**发布提交必须先通过完整 CI 的四个作业；附件 `release-manifest.json` 记录该提交、验收 CI 和各镜像摘要，见 [发布说明](docs/releases/v0.0.2.md)及 [ARM64 验收证据](docs/14-ARM64支持.md)。
+
 | 验证领域 | 证据 |
 | --- | --- |
 | **Linux 业务链路** | 实际 Agent 任务、扫描、修复及防护联动，见[全功能联动验收](docs/10-本机全功能联动验收记录.md)。 |
@@ -363,7 +364,7 @@ Linux 原生采样覆盖约 197 秒，包含启动、空闲、采集、短基线
 
 上述测量不覆盖长期扫描或持续高负载。Windows SCM 验证不等于 Windows 全量安全引擎与 Java 平台完整联动验收。100～2000 台的架构目标、各 Linux 发行版及全部 Windows 版本尚未完成规模或全平台验证。多租户尚未实现。详见[验收状态](docs/07-封版缺陷清单.md)与[原生 Agent 测量记录](docs/12-原生Agent本机验收记录.md)。
 
-发布 CI 核对同一源码提交的三个完整 CI 作业，复用已测试的 Agent 二进制，并在发布前冒烟测试实际容器；附件提供校验和与镜像摘要清单。
+发布 CI 核对同一源码提交的四个完整 CI 作业，复用已测试的 Agent 二进制，并在发布前冒烟测试实际容器；附件提供校验和与镜像摘要清单。
 
 </details>
 
@@ -390,7 +391,7 @@ Linux 原生采样覆盖约 197 秒，包含启动、空闲、采集、短基线
 
 ```bash
 node deploy/release/check-version.mjs
-node --test deploy/tests/release-gate.test.mjs
+node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
 
 # 下列阶段依次执行。
 cd server && mvn -B package

@@ -8,7 +8,7 @@ on:
       tag:
         description: Existing release tag (full CI must have passed on this commit)
         required: true
-        default: v0.0.1
+        default: v0.0.2
         type: string
 
 permissions:
