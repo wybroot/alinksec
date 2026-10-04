@@ -68,13 +68,16 @@ public class BaselinePackageService {
         if (result.get("test_task_id") != null) {
             long task = ((Number) result.get("test_task_id")).longValue();
             result.put("testTask", jdbc.queryForMap("SELECT id,task_no,status,progress FROM t_baseline_task WHERE id=?", task));
-            var summaries = jdbc.queryForList("SELECT agent_id,total,passed_count,failed_count,score FROM t_baseline_summary WHERE task_id=?", task);
+            var summaries = jdbc.queryForList("SELECT agent_id,total,passed_count,failed_count,score,error_count,legacy_count FROM t_baseline_summary WHERE task_id=?", task);
             for (var summary : summaries) summary.put("items", jdbc.queryForList("""
-                    SELECT i.code,i.name,i.rule_id,r.passed,r.actual,r.message FROM t_baseline_result r
+                    SELECT i.code,i.name,i.rule_id,r.passed,r.actual,r.message,r.execution_status,r.duration_ms FROM t_baseline_result r
                     JOIN v_baseline_result_definition i ON i.result_id=r.id
                     WHERE r.task_id=? AND r.agent_id=? ORDER BY i.code
                     """, task, summary.get("agent_id")));
             result.put("testResults", summaries);
+            result.put("testReady", ((Number) ((Map<?, ?>) result.get("testTask")).get("status")).intValue() == 2
+                    && !summaries.isEmpty() && summaries.stream().allMatch(summary ->
+                    ((Number) summary.get("error_count")).intValue() == 0 && ((Number) summary.get("legacy_count")).intValue() == 0));
         }
         return result;
     }
@@ -130,6 +133,8 @@ public class BaselinePackageService {
                 "测试核查尚未完整结束，不能发布");
         require(jdbc.queryForObject("SELECT count(*) FROM t_baseline_summary WHERE task_id=?", Integer.class, test) > 0,
                 "缺少测试主机核查结果");
+        require(jdbc.queryForObject("SELECT count(*) FROM t_baseline_summary WHERE task_id=? AND (error_count>0 OR legacy_count>0)", Integer.class, test) == 0,
+                "测试存在执行异常或旧 Agent 无法区分的结果，请更新 Agent 并重新测试后发布");
         // Publishing selects a version; it does not run checks or repairs on other hosts.
         String previous = active(String.valueOf(pkg.get("code")));
         if (previous != null) {

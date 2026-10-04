@@ -111,7 +111,7 @@ const migrations = database(db => {
     VALUES (?, 'image-persistent-software', '1.0')`).run(agentId)
   return db.prepare('SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()
 })
-assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004'])
+assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005'])
 execFileSync('docker', ['restart', '--timeout', '15', containerId], { timeout: 30_000, stdio: 'pipe' })
 // Docker may allocate new ephemeral host ports when the same container restarts.
 const ports = JSON.parse(execFileSync('docker', ['inspect', '--format',

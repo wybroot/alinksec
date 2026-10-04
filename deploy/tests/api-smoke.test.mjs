@@ -325,6 +325,28 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     if (platform === 'linux') assert.equal(sql("SELECT count(*) FROM t_command WHERE type='baseline_check';"), previousCommands, 'Import/review cannot run checks')
     const foreign = platform === 'linux' ? 'ci-smoke-windows' : 'ci-smoke-001'
     assert.equal((await request(`${prefix}/test`, { ...options, body: { agentIds: [foreign] } })).status, 400)
+    for (const outcome of ['error', 'legacy']) {
+      const attempt = await ok(`${prefix}/test`, { ...options, body: { agentIds: [agent] } })
+      const failedTest = Number(attempt.test_task_id); baselineTaskIds.push(failedTest)
+      sql(`BEGIN;
+        INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+        SELECT e.task_id,e.agent_id,e.item_id,false,'','Unable to evaluate check','${outcome}'
+        FROM t_baseline_task_expected e WHERE e.task_id=${failedTest};
+        INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count,legacy_count)
+        VALUES (${failedTest},'${agent}',4,0,4,0,${outcome === 'error' ? 4 : 0},${outcome === 'legacy' ? 4 : 0});
+        UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${failedTest};
+        COMMIT;`)
+      stages[outcome] = await ok(prefix, { token: tokens.admin })
+      assert.equal(stages[outcome].testReady, false)
+      assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'Invalid execution evidence' } })).status, 400)
+      if (outcome === 'error') {
+        stages.errorLatest = await ok('/api/baseline/latest', { token: tokens.viewer })
+        stages.errorItems = await ok(`/api/baseline/tasks/${failedTest}/agents/${agent}/items`, { token: tokens.viewer })
+        stages.errorCategories = await ok(`/api/baseline/tasks/${failedTest}/category-stats`, { token: tokens.viewer })
+        assert.ok(stages.errorItems.every(item => item.execution_status === 'error' && !item.fixable))
+        assert.ok(stages.errorCategories.every(category => Number(category.failed) === 0))
+      }
+    }
     stages.testing = await ok(`${prefix}/test`, { ...options, body: { agentIds: [agent] } })
     const testId = Number(stages.testing.test_task_id); assert.ok(Number.isSafeInteger(testId)); baselineTaskIds.push(testId)
     assert.equal(sql(`SELECT count(*) FROM t_baseline_task_expected WHERE task_id=${testId};`), '4')
@@ -337,13 +359,14 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     // API fixtures model a complete Agent report. Native check execution is validated separately.
     const expected = mode === 'sqlite' ? `json_extract(i."check", '$.expected')` : `CAST(i."check" AS JSONB)->>'expected'`
     sql(`BEGIN;
-      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual)
-      SELECT e.task_id,e.agent_id,e.item_id,true,${expected} FROM t_baseline_task_expected e
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,true,${expected},'pass' FROM t_baseline_task_expected e
       JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${testId};
       INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score) VALUES (${testId},'${agent}',4,4,0,100);
       UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${testId};
       COMMIT;`)
     stages.completed = await ok(prefix, { token: tokens.admin })
+    assert.equal(stages.completed.testReady, true)
     stages.published = await ok(`${prefix}/publish`, { ...options, body: { note: 'Protocol fixture results reviewed' } })
     assert.equal(stages.published.status, 'published')
     const details = await ok(`/api/baseline/tasks/${testId}/agents/${agent}/items`, { token: tokens.viewer })

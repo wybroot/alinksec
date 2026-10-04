@@ -43,7 +43,8 @@ public class SqliteDatabaseConfiguration {
                 "db/sqlite/V001__initial.sql",
                 "db/common/V002__security_libraries.sql",
                 "db/common/V003__library_schedules.sql",
-                "db/common/V004__baseline_packages.sql"
+                "db/common/V004__baseline_packages.sql",
+                "db/common/V005__baseline_execution_evidence.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

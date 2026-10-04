@@ -136,11 +136,18 @@ INSERT INTO t_asset_software (agent_id, name, version)
 VALUES ('migration-fixture-agent', 'legacy-software', '1.0');
 INSERT INTO t_audit_log (method, path, body_digest, status, cost_ms)
 VALUES ('POST', '/api/notify/channels', 'legacy-webhook-secret', 200, 1);
+INSERT INTO t_baseline_task(task_no,name,scope,template_ids,status)
+VALUES ('migration-baseline-evidence','Historical baseline','{}','{1}',2);
+INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message)
+SELECT id,'migration-fixture-agent',1,false,'historical value','historical reason'
+FROM t_baseline_task WHERE task_no='migration-baseline-evidence';
+INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score)
+SELECT id,'migration-fixture-agent',1,0,1,0 FROM t_baseline_task WHERE task_no='migration-baseline-evidence';
 SQL
 PGDATABASE="$test_database" pg_dump --format=custom --file="$work_dir/legacy.dump"
 run_migrations "$work_dir/base"
 assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" "50"
-assert_query "SELECT count(*) FROM t_schema_migration" "4"
+assert_query "SELECT count(*) FROM t_schema_migration" "5"
 assert_query "SELECT hostname || '|' || isolation_status FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host|0"
 assert_query "SELECT name || '|' || version FROM t_asset_software WHERE agent_id = 'migration-fixture-agent'" "legacy-software|1.0"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest IS NOT NULL" "0"
@@ -148,10 +155,16 @@ assert_query "SELECT count(*) FROM t_protect_rule WHERE rule_id = 'PR-0001'" "1"
 assert_query "SELECT content::text FROM t_policy_state WHERE id = 1" "{}"
 pass "legacy upgrade restores missing features, preserves assets and scrubs old audit secrets"
 
+assert_query "SELECT execution_status || '|' || actual || '|' || message || '|' || duration_ms FROM t_baseline_result WHERE agent_id='migration-fixture-agent'" "legacy|historical value|historical reason|0"
+assert_query "SELECT legacy_count || '|' || error_count FROM t_baseline_summary WHERE agent_id='migration-fixture-agent'" "1|0"
+assert_query "SELECT fix_current FROM v_baseline_result_definition WHERE id=1" "f"
+app_sql -c "SELECT execution_status FROM t_baseline_result; SELECT fix_current FROM v_baseline_result_definition;" >"$work_dir/baseline-evidence.log"
+pass "historical baseline evidence remains readable to the application without invented outcomes or automatic repair"
+
 test_sql -c "INSERT INTO t_audit_log (method, path, body_digest, status, cost_ms) VALUES ('POST', '/api/hosts/collect', 'new-safe-digest', 200, 1);"
 applied_at="$(query "SELECT applied_at FROM t_schema_migration ORDER BY version")"
 run_migrations "$work_dir/base"
-assert_query "SELECT count(*) FROM t_schema_migration" "4"
+assert_query "SELECT count(*) FROM t_schema_migration" "5"
 assert_query "SELECT applied_at FROM t_schema_migration ORDER BY version" "$applied_at"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "repeat migrations preserve history and new audit records"
@@ -197,9 +210,9 @@ app_sql -c "DELETE FROM t_baseline_template WHERE code='migration-template-probe
 pass "reviewed template IDs advance past bootstrap seeds without reusing allocated IDs"
 
 cp "$work_dir/base/"*.sql "$work_dir/broken/"
-cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V005__broken.sql"
+cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V006__broken.sql"
 expect_migration_failure "$work_dir/broken" "migration_test_missing_function"
-assert_query "SELECT count(*) FROM t_schema_migration" "4"
+assert_query "SELECT count(*) FROM t_schema_migration" "5"
 assert_query "SELECT to_regclass('public.t_migration_rollback_probe') IS NULL" "t"
 assert_query "SELECT hostname FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host"
 pass "failed migration rolls back schema, data and version history together"
@@ -207,13 +220,13 @@ pass "failed migration rolls back schema, data and version history together"
 cp "$work_dir/base/"*.sql "$work_dir/tampered/"
 printf '\n-- changed after release\n' >>"$work_dir/tampered/V001__pre_release_upgrade.sql"
 expect_migration_failure "$work_dir/tampered" "Migration checksum mismatch"
-assert_query "SELECT count(*) FROM t_schema_migration" "4"
+assert_query "SELECT count(*) FROM t_schema_migration" "5"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "changed released migration blocks execution"
 
 cp "$work_dir/base/V001__pre_release_upgrade.sql" "$work_dir/renamed/V002__renamed_upgrade.sql"
 expect_migration_failure "$work_dir/renamed" "Applied migration file is missing"
-assert_query "SELECT count(*) FROM t_schema_migration" "4"
+assert_query "SELECT count(*) FROM t_schema_migration" "5"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "missing or renamed applied migration blocks execution before pending changes"
 
@@ -241,6 +254,6 @@ run_migrations "$work_dir/base" "$restore_database"
 restored_state="$(PGDATABASE="$restore_database" owner_sql -At -c "
   SELECT isolation_status || '|' || (SELECT count(*) FROM t_schema_migration)
   FROM t_agent WHERE agent_id = 'migration-fixture-agent';")"
-[[ "$restored_state" == "0|4" ]] || fail "Unexpected restored upgrade state: $restored_state"
+[[ "$restored_state" == "0|5" ]] || fail "Unexpected restored upgrade state: $restored_state"
 pass "restored backup can upgrade through the production migration runner"
 printf 'Passed %s PostgreSQL migration checks.\n' "$checks"

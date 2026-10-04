@@ -386,6 +386,8 @@ export async function fetchBaseline() {
     host: r.hostname,
     tpl: r.tpl || '等保 2.0 基线',
     rate: Math.round(Number(r.score) || 0),
+    errors: Number(r.error_count || 0),
+    legacy: Number(r.legacy_count || 0),
     c: Number(r.c || 0),
     h: Number(r.h || 0),
     m: Number(r.m || 0),

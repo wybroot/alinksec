@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="baseline-page">
     <div class="grid-2">
       <div class="panel"><h4>基线核查 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
       <div class="panel"><h4>各检查领域通过率</h4><div ref="catEl" class="chart"></div></div>
@@ -15,11 +15,12 @@
         <el-table-column prop="host" label="主机" width="170" />
         <el-table-column prop="tpl" label="模板" width="220" />
         <el-table-column label="合规率" width="200">
-          <template #default="{ row }"><el-progress :percentage="row.rate" :stroke-width="8" :color="row.rate > 80 ? '#16a34a' : row.rate > 60 ? '#f59e0b' : '#dc2626'" /></template>
+          <template #default="{ row }"><span v-if="row.legacy" style="color:#b45309">旧结果待重新核查</span><el-progress v-else :percentage="row.rate" :stroke-width="8" :color="row.rate > 80 ? '#16a34a' : row.rate > 60 ? '#f59e0b' : '#dc2626'" /></template>
         </el-table-column>
         <el-table-column label="不合规（严重/高/中/低）" width="180">
           <template #default="{ row }"><span class="mono" style="color:#dc2626">{{ row.c }}</span> / {{ row.h }} / {{ row.m }} / {{ row.l }}</template>
         </el-table-column>
+        <el-table-column label="异常 / 旧结果" width="120"><template #default="{ row }">{{ row.errors }} / {{ row.legacy }}</template></el-table-column>
         <el-table-column prop="time" label="核查时间" width="150" />
         <el-table-column label="操作" fixed="right">
           <template #default="{ row }">
@@ -60,7 +61,7 @@
     </el-dialog>
 
     <!-- 单机明细 -->
-    <el-dialog v-model="detail.visible" :title="`${detail.host} · 核查明细`" width="920px">
+    <el-dialog v-model="detail.visible" :title="`${detail.host} · 核查明细`" width="min(920px, calc(100vw - 32px))">
       <div class="toolbar">
         <span style="font-size:12px;color:#94a3b8">未通过且支持自动修复的项可勾选提交：Agent 将 备份 → 执行 → 复核 → 失败自动回滚</span>
         <div class="spacer"></div>
@@ -77,9 +78,9 @@
             <span :class="['sev', `sev-${sevClass(row.severity)}`]">{{ sevText(row.severity) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="结果" width="70">
+        <el-table-column label="结果" width="100">
           <template #default="{ row }">
-            <span :style="{ color: row.passed ? '#16a34a' : '#dc2626', fontWeight: 600 }">{{ row.passed ? '通过' : '未通过' }}</span>
+            <span :style="{ color: row.passed ? '#16a34a' : '#dc2626', fontWeight: 600 }">{{ row.execution_status === 'error' ? '执行异常' : row.execution_status === 'legacy' ? (row.passed ? '通过（旧）' : '未通过（旧）') : row.passed ? '通过' : '不合规' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="actual" label="实测值 / 失败原因" min-width="200" show-overflow-tooltip>
@@ -93,6 +94,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <template #footer><el-button @click="detail.visible = false">关闭</el-button></template>
     </el-dialog>
 
     <!-- 修复任务记录 -->
@@ -214,6 +216,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import * as echarts from 'echarts'
 import {
   createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
   fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
@@ -409,7 +412,7 @@ const sevClass = (n) => SEV_CLASS[Number(n)] || 'low'
 
 /* ---------------- 图表（真实数据） ---------------- */
 
-const avgScore = computed(() => rows.value.length
+const avgScore = computed(() => rows.value.length && !rows.value.some((r) => r.legacy)
   ? Math.round(rows.value.reduce((s, r) => s + r.rate, 0) / rows.value.length)
   : null)
 
@@ -422,8 +425,8 @@ const { render: renderScore } = useChart(scoreEl, () => ({
     axisLine: { lineStyle: { width: 14, color: [[1, '#e4ecfd']] } },
     pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
     title: { offsetCenter: [0, '30%'], fontSize: 13, color: '#64748b' },
-    detail: { valueAnimation: true, fontSize: 40, fontWeight: 700, offsetCenter: [0, '-5%'], color: '#0f172a', formatter: (v) => (v == null ? '—' : v) },
-    data: [{ value: avgScore.value ?? 0, name: rows.value.length ? `平均合规得分（${rows.value.length} 台）` : '暂无核查数据' }],
+    detail: { valueAnimation: true, fontSize: 40, fontWeight: 700, offsetCenter: [0, '-5%'], color: '#0f172a', formatter: (v) => (avgScore.value == null ? '—' : v) },
+    data: [{ value: avgScore.value ?? 0, name: rows.value.some((r) => r.legacy) ? '旧结果待重新核查' : rows.value.length ? `平均合规得分（${rows.value.length} 台）` : '暂无核查数据' }],
   }],
 }))
 
@@ -445,7 +448,9 @@ const lastSummary = computed(() => {
   if (!rows.value.length) return '暂无核查数据：点击「发起核查」创建首个任务'
   const failed = rows.value.reduce((s, r) => s + r.c + r.h + r.m + r.l, 0)
   const time = rows.value.map((r) => r.time).sort().pop()
-  return `最近核查：${time} · 覆盖 ${rows.value.length} 台 · 不合规项 ${failed}`
+  const errors = rows.value.reduce((s, r) => s + r.errors, 0)
+  const legacy = rows.value.reduce((s, r) => s + r.legacy, 0)
+  return `最近核查：${time} · 覆盖 ${rows.value.length} 台 · 不合规项 ${failed} · 执行异常 ${errors} · 旧结果 ${legacy}`
 })
 
 /* ---------------- 加载 ---------------- */
@@ -467,3 +472,7 @@ async function load() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.baseline-page,.baseline-page .panel{min-width:0}
+</style>

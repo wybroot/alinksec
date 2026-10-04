@@ -54,7 +54,8 @@
           <h4>未支持规则（{{ detail.document.unsupported.length }}，不计入核查得分）</h4>
           <el-table :data="detail.document.unsupported" max-height="220" empty-text="没有标记为未支持的规则"><el-table-column prop="ruleId" label="原始规则" min-width="200" /><el-table-column prop="reason" label="原因" min-width="250" /></el-table>
           <template v-if="detail.testTask"><h4>测试核查 · 任务 {{ detail.testTask.task_no }} · {{ Number(detail.testTask.status) === 2 ? '已完成' : '尚未完整结束' }}</h4>
-            <el-table :data="detail.testResults"><el-table-column type="expand"><template #default="{ row }"><el-table :data="row.items"><el-table-column prop="name" label="检查项" min-width="180" /><el-table-column label="结果" width="80"><template #default="{ row: item }">{{ item.passed ? '通过' : '未通过' }}</template></el-table-column><el-table-column label="实测值 / 原因" min-width="240"><template #default="{ row: item }">{{ item.message || item.actual || '—' }}</template></el-table-column></el-table></template></el-table-column><el-table-column prop="agent_id" label="测试主机" min-width="180" /><el-table-column prop="passed_count" label="通过" /><el-table-column prop="failed_count" label="未通过" /><el-table-column prop="score" label="得分" /></el-table>
+            <el-alert v-if="Number(detail.testTask.status) === 2 && !detail.testReady" title="测试存在执行异常或无法确认的旧 Agent 结果。请检查原因、更新 Agent 并重新测试后发布。" type="error" :closable="false" />
+            <el-table :data="detail.testResults"><el-table-column type="expand"><template #default="{ row }"><el-table :data="row.items"><el-table-column prop="name" label="检查项" min-width="180" /><el-table-column label="结果" width="80"><template #default="{ row: item }">{{ outcome(item) }}</template></el-table-column><el-table-column label="实测值 / 原因" min-width="240"><template #default="{ row: item }">{{ item.message || item.actual || '—' }}</template></el-table-column></el-table></template></el-table-column><el-table-column prop="agent_id" label="测试主机" min-width="180" /><el-table-column prop="passed_count" label="通过" /><el-table-column prop="failed_count" label="未通过" /><el-table-column prop="error_count" label="执行异常" /><el-table-column prop="legacy_count" label="旧结果" /><el-table-column prop="score" label="得分" /></el-table>
           </template>
           <div v-if="admin" class="actions">
             <el-input v-model="note" type="textarea" :rows="2" maxlength="2000" placeholder="审核、发布或撤回说明；发布时请说明测试结果及未通过项" aria-label="审核说明" />
@@ -62,7 +63,7 @@
             <template v-if="detail.status === 'approved'">
               <p>仅向所选测试主机下发核查，不执行修复。</p>
               <el-select v-model="testAgents" multiple filterable placeholder="选择 1 至 10 台适用测试主机" aria-label="测试主机" style="width:100%"><el-option v-for="host in detail.testTargets" :key="host.agent_id" :value="host.agent_id" :label="`${host.hostname} · ${host.os_version || os(host.os_type)}`" /></el-select>
-              <div class="button-row"><el-button :disabled="!testAgents.length" :loading="busy" @click="act('test')">下发测试核查</el-button><el-button type="primary" :disabled="Number(detail.testTask?.status) !== 2" :loading="busy" @click="act('publish')">发布为可选模板</el-button><el-button type="warning" :loading="busy" @click="act('withdraw')">撤回版本</el-button></div>
+              <div class="button-row"><el-button :disabled="!testAgents.length" :loading="busy" @click="act('test')">下发测试核查</el-button><el-button type="primary" :disabled="!detail.testReady" :loading="busy" @click="act('publish')">发布为可选模板</el-button><el-button type="warning" :loading="busy" @click="act('withdraw')">撤回版本</el-button></div>
             </template>
             <div v-if="detail.status === 'published'" class="button-row"><el-button type="warning" :loading="busy" @click="act('withdraw')">撤回版本</el-button></div>
           </div>
@@ -82,6 +83,7 @@ const packages = ref([]), templates = ref([]), loading = ref(false), loadError =
 const visible = ref(false), detail = ref(null), detailLoading = ref(false), detailError = ref(''), note = ref(''), testAgents = ref([])
 const os = (type) => ({ 1: 'Linux', 2: 'Windows' }[Number(type)] || '未知系统')
 const status = (value) => ({ candidate: '待审核', approved: '待测试 / 发布', published: '已发布', withdrawn: '已撤回', rejected: '已拒绝' }[value] || value)
+const outcome = (item) => item.execution_status === 'error' ? '执行异常' : item.execution_status === 'legacy' ? '旧结果' : item.passed ? '通过' : '不合规'
 const change = (value) => ({ added: '新增', changed: '修改', removed: '撤销' }[value] || value)
 const json = (value) => value == null ? '无' : JSON.stringify(value, null, 2)
 async function load() {

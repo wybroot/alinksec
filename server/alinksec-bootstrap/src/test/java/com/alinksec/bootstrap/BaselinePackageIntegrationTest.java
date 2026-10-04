@@ -6,6 +6,8 @@ import com.alinksec.service.baseline.*;
 import com.alinksec.service.command.CommandService;
 import com.alinksec.service.config.*;
 import com.alinksec.service.query.BaselineQueryService;
+import com.alinksec.service.fix.FixTaskService;
+import com.alinksec.service.fix.PatchRepoService;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -82,7 +84,7 @@ class BaselinePackageIntegrationTest {
     RptBaselineResult report(long task, String agent, boolean passed) {
         var result = RptBaselineResult.newBuilder().setTaskId(String.valueOf(task));
         jdbc.queryForList("SELECT item_id FROM t_baseline_task_expected WHERE task_id=? AND agent_id=?", Long.class, task, agent)
-                .forEach(item -> result.addItems(BaselineItemResult.newBuilder().setItemId(String.valueOf(item)).setPassed(passed).setActual("safe=1")));
+                .forEach(item -> result.addItems(BaselineItemResult.newBuilder().setItemId(String.valueOf(item)).setPassed(passed).setExecutionStatus(passed ? "pass" : "fail").setActual("safe=1")));
         return result.build();
     }
     Map<String, Object> published(ObjectNode document, String agent) throws IOException {
@@ -196,6 +198,170 @@ class BaselinePackageIntegrationTest {
         assertEquals(0, dispatched.size());
         jdbc.update("UPDATE t_agent SET deleted=true WHERE agent_id='ubuntu'");
         assertThrows(IllegalArgumentException.class, () -> tasks.createTask(null, List.of("ubuntu"), List.of(), 7L));
+    }
+
+    @Test void executionErrorsAndLegacyReportsRequireANewExplicitTest() throws Exception {
+        var pkg = imported(document("LINUX", 1, "^.*$", "1"));
+        String packageId = id(pkg); packages.review(packageId, true, "Reviewed", 7L);
+        for (String outcome : List.of("error", "")) {
+            long task = test(packageId, "ubuntu");
+            var valid = report(task, "ubuntu", false);
+            var item = valid.getItems(0).toBuilder().setExecutionStatus(outcome).setMessage("Unable to check");
+            results.onResult("ubuntu", valid.toBuilder().clearItems().addItems(item).build());
+            assertEquals(2, jdbc.queryForObject("SELECT status FROM t_baseline_task WHERE id=?", Integer.class, task));
+            assertEquals(false, packages.detail(packageId).get("testReady"));
+            assertThrows(IllegalArgumentException.class, () -> packages.publish(packageId, "Reviewed", 7L));
+            results.onResult("ubuntu", report(task, "ubuntu", true));
+            assertEquals(0, jdbc.queryForObject("SELECT score FROM t_baseline_summary WHERE task_id=?", Integer.class, task), "Retries preserve accepted evidence");
+        }
+        long successfulTest = test(packageId, "ubuntu");
+        // A valid negative result proves the check ran; compliance is separate
+        // from deciding whether its reviewed template may be published.
+        results.onResult("ubuntu", report(successfulTest, "ubuntu", false));
+        assertEquals(true, packages.detail(packageId).get("testReady"));
+        assertEquals("published", packages.publish(packageId, "Valid test", 7L).get("status"));
+    }
+
+    @Test void contradictoryOutcomesCannotCompleteATestAndEvidenceIsBounded() throws Exception {
+        var pkg = imported(document("LINUX", 1, "^.*$", "1")); packages.review(id(pkg), true, "Reviewed", 7L);
+        long task = test(id(pkg), "ubuntu"); var valid = report(task, "ubuntu", true);
+        for (String outcome : List.of("fail", "error", "unknown")) {
+            results.onResult("ubuntu", valid.toBuilder().clearItems().addItems(valid.getItems(0).toBuilder().setExecutionStatus(outcome)).build());
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_summary", Integer.class));
+        String large = "取证😀".repeat(3000);
+        results.onResult("ubuntu", valid.toBuilder().clearItems().addItems(valid.getItems(0).toBuilder().setActual(large).setMessage(large).setDurationMs(-1)).build());
+        var evidence = query.taskAgentItems(task, "ubuntu", null).get(0);
+        assertTrue(((String) evidence.get("actual")).length() <= 4097);
+        assertTrue(((String) evidence.get("message")).length() <= 2049);
+        assertEquals(4294967295L, ((Number) evidence.get("duration_ms")).longValue());
+        results.onResult("ubuntu", report(task, "ubuntu", false));
+        assertEquals(100, jdbc.queryForObject("SELECT score FROM t_baseline_summary WHERE task_id=?", Integer.class, task));
+    }
+
+    @Test void latePartialReportsPreserveTimeoutAndCancellationRejectsReports() throws Exception {
+        published(document("LINUX", 1, "^.*$", "1"), "ubuntu");
+        long task = tasks.createTask("Timeout", List.of("ubuntu", "rocky"), List.of(), 7L);
+        jdbc.update("UPDATE t_baseline_task SET status=3,finished_at='2026-01-01 00:00:00' WHERE id=?", task);
+        results.onResult("ubuntu", report(task, "ubuntu", true));
+        assertEquals(3, jdbc.queryForObject("SELECT status FROM t_baseline_task WHERE id=?", Integer.class, task));
+        assertEquals(50, jdbc.queryForObject("SELECT progress FROM t_baseline_task WHERE id=?", Integer.class, task));
+        assertEquals("2026-01-01 00:00:00", jdbc.queryForObject("SELECT finished_at FROM t_baseline_task WHERE id=?", String.class, task));
+        results.onResult("rocky", report(task, "rocky", true));
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM t_baseline_task WHERE id=?", Integer.class, task));
+        long cancelled = tasks.createTask("Cancelled", List.of("ubuntu"), List.of(), 7L);
+        jdbc.update("UPDATE t_baseline_task SET status=4 WHERE id=?", cancelled);
+        results.onResult("ubuntu", report(cancelled, "ubuntu", true));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_result WHERE task_id=?", Integer.class, cancelled));
+    }
+
+    @Test void configurationRepairRequiresCurrentFailedEvidenceAndApplicableEnabledTemplate() {
+        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
+        var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
+        assertThrows(IllegalArgumentException.class, () -> fixes.createTask("No evidence", target, 7L));
+        long task = tasks.createTask("Before repair", List.of("ubuntu"), List.of(1L), 7L);
+        results.onResult("ubuntu", report(task, "ubuntu", false));
+        dispatched.clear();
+        long repair = fixes.createTask("Valid repair", target, 7L);
+        assertEquals(1, dispatched.size()); assertEquals(FixItem.FixType.CONFIG, dispatched.get(0).getVulnFix().getFixes(0).getType());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_fix_record WHERE task_id=?", Integer.class, repair));
+        dispatched.clear();
+        jdbc.update("UPDATE t_baseline_template SET enabled=false WHERE id=1");
+        assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Disabled", target, 7L));
+        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        jdbc.update("UPDATE t_agent SET os_type=2 WHERE agent_id='ubuntu'");
+        assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Wrong OS", target, 7L));
+        jdbc.update("UPDATE t_agent SET os_type=1 WHERE agent_id='ubuntu'");
+        jdbc.update("UPDATE t_baseline_item SET \"check\"='{}' WHERE id=?", item);
+        assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Stale definition", target, 7L));
+        assertTrue(dispatched.isEmpty());
+    }
+
+    @Test void configurationRepairRejectsExecutionErrorsAndLaterSuccessfulResults() {
+        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
+        var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
+        for (String outcome : List.of("fail", "error", "legacy", "pass")) {
+            long task = tasks.createTask(outcome, List.of("ubuntu"), List.of(1L), 7L);
+            var response = report(task, "ubuntu", outcome.equals("pass")).toBuilder();
+            if (outcome.equals("error") || outcome.equals("legacy")) {
+                var first = response.getItemsList().stream().filter(value -> value.getItemId().equals(String.valueOf(item))).findFirst().orElseThrow();
+                int index = response.getItemsList().indexOf(first);
+                response.setItems(index, first.toBuilder().setExecutionStatus(outcome.equals("legacy") ? "" : "error"));
+            }
+            results.onResult("ubuntu", response.build());
+            dispatched.clear();
+            if (!outcome.equals("fail")) {
+                assertFalse(DatabaseDialect.readBoolean(query.taskAgentItems(task, "ubuntu", null).stream().filter(row -> ((Number) row.get("item_id")).longValue() == item).findFirst().orElseThrow().get("fixable")));
+                assertThrows(IllegalArgumentException.class, () -> fixes.createTask(outcome, target, 7L));
+                assertTrue(dispatched.isEmpty());
+            }
+        }
+    }
+
+    @Test void executionMigrationKeepsHistoricalEvidenceWithoutInventingAConfirmedOutcome() throws Exception {
+        try (var old = new SingleConnectionDataSource(DriverManager.getConnection("jdbc:sqlite:" + root.resolve("legacy.sqlite")), true)) {
+            var legacy = new JdbcTemplate(old);
+            try (var connection = old.getConnection()) {
+                for (String path : List.of("db/sqlite/V001__initial.sql", "db/common/V002__security_libraries.sql",
+                        "db/common/V003__library_schedules.sql", "db/common/V004__baseline_packages.sql")) {
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource(path));
+                }
+                legacy.update("INSERT INTO t_baseline_task(task_no,name,scope,template_ids,status) VALUES('legacy','Legacy','{}','[1]',2)");
+                legacy.update("INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message) VALUES(1,'old-agent',1,false,'retained','retained reason')");
+                legacy.update("INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score) VALUES(1,'old-agent',1,0,1,0)");
+                org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                        new org.springframework.core.io.ClassPathResource("db/common/V005__baseline_execution_evidence.sql"));
+            }
+            assertEquals("legacy", legacy.queryForObject("SELECT execution_status FROM t_baseline_result", String.class));
+            assertEquals("retained", legacy.queryForObject("SELECT actual FROM t_baseline_result", String.class));
+            assertEquals("retained reason", legacy.queryForObject("SELECT message FROM t_baseline_result", String.class));
+            assertEquals(1, legacy.queryForObject("SELECT legacy_count FROM t_baseline_summary", Integer.class));
+            assertEquals(0, legacy.queryForObject("SELECT error_count FROM t_baseline_summary", Integer.class));
+            assertFalse(DatabaseDialect.readBoolean(legacy.queryForObject("SELECT fix_current FROM v_baseline_result_definition", Object.class)));
+        }
+    }
+
+    @Test void automaticSelectionCannotAddANewlyPublishedSeriesAfterTakingItsLocks() throws Exception {
+        var first = published(document("FIRST", 1, "^.*$", "1"), "ubuntu");
+        var next = imported(document("NEXT", 1, "^.*$", "1"));
+        packages.review(id(next), true, "Reviewed", 7L);
+        long candidate = ((Number) packages.detail(id(next)).get("template_id")).longValue();
+        var interleaved = new JdbcTemplate(source) {
+            @Override public int update(String sql, Object... args) {
+                if (sql.equals("UPDATE t_baseline_package_gate SET revision=revision+1 WHERE code=?")) {
+                    jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=?", candidate);
+                }
+                return super.update(sql, args);
+            }
+        };
+        var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
+        var creator = transactional(new BaselineTaskService(interleaved, commands, new DatabaseDialect(props)));
+        dispatched.clear();
+        long task = creator.createTask("Publication interleaving", List.of("ubuntu"), List.of(), 7L);
+        assertEquals(List.of(template(first)), jdbc.queryForList("SELECT template_id FROM t_baseline_task_template WHERE task_id=?", Long.class, task));
+        assertEquals(1, dispatched.size()); assertEquals(1, dispatched.get(0).getBaselineCheck().getItemsCount());
+    }
+
+    @Test void aLateOlderTaskCannotReplaceNewerComplianceEvidenceForRepair() {
+        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
+        var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
+        long old = tasks.createTask("Older delayed task", List.of("ubuntu"), List.of(1L), 7L);
+        long latest = tasks.createTask("Latest task", List.of("ubuntu"), List.of(1L), 7L);
+        results.onResult("ubuntu", report(latest, "ubuntu", true));
+        results.onResult("ubuntu", report(old, "ubuntu", false));
+        dispatched.clear();
+        assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Stale late evidence", target, 7L));
+        assertTrue(dispatched.isEmpty());
+        assertTrue(query.taskAgentItems(old, "ubuntu", null).stream().noneMatch(row -> DatabaseDialect.readBoolean(row.get("fixable"))));
     }
 
     @Test void rejectsUnallowlistedCommandsInvalidExpressionsAndWindowsPermissions() throws Exception {

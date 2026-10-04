@@ -516,6 +516,7 @@ validation reference is in English.
 | [16 · Open-source Platform Integration](docs/16-开源安全平台对接指南.md) | Native MISP and export scripts, OpenCTI/vulnerability conversion and authentication |
 | [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
 | [18 · Baseline Template Review](docs/18-基线模板审核与系统适配.md) | Linux/Windows candidates, applicability, review, test, publication and task snapshots |
+| [19 · Module Completion Plan](docs/19-模块完善计划.md) | One module per branch, baseline quality gates and ordered backlog |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>

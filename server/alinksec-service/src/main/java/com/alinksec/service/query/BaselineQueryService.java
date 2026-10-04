@@ -78,7 +78,7 @@ public class BaselineQueryService {
         }
         normalizeTemplateIds(task.get(0));
         List<Map<String, Object>> hosts = jdbc.queryForList("""
-                SELECT s.agent_id, a.hostname, a.ip, s.total, s.passed_count, s.failed_count,
+                SELECT s.agent_id, a.hostname, a.ip, s.total, s.passed_count, s.failed_count, s.error_count, s.legacy_count,
                        s.score, s.checked_at
                 FROM t_baseline_summary s
                 LEFT JOIN t_agent a ON a.agent_id = s.agent_id
@@ -109,9 +109,9 @@ public class BaselineQueryService {
             where.append(" AND r.passed = ").append(passed);
         }
         String sql = ("""
-                SELECT i.id AS item_id, i.code, i.name, i.category, i.severity, r.passed, r.actual, r.message,
+                SELECT i.id AS item_id, i.code, i.name, i.category, i.severity, r.passed, r.actual, r.message,r.execution_status,r.duration_ms,
                        r.checked_at, i.rule_id, i.template_version, i.package_id, i.content_sha256, CAST(i.fix_spec AS TEXT) AS fix_spec,
-                       (i.fix_current AND i.fix_spec IS NOT NULL
+                       (NOT r.passed AND r.execution_status <> 'error' AND i.fix_current AND i.fix_spec IS NOT NULL
                         AND CAST(i.fix_spec AS TEXT) NOT IN ('null', '')
                         AND COALESCE(%s, 'auto') <> 'manual') AS fixable
                 FROM t_baseline_result r
@@ -125,8 +125,10 @@ public class BaselineQueryService {
     public List<Map<String, Object>> taskCategoryStats(long taskId) {
         return jdbc.queryForList("""
                 SELECT i.category, count(*) AS total,
-                       SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS passed,
-                       SUM(CASE WHEN NOT r.passed THEN 1 ELSE 0 END) AS failed
+                       SUM(CASE WHEN r.execution_status='pass' THEN 1 ELSE 0 END) AS passed,
+                       SUM(CASE WHEN r.execution_status='fail' THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN r.execution_status='error' THEN 1 ELSE 0 END) AS errors,
+                       SUM(CASE WHEN r.execution_status='legacy' THEN 1 ELSE 0 END) AS legacy
                 FROM t_baseline_result r JOIN v_baseline_result_definition i ON i.result_id = r.id
                 WHERE r.task_id = ?
                 GROUP BY i.category ORDER BY i.category
@@ -142,19 +144,19 @@ public class BaselineQueryService {
         }
         long taskId = ((Number) tasks.get(0).get("id")).longValue();
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT s.agent_id, a.hostname, t.name AS tpl, s.total, s.passed_count, s.failed_count,
+                SELECT s.agent_id, a.hostname, t.name AS tpl, s.total, s.passed_count, s.failed_count,s.error_count,s.legacy_count,
                        s.score, s.checked_at,
-                       SUM(CASE WHEN NOT r.passed AND i.severity = 4 THEN 1 ELSE 0 END) AS c,
-                       SUM(CASE WHEN NOT r.passed AND i.severity = 3 THEN 1 ELSE 0 END) AS h,
-                       SUM(CASE WHEN NOT r.passed AND i.severity = 2 THEN 1 ELSE 0 END) AS m,
-                       SUM(CASE WHEN NOT r.passed AND i.severity = 1 THEN 1 ELSE 0 END) AS l
+                       SUM(CASE WHEN r.execution_status='fail' AND i.severity = 4 THEN 1 ELSE 0 END) AS c,
+                       SUM(CASE WHEN r.execution_status='fail' AND i.severity = 3 THEN 1 ELSE 0 END) AS h,
+                       SUM(CASE WHEN r.execution_status='fail' AND i.severity = 2 THEN 1 ELSE 0 END) AS m,
+                       SUM(CASE WHEN r.execution_status='fail' AND i.severity = 1 THEN 1 ELSE 0 END) AS l
                 FROM t_baseline_summary s
                 JOIN t_agent a ON a.agent_id = s.agent_id
                 JOIN t_baseline_task t ON t.id = s.task_id
                 LEFT JOIN t_baseline_result r ON r.task_id = s.task_id AND r.agent_id = s.agent_id
                 LEFT JOIN v_baseline_result_definition i ON i.result_id = r.id
                 WHERE s.task_id = ?
-                GROUP BY s.agent_id, a.hostname, t.name, s.total, s.passed_count, s.failed_count,
+                GROUP BY s.agent_id, a.hostname, t.name, s.total, s.passed_count, s.failed_count,s.error_count,s.legacy_count,
                          s.score, s.checked_at
                 ORDER BY s.score ASC
                 """, taskId);

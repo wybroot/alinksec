@@ -114,11 +114,19 @@ public class BaselineTaskService {
     private long create(String name, List<String> agentIds, List<Long> templateIds, Long createdBy, boolean review) {
         if (name != null && name.length() > 128) throw new IllegalArgumentException("任务名称不能超过 128 字");
         Plan plan = plan(agentIds, templateIds, review);
-        // Serialize task selection with publication/withdrawal, including across service replicas.
-        plan.templates.stream().filter(t -> t.get("package_id") != null).map(t -> String.valueOf(t.get("package_id")))
-                .sorted().forEach(id -> jdbc.update("UPDATE t_baseline_package_gate SET revision=revision+1 WHERE code=(SELECT code FROM t_baseline_package WHERE id=?)", id));
-        plan = plan(agentIds, templateIds, review);
         var uncovered = coverage(plan).stream().filter(row -> !Boolean.TRUE.equals(row.get("covered"))).map(row -> row.get("agent_id")).toList();
+        if (!uncovered.isEmpty()) throw new IllegalArgumentException("以下主机没有已发布且适用的检查项: " + uncovered);
+        // Freeze this selection before locking. A newly published series may be
+        // selected by the next task, but cannot enter this one without its lock.
+        var selectedIds = plan.items.stream().map(item -> ((Number) item.get("template_id")).longValue()).distinct().toList();
+        var packageIds = plan.templates.stream().filter(t -> selectedIds.contains(((Number) t.get("id")).longValue()) && t.get("package_id") != null)
+                .map(t -> String.valueOf(t.get("package_id"))).distinct().toList();
+        // All baseline task/repair operations use the same code ordering.
+        if (!packageIds.isEmpty()) jdbc.queryForList("SELECT DISTINCT code FROM t_baseline_package WHERE id IN ("
+                + DatabaseDialect.placeholders(packageIds.size()) + ") ORDER BY code", String.class, packageIds.toArray())
+                .forEach(code -> jdbc.update("UPDATE t_baseline_package_gate SET revision=revision+1 WHERE code=?", code));
+        plan = plan(agentIds, selectedIds, review);
+        uncovered = coverage(plan).stream().filter(row -> !Boolean.TRUE.equals(row.get("covered"))).map(row -> row.get("agent_id")).toList();
         if (!uncovered.isEmpty()) throw new IllegalArgumentException("以下主机没有已发布且适用的检查项: " + uncovered);
         if (coverage(plan).stream().anyMatch(row -> ((Number) row.get("itemCount")).intValue() > 500)) {
             throw new IllegalArgumentException("每台主机单次最多下发 500 项检查，请缩小模板集合");

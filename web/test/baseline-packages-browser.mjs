@@ -25,7 +25,7 @@ const server=createServer((req,res)=>{
 await new Promise(r=>server.listen(0,'127.0.0.1',r))
 const baseURL='http://127.0.0.1:'+server.address().port
 const errors=[],writes=[],unexpected=[]
-let browser,page,rejectReview=true,completeTests=false,rejectCoverage=true
+let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErrors=false
 const ids=Object.fromEntries(Object.entries(fixtures.platforms).map(([platform,stages])=>[stages.candidate.id,platform]))
 const details=Object.fromEntries(Object.values(fixtures.platforms).map(stages=>[stages.candidate.id,structuredClone(stages.candidate)]))
 const summary=(doc)=>({...fixtures.list.find(pkg=>pkg.id===doc.id),status:doc.status,template_id:doc.template_id,test_task_id:doc.test_task_id})
@@ -41,7 +41,10 @@ try {
     if(path==='/api/baseline/packages'&&method==='GET')return ok(Object.values(details).map(summary))
     if(path==='/api/baseline/templates')return ok(fixtures.templates.map(template=>({...template,enabled:template.package_id?details[template.package_id]?.status==='published':template.enabled})))
     if(path==='/api/hosts')return ok(url.searchParams.get('page')==='2'?fixtures.hostsPage2:fixtures.hosts)
-    if(path==='/api/baseline/latest')return ok({list:[],total:0})
+    if(path==='/api/baseline/latest')return ok(showErrors ? fixtures.platforms.linux.errorLatest : {list:[],total:0})
+    const errorTask=fixtures.platforms.linux.errorLatest.taskId
+    if(path===`/api/baseline/tasks/${errorTask}/category-stats`)return ok(fixtures.platforms.linux.errorCategories)
+    if(path===`/api/baseline/tasks/${errorTask}/agents/ci-smoke-001/items`)return ok(fixtures.platforms.linux.errorItems)
     if(path==='/api/baseline/coverage'){
       writes.push({path,body:request.postDataJSON()})
       return ok(fixtures.coverage.map(row=>({...row,covered:rejectCoverage&&Number(row.os_type)===2?false:row.covered})))
@@ -55,7 +58,7 @@ try {
     if(match&&ids[match[1]]){
       const id=match[1],operation=match[2],stages=fixtures.platforms[ids[id]]
       if(method==='GET'){
-        if(completeTests&&details[id].status==='approved'&&details[id].test_task_id)details[id]=structuredClone(stages.completed)
+        if(reportStage&&details[id].status==='approved'&&details[id].test_task_id)details[id]=structuredClone(stages[reportStage])
         return ok(details[id])
       }
       const body=request.postDataJSON()
@@ -96,7 +99,20 @@ try {
   await expect(dialog.getByRole('heading',{name:/测试核查/})).toBeVisible()
   await expect(dialog.getByRole('button',{name:'发布为可选模板',exact:true})).toBeDisabled()
   assert.deepEqual(writes.find(write=>write.path.endsWith('/test')).body,{agentIds:['ci-smoke-001']})
-  completeTests=true
+  reportStage='error'
+  await dialog.getByRole('button',{name:'刷新版本',exact:true}).click()
+  await expect(dialog.getByText('测试存在执行异常或无法确认的旧 Agent 结果。请检查原因、更新 Agent 并重新测试后发布。',{exact:true})).toBeVisible()
+  await expect(dialog.getByRole('button',{name:'发布为可选模板',exact:true})).toBeDisabled()
+  reportStage='legacy'
+  await dialog.getByRole('button',{name:'刷新版本',exact:true}).click()
+  await expect(dialog.getByRole('button',{name:'发布为可选模板',exact:true})).toBeDisabled()
+  reportStage=null
+  await dialog.locator('.actions .el-select').click()
+  await page.getByRole('option',{name:`${target.hostname} · ${target.os_version||'Linux'}`,exact:true}).click()
+  await dialog.getByRole('heading').first().click()
+  await dialog.getByRole('button',{name:'下发测试核查',exact:true}).click()
+  await expect(dialog.getByRole('button',{name:'发布为可选模板',exact:true})).toBeDisabled()
+  reportStage='completed'
   await dialog.getByRole('button',{name:'刷新版本',exact:true}).click()
   await expect(dialog.getByRole('button',{name:'发布为可选模板',exact:true})).toBeEnabled()
   await dialog.getByRole('textbox',{name:'审核说明',exact:true}).fill('Complete test results reviewed; noncompliant findings require separate treatment')
@@ -112,7 +128,14 @@ try {
   await page.screenshot({path:root+'/templates-desktop.png',fullPage:true,animations:'disabled'})
 
   // The task form sends an empty selection for server-side OS matching and blocks uncovered hosts.
+  showErrors=true
   await page.goto('/baseline')
+  await expect(page.getByText(/执行异常 4/)).toBeVisible()
+  await expect(page.getByText(/不合规项 0/)).toBeVisible()
+  await page.getByRole('button',{name:'明细',exact:true}).click()
+  const evidence=page.getByRole('dialog',{name:/核查明细/})
+  await expect(evidence.getByText('执行异常',{exact:true})).toHaveCount(4)
+  await evidence.getByRole('button',{name:'关闭',exact:true}).click()
   await page.getByRole('button',{name:'+ 发起核查',exact:true}).click()
   const create=page.getByRole('dialog',{name:'发起基线核查',exact:true})
   await expect(create.getByText('按 Agent 系统自动选择',{exact:true})).toBeVisible()
@@ -128,6 +151,22 @@ try {
   await create.getByRole('button',{name:'下发核查',exact:true}).click()
   await expect(create).not.toBeVisible()
   assert.deepEqual(writes.find(write=>write.path==='/api/baseline/tasks').body.templateIds,[])
+
+  await page.setViewportSize({width:390,height:844})
+  await page.getByRole('button',{name:'明细',exact:true}).click()
+  await expect.poll(async()=>{
+    const bounds=await evidence.boundingBox()
+    return !!bounds&&bounds.x>=0&&bounds.x+bounds.width<=390&&bounds.y>=0&&bounds.y+bounds.height<=844
+  },{message:'Mobile baseline evidence dialog must fit the viewport',timeout:8000}).toBe(true)
+  await expect(evidence.getByRole('button',{name:'一键修复所选（0）',exact:true})).toBeDisabled()
+  await page.screenshot({path:root+'/evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await evidence.getByRole('button',{name:'关闭',exact:true}).click()
+  await page.getByRole('button',{name:'+ 发起核查',exact:true}).click()
+  await expect.poll(async()=>{
+    const bounds=await create.boundingBox()
+    return !!bounds&&bounds.x>=0&&bounds.x+bounds.width<=390&&bounds.y>=0&&bounds.y+bounds.height<=844
+  },{message:'Mobile baseline creation dialog must fit the viewport',timeout:8000}).toBe(true)
+  await create.getByRole('button',{name:'取消',exact:true}).click()
 
   await page.goto('/baseline-templates');await page.setViewportSize({width:390,height:844})
   const windows=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Windows 基础安全核查',exact:true})})
@@ -150,7 +189,7 @@ try {
     await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   }
   assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
-  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review dialog'],writes,errors,unexpected}))
+  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','error and legacy evidence block publication until retest','execution errors separated from noncompliance','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review, evidence and creation dialogs'],writes,errors,unexpected}))
   console.log('PASS baseline candidates, review, publication, OS selection, roles and mobile layout')
 } catch(error) {
   writeFileSync(root+'/browser-result.json',JSON.stringify({passed:false,mode,error:error.message,writes,errors,unexpected}))

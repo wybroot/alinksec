@@ -2,11 +2,15 @@ package baseline
 
 import (
 	"encoding/json"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 )
@@ -42,6 +46,62 @@ func TestRunPreservesCheckIDs(t *testing.T) {
 		if item.GetPassed() != (i == 0) {
 			t.Errorf("check %d passed = %v", i, item.GetPassed())
 		}
+		want := "error"
+		if i == 0 {
+			want = "pass"
+		} else if i == 1 || i == 2 && runtime.GOOS == "linux" {
+			want = "fail"
+		}
+		if item.GetExecutionStatus() != want {
+			t.Errorf("check %d status=%s, want %s", i, item.GetExecutionStatus(), want)
+		}
+	}
+}
+
+func TestLargeEvidenceIsValidAndFitsOneGRPCReport(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(file, []byte(strings.Repeat("安", 5000)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(CheckSpec{Type: "file_content", Target: file, Regex: "^安"})
+	specs := make([]*pb.BaselineCheckSpec, MaxChecks)
+	for i := range specs {
+		specs[i] = &pb.BaselineCheckSpec{ItemId: "test", Check: string(data)}
+	}
+	result := Run("bounded", specs, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, item := range result.Items {
+		if !item.Passed || item.ExecutionStatus != "pass" || !utf8.ValidString(item.Actual) || len(item.Actual) > 2051 {
+			t.Fatalf("unbounded or invalid evidence: %d", len(item.Actual))
+		}
+	}
+	wire, err := proto.Marshal(result)
+	if err != nil || len(wire) > 4*1024*1024 {
+		t.Fatalf("report bytes=%d, err=%v", len(wire), err)
+	}
+}
+
+func TestParserRejectsUnboundedTimeoutAndUnknownFields(t *testing.T) {
+	for _, data := range []string{
+		`{"type":"cmd_output","cmd":"sysctl -n net.ipv4.ip_forward","timeout_ms":-1}`,
+		`{"type":"cmd_output","cmd":"sysctl -n net.ipv4.ip_forward","timeout_ms":30001}`,
+		`{"type":"file_line","target":"relative","operator":"contains","expected":"x"}`,
+		`{"type":"cmd_output","arbitrary_script":"x"}`,
+		`{"type":"cmd_output"} {}`,
+		`{"type":"cmd_output","type":"file_line"}`,
+		`{"type":"file_content","target":"/etc/test","regex":""}`,
+		`{"type":"file_line","target":"/etc/test","operator":"not_contains","expected":""}`,
+		`{"type":"file_perm","target":"/etc/test","perm":"8888"}`,
+	} {
+		if _, err := ParseCheck(data); err == nil {
+			t.Fatalf("accepted invalid check: %s", data)
+		}
+	}
+}
+
+func TestParserAcceptsUnicodeWithinTheServerCharacterLimit(t *testing.T) {
+	data, _ := json.Marshal(CheckSpec{Type: "file_line", Target: filepath.Join(t.TempDir(), "设置"), Operator: "contains", Expected: strings.Repeat("安", 1000)})
+	if _, err := ParseCheck(string(data)); err != nil {
+		t.Fatalf("valid Unicode check rejected: %v", err)
 	}
 }
 

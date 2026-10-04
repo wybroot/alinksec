@@ -12,7 +12,9 @@ test('server and Agent compile the same platform-specific command set', () => {
   assert.equal(new Set([...commands.linux, ...commands.windows]).size, 30)
 })
 
-test('PostgreSQL and SQLite apply the same immutable baseline package migration', () => {
-  assert.deepEqual(readFileSync(new URL('../migrations/V004__baseline_packages.sql', import.meta.url)),
-    readFileSync(new URL('../../server/alinksec-bootstrap/src/main/resources/db/common/V004__baseline_packages.sql', import.meta.url)))
+test('PostgreSQL and SQLite apply the same baseline migrations', () => {
+  for (const migration of ['V004__baseline_packages.sql', 'V005__baseline_execution_evidence.sql']) {
+    assert.deepEqual(readFileSync(new URL(`../migrations/${migration}`, import.meta.url)),
+      readFileSync(new URL(`../../server/alinksec-bootstrap/src/main/resources/db/common/${migration}`, import.meta.url)))
+  }
 })
