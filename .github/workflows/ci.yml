@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test ./cmd/agent ./internal/upgrade ./internal/baseline
+        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent

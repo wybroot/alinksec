@@ -139,7 +139,7 @@ VALUES ('POST', '/api/notify/channels', 'legacy-webhook-secret', 200, 1);
 SQL
 PGDATABASE="$test_database" pg_dump --format=custom --file="$work_dir/legacy.dump"
 run_migrations "$work_dir/base"
-assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" "45"
+assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" "50"
 assert_query "SELECT count(*) FROM t_schema_migration" "4"
 assert_query "SELECT hostname || '|' || isolation_status FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host|0"
 assert_query "SELECT name || '|' || version FROM t_asset_software WHERE agent_id = 'migration-fixture-agent'" "legacy-software|1.0"
@@ -230,6 +230,6 @@ run_migrations "$work_dir/base" "$restore_database"
 restored_state="$(PGDATABASE="$restore_database" owner_sql -At -c "
   SELECT isolation_status || '|' || (SELECT count(*) FROM t_schema_migration)
   FROM t_agent WHERE agent_id = 'migration-fixture-agent';")"
-[[ "$restored_state" == "0|3" ]] || fail "Unexpected restored upgrade state: $restored_state"
+[[ "$restored_state" == "0|4" ]] || fail "Unexpected restored upgrade state: $restored_state"
 pass "restored backup can upgrade through the production migration runner"
 printf 'Passed %s PostgreSQL migration checks.\n' "$checks"

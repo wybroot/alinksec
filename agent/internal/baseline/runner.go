@@ -156,7 +156,15 @@ func checkCmdOutput(cs *CheckSpec) ItemResult {
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", cs.Cmd)
+		// The exact approved selector contains a fixed PowerShell script. Pass
+		// it as one argument: cmd.exe would add a second layer of quoting and
+		// turn the script into a string literal instead of executing the query.
+		const prefix = "powershell.exe -NoProfile -NonInteractive -Command \""
+		script, ok := strings.CutPrefix(cs.Cmd, prefix)
+		if !ok || !strings.HasSuffix(script, "\"") {
+			return ItemResult{Passed: false, Message: "不支持的 Windows 基线命令格式"}
+		}
+		cmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", strings.TrimSuffix(script, "\""))
 	} else {
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", cs.Cmd)
 	}

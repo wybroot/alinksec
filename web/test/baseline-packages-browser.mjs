@@ -116,7 +116,7 @@ try {
   await page.getByRole('button',{name:'+ 发起核查',exact:true}).click()
   const create=page.getByRole('dialog',{name:'发起基线核查',exact:true})
   await expect(create.getByText('按 Agent 系统自动选择',{exact:true})).toBeVisible()
-  const hosts=create.getByRole('combobox').last()
+  const hosts=create.locator('.el-select').last()
   await hosts.click()
   for(const name of ['ci-smoke-host-001','ci-windows-test-host'])await page.getByRole('option').filter({hasText:name}).click()
   await create.getByText('离线主机将在上线后收到指令',{exact:false}).click()
