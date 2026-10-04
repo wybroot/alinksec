@@ -227,33 +227,60 @@ class BaselinePackageIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> imported(empty));
     }
 
-    @Test void commandsAreDurableWithSnapshotsAndSentOnlyAfterCommit() {
+    @Test void commandsAreDurableWithSnapshotsAndSentOnlyAfterCommit() throws Exception {
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
         var database = new DatabaseDialect(props);
-        var sender = mock(com.alinksec.service.command.CommandSender.class);
-        var repository = new com.alinksec.service.command.CommandRepository(jdbc, database);
-        var service = transactional(new CommandService(repository, sender,
-                mock(com.alinksec.service.download.AgentDownloadTokenService.class), props, List.of(), manager));
-        var actualTasks = transactional(new BaselineTaskService(jdbc, service, database));
-        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
-        var transaction = new org.springframework.transaction.support.TransactionTemplate(manager);
-        assertThrows(IllegalStateException.class, () -> transaction.execute(status -> {
-            actualTasks.createTask("rolled back", List.of("ubuntu"), List.of(1L), 7L);
-            verifyNoInteractions(sender);
-            throw new IllegalStateException("rollback fixture");
-        }));
-        verifyNoInteractions(sender);
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_command", Integer.class));
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_item", Integer.class));
-        doAnswer(invocation -> {
-            Command command = invocation.getArgument(1);
-            long task = Long.parseLong(command.getBaselineCheck().getTaskId());
-            assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_item WHERE task_id=?", Integer.class, task));
-            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_command", Integer.class));
-            return true;
-        }).when(sender).send(eq("ubuntu"), any(Command.class));
-        actualTasks.createTask("committed", List.of("ubuntu"), List.of(1L), 7L);
-        verify(sender).send(eq("ubuntu"), any(Command.class));
-        assertEquals(1, jdbc.queryForObject("SELECT status FROM t_command", Integer.class));
+        var config = new com.zaxxer.hikari.HikariConfig();
+        config.setJdbcUrl("jdbc:sqlite:" + root.resolve("db.sqlite"));
+        config.setMaximumPoolSize(1); config.setMinimumIdle(1); config.setConnectionTimeout(1000);
+        config.addDataSourceProperty("transaction_mode", "IMMEDIATE");
+        config.addDataSourceProperty("busy_timeout", 1000);
+        try (var pool = new com.zaxxer.hikari.HikariDataSource(config)) {
+            var pooledJdbc = new JdbcTemplate(pool);
+            var pooledManager = new DataSourceTransactionManager(pool);
+            var sender = mock(com.alinksec.service.command.CommandSender.class);
+            var repository = new com.alinksec.service.command.CommandRepository(pooledJdbc, database);
+            var service = transactional(new CommandService(repository, sender,
+                    mock(com.alinksec.service.download.AgentDownloadTokenService.class), props, List.of(), pooledManager), pooledManager);
+            try {
+                var actualTasks = transactional(new BaselineTaskService(pooledJdbc, service, database), pooledManager);
+                jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+                var transaction = new org.springframework.transaction.support.TransactionTemplate(pooledManager);
+                assertThrows(IllegalStateException.class, () -> transaction.execute(status -> {
+                    actualTasks.createTask("rolled back", List.of("ubuntu"), List.of(1L), 7L);
+                    verifyNoInteractions(sender);
+                    throw new IllegalStateException("rollback fixture");
+                }));
+                verifyNoInteractions(sender);
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_command", Integer.class));
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_item", Integer.class));
+                var delivered = new java.util.concurrent.CompletableFuture<Command>();
+                doAnswer(invocation -> {
+                    Command command = invocation.getArgument(1);
+                    try {
+                        long task = Long.parseLong(command.getBaselineCheck().getTaskId());
+                        assertEquals(60, pooledJdbc.queryForObject("SELECT count(*) FROM t_baseline_task_item WHERE task_id=?", Integer.class, task));
+                        assertEquals(1, pooledJdbc.queryForObject("SELECT count(*) FROM t_command", Integer.class));
+                        delivered.complete(command);
+                    } catch (Throwable error) { delivered.completeExceptionally(error); return false; }
+                    return true;
+                }).when(sender).send(eq("ubuntu"), any(Command.class));
+                transaction.execute(status -> {
+                    actualTasks.createTask("committed", List.of("ubuntu"), List.of(1L), 7L);
+                    verifyNoInteractions(sender); return null;
+                });
+                delivered.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                verify(sender).send(eq("ubuntu"), any(Command.class));
+                assertEquals(1, pooledJdbc.queryForObject("SELECT status FROM t_command", Integer.class));
+                transaction.execute(status -> pooledJdbc.update("INSERT INTO t_host_group(name) VALUES ('subsequent-write')"));
+                assertEquals(1, pooledJdbc.queryForObject("SELECT count(*) FROM t_host_group WHERE name='subsequent-write'", Integer.class));
+            } finally { service.close(); }
+        }
+    }
+
+    @SuppressWarnings("unchecked") private <T> T transactional(T target, DataSourceTransactionManager transactionManager) {
+        var factory = new ProxyFactory(target); factory.setProxyTargetClass(true);
+        factory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
+        return (T) factory.getProxy();
     }
 }

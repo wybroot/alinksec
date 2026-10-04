@@ -24,6 +24,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Base64;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import jakarta.annotation.PreDestroy;
 
 /**
  * 指令编排（通信协议 §3.1）：
@@ -41,6 +45,10 @@ public class CommandService {
     private final AlinkSecProperties props;
     private final List<CommandLifecycleListener> lifecycleListeners;
     private final TransactionTemplate deliveryTransaction;
+    private final ThreadPoolExecutor deliveryWorker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(500), runnable -> {
+                Thread thread = new Thread(runnable, "command-delivery"); thread.setDaemon(true); return thread;
+            });
 
     public CommandService(CommandRepository repository, CommandSender sender,
                           AgentDownloadTokenService downloadTokens, AlinkSecProperties props,
@@ -72,13 +80,22 @@ public class CommandService {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() {
-                    try { deliveryTransaction.executeWithoutResult(status -> send(agentId, cmd)); }
+                    // Transaction resources are still bound during afterCommit. In SQLite
+                    // IMMEDIATE mode even the committed connection holds the next write
+                    // transaction until cleanup. A separate worker lets cleanup finish,
+                    // and also supports deployments with a single pooled connection.
+                    try { deliveryWorker.execute(() -> {
+                        try { deliveryTransaction.executeWithoutResult(status -> send(agentId, cmd)); }
+                        catch (RuntimeException e) { log.warn("已提交指令保留待重推: cmd_id={} agent={}", cmd.getCmdId(), agentId); }
+                    }); }
                     catch (RuntimeException e) { log.warn("已提交指令保留待重推: cmd_id={} agent={}", cmd.getCmdId(), agentId); }
                 }
             });
         } else { send(agentId, cmd); }
         return cmd.getCmdId();
     }
+
+    @PreDestroy public void close() { deliveryWorker.shutdownNow(); }
 
     private Command persist(String agentId, Command.Builder command, Long issuedBy) {
         String cmdId = UUID.randomUUID().toString();
