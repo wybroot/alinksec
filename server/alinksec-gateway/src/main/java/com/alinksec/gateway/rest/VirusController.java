@@ -7,7 +7,7 @@ import com.alinksec.service.virus.VirusDbService;
 import com.alinksec.service.virus.VirusTaskService;
 import com.alinksec.service.download.AgentDownloadTokenService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,8 +21,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -94,18 +92,19 @@ public class VirusController {
 
     /** 特征包下载（Agent 拉取端点，无 JWT：package_key 为版本号文件名 + 内网部署） */
     @GetMapping("/db/download")
-    public ResponseEntity<FileSystemResource> download(@RequestParam String packageKey, @RequestParam String token) {
+    public ResponseEntity<Resource> download(@RequestParam String packageKey, @RequestParam String token) throws java.io.IOException {
         if (!downloadTokens.isAuthorized(token, "virus-db", packageKey)) {
             return ResponseEntity.notFound().build();
         }
-        Path path = dbService.packagePath(packageKey);
-        if (!Files.isRegularFile(path)) {
+        var artifact = dbService.downloadPackage(packageKey);
+        if (artifact == null) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + path.getFileName() + "\"")
-                .body(new FileSystemResource(path));
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + packageKey + "\"")
+                .contentLength(artifact.size())
+                .body(artifact.resource());
     }
 
     /** 新增白名单（type = hash / path） */

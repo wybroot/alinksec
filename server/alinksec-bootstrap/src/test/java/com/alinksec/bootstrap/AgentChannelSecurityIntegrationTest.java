@@ -129,6 +129,7 @@ class AgentChannelSecurityIntegrationTest {
         registry.add("alinksec.server.tls-sans", () -> "localhost,127.0.0.1");
         registry.add("alinksec.metrics.enabled", () -> false);
         registry.add("alinksec.signature.storage-dir", () -> tempDir.resolve("signature").toString());
+        registry.add("alinksec.libraries.work-dir", () -> tempDir.resolve("libraries").toString());
         registry.add("alinksec.patch.storage-dir", () -> tempDir.resolve("patch").toString());
         registry.add("alinksec.upgrade.storage-dir", () -> tempDir.resolve("upgrade").toString());
         registry.add("ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD", () -> "");

@@ -512,6 +512,9 @@ validation reference is in English.
 | [12 · Native Agent Evidence](docs/12-原生Agent本机验收记录.md) | Linux resource sampling and actual Windows SCM checks |
 | [13 · Releases](docs/13-版本发布流程.md) | CI gates, images, assets and credentials |
 | [14 · ARM64](docs/14-ARM64支持.md) | Source builds, installation and multi-platform validation |
+| [15 · Security Libraries](docs/15-安全库同步与存储.md) | Manual imports, remote feeds, retained versions and S3 configuration |
+| [16 · Open-source Platform Integration](docs/16-开源安全平台对接指南.md) | Native MISP and export scripts, OpenCTI/vulnerability conversion and authentication |
+| [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>

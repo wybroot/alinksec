@@ -26,7 +26,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成） */
     private static final List<String> ADMIN_WRITE_PREFIXES = List.of(
-            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify");
+            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources");
 
     /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
     private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit");

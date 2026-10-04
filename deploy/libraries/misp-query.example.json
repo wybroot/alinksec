@@ -1,0 +1,9 @@
+{
+  "returnFormat": "text",
+  "type": "sha256",
+  "published": true,
+  "to_ids": true,
+  "deleted": false,
+  "enforceWarninglist": true,
+  "tags": ["alinksec:malicious-file"]
+}

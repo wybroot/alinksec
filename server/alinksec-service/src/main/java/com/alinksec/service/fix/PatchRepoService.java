@@ -1,6 +1,7 @@
 package com.alinksec.service.fix;
 
 import com.alinksec.service.config.AlinkSecProperties;
+import com.alinksec.service.library.LibraryFiles;
 import com.alinksec.service.download.AgentDownloadTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,12 +35,14 @@ public class PatchRepoService {
     private final JdbcTemplate jdbc;
     private final AlinkSecProperties props;
     private final AgentDownloadTokenService downloadTokens;
+    private final LibraryFiles files;
 
     public PatchRepoService(JdbcTemplate jdbc, AlinkSecProperties props,
-                            AgentDownloadTokenService downloadTokens) {
+                            AgentDownloadTokenService downloadTokens, LibraryFiles files) {
         this.jdbc = jdbc;
         this.props = props;
         this.downloadTokens = downloadTokens;
+        this.files = files;
     }
 
     /**
@@ -62,7 +65,7 @@ public class PatchRepoService {
         Path dir = Path.of(props.getPatch().getStorageDir());
         Files.createDirectories(dir);
         String filename = UUID.randomUUID().toString().replace("-", "") + "-" + sanitize(originalName);
-        Path dest = dir.resolve(filename);
+        Path dest = files.temporary(".patch");
         String sha256;
         long size;
         try {
@@ -74,8 +77,8 @@ public class PatchRepoService {
             Files.deleteIfExists(dest);
             throw e;
         }
-        // 与包类型一致性的最低校验（扩展名提示，不阻断——由导入人负责）
         try {
+            files.put("patch", filename, dest);
             long id = jdbc.queryForObject("""
                     INSERT INTO t_patch_package
                         (os_type, os_version, pkg_name, target_version, repo_type, filename, sha256, size, imported_by)
@@ -88,10 +91,12 @@ public class PatchRepoService {
                     targetVersion.trim(), repoType, filename, sha256, size, importedBy);
             log.info("补丁包导入: {} {} {} → {} ({}B)", repoType, pkgName, targetVersion, filename, size);
             return Map.of("id", id, "filename", filename, "sha256", sha256, "size", size);
-        } catch (Exception e) {
-            Files.deleteIfExists(dest);
-            throw e;
-        }
+        } finally { Files.deleteIfExists(dest); }
+    }
+
+    public LibraryFiles.Download downloadPackage(String filename) throws IOException {
+        resolveFile(filename); // Validate the persisted inventory before opening an object.
+        return files.download("patch", filename);
     }
 
     /** 分页清单（按 os_type / 关键字过滤） */
@@ -161,7 +166,7 @@ public class PatchRepoService {
     /** 构造 Agent 下载 URL（key=sha256，RestConfig 白名单放行） */
     public String downloadUrl(String agentId, Map<String, Object> patchRow) {
         return props.getPatch().getDownloadBaseUrl()
-                + "/api/fix/patches/download?filename=" + patchRow.get("filename")
+                + "/api/fix/patches/download?filename=" + java.net.URLEncoder.encode(String.valueOf(patchRow.get("filename")), java.nio.charset.StandardCharsets.UTF_8)
                 + "&token=" + downloadTokens.issue(agentId, "patch", String.valueOf(patchRow.get("filename")));
     }
 
@@ -177,7 +182,7 @@ public class PatchRepoService {
     }
 
     private static String sanitize(String name) {
-        return name == null ? "patch.bin" : name.replaceAll("[\\\\/:*?\"<>|\\s]", "_");
+        return name == null ? "patch.bin" : name.replaceAll("[^\\p{L}\\p{N}._~+()@\\[\\]%-]", "_");
     }
 
     static String sha256(Path file) throws IOException {

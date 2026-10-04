@@ -17,7 +17,7 @@
           <el-descriptions-item label="当前版本">{{ db.version }}</el-descriptions-item>
           <el-descriptions-item label="最近更新">{{ db.updated }}</el-descriptions-item>
           <el-descriptions-item label="哈希情报">{{ db.hashCount }} 条</el-descriptions-item>
-          <el-descriptions-item label="YARA 规则">{{ db.yaraCount }} 条</el-descriptions-item>
+          <el-descriptions-item label="内部检测规则">{{ db.yaraCount }} 条</el-descriptions-item>
         </el-descriptions>
         <p style="font-size:12px;color:#94a3b8;line-height:1.8;margin-top:10px">特征包为 zip（manifest.json + hashes.txt），导入校验通过后自动推送全部 Agent；Agent 限速下载并原子替换，失败沿用本地旧库。</p>
         <input ref="fileInput" type="file" accept=".zip" style="display:none" @change="onFileChange" />

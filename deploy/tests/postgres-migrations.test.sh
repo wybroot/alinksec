@@ -139,8 +139,8 @@ VALUES ('POST', '/api/notify/channels', 'legacy-webhook-secret', 200, 1);
 SQL
 PGDATABASE="$test_database" pg_dump --format=custom --file="$work_dir/legacy.dump"
 run_migrations "$work_dir/base"
-assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" "39"
-assert_query "SELECT count(*) FROM t_schema_migration" "1"
+assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" "45"
+assert_query "SELECT count(*) FROM t_schema_migration" "3"
 assert_query "SELECT hostname || '|' || isolation_status FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host|0"
 assert_query "SELECT name || '|' || version FROM t_asset_software WHERE agent_id = 'migration-fixture-agent'" "legacy-software|1.0"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest IS NOT NULL" "0"
@@ -149,10 +149,10 @@ assert_query "SELECT content::text FROM t_policy_state WHERE id = 1" "{}"
 pass "legacy upgrade restores missing features, preserves assets and scrubs old audit secrets"
 
 test_sql -c "INSERT INTO t_audit_log (method, path, body_digest, status, cost_ms) VALUES ('POST', '/api/hosts/collect', 'new-safe-digest', 200, 1);"
-applied_at="$(query "SELECT applied_at FROM t_schema_migration")"
+applied_at="$(query "SELECT applied_at FROM t_schema_migration ORDER BY version")"
 run_migrations "$work_dir/base"
-assert_query "SELECT count(*) FROM t_schema_migration" "1"
-assert_query "SELECT applied_at FROM t_schema_migration" "$applied_at"
+assert_query "SELECT count(*) FROM t_schema_migration" "3"
+assert_query "SELECT applied_at FROM t_schema_migration ORDER BY version" "$applied_at"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "repeat migrations preserve history and new audit records"
 
@@ -164,7 +164,19 @@ SELECT 'migration-app-agent', 'app-host', 1, id FROM t_host_group WHERE name = '
 UPDATE t_agent SET hostname = 'updated-app-host' WHERE agent_id = 'migration-app-agent';
 DELETE FROM t_agent WHERE agent_id = 'migration-app-agent';
 DELETE FROM t_host_group WHERE name = 'migration-app-group';
+INSERT INTO t_security_feed_schedule(source_id,enabled,interval_ms,updated_at)
+VALUES ('migration-feed',1,300000,'2026-10-03T00:00:00Z');
+INSERT INTO t_security_feed_state(source_id,kind,status) VALUES ('migration-feed','misp','failed');
+UPDATE t_security_feed_state SET failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END
+WHERE source_id='migration-feed';
+INSERT INTO t_security_feed_run(id,source_id,trigger_type,started_at,status)
+VALUES ('migration-run','migration-feed','scheduled','2026-10-03T00:00:00Z','failed');
+DELETE FROM t_security_feed_run WHERE source_id='migration-feed' AND id NOT IN
+  (SELECT id FROM t_security_feed_run WHERE source_id='migration-feed' ORDER BY started_at DESC,id DESC LIMIT 50);
 SQL
+assert_query "SELECT enabled || '|' || interval_ms FROM t_security_feed_schedule WHERE source_id='migration-feed'" "1|300000"
+assert_query "SELECT failure_count FROM t_security_feed_state WHERE source_id='migration-feed'" "1"
+assert_query "SELECT count(*) FROM t_security_feed_run WHERE source_id='migration-feed'" "1"
 if app_sql -c 'CREATE TABLE privilege_escape(id INTEGER)' >"$work_dir/denied-ddl.log" 2>&1; then
   fail "Application role can create tables"
 fi
@@ -174,9 +186,9 @@ fi
 pass "application role supports DML and sequences but denies DDL and migration history"
 
 cp "$work_dir/base/"*.sql "$work_dir/broken/"
-cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/"
+cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V004__broken.sql"
 expect_migration_failure "$work_dir/broken" "migration_test_missing_function"
-assert_query "SELECT count(*) FROM t_schema_migration" "1"
+assert_query "SELECT count(*) FROM t_schema_migration" "3"
 assert_query "SELECT to_regclass('public.t_migration_rollback_probe') IS NULL" "t"
 assert_query "SELECT hostname FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host"
 pass "failed migration rolls back schema, data and version history together"
@@ -184,13 +196,13 @@ pass "failed migration rolls back schema, data and version history together"
 cp "$work_dir/base/"*.sql "$work_dir/tampered/"
 printf '\n-- changed after release\n' >>"$work_dir/tampered/V001__pre_release_upgrade.sql"
 expect_migration_failure "$work_dir/tampered" "Migration checksum mismatch"
-assert_query "SELECT count(*) FROM t_schema_migration" "1"
+assert_query "SELECT count(*) FROM t_schema_migration" "3"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "changed released migration blocks execution"
 
 cp "$work_dir/base/V001__pre_release_upgrade.sql" "$work_dir/renamed/V002__renamed_upgrade.sql"
 expect_migration_failure "$work_dir/renamed" "Applied migration file is missing"
-assert_query "SELECT count(*) FROM t_schema_migration" "1"
+assert_query "SELECT count(*) FROM t_schema_migration" "3"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "missing or renamed applied migration blocks execution before pending changes"
 
@@ -198,7 +210,7 @@ for migration in "$work_dir/base/"*.sql; do
   sed 's/$/\r/' "$migration" >"$work_dir/crlf/$(basename "$migration")"
 done
 run_migrations "$work_dir/crlf"
-assert_query "SELECT applied_at FROM t_schema_migration" "$applied_at"
+assert_query "SELECT applied_at FROM t_schema_migration ORDER BY version" "$applied_at"
 assert_query "SELECT count(*) FROM t_audit_log WHERE body_digest = 'new-safe-digest'" "1"
 pass "CRLF and LF copies share the same migration checksum"
 
@@ -218,6 +230,6 @@ run_migrations "$work_dir/base" "$restore_database"
 restored_state="$(PGDATABASE="$restore_database" owner_sql -At -c "
   SELECT isolation_status || '|' || (SELECT count(*) FROM t_schema_migration)
   FROM t_agent WHERE agent_id = 'migration-fixture-agent';")"
-[[ "$restored_state" == "0|1" ]] || fail "Unexpected restored upgrade state: $restored_state"
+[[ "$restored_state" == "0|3" ]] || fail "Unexpected restored upgrade state: $restored_state"
 pass "restored backup can upgrade through the production migration runner"
 printf 'Passed %s PostgreSQL migration checks.\n' "$checks"

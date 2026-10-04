@@ -432,6 +432,9 @@ cd ../web && npm ci && npm test && npm run build
 | [12 · 原生 Agent 验收](docs/12-原生Agent本机验收记录.md) | Linux 资源采样与 Windows 实际 SCM 验证 |
 | [13 · 发布流程](docs/13-版本发布流程.md) | CI 门禁、镜像、附件与凭据 |
 | [14 · ARM64 支持](docs/14-ARM64支持.md) | 源码构建、安装与双架构验证 |
+| [15 · 安全库同步与存储](docs/15-安全库同步与存储.md) | 人工导入、远端同步、版本回退与 S3 配置 |
+| [16 · 开源安全平台对接](docs/16-开源安全平台对接指南.md) | MISP 原生接入与导出脚本、OpenCTI/漏洞聚合转换、认证指导 |
+| [17 · 安全数据接入与演进](docs/17-安全数据接入与演进.md) | 服务台同步计划、执行记录及基线/漏洞适配路线 |
 | [验证命令参考](deploy/tests/README.md) | 本机检查、fixture 与资源约束 |
 
 </details>
