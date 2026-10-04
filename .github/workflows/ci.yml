@@ -102,6 +102,20 @@ jobs:
         run: python3 -B -m unittest discover -s deploy/tests -p 'test_library_feed_tools.py' -v
       - name: Check deployment configuration and least-privilege boundaries
         run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
+      - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
+        working-directory: web
+      - name: Retain validated web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-${{ matrix.arch }}
+          path: web/dist/
+          retention-days: 7
+      - name: Install serial browser validation runtime
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Check library schedules and history in the production web bundle
+        working-directory: web
+        run: node test/libraries-browser.mjs
       - run: mvn -B package
         working-directory: server
       - name: Check local SQLite validation workflow
@@ -138,20 +152,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
-        working-directory: web
-      - name: Retain validated web bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist-${{ matrix.arch }}
-          path: web/dist/
-          retention-days: 7
-      - name: Install serial browser validation runtime
-        working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
-      - name: Check library schedules and history in the production web bundle
-        working-directory: web
-        run: node test/libraries-browser.mjs
       - run: docker compose config -q
         working-directory: deploy/docker
       - run: docker compose build
