@@ -13,6 +13,7 @@ const routes = [
       { path: 'baseline', component: () => import('./views/Baseline.vue'), meta: { title: '基线核查', icon: 'Checked' } },
       { path: 'vuln', component: () => import('./views/Vuln.vue'), meta: { title: '漏洞与修复', icon: 'Warning' } },
       { path: 'virus', component: () => import('./views/Virus.vue'), meta: { title: '病毒查杀', icon: 'Search' } },
+      { path: 'libraries', component: () => import('./views/Libraries.vue'), meta: { title: '安全库管理', icon: 'Collection' } },
       { path: 'protect', component: () => import('./views/Protect.vue'), meta: { title: '实时防护', icon: 'Lock' } },
       { path: 'alerts', component: () => import('./views/Alerts.vue'), meta: { title: '告警中心', icon: 'Bell' } },
       { path: 'system', component: () => import('./views/System.vue'), meta: { title: '系统管理', icon: 'Setting' } },

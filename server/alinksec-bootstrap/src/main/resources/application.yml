@@ -3,6 +3,8 @@ spring:
     name: alinksec-server
   profiles:
     default: postgres
+  config:
+    import: optional:file:${ALINKSEC_LIBRARY_CONFIG:./data/libraries.yml}
   servlet:
     multipart:
       max-file-size: 500MB
@@ -13,6 +15,21 @@ server:
   port: 8080   # M2 REST API 占位
 
 alinksec:
+  libraries:
+    work-dir: ${ALINKSEC_LIBRARY_WORK_DIR:./data/libraries}
+    max-download-bytes: 67108864
+    max-hashes: 250000
+    max-cves-per-import: 10000
+    retain-versions: 10
+    retain-days: 7
+    storage:
+      backend: ${ALINKSEC_LIBRARY_STORAGE:local}
+      endpoint: ${ALINKSEC_LIBRARY_S3_ENDPOINT:}
+      bucket: ${ALINKSEC_LIBRARY_S3_BUCKET:}
+      region: ${ALINKSEC_LIBRARY_S3_REGION:us-east-1}
+      access-key: ${ALINKSEC_LIBRARY_S3_ACCESS_KEY:}
+      secret-key: ${ALINKSEC_LIBRARY_S3_SECRET_KEY:}
+      prefix: alinksec
   database:
     type: postgres
   server:

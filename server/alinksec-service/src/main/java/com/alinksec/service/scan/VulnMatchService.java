@@ -37,13 +37,8 @@ public class VulnMatchService {
     /** 单机比对。taskId=0 表示资产快照触发的自动比对。 */
     @Transactional
     public void matchAgent(String agentId, long taskId) {
-        List<Map<String, Object>> cves = jdbc.queryForList(
-                "SELECT cve_id, severity, cvss, CAST(affected AS TEXT) AS affected FROM t_cve_db");
-        if (cves.isEmpty()) {
-            return;
-        }
         List<Map<String, Object>> software = jdbc.queryForList(
-                "SELECT name, version FROM t_asset_software WHERE agent_id = ?", agentId);
+                "SELECT name, version, source FROM t_asset_software WHERE agent_id = ?", agentId);
         if (software.isEmpty()) {
             return;
         }
@@ -65,12 +60,16 @@ public class VulnMatchService {
         jdbc.update("DELETE FROM t_vuln_finding AS f WHERE agent_id = ? AND status IN (0, 1) AND NOT "
                 + pendingRepair, agentId);
 
-        int inserted = 0;
-        for (Map<String, Object> cve : cves) {
-            String cveId = (String) cve.get("cve_id");
-            int severity = ((Number) cve.get("severity")).intValue();
-            Object cvss = cve.get("cvss");
-            for (JsonNode rule : JsonUtils.read((String) cve.get("affected"))) {
+        var hosts = jdbc.queryForList("SELECT os_version FROM t_agent WHERE agent_id=?", agentId);
+        String os = hosts.isEmpty() ? "" : String.valueOf(hosts.get(0).get("os_version"));
+        int[] inserted = {0};
+        // Metadata-only NVD entries are excluded, and candidate rows are consumed one at a time.
+        jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE CAST(affected AS TEXT) <> '[]'",
+                (org.springframework.jdbc.core.RowCallbackHandler) cve -> {
+            String cveId = cve.getString("cve_id");
+            int severity = cve.getInt("severity");
+            Object cvss = cve.getObject("cvss");
+            for (JsonNode rule : JsonUtils.read(cve.getString("affected"))) {
                 String cveName = rule.path("name").asText("");
                 String vrange = rule.path("vrange").asText("*");
                 if (cveName.isEmpty()) {
@@ -79,14 +78,8 @@ public class VulnMatchService {
                 for (Map<String, Object> sw : software) {
                     String swName = String.valueOf(sw.get("name"));
                     String swVersion = String.valueOf(sw.get("version") == null ? "" : sw.get("version"));
-                    // 名称宽松匹配：CVE 侧名称为资产软件名子串（如 openssl 命中 openssl-libs）
-                    if (!swName.toLowerCase().contains(cveName.toLowerCase())) {
-                        continue;
-                    }
-                    String fixed = rangeFixedVersion(vrange);
-                    if (!versionInRange(swVersion, vrange)) {
-                        continue;
-                    }
+                    if (!ruleMatches(rule, swName, swVersion, os, String.valueOf(sw.getOrDefault("source", "")))) continue;
+                    String fixed = rule.has("fixed_version") ? rule.path("fixed_version").asText("") : rangeFixedVersion(vrange);
                     if (dismissed.contains(cveId + "|" + swName)) {
                         continue;
                     }
@@ -95,12 +88,11 @@ public class VulnMatchService {
                               (task_id, agent_id, cve_id, software, installed_version, fixed_version, severity, cvss)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """, taskId, agentId, cveId, swName, swVersion, fixed, severity, cvss);
-                    inserted++;
+                    inserted[0]++;
                 }
             }
-        }
-        log.info("漏洞比对完成: agent={} task={} cve_db={} software={} findings={}",
-                agentId, taskId, cves.size(), software.size(), inserted);
+        });
+        log.info("漏洞比对完成: agent={} task={} software={} findings={}", agentId, taskId, software.size(), inserted[0]);
     }
 
     /** 全量比对（CVE 库导入后手动刷新）。返回比对主机数。 */
@@ -133,10 +125,10 @@ public class VulnMatchService {
         }
         String op = range.startsWith(">=") ? ">=" : range.startsWith("<=") ? "<="
                 : range.startsWith("<") ? "<" : range.startsWith(">") ? ">"
-                : range.startsWith("=") ? "=" : "=";
+                : range.startsWith("=") ? "=" : "";
         String bound = range.substring(op.length()).trim();
         if (bound.isEmpty()) {
-            return true;
+            return false;
         }
         int cmp = compareVersions(version, bound);
         return switch (op) {
@@ -148,25 +140,26 @@ public class VulnMatchService {
         };
     }
 
-    /** 从 vrange 提取修复版本（边界值），如 "<1.1.1n" → "1.1.1n" */
+    static boolean ruleMatches(JsonNode rule, String name, String version, String os, String source) {
+        String expected = rule.path("name").asText("");
+        if (expected.isBlank()) return false;
+        boolean exact = "exact".equals(rule.path("match").asText("legacy"));
+        if (exact ? !name.equalsIgnoreCase(expected) : !name.toLowerCase(java.util.Locale.ROOT).contains(expected.toLowerCase(java.util.Locale.ROOT))) return false;
+        String expectedOs = rule.path("os").asText("");
+        if (!expectedOs.isBlank() && !"*".equals(expectedOs) && !expectedOs.equalsIgnoreCase(os)) return false;
+        String expectedSource = rule.path("source").asText("");
+        if (!expectedSource.isBlank() && !expectedSource.equals(source)) return false;
+        if (rule.has("ranges")) {
+            for (JsonNode range : rule.path("ranges")) if (!versionInRange(version, range.asText())) return false;
+            return !rule.path("ranges").isEmpty();
+        }
+        return versionInRange(version, rule.path("vrange").asText("*"));
+    }
+
+    /** Only an exclusive upper bound can suggest a fixed version; inclusive bounds remain vulnerable. */
     static String rangeFixedVersion(String vrange) {
         String range = vrange == null ? "" : vrange.trim();
-        if (range.startsWith("<=")) {
-            return range.substring(2).trim();
-        }
-        if (range.startsWith("<")) {
-            return range.substring(1).trim();
-        }
-        if (range.startsWith(">=")) {
-            return range.substring(2).trim();
-        }
-        if (range.startsWith(">")) {
-            return range.substring(1).trim();
-        }
-        if (range.startsWith("=")) {
-            return range.substring(1).trim();
-        }
-        return range.isEmpty() || "*".equals(range) ? null : range;
+        return range.startsWith("<") && !range.startsWith("<=") ? range.substring(1).trim() : null;
     }
 
     /**
@@ -205,10 +198,8 @@ public class VulnMatchService {
         if (nb.isEmpty()) {
             return -1;                             // 数字段 < 字母段
         }
-        long va = Long.parseLong(na), vb = Long.parseLong(nb);
-        if (va != vb) {
-            return Long.compare(va, vb);
-        }
+        int numeric = new java.math.BigInteger(na).compareTo(new java.math.BigInteger(nb));
+        if (numeric != 0) return numeric;
         // 数值相等：余部短的更小（"1" < "1p1"）；再按字典序（"p1" < "p2"）
         if (aa.isEmpty() && ab.isEmpty()) {
             return 0;

@@ -98,6 +98,53 @@ are checked before insertion and removed afterward. Plain HTTP is accepted only
 on loopback addresses for local validation. `ALINKSEC_SMOKE_SQLITE_FILE` allows
 direct access to a local SQLite file without maintenance containers.
 
+## Security Libraries
+
+`LibraryIntegrationTest` uses a temporary SQLite database and local HTTP fixtures
+to check manual/remote merging, malformed imports, transactional rollback,
+conditional requests, provider adapters (including native MISP), persistent console
+schedules, retry delays, interrupted-run recovery, bounded history, retention and signed S3 operations.
+The worker checks also cover duplicate requests, pausing during a download and
+retrying after failure, using a gated HTTP fixture without external services.
+It does not require provider credentials or access production feeds or buckets.
+Run serially from `server/`:
+
+```sh
+mvn -B -T1 -pl alinksec-bootstrap -am -DforkCount=0 \
+  -Dtest=LibraryIntegrationTest,SqliteDatabaseIntegrationTest,VulnMatchServiceTest,JwtAuthInterceptorTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+See [security library configuration](../../docs/15-安全库同步与存储.md) for
+production source credentials, capacity limits and matching boundaries.
+
+The portable MISP bridge/package checks use local fixtures and a simulated curl,
+with no provider credentials, server build or containers:
+
+```sh
+python3 -B -m unittest discover -s deploy/tests -p 'test_library_feed_tools.py' -v
+bash -n deploy/libraries/refresh-misp.sh
+```
+
+They verify package compatibility, complete snapshots, deduplication, stable
+publication, bounded inputs and preservation of the previous file on failures.
+See [open-source platform integration](../../docs/16-开源安全平台对接指南.md)
+for the MISP workflow and the remaining OpenCTI/Vulnerability-Lookup adapter work.
+
+After building the production frontend, CI runs `node test/libraries-browser.mjs`
+from `web/`. It serves the bundle on loopback and replays captured disposable
+PostgreSQL responses to exercise schedule edits, rejected saves/reset, execution history, role
+visibility and desktop/mobile layout. Screenshots and results are saved in
+`.tmp/library-browser-artifacts`. This complements backend tests; it does not
+claim to connect to a production MISP instance.
+
+On small machines, the same script accepts `ALINKSEC_LIBRARY_PREVIEW_DIST` pointing
+to a page-scoped preview built from the current source. Pause the backend and run
+under the local memory watchdog. Preview results go to
+`.tmp/library-preview-artifacts` and are labelled separately from the production
+bundle check. If memory pressure stops the browser, leave that check for CI;
+do not increase local limits or count the interrupted run as a pass.
+
 ## Agent TLS Identity
 
 `AgentChannelSecurityIntegrationTest` starts the production gRPC server on an

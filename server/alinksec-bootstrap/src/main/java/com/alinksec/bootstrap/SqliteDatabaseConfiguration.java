@@ -40,7 +40,9 @@ public class SqliteDatabaseConfiguration {
 
         private static final Logger log = LoggerFactory.getLogger(SqliteMigrationBeanPostProcessor.class);
         private static final List<String> MIGRATIONS = List.of(
-                "db/sqlite/V001__initial.sql"
+                "db/sqlite/V001__initial.sql",
+                "db/common/V002__security_libraries.sql",
+                "db/common/V003__library_schedules.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

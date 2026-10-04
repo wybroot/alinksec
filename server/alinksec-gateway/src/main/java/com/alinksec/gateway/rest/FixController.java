@@ -6,7 +6,7 @@ import com.alinksec.service.fix.PatchRepoService;
 import com.alinksec.service.query.FixQueryService;
 import com.alinksec.service.download.AgentDownloadTokenService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,8 +20,6 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -109,16 +107,17 @@ public class FixController {
     }
 
     @GetMapping("/patches/download")
-    public ResponseEntity<FileSystemResource> downloadPatch(@RequestParam String filename, @RequestParam String token) {
+    public ResponseEntity<Resource> downloadPatch(@RequestParam String filename, @RequestParam String token) throws java.io.IOException {
         if (!downloadTokens.isAuthorized(token, "patch", filename)) {
             return ResponseEntity.notFound().build();
         }
-        Path path = patchRepo.resolveFile(filename);
-        if (!Files.isRegularFile(path)) {
+        var artifact = patchRepo.downloadPackage(filename);
+        if (artifact == null) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + path.getFileName() + "\"")
-                .body(new FileSystemResource(path));
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentLength(artifact.size())
+                .body(artifact.resource());
     }
 }

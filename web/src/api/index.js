@@ -44,6 +44,13 @@ const post = (path, data) => request(path, { method: 'POST', body: JSON.stringif
 const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data) })
 const del = (path) => request(path, { method: 'DELETE' })
 
+export const fetchLibraries = () => get('/api/libraries')
+export const synchronizeLibrary = (id) => post(`/api/libraries/sources/${encodeURIComponent(id)}/sync`, {})
+export const updateLibrarySchedule = (id, plan) => put(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`, plan)
+export const resetLibrarySchedule = (id) => del(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`)
+export const fetchLibraryRuns = (id) => get(`/api/libraries/sources/${encodeURIComponent(id)}/runs`)
+export const importCveLibrary = (file) => upload('/api/libraries/cves/import', file)
+
 /** multipart 上传（浏览器自动生成 boundary，勿手工设 Content-Type） */
 async function upload(path, file, field = 'file') {
   const form = new FormData()

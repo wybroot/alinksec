@@ -1,0 +1,73 @@
+# Copy into server-data as /app/data/libraries.yml; sources stay disabled until explicitly enabled.
+# Keep credentials in protected deployment configuration. This file contains no real credentials.
+# Open-source platform setup: docs/16-开源安全平台对接指南.md
+# Generic sources only perform HTTPS GET without auth headers. Their api-key is not used.
+# MISP can use its native adapter below. OpenCTI still requires a curated export bridge.
+# Console enabled/interval overrides persist in the database; restore deployment configuration to reset.
+alinksec:
+  libraries:
+    storage:
+      backend: local
+      # To use an existing S3-compatible service, configure these fields in this file:
+      # backend: s3
+      # endpoint: https://storage.example.invalid
+      # bucket: alinksec-libraries
+      # region: us-east-1
+      # access-key: ${ALINKSEC_LIBRARY_S3_ACCESS_KEY:}
+      # secret-key: ${ALINKSEC_LIBRARY_S3_SECRET_KEY:}
+    sources:
+      - id: misp
+        type: misp
+        enabled: false
+        url: https://misp.example.invalid/attributes/restSearch
+        api-key: ${ALINKSEC_MISP_KEY:}
+        misp-tag: alinksec:malicious-file
+        interval-ms: 1800000
+        # Read-only key + curated tag are required. Fetches a complete SHA256 snapshot.
+        # Choose either this source or misp-export for the same dataset, not both.
+      - id: malwarebazaar
+        type: malwarebazaar
+        enabled: false
+        interval-ms: 1800000
+        api-key: ${ALINKSEC_MALWAREBAZAAR_KEY:}
+        # Official API covers the last 60 minutes. Import an initial/full hash library separately.
+      - id: nvd
+        type: nvd
+        enabled: false
+        interval-ms: 7200000
+        initial-days: 7
+        api-key: ${ALINKSEC_NVD_KEY:}
+        # Without mappings NVD provides metadata, not inferred distro package findings.
+        # products:
+        #   - cpe-prefix: 'cpe:2.3:a:vendor:product:'
+        #     name: 'Exact installed application name'
+        #     os: 'Exact os_version reported by the Agent'
+        #     asset-source: registry
+      - id: vendor-signatures
+        type: signature-zip
+        enabled: false
+        url: https://security-feed.example.invalid/signatures.zip
+        interval-ms: 3600000
+      - id: vendor-vulnerabilities
+        type: cve-json
+        enabled: false
+        url: https://security-feed.example.invalid/vulnerabilities.json
+        interval-ms: 7200000
+      - id: misp-export
+        type: signature-zip
+        enabled: false
+        # Complete SHA256 snapshot made with deploy/libraries/refresh-misp.sh.
+        url: https://security-feed.example.invalid/feeds/misp/signatures.zip
+        interval-ms: 1800000
+      - id: opencti-export
+        type: signature-zip
+        enabled: false
+        # Requires a separate complete export/filter task, not a raw STIX or GraphQL response.
+        url: https://security-feed.example.invalid/feeds/opencti/signatures.zip
+        interval-ms: 1800000
+      - id: vulnerability-lookup-export
+        type: cve-json
+        enabled: false
+        # Requires normalization; the upstream /api/vulnerability response is not this format.
+        url: https://security-feed.example.invalid/feeds/vulnerabilities.json
+        interval-ms: 7200000

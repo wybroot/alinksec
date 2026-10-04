@@ -1,0 +1,87 @@
+{
+  "managed": {
+    "sources": [
+      {
+        "id": "local-feed",
+        "type": "hashes",
+        "enabled": false,
+        "intervalMs": 900000,
+        "scheduleOverridden": true,
+        "minIntervalMs": 300000,
+        "configurationIssue": "",
+        "checked_at": "2026-10-03T13:43:44.086074623Z",
+        "success_at": "2026-10-03T13:43:42.429268186Z",
+        "status": "failed",
+        "error": "远端访问或发布失败，已有库保留",
+        "entry_count": 1,
+        "cursor": "",
+        "failure_count": 1,
+        "stale": false,
+        "nextCheckAt": null,
+        "retryDelayMs": 900000,
+        "coverage": "configured-feed"
+      },
+      {
+        "id": "misp-source",
+        "type": "misp",
+        "enabled": false,
+        "intervalMs": 1800000,
+        "scheduleOverridden": true,
+        "minIntervalMs": 300000,
+        "configurationIssue": "",
+        "checked_at": "2026-10-03T13:43:44.751509859Z",
+        "success_at": "2026-10-03T13:43:44.489988961Z",
+        "status": "failed",
+        "error": "数据格式、认证或容量校验失败，已有库保留",
+        "entry_count": 1,
+        "cursor": "",
+        "failure_count": 1,
+        "stale": false,
+        "nextCheckAt": null,
+        "retryDelayMs": 1800000,
+        "coverage": "curated-snapshot"
+      }
+    ],
+    "running": false,
+    "storage": "local",
+    "signature": {
+      "db_version": "lib-musg0dhz-a03b6bbf",
+      "hash_count": 3,
+      "rule_count": 0,
+      "imported_at": "2026-10-03T13:43:44.462+00:00"
+    },
+    "cveCount": 21,
+    "managedCveCount": 1,
+    "matchableCveCount": 1,
+    "manualSignature": 1
+  },
+  "runs": [
+    {
+      "id": "17936e5b-f95f-497c-8cb7-3436a7bbf83b",
+      "trigger_type": "manual",
+      "started_at": "2026-10-03T13:43:44.753817838Z",
+      "finished_at": "2026-10-03T13:43:44.769901028Z",
+      "status": "failed",
+      "entry_count": 1,
+      "error": "数据格式、认证或容量校验失败，已有库保留"
+    },
+    {
+      "id": "9ffe428d-62ba-4d60-9135-e032f4862549",
+      "trigger_type": "manual",
+      "started_at": "2026-10-03T13:43:44.453598664Z",
+      "finished_at": "2026-10-03T13:43:44.491924391Z",
+      "status": "success",
+      "entry_count": 1,
+      "error": ""
+    },
+    {
+      "id": "2996c3fb-cd9b-4cf1-8b36-5f1cb1aa957c",
+      "trigger_type": "manual",
+      "started_at": "2026-10-03T13:43:44.315222314Z",
+      "finished_at": "2026-10-03T13:43:44.395270889Z",
+      "status": "success",
+      "entry_count": 2,
+      "error": ""
+    }
+  ]
+}

@@ -45,14 +45,28 @@ class VulnMatchServiceTest {
         assertFalse(VulnMatchService.versionInRange("6.7.10", "<6.7.10"));
         assertTrue(VulnMatchService.versionInRange("6.7.9", "<6.8"));
         assertTrue(VulnMatchService.versionInRange("anything", "*"));
+        assertTrue(VulnMatchService.versionInRange("1.2.3", "1.2.3"));
+        assertFalse(VulnMatchService.versionInRange("1.2.4", "1.2.3"));
+        assertFalse(VulnMatchService.versionInRange("1.2.3", "<"));
         assertFalse(VulnMatchService.versionInRange("", "<1.0"));   // 版本缺失不误报
         assertFalse(VulnMatchService.versionInRange(null, "<1.0"));
     }
 
     @Test
+    void importedRulesRequireTheConfiguredProductOsAndSourceAndAllBounds() {
+        var rule = com.alinksec.common.util.JsonUtils.read("{\"name\":\"openssl\",\"match\":\"exact\",\"os\":\"ubuntu22.04\",\"source\":\"dpkg\",\"ranges\":[\">=1.0\",\"<2.0\"]}");
+        assertTrue(VulnMatchService.ruleMatches(rule, "openssl", "1.5", "ubuntu22.04", "dpkg"));
+        assertFalse(VulnMatchService.ruleMatches(rule, "openssl-libs", "1.5", "ubuntu22.04", "dpkg"));
+        assertFalse(VulnMatchService.ruleMatches(rule, "openssl", "1.5", "rhel9", "dpkg"));
+        assertFalse(VulnMatchService.ruleMatches(rule, "openssl", "1.5", "ubuntu22.04", "rpm"));
+        assertFalse(VulnMatchService.ruleMatches(rule, "openssl", "0.9", "ubuntu22.04", "dpkg"));
+        assertFalse(VulnMatchService.ruleMatches(rule, "openssl", "2.0", "ubuntu22.04", "dpkg"));
+    }
+
+    @Test
     void rangeFixedVersion_extract() {
         assertEquals("1.1.1n", VulnMatchService.rangeFixedVersion("<1.1.1n"));
-        assertEquals("9.8p1", VulnMatchService.rangeFixedVersion("<=9.8p1"));
+        assertNull(VulnMatchService.rangeFixedVersion("<=9.8p1"));
         assertNull(VulnMatchService.rangeFixedVersion("*"));
         assertNull(VulnMatchService.rangeFixedVersion(""));
     }

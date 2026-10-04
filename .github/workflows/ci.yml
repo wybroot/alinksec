@@ -98,8 +98,24 @@ jobs:
           node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
+      - name: Check security feed export tools
+        run: python3 -B -m unittest discover -s deploy/tests -p 'test_library_feed_tools.py' -v
       - name: Check deployment configuration and least-privilege boundaries
         run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
+      - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
+        working-directory: web
+      - name: Retain validated web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-${{ matrix.arch }}
+          path: web/dist/
+          retention-days: 7
+      - name: Install serial browser validation runtime
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Check library schedules and history in the production web bundle
+        working-directory: web
+        run: node test/libraries-browser.mjs
       - run: mvn -B package
         working-directory: server
       - name: Check local SQLite validation workflow
@@ -136,17 +152,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
-        working-directory: web
-      - name: Retain validated web bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist-${{ matrix.arch }}
-          path: web/dist/
-          retention-days: 7
-      - name: Install serial browser validation runtime
-        working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
       - run: docker compose config -q
         working-directory: deploy/docker
       - run: docker compose build
@@ -174,7 +179,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: browser-validation-${{ matrix.arch }}
-          path: .tmp/browser-artifacts-*
+          path: |
+            .tmp/browser-artifacts-*
+            .tmp/library-browser-artifacts
           include-hidden-files: true
           if-no-files-found: ignore
       - run: docker compose up -d --wait
@@ -300,8 +307,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "1"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")" = "39"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "3"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")" = "45"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
