@@ -320,7 +320,7 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     const prefix = `/api/baseline/packages/${candidate.id}`
     assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'No review' } })).status, 400)
     stages.approved = await ok(`${prefix}/review`, { ...options, body: { approved: true, note: 'Fixture review' } })
-    record.template = Number(stages.approved.template_id); assert.ok(Number.isSafeInteger(record.template))
+    record.template = Number(stages.approved.template_id); assert.ok(Number.isSafeInteger(record.template) && record.template > 1, 'Generated template IDs cannot reuse the built-in template ID')
     assert.equal((await request('/api/baseline/tasks', { ...options, body: { agentIds: [agent], templateIds: [record.template] } })).status, 400)
     if (platform === 'linux') assert.equal(sql("SELECT count(*) FROM t_command WHERE type='baseline_check';"), previousCommands, 'Import/review cannot run checks')
     const foreign = platform === 'linux' ? 'ci-smoke-windows' : 'ci-smoke-001'

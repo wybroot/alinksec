@@ -185,6 +185,17 @@ if app_sql -c 'SELECT * FROM t_schema_migration' >"$work_dir/denied-history.log"
 fi
 pass "application role supports DML and sequences but denies DDL and migration history"
 
+app_sql -c "INSERT INTO t_baseline_template(code,name,os_type) VALUES ('migration-template-probe','Sequence probe',1);"
+assert_query "SELECT id FROM t_baseline_template WHERE code='migration-template-probe'" "2"
+app_sql -c "DELETE FROM t_baseline_template WHERE code='migration-template-probe';"
+test_sql -c "SELECT nextval('t_baseline_template_id_seq') FROM generate_series(1,3);"
+run_migrations "$work_dir/base"
+assert_query "SELECT last_value FROM t_baseline_template_id_seq" "5"
+app_sql -c "INSERT INTO t_baseline_template(code,name,os_type) VALUES ('migration-template-probe','Sequence probe',1);"
+assert_query "SELECT id FROM t_baseline_template WHERE code='migration-template-probe'" "6"
+app_sql -c "DELETE FROM t_baseline_template WHERE code='migration-template-probe';"
+pass "reviewed template IDs advance past bootstrap seeds without reusing allocated IDs"
+
 cp "$work_dir/base/"*.sql "$work_dir/broken/"
 cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V005__broken.sql"
 expect_migration_failure "$work_dir/broken" "migration_test_missing_function"
