@@ -133,8 +133,10 @@ try {
   const windows=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Windows 基础安全核查',exact:true})})
   await windows.getByRole('button',{name:'查看版本',exact:true}).click()
   await expect(dialog.getByRole('heading',{name:/Windows 基础安全核查/})).toBeVisible()
-  const bounds=await dialog.boundingBox()
-  assert.ok(bounds&&bounds.x>=0&&bounds.x+bounds.width<=390&&bounds.y>=0&&bounds.y+bounds.height<=844,'Mobile review dialog must fit the viewport')
+  await expect.poll(async()=>{
+    const bounds=await dialog.boundingBox()
+    return !!bounds&&bounds.x>=0&&bounds.x+bounds.width<=390&&bounds.y>=0&&bounds.y+bounds.height<=844
+  },{message:'Mobile review dialog must fit the viewport after its entrance animation',timeout:8000}).toBe(true)
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile page must not overflow')
   await page.screenshot({path:root+'/review-mobile.png',fullPage:true,animations:'disabled'})
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
@@ -142,7 +144,7 @@ try {
     await page.evaluate(role=>localStorage.setItem('alinksec_user',JSON.stringify({username:role,role})),role)
     await page.reload()
     await expect(page.getByRole('button',{name:'导入候选版本',exact:true})).toHaveCount(0)
-    await page.getByRole('button',{name:'查看版本',exact:true}).first().click()
+    await windows.getByRole('button',{name:'查看版本',exact:true}).click()
     await expect(dialog).toBeVisible()
     for(const action of ['审核通过','拒绝候选版本','下发测试核查','发布为可选模板','撤回版本'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
     await dialog.getByRole('button',{name:'关闭',exact:true}).click()
