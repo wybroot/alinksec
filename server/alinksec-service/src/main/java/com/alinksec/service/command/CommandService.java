@@ -12,6 +12,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -35,15 +40,19 @@ public class CommandService {
     private final AgentDownloadTokenService downloadTokens;
     private final AlinkSecProperties props;
     private final List<CommandLifecycleListener> lifecycleListeners;
+    private final TransactionTemplate deliveryTransaction;
 
     public CommandService(CommandRepository repository, CommandSender sender,
                           AgentDownloadTokenService downloadTokens, AlinkSecProperties props,
-                          List<CommandLifecycleListener> lifecycleListeners) {
+                          List<CommandLifecycleListener> lifecycleListeners,
+                          PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.sender = sender;
         this.downloadTokens = downloadTokens;
         this.props = props;
         this.lifecycleListeners = lifecycleListeners;
+        this.deliveryTransaction = new TransactionTemplate(transactionManager);
+        this.deliveryTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -51,6 +60,27 @@ public class CommandService {
      */
     @Transactional
     public String dispatch(String agentId, Command.Builder command, Long issuedBy) {
+        Command cmd = persist(agentId, command, issuedBy);
+        send(agentId, cmd);
+        return cmd.getCmdId();
+    }
+
+    /** Durable queue in the task transaction; expose it to the Agent only after snapshots commit. */
+    @Transactional
+    public String dispatchAfterCommit(String agentId, Command.Builder command, Long issuedBy) {
+        Command cmd = persist(agentId, command, issuedBy);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    try { deliveryTransaction.executeWithoutResult(status -> send(agentId, cmd)); }
+                    catch (RuntimeException e) { log.warn("已提交指令保留待重推: cmd_id={} agent={}", cmd.getCmdId(), agentId); }
+                }
+            });
+        } else { send(agentId, cmd); }
+        return cmd.getCmdId();
+    }
+
+    private Command persist(String agentId, Command.Builder command, Long issuedBy) {
         String cmdId = UUID.randomUUID().toString();
         Command cmd = command.setCmdId(cmdId)
                 .setIssuedAt(System.currentTimeMillis())
@@ -58,13 +88,17 @@ public class CommandService {
         repository.insert(cmdId, agentId, commandType(cmd),
                 com.alinksec.common.util.JsonUtils.write(payloadOf(cmd)), issuedBy);
         lifecycleListeners.forEach(listener -> listener.onDispatched(agentId, cmd));
+        return cmd;
+    }
+
+    private void send(String agentId, Command cmd) {
+        String cmdId = cmd.getCmdId();
         if (sender.send(agentId, cmd)) {
             repository.markSent(cmdId);
             log.debug("指令已下发: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
         } else {
             log.info("指令挂起待推: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
         }
-        return cmdId;
     }
 
     /** 策略版本同步指令（心跳版本不一致时由 HeartbeatService / 规则编辑后触发）；policyJson 为空 = 仅版本同步（M1 兼容） */

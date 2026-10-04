@@ -58,6 +58,20 @@ class JwtAuthInterceptorTest {
         }
     }
 
+    @Test
+    void baselinePackageLifecycleIsAdministratorOnlyButOperatorsCanRunCoveredTasks() throws Exception {
+        for (String role : new String[]{"admin", "operator", "viewer"}) {
+            for (String operation : new String[]{"import", "pkg/review", "pkg/test", "pkg/publish", "pkg/withdraw"}) {
+                var request = request(role); request.setMethod("POST"); request.setRequestURI("/api/baseline/packages/" + operation);
+                assertEquals("admin".equals(role), interceptor().preHandle(request, new MockHttpServletResponse(), new Object()));
+            }
+            var read = request(role); read.setRequestURI("/api/baseline/packages/pkg");
+            assertTrue(interceptor().preHandle(read, new MockHttpServletResponse(), new Object()));
+            var task = request(role); task.setMethod("POST"); task.setRequestURI("/api/baseline/tasks");
+            assertEquals(!"viewer".equals(role), interceptor().preHandle(task, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
     private static JwtAuthInterceptor interceptor() {
         JwtSecretHolder secret = mock(JwtSecretHolder.class);
         when(secret.secret()).thenReturn("test-signing-secret");

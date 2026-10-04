@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test ./cmd/agent ./internal/upgrade
+        run: go test ./cmd/agent ./internal/upgrade ./internal/baseline
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -98,8 +98,10 @@ jobs:
           node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
-      - name: Check security feed export tools
-        run: python3 -B -m unittest discover -s deploy/tests -p 'test_library_feed_tools.py' -v
+      - name: Check security feed and baseline package tools
+        run: |
+          python3 -B -m unittest discover -s deploy/tests -p 'test_*_tools.py' -v
+          node --test deploy/tests/baseline-package.test.mjs
       - name: Check deployment configuration and least-privilege boundaries
         run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
@@ -120,6 +122,9 @@ jobs:
         working-directory: server
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
+      - name: Check baseline review and mixed-system selection in the production web bundle
+        working-directory: web
+        run: node test/baseline-packages-browser.mjs
       - name: Check real SQLite maintenance and restored application
         timeout-minutes: 10
         run: |
@@ -182,6 +187,8 @@ jobs:
           path: |
             .tmp/browser-artifacts-*
             .tmp/library-browser-artifacts
+            .tmp/baseline-browser-artifacts
+            .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
       - run: docker compose up -d --wait
@@ -307,8 +314,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "3"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")" = "45"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "4"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

@@ -1,12 +1,13 @@
 <template>
   <div>
     <div class="grid-2">
-      <div class="panel"><h4>等保 2.0 服务器基线 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
+      <div class="panel"><h4>基线核查 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
       <div class="panel"><h4>各检查领域通过率</h4><div ref="catEl" class="chart"></div></div>
     </div>
     <div class="panel">
       <div class="toolbar">
         <el-button type="primary" @click="openCreate">+ 发起核查</el-button>
+        <el-button plain @click="$router.push('/baseline-templates')">基线模板</el-button>
         <div class="spacer"></div>
         <span style="font-size:12px;color:#94a3b8">{{ lastSummary }}</span>
       </div>
@@ -34,13 +35,14 @@
     </div>
 
     <!-- 发起核查 -->
-    <el-dialog v-model="dlg.visible" title="发起基线核查" width="640px">
+    <el-dialog v-model="dlg.visible" title="发起基线核查" width="min(640px, calc(100vw - 32px))">
       <el-form label-width="90px">
         <el-form-item label="任务名称">
           <el-input v-model="dlg.name" placeholder="留空自动生成" maxlength="64" />
         </el-form-item>
         <el-form-item label="基线模板">
-          <el-select v-model="dlg.templateIds" multiple placeholder="选择基线模板（可多选）" style="width:100%">
+          <el-switch v-model="dlg.automatic" active-text="按 Agent 系统自动选择" style="margin-bottom:8px" />
+          <el-select v-if="!dlg.automatic" v-model="dlg.templateIds" multiple placeholder="选择基线模板（可多选）" style="width:100%">
             <el-option v-for="t in templates" :key="t.id" :label="`${t.name}（${t.item_count} 项）`" :value="t.id" />
           </el-select>
         </el-form-item>
@@ -67,6 +69,7 @@
       <el-table :data="detail.items" stripe max-height="440" @selection-change="(s) => (fixSel = s)">
         <el-table-column type="selection" width="42" :selectable="(r) => !r.passed && r.fixable" />
         <el-table-column prop="code" label="编号" width="130" />
+        <el-table-column prop="template_version" label="模板版本" width="100" />
         <el-table-column prop="name" label="检查项" min-width="200" />
         <el-table-column prop="category" label="类别" width="100" />
         <el-table-column label="严重度" width="80">
@@ -213,7 +216,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
-  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
+  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
 } from '../api'
 import { useChart } from '../composables/useChart'
 
@@ -232,16 +235,17 @@ const catStats = ref([])
 
 /* ---------------- 发起核查 ---------------- */
 
-const dlg = reactive({ visible: false, loading: false, name: '', templateIds: [], agentIds: [] })
+const dlg = reactive({ visible: false, loading: false, name: '', automatic: true, templateIds: [], agentIds: [] })
 
 async function openCreate() {
   dlg.visible = true
   dlg.name = ''
+  dlg.automatic = true
   dlg.templateIds = []
   dlg.agentIds = []
   try {
     const [tpls, list] = await Promise.all([fetchBaselineTemplates(), fetchAllHosts()])
-    templates.value = (tpls || []).filter((t) => t.enabled !== false)
+    templates.value = (tpls || []).filter((t) => t.enabled === true || t.enabled === 1)
     hosts.value = list
   } catch (e) {
     msg(e.message || '基础数据加载失败', 'error')
@@ -249,11 +253,15 @@ async function openCreate() {
 }
 
 async function submit() {
-  if (!dlg.templateIds.length) return msg('请选择基线模板', 'warning')
+  if (!dlg.automatic && !dlg.templateIds.length) return msg('请选择基线模板', 'warning')
   if (!dlg.agentIds.length) return msg('请选择目标主机', 'warning')
   dlg.loading = true
   try {
-    await createBaselineTask(dlg.agentIds, dlg.templateIds, dlg.name || null)
+    const selected = dlg.automatic ? [] : dlg.templateIds
+    const coverage = await fetchBaselineCoverage(dlg.agentIds, selected)
+    const uncovered = coverage.filter((row) => !row.covered)
+    if (uncovered.length) throw new Error(`以下主机没有适用模板：${uncovered.map((row) => row.agent_id).join('、')}。请先在基线模板页发布相应系统的模板。`)
+    await createBaselineTask(dlg.agentIds, selected, dlg.name || null)
     dlg.visible = false
     msg(`核查任务已下发：${dlg.agentIds.length} 台主机`)
     await load()

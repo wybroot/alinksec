@@ -32,12 +32,13 @@ class CommandServiceTest {
     @Mock private CommandSender sender;
     @Mock private AgentDownloadTokenService downloadTokens;
     @Mock private CommandLifecycleListener lifecycleListener;
+    @Mock private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     @Test
     void dispatchPersistsCompleteProtobufForReplay() throws Exception {
         when(sender.send(eq("agent-1"), org.mockito.ArgumentMatchers.any(Command.class))).thenReturn(false);
         CommandService service = new CommandService(repository, sender, downloadTokens,
-                new AlinkSecProperties(), List.of(lifecycleListener));
+                new AlinkSecProperties(), List.of(lifecycleListener), transactionManager);
 
         service.dispatch("agent-1", Command.newBuilder().setCollectNow(CmdCollectNow.getDefaultInstance()), null);
 
@@ -64,7 +65,7 @@ class CommandServiceTest {
         when(downloadTokens.issue("agent-1", "agent-upgrade", "agent-v1.bin")).thenReturn("fresh-token");
         when(sender.send(eq("agent-1"), org.mockito.ArgumentMatchers.any(Command.class))).thenReturn(true);
         CommandService service = new CommandService(repository, sender, downloadTokens, props,
-                List.of(lifecycleListener));
+                List.of(lifecycleListener), transactionManager);
 
         service.deliverPending("agent-1");
 
@@ -84,7 +85,7 @@ class CommandServiceTest {
                 .build();
         when(repository.onAck("agent-1", ack)).thenReturn(1);
         CommandService service = new CommandService(repository, sender, downloadTokens,
-                new AlinkSecProperties(), List.of(lifecycleListener));
+                new AlinkSecProperties(), List.of(lifecycleListener), transactionManager);
 
         service.onAck("agent-1", ack);
 

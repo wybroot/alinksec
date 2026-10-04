@@ -36,15 +36,35 @@ public class BaselineResultService {
             log.warn("基线结果 task_id 非法: agent={} task_id={}", agentId, result.getTaskId());
             return;
         }
-        Integer status = jdbc.queryForObject(
-                "SELECT status FROM t_baseline_task WHERE id = ?", Integer.class, taskId);
-        if (status == null) {
+        var taskRows = jdbc.queryForList("SELECT status,CAST(scope AS TEXT) AS scope FROM t_baseline_task WHERE id=?", taskId);
+        if (taskRows.isEmpty()) {
             log.warn("基线结果指向不存在的任务: agent={} task_id={}", agentId, taskId);
             return;
         }
+        int status = ((Number) taskRows.get(0).get("status")).intValue();
         if (status == 4) { // 已取消
             log.info("任务已取消，结果丢弃: agent={} task_id={}", agentId, taskId);
             return;
+        }
+
+        // New tasks accept one complete result for exactly the checks sent to this Agent.
+        int expectedTask = jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_expected WHERE task_id=?", Integer.class, taskId);
+        if (expectedTask > 0) {
+            var expected = new java.util.HashSet<>(jdbc.queryForList("SELECT item_id FROM t_baseline_task_expected WHERE task_id=? AND agent_id=?", Long.class, taskId, agentId));
+            var actual = new java.util.HashSet<Long>();
+            boolean invalid = expected.isEmpty();
+            for (var item : result.getItemsList()) {
+                try { if (!actual.add(Long.parseLong(item.getItemId()))) invalid = true; }
+                catch (NumberFormatException e) { invalid = true; }
+            }
+            if (invalid || !expected.equals(actual)) {
+                log.warn("拒绝不完整、重复或越权的基线结果: agent={} task={}", agentId, taskId); return;
+            }
+        } else {
+            var scope = JsonUtils.read(String.valueOf(taskRows.get(0).get("scope")));
+            boolean allowed = false;
+            for (var target : scope.path("agent_ids")) if (agentId.equals(target.asText())) allowed = true;
+            if (!allowed) { log.warn("基线结果主机不在任务范围: agent={} task={}", agentId, taskId); return; }
         }
 
         // 明细幂等替换（Agent 重试/离线补传重复上报）
@@ -108,7 +128,8 @@ public class BaselineResultService {
                 Integer.class, targets.toArray());
         Integer reported = jdbc.queryForObject(
                 "SELECT count(*) FROM t_baseline_summary WHERE task_id = ?", Integer.class, taskId);
-        int total = agentCount == null ? 0 : agentCount;
+        Integer capturedCount = jdbc.queryForObject("SELECT count(DISTINCT agent_id) FROM t_baseline_task_expected WHERE task_id=?", Integer.class, taskId);
+        int total = capturedCount != null && capturedCount > 0 ? capturedCount : agentCount == null ? 0 : agentCount;
         int done = reported == null ? 0 : reported;
         int progress = total == 0 ? 100 : Math.min(100, done * 100 / total);
         if (done >= total && total > 0) {

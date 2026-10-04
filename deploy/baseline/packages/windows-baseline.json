@@ -1,0 +1,79 @@
+{
+  "code": "ALINKSEC-WINDOWS-BASE",
+  "name": "Windows 基础安全核查",
+  "standard": "ALinkSec 基础核查（非完整合规基线）",
+  "product": "windows",
+  "osType": 2,
+  "osVersionPattern": "^.*$",
+  "version": "1",
+  "items": [
+    {
+      "code": "ALINKSEC-WINDOWS-001",
+      "ruleId": "ALINKSEC-WINDOWS-001",
+      "name": "所有防火墙配置已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 15000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-WINDOWS-002",
+      "ruleId": "ALINKSEC-WINDOWS-002",
+      "name": "Defender 实时保护已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+        "operator": "eq",
+        "expected": "True",
+        "timeout_ms": 15000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-WINDOWS-003",
+      "ruleId": "ALINKSEC-WINDOWS-003",
+      "name": "事件日志服务运行",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+        "operator": "eq",
+        "expected": "Running",
+        "timeout_ms": 15000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-WINDOWS-004",
+      "ruleId": "ALINKSEC-WINDOWS-004",
+      "name": "用户账户控制已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\"",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 15000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec reviewed starter definitions",
+    "version": "1",
+    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline",
+    "sha256": "367b24692b21120ec2c50e4e0de0855ce45e7c41d7c39bc1458175d83294f276"
+  }
+}

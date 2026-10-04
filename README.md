@@ -50,7 +50,7 @@ security dashboard at `/screen` for an at-a-glance view of the environment.
 | Domain | What You Can Do |
 | --- | --- |
 | 🖥️ **Hosts & assets** | Enroll hosts with mTLS; track heartbeats, software, processes, ports, accounts and disks; inspect read-only Linux container and local Kubernetes workload inventory. |
-| 📋 **Security baselines** | Run structured checks, update check definitions without replacing the Agent, inspect noncompliant items and apply verified configuration repairs. |
+| 📋 **Security baselines** | Review versioned Linux/Windows template packages, select published checks by Agent OS, preserve task snapshots, and inspect noncompliant items before verified repairs. |
 | 🔎 **Risk discovery** | Scan for vulnerabilities, weak passwords and high-risk ports; review findings alongside the affected host's inventory. |
 | 🧩 **Package remediation** | Approve per-host fixes, schedule maintenance windows, distribute offline patches and collect execution results. |
 | 🦠 **Malware scanning** | Run quick, full or custom scans using SHA256 signatures and rules; quarantine, restore or delete detections; maintain allowlists and update signatures. |
@@ -515,6 +515,7 @@ validation reference is in English.
 | [15 · Security Libraries](docs/15-安全库同步与存储.md) | Manual imports, remote feeds, retained versions and S3 configuration |
 | [16 · Open-source Platform Integration](docs/16-开源安全平台对接指南.md) | Native MISP and export scripts, OpenCTI/vulnerability conversion and authentication |
 | [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
+| [18 · Baseline Template Review](docs/18-基线模板审核与系统适配.md) | Linux/Windows candidates, applicability, review, test, publication and task snapshots |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>

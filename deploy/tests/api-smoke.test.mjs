@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
 import { after, before, test } from 'node:test'
@@ -57,12 +57,12 @@ function sql(statement) {
   return execFileSync('docker', [...composeArgs, ...args], { encoding: 'utf8', timeout: 60_000 }).trim()
 }
 
-function request(path, { token, method = 'GET', body } = {}) {
+function request(path, { token, method = 'GET', body, rawBody, extraHeaders = {} } = {}) {
   return new Promise((resolve, reject) => {
-    const payload = body === undefined ? undefined : JSON.stringify(body)
-    const headers = {}
+    const payload = rawBody ?? (body === undefined ? undefined : JSON.stringify(body))
+    const headers = { ...extraHeaders }
     if (token) headers.Authorization = `Bearer ${token}`
-    if (payload) headers['Content-Type'] = 'application/json'
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
     const req = transport.request(new URL(path, baseUrl), { ca, method, headers }, res => {
       let text = ''
       res.setEncoding('utf8')
@@ -102,6 +102,7 @@ async function waitForSql(statement, expected) {
 const tokens = {}
 let seeded = false
 let auditStartId
+const baselinePackages = [], baselineTaskIds = []
 
 before(async () => {
   // Reserve fixture names and refuse to overwrite data from an earlier run.
@@ -140,6 +141,20 @@ before(async () => {
 
 after(() => {
   if (!seeded) return
+  for (const pkg of baselinePackages) sql(`BEGIN;
+    DELETE FROM t_baseline_package WHERE id='${pkg.id}';
+    DELETE FROM t_baseline_package_gate WHERE code='${pkg.code}';
+    DELETE FROM t_baseline_item WHERE template_id=${pkg.template || -1};
+    DELETE FROM t_baseline_template WHERE id=${pkg.template || -1};
+    COMMIT;`)
+  for (const task of baselineTaskIds) sql(`BEGIN;
+    DELETE FROM t_baseline_result WHERE task_id=${task};
+    DELETE FROM t_baseline_summary WHERE task_id=${task};
+    DELETE FROM t_baseline_task_expected WHERE task_id=${task};
+    DELETE FROM t_baseline_task_item WHERE task_id=${task};
+    DELETE FROM t_baseline_task_template WHERE task_id=${task};
+    DELETE FROM t_baseline_task WHERE id=${task};
+    COMMIT;`)
   sql(`BEGIN;
     DELETE FROM t_command WHERE agent_id LIKE 'ci-smoke-%';
     DELETE FROM t_asset_software WHERE agent_id LIKE 'ci-smoke-%';
@@ -280,4 +295,74 @@ test(`${mode}: webhook credentials are absent from audit records`, async () => {
   } finally {
     await ok(`/api/notify/channels/${channel.id}`, { token, method: 'DELETE' })
   }
+})
+
+test(`${mode}: baseline candidates, mixed systems, snapshots and publication lifecycle`, async () => {
+  sql("INSERT INTO t_agent(agent_id,hostname,os_type,os_version) VALUES ('ci-smoke-windows','ci-windows-test-host',2,'Windows Server 2022');")
+  const fixtures = { mode, capturedFrom: 'disposable REST API; complete test results seeded as protocol fixtures', platforms: {} }
+  const options = { token: tokens.admin, method: 'POST' }
+  const previousCommands = sql("SELECT count(*) FROM t_command WHERE type='baseline_check';")
+  for (const [platform, agent] of [['linux', 'ci-smoke-001'], ['windows', 'ci-smoke-windows']]) {
+    const document = JSON.parse(readFileSync(new URL(`../baseline/packages/${platform}-baseline.json`, import.meta.url)))
+    document.code = `API-${mode}-${platform}`
+    const boundary = 'alinksec-baseline-fixture-boundary'
+    const rawBody = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="baseline.json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(document)}\r\n--${boundary}--\r\n`)
+    const upload = { method: 'POST', rawBody, extraHeaders: { 'Content-Type': `multipart/form-data; boundary=${boundary}` } }
+    for (const role of ['operator', 'viewer']) {
+      assert.equal((await request('/api/baseline/packages/import', { ...upload, token: tokens[role] })).status, 403)
+      await ok('/api/baseline/packages', { token: tokens[role] })
+    }
+    const candidate = await ok('/api/baseline/packages/import', { ...upload, token: tokens.admin })
+    assert.match(candidate.id, /^[a-f0-9-]{36}$/)
+    const record = { id: candidate.id, code: document.code }; baselinePackages.push(record)
+    const stages = { candidate }; fixtures.platforms[platform] = stages
+    assert.equal(candidate.status, 'candidate'); assert.equal(candidate.diff.length, 4)
+    const prefix = `/api/baseline/packages/${candidate.id}`
+    assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'No review' } })).status, 400)
+    stages.approved = await ok(`${prefix}/review`, { ...options, body: { approved: true, note: 'Fixture review' } })
+    record.template = Number(stages.approved.template_id); assert.ok(Number.isSafeInteger(record.template))
+    assert.equal((await request('/api/baseline/tasks', { ...options, body: { agentIds: [agent], templateIds: [record.template] } })).status, 400)
+    if (platform === 'linux') assert.equal(sql("SELECT count(*) FROM t_command WHERE type='baseline_check';"), previousCommands, 'Import/review cannot run checks')
+    const foreign = platform === 'linux' ? 'ci-smoke-windows' : 'ci-smoke-001'
+    assert.equal((await request(`${prefix}/test`, { ...options, body: { agentIds: [foreign] } })).status, 400)
+    stages.testing = await ok(`${prefix}/test`, { ...options, body: { agentIds: [agent] } })
+    const testId = Number(stages.testing.test_task_id); assert.ok(Number.isSafeInteger(testId)); baselineTaskIds.push(testId)
+    assert.equal(sql(`SELECT count(*) FROM t_baseline_task_expected WHERE task_id=${testId};`), '4')
+    assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'Incomplete test' } })).status, 400)
+    const task = await ok(`/api/baseline/tasks/${testId}`, { token: tokens.viewer })
+    assert.equal(task.templates[0].version, '1'); assert.equal(task.templates[0].content_sha256, candidate.content_sha256)
+    // API fixtures model a complete Agent report. Native check execution is validated separately.
+    const expected = mode === 'sqlite' ? `json_extract(i."check", '$.expected')` : `CAST(i."check" AS JSONB)->>'expected'`
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual)
+      SELECT e.task_id,e.agent_id,e.item_id,true,${expected} FROM t_baseline_task_expected e
+      JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${testId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score) VALUES (${testId},'${agent}',4,4,0,100);
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${testId};
+      COMMIT;`)
+    stages.completed = await ok(prefix, { token: tokens.admin })
+    stages.published = await ok(`${prefix}/publish`, { ...options, body: { note: 'Protocol fixture results reviewed' } })
+    assert.equal(stages.published.status, 'published')
+    const details = await ok(`/api/baseline/tasks/${testId}/agents/${agent}/items`, { token: tokens.viewer })
+    assert.equal(details.length, 4); assert.ok(details.every(item => item.template_version === '1' && !item.fixable))
+    await waitForSql(`SELECT count(*) FROM t_audit_log WHERE path='${prefix}/review' AND status=200;`, '1')
+  }
+  const agents = ['ci-smoke-001', 'ci-smoke-windows']
+  fixtures.coverage = await ok('/api/baseline/coverage', { ...options, body: { agentIds: agents, templateIds: [] } })
+  assert.ok(fixtures.coverage.every(row => row.covered))
+  const created = await ok('/api/baseline/tasks', { token: tokens.operator, method: 'POST', body: { agentIds: agents } })
+  baselineTaskIds.push(Number(created.taskId))
+  const windowsPayload = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-windows' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+  assert.ok(!JSON.stringify(windowsPayload).includes('sysctl -n'), 'Windows cannot receive Linux command selectors')
+  fixtures.templates = await ok('/api/baseline/templates', { token: tokens.viewer })
+  fixtures.list = await ok('/api/baseline/packages', { token: tokens.viewer })
+  fixtures.hosts = await ok('/api/hosts?page=1&size=100', { token: tokens.viewer })
+  fixtures.hostsPage2 = await ok('/api/hosts?page=2&size=100', { token: tokens.viewer })
+  for (const pkg of baselinePackages) {
+    const withdrawn = await ok(`/api/baseline/packages/${pkg.id}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } })
+    fixtures.platforms[pkg.code.endsWith('linux') ? 'linux' : 'windows'].withdrawn = withdrawn
+    assert.equal(withdrawn.status, 'withdrawn')
+  }
+  const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
+  writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })

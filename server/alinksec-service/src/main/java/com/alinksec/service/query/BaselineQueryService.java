@@ -24,7 +24,7 @@ public class BaselineQueryService {
 
     public List<Map<String, Object>> templates() {
         return jdbc.queryForList("""
-                SELECT id, code, name, standard, os_type, version, item_count, enabled
+                SELECT id, code, name, standard, os_type, version, item_count, enabled, package_id, os_version_pattern
                 FROM t_baseline_template ORDER BY id
                 """);
     }
@@ -85,6 +85,7 @@ public class BaselineQueryService {
         Map<String, Object> result = new HashMap<>();
         result.put("task", task.get(0));
         result.put("hosts", hosts);
+        result.put("templates", jdbc.queryForList("SELECT * FROM t_baseline_task_template WHERE task_id=? ORDER BY template_id", taskId));
         return result;
     }
 
@@ -97,14 +98,14 @@ public class BaselineQueryService {
         }
         String sql = ("""
                 SELECT i.id AS item_id, i.code, i.name, i.category, i.severity, r.passed, r.actual, r.message,
-                       r.checked_at, CAST(i.fix_spec AS TEXT) AS fix_spec,
-                       (i.fix_spec IS NOT NULL
+                       r.checked_at, i.rule_id, i.template_version, i.package_id, i.content_sha256, CAST(i.fix_spec AS TEXT) AS fix_spec,
+                       (i.fix_current AND i.fix_spec IS NOT NULL
                         AND CAST(i.fix_spec AS TEXT) NOT IN ('null', '')
                         AND COALESCE(%s, 'auto') <> 'manual') AS fixable
                 FROM t_baseline_result r
-                JOIN t_baseline_item i ON i.id = r.item_id""" + where
+                JOIN v_baseline_result_definition i ON i.result_id = r.id""" + where
                 + " ORDER BY i.severity DESC, i.code")
-                .formatted(database.jsonTextValue("i.fix_spec", "risk"));
+                .formatted(database.isSqlite() ? "json_extract(i.fix_spec, '$.risk')" : "CAST(i.fix_spec AS JSONB)->>'risk'");
         return jdbc.queryForList(sql);
     }
 
@@ -114,7 +115,7 @@ public class BaselineQueryService {
                 SELECT i.category, count(*) AS total,
                        SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS passed,
                        SUM(CASE WHEN NOT r.passed THEN 1 ELSE 0 END) AS failed
-                FROM t_baseline_result r JOIN t_baseline_item i ON i.id = r.item_id
+                FROM t_baseline_result r JOIN v_baseline_result_definition i ON i.result_id = r.id
                 WHERE r.task_id = ?
                 GROUP BY i.category ORDER BY i.category
                 """, taskId);
@@ -139,7 +140,7 @@ public class BaselineQueryService {
                 JOIN t_agent a ON a.agent_id = s.agent_id
                 JOIN t_baseline_task t ON t.id = s.task_id
                 LEFT JOIN t_baseline_result r ON r.task_id = s.task_id AND r.agent_id = s.agent_id
-                LEFT JOIN t_baseline_item i ON i.id = r.item_id
+                LEFT JOIN v_baseline_result_definition i ON i.result_id = r.id
                 WHERE s.task_id = ?
                 GROUP BY s.agent_id, a.hostname, t.name, s.total, s.passed_count, s.failed_count,
                          s.score, s.checked_at

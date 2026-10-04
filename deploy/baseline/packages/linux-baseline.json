@@ -1,0 +1,79 @@
+{
+  "code": "ALINKSEC-LINUX-BASE",
+  "name": "Linux 基础安全核查",
+  "standard": "ALinkSec 基础核查（非完整合规基线）",
+  "product": "linux",
+  "osType": 1,
+  "osVersionPattern": "^.*$",
+  "version": "1",
+  "items": [
+    {
+      "code": "ALINKSEC-LINUX-001",
+      "ruleId": "ALINKSEC-LINUX-001",
+      "name": "IPv4 转发关闭",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.ip_forward",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-LINUX-002",
+      "ruleId": "ALINKSEC-LINUX-002",
+      "name": "TCP SYN Cookie 已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-LINUX-003",
+      "ruleId": "ALINKSEC-LINUX-003",
+      "name": "拒绝 IPv4 重定向",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    },
+    {
+      "code": "ALINKSEC-LINUX-004",
+      "ruleId": "ALINKSEC-LINUX-004",
+      "name": "拒绝 IPv4 源路由",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec reviewed starter definitions",
+    "version": "1",
+    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline",
+    "sha256": "367b24692b21120ec2c50e4e0de0855ce45e7c41d7c39bc1458175d83294f276"
+  }
+}
