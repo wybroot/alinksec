@@ -330,6 +330,9 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     assert.equal(sql(`SELECT count(*) FROM t_baseline_task_expected WHERE task_id=${testId};`), '4')
     assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'Incomplete test' } })).status, 400)
     const task = await ok(`/api/baseline/tasks/${testId}`, { token: tokens.viewer })
+    assert.deepEqual(task.task.template_ids, [record.template])
+    const taskList = await ok('/api/baseline/tasks?page=1&size=100', { token: tokens.viewer })
+    assert.deepEqual(taskList.list.find(row => Number(row.id) === testId).template_ids, [record.template])
     assert.equal(task.templates[0].version, '1'); assert.equal(task.templates[0].content_sha256, candidate.content_sha256)
     // API fixtures model a complete Agent report. Native check execution is validated separately.
     const expected = mode === 'sqlite' ? `json_extract(i."check", '$.expected')` : `CAST(i."check" AS JSONB)->>'expected'`

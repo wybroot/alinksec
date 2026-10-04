@@ -1,6 +1,7 @@
 package com.alinksec.service.query;
 
 import com.alinksec.service.config.DatabaseDialect;
+import com.alinksec.common.util.JsonUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -52,12 +53,13 @@ public class BaselineQueryService {
     public Map<String, Object> tasks(int page, int size) {
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_baseline_task", Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
+                SELECT t.id, t.task_no, t.name, CAST(t.template_ids AS TEXT) AS template_ids, t.status, t.progress,
                        (SELECT count(*) FROM t_baseline_summary s WHERE s.task_id = t.id) AS agent_count,
                        (SELECT ROUND(AVG(s.score), 2) FROM t_baseline_summary s WHERE s.task_id = t.id) AS avg_score,
                        t.created_at, t.started_at, t.finished_at
                 FROM t_baseline_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
                 """, size, (page - 1) * size);
+        list.forEach(this::normalizeTemplateIds);
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -67,13 +69,14 @@ public class BaselineQueryService {
     /** 任务详情：按主机汇总 */
     public Map<String, Object> taskDetail(long taskId) {
         List<Map<String, Object>> task = jdbc.queryForList("""
-                SELECT t.id, t.task_no, t.name, t.template_ids, t.status, t.progress,
+                SELECT t.id, t.task_no, t.name, CAST(t.template_ids AS TEXT) AS template_ids, t.status, t.progress,
                        CAST(t.scope AS TEXT) AS scope, t.created_at, t.started_at, t.finished_at
                 FROM t_baseline_task t WHERE t.id = ?
                 """, taskId);
         if (task.isEmpty()) {
             return null;
         }
+        normalizeTemplateIds(task.get(0));
         List<Map<String, Object>> hosts = jdbc.queryForList("""
                 SELECT s.agent_id, a.hostname, a.ip, s.total, s.passed_count, s.failed_count,
                        s.score, s.checked_at
@@ -87,6 +90,15 @@ public class BaselineQueryService {
         result.put("hosts", hosts);
         result.put("templates", jdbc.queryForList("SELECT * FROM t_baseline_task_template WHERE task_id=? ORDER BY template_id", taskId));
         return result;
+    }
+
+    /** Return plain IDs, never a PostgreSQL JDBC array and its connection internals. */
+    private void normalizeTemplateIds(Map<String, Object> task) {
+        String encoded = String.valueOf(task.get("template_ids"));
+        var values = JsonUtils.read(database.isSqlite() ? encoded : encoded.replace('{', '[').replace('}', ']'));
+        List<Long> ids = new java.util.ArrayList<>();
+        values.forEach(value -> ids.add(value.longValue()));
+        task.put("template_ids", ids);
     }
 
     /** 单机核查明细（含模板项信息；fixable = fix_spec 非空且 risk=auto，一键修复入口用） */

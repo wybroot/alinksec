@@ -124,6 +124,10 @@ class BaselinePackageIntegrationTest {
         }
         assertEquals(2, jdbc.queryForObject("SELECT status FROM t_baseline_task WHERE id=?", Integer.class, task));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_template WHERE task_id=?", Integer.class, task));
+        @SuppressWarnings("unchecked") var detail = (Map<String, Object>) query.taskDetail(task).get("task");
+        assertEquals(List.of(2L, 3L, 4L), detail.get("template_ids"));
+        @SuppressWarnings("unchecked") var taskRows = (List<Map<String, Object>>) query.tasks(1, 10).get("list");
+        assertEquals(List.of(2L, 3L, 4L), taskRows.get(0).get("template_ids"));
     }
 
     @Test void withdrawalBlocksNewTasksAndHistoryDoesNotReadChangedLiveDefinitions() throws Exception {
