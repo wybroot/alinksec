@@ -81,6 +81,8 @@ try {
   let history=page.getByRole('dialog',{name:'misp-source · 最近执行记录'})
   await expect(history.getByText('失败',{exact:true})).toBeVisible()
   await expect(history.getByText('成功',{exact:true})).toHaveCount(2)
+  await expect(history.locator('.el-loading-mask')).toHaveCount(0)
+  await expect(page.locator('.el-message')).toHaveCount(0)
   await page.screenshot({path:root+'/history-desktop.png',fullPage:true,animations:'disabled'})
   await history.locator('.el-dialog__headerbtn').click()
   await expect(history).not.toBeVisible()
