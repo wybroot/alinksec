@@ -142,6 +142,13 @@ jobs:
         working-directory: agent
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
+      - name: Check native protected local identity files and redacted evidence
+        working-directory: agent
+        run: |
+          mkdir -p ../.tmp
+          go test -c -o ../.tmp/baseline-native.test ./internal/baseline
+          cd internal/baseline
+          sudo env ALINKSEC_IDENTITY_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLocalIdentity$'
       - name: Check concurrent guard policy updates
         run: go test -race ./internal/guard ./internal/baseline
         working-directory: agent

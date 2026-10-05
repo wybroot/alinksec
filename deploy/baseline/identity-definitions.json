@@ -1,0 +1,139 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu 24.04 local identity file review",
+    "version": "2026-10-05",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/identity-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-IDENTITY",
+      "name": "Ubuntu 24.04 本地身份文件参考核查",
+      "standard": "本地身份文件参考策略（非完整合规）",
+      "product": "Ubuntu 24.04 本地 passwd/shadow/group/gshadow；需 root 读取、shadow 组及可确认 POSIX ACL",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0009",
+          "ruleId": "BL-LINUX-0009",
+          "name": "本地 passwd/shadow 不含空口令字段",
+          "category": "身份鉴别",
+          "severity": 4,
+          "check": {
+            "type": "local_accounts",
+            "target": "/etc/shadow",
+            "option": "empty_password",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "remediation": "读取本地 passwd 和 shadow，检查两文件的空口令字段、重复名称及 x 对应记录；锁定标记不为空。仅输出账户名称和数量，不输出口令字段或哈希。它不验证口令算法、实际认证方式、PAM 是否接受空口令或 LDAP/SSSD/NSS 等外部身份源。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+        },
+        {
+          "code": "BL-LINUX-0011",
+          "ruleId": "BL-LINUX-0011",
+          "name": "本地 passwd 普通文件的权限不超出 0644 且属主/属组符合参考",
+          "category": "访问控制",
+          "severity": 3,
+          "check": {
+            "type": "local_identity_file",
+            "target": "/etc/passwd",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 数值 GID 0。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+        },
+        {
+          "code": "BL-LINUX-0012",
+          "ruleId": "BL-LINUX-0012",
+          "name": "本地 shadow 普通文件的权限不超出 0640 且属主/属组符合参考",
+          "category": "访问控制",
+          "severity": 4,
+          "check": {
+            "type": "local_identity_file",
+            "target": "/etc/shadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 本地 /etc/group 解析得到的 shadow GID；不是统一 root 组。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+        },
+        {
+          "code": "BL-LINUX-0013",
+          "ruleId": "BL-LINUX-0013",
+          "name": "本地 group 普通文件的权限不超出 0644 且属主/属组符合参考",
+          "category": "访问控制",
+          "severity": 3,
+          "check": {
+            "type": "local_identity_file",
+            "target": "/etc/group",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 数值 GID 0。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+        },
+        {
+          "code": "BL-LINUX-0014",
+          "ruleId": "BL-LINUX-0014",
+          "name": "本地 gshadow 普通文件的权限不超出 0640 且属主/属组符合参考",
+          "category": "访问控制",
+          "severity": 4,
+          "check": {
+            "type": "local_identity_file",
+            "target": "/etc/gshadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 本地 /etc/group 解析得到的 shadow GID；不是统一 root 组。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+        },
+        {
+          "code": "BL-LINUX-0015",
+          "ruleId": "BL-LINUX-0015",
+          "name": "本地 UID 1 至 999 账户的 shell 字段为 nologin/false",
+          "category": "身份鉴别",
+          "severity": 3,
+          "check": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "system_shells",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000,
+            "uid_min": 1,
+            "uid_max": 999
+          },
+          "remediation": "明确仅 UID 1 至 999，root 与范围外账户不在本项；允许 /usr/sbin/nologin、/sbin/nologin、/bin/false、/usr/bin/false，空 shell 按默认 /bin/sh 视作未满足。参考集合不包含合法的 sync/shutdown 等其他受限命令，需人工按业务范围评估；字段满足不证明账户完全锁定或无法以其他方式访问。改变 UID 范围必须新建候选版本并重审测试。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+        },
+        {
+          "code": "BL-LINUX-0016",
+          "ruleId": "BL-LINUX-0016",
+          "name": "本地 passwd 的 UID 0 账户恰好为 root",
+          "category": "身份鉴别",
+          "severity": 4,
+          "check": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "uid0_accounts",
+            "operator": "eq",
+            "expected": "root",
+            "timeout_ms": 5000
+          },
+          "remediation": "只解析本地 passwd，要求 UID 0 名称列表恰好包含 root 一项；不运行 getent、不访问网络，不宣称覆盖外部身份源或全部提权授权。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

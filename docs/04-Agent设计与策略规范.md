@@ -116,6 +116,8 @@ agent/
 | `file_perm` | 文件/目录权限位 | target、perm(如 0644)、owner、group | /etc/passwd 644 |
 | `cmd_output` | 执行 Agent 内置白名单命令并比对输出 | cmd、operator(eq/gt/lt/regex)、expected、timeout_ms | `sysctl -n net.ipv4.tcp_syncookies` = 1 |
 | `sshd_effective` | Linux OpenSSH 解释磁盘配置及明确连接条件 | target、option、connection(user/host/address/local_address/local_port)、operator(eq/regex)、expected、timeout_ms | 指定 root 连接的 PermitRootLogin 为 no；详见 [OpenSSH 配置核查](21-OpenSSH配置核查.md) |
+| `local_identity_file` | Linux 固定本地身份普通文件元数据 | target、perm、owner(0)、group(0/shadow)、operator(subset)、timeout_ms | 权限允许位上限、数值UID/GID与ACL确认；详见 [本地身份文件核查](22-本地身份文件核查.md) |
+| `local_accounts` | 本地 passwd/shadow 的账户字段与明确范围 | target、option、operator(eq)、expected；system_shells 必填 uid_min/uid_max | 空口令字段、指定非root UID范围shell及UID0名称；不输出口令/哈希、不读取外部身份源 |
 | `service_status` | 服务启用状态 | name、expected(enabled/disabled/running) | sshd 禁 root 时 firewalld 状态 |
 | `account_policy` | 口令/账户策略 | key(minlen/maxdays/lockout…)、operator、expected | 密码最长有效期 90 天 |
 | `mount_opt` | 挂载点选项 | mount、option(nosuid/noexec/nodev)、required(bool) | /tmp nodev,nosuid |

@@ -139,6 +139,30 @@ public final class BaselinePackageFormat {
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
             }
+            case "local_identity_file" -> {
+                fields(check, "type", "target", "perm", "owner", "group", "operator", "timeout_ms");
+                require(os == 1, "本地身份文件检查仅支持 Linux");
+                require(Set.of("/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow").contains(text(check, "target", 1024)), "身份文件路径必须为固定本地路径");
+                require(text(check, "operator", 32).equals("subset"), "身份文件权限需使用 subset 上限比较");
+                require(text(check, "perm", 4).matches("[0-7]{4}"), "权限上限需为四位八进制");
+                require(text(check, "owner", 64).equals("0"), "身份文件属主需为数值 UID 0");
+                require(Set.of("0", "shadow").contains(text(check, "group", 64)), "身份文件属组需明确为 GID 0 或本地 shadow 组");
+            }
+            case "local_accounts" -> {
+                String option = text(check, "option", 32);
+                if (option.equals("system_shells")) fields(check, "type", "target", "option", "operator", "expected", "uid_min", "uid_max", "timeout_ms");
+                else fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "本地账户检查仅支持 Linux");
+                require(Set.of("empty_password", "uid0_accounts", "system_shells").contains(option), "本地账户检查项尚未支持");
+                require(text(check, "target", 1024).equals(option.equals("empty_password") ? "/etc/shadow" : "/etc/passwd"), "本地账户检查路径不匹配");
+                require(text(check, "operator", 32).equals("eq"), "本地账户检查仅支持 eq");
+                require(text(check, "expected", 1000).equals(option.equals("uid0_accounts") ? "root" : "0"), "本地账户期望值不匹配");
+                if (option.equals("system_shells")) {
+                    JsonNode min = check.path("uid_min"), max = check.path("uid_max");
+                    require(min.isIntegralNumber() && min.canConvertToLong() && max.isIntegralNumber() && max.canConvertToLong()
+                            && min.longValue() >= 1 && min.longValue() <= max.longValue() && max.longValue() <= 4294967294L, "需明确有效的非 root UID 范围");
+                }
+            }
             default -> throw new IllegalArgumentException("不支持的检查类型: " + type);
         }
         if (check.has("timeout_ms")) require(check.get("timeout_ms").isInt()

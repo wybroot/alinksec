@@ -450,6 +450,71 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === sshRecord.id))
   ssh.withdrawn = await ok(`${sshPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } })
   assert.equal(ssh.withdrawn.status, 'withdrawn')
+  // Identity policies retain numeric metadata and the explicit UID range in
+  // immutable snapshots. These complete reports are redacted protocol fixtures.
+  const identityDocument = JSON.parse(readFileSync(new URL('../baseline/packages/identity/linux-baseline.json', import.meta.url)))
+  identityDocument.code = `API-${mode}-identity`
+  const identityBoundary = 'alinksec-identity-fixture-boundary'
+  const identityUpload = document => ({ method: 'POST', token: tokens.admin,
+    rawBody: Buffer.from(`--${identityBoundary}\r\nContent-Disposition: form-data; name="file"; filename="identity.json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(document)}\r\n--${identityBoundary}--\r\n`),
+    extraHeaders: { 'Content-Type': `multipart/form-data; boundary=${identityBoundary}` } })
+  const invalidIdentity = structuredClone(identityDocument)
+  invalidIdentity.items.find(item => item.check.option === 'system_shells').check.uid_min = 0
+  assert.equal((await request('/api/baseline/packages/import', identityUpload(invalidIdentity))).status, 400)
+  const identity = { candidate: await ok('/api/baseline/packages/import', identityUpload(identityDocument)) }; fixtures.identity = identity
+  const identityRecord = { id: identity.candidate.id, code: identityDocument.code }; baselinePackages.push(identityRecord)
+  const identityPrefix = `/api/baseline/packages/${identityRecord.id}`
+  identity.approved = await ok(`${identityPrefix}/review`, { ...options, body: { approved: true, note: 'Review Ubuntu24 local files and explicit UID 1..999 scope' } })
+  identityRecord.template = Number(identity.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) {
+    assert.equal((await request(`${identityPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  }
+  for (const outcome of ['error', 'complete']) {
+    identity.testing = await ok(`${identityPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(identity.testing.test_task_id); baselineTaskIds.push(taskId)
+    const rawChecks = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n')
+    assert.deepEqual(rawChecks.map(value => JSON.parse(value)), [...identityDocument.items].sort((a,b) => a.code.localeCompare(b.code)).map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must preserve all seven identity snapshots')
+    const type = mode === 'sqlite' ? `json_extract(i."check", '$.type')` : `CAST(i."check" AS JSONB)->>'type'`
+    const target = mode === 'sqlite' ? `json_extract(i."check", '$.target')` : `CAST(i."check" AS JSONB)->>'target'`
+    const option = mode === 'sqlite' ? `json_extract(i."check", '$.option')` : `CAST(i."check" AS JSONB)->>'option'`
+    const metadata = `${type}='local_identity_file'`
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : metadata},
+        CASE WHEN ${metadata} THEN CASE WHEN ${target} IN ('/etc/shadow','/etc/gshadow')
+          THEN 'scope=local-files target=' || ${target} || ' mode=0600 uid=0 gid=42 access_acl=none allowed_mode=0640 expected_uid=0 expected_gid=42'
+          ELSE 'scope=local-files target=' || ${target} || ' mode=0444 uid=0 gid=0 access_acl=none allowed_mode=0644 expected_uid=0 expected_gid=0' END
+          WHEN ${option}='empty_password' THEN 'scope=local-files target=/etc/shadow passwd_accounts=3 shadow_accounts=3 offender_count=1 accounts=[shadow:fixture-user]'
+          WHEN ${option}='system_shells' THEN 'scope=local-files target=/etc/passwd uid_range=1..999 checked=2 offender_count=1 accounts=[fixture-service(uid=999)]'
+          ELSE 'scope=local-files target=/etc/passwd accounts=3 uid0_count=2 uid0_accounts=[fixture-admin,root] expected=root' END,
+        ${outcome === 'error' ? "'Local identity query failed'" : `CASE WHEN ${metadata} THEN '' ELSE 'Local identity policy mismatch' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${metadata} THEN 'pass' ELSE 'fail' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',7,${outcome === 'error' ? 0 : 4},${outcome === 'error' ? 7 : 3},${outcome === 'error' ? 0 : 57},${outcome === 'error' ? 7 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    if (outcome === 'error') {
+      identity.error = await ok(identityPrefix, { token: tokens.admin })
+      assert.equal(identity.error.testReady, false)
+      assert.equal((await request(`${identityPrefix}/publish`, { ...options, body: { note: 'Unconfirmed identity queries cannot publish' } })).status, 400)
+    } else {
+      identity.completed = await ok(identityPrefix, { token: tokens.admin })
+      assert.equal(identity.completed.testReady, true)
+      const items = identity.completed.testResults[0].items
+      assert.equal(items.length, 7); assert.equal(items.filter(item => item.execution_status === 'pass').length, 4)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 3)
+      assert.ok(items.every(item => !item.fixable))
+      assert.ok(items.some(item => item.actual.includes('uid_range=1..999')))
+      assert.ok(!JSON.stringify(identity.completed).includes('DO_NOT_REPORT_PASSWORD_HASH'))
+    }
+  }
+  identity.published = await ok(`${identityPrefix}/publish`, { ...options, body: { note: 'Redacted protocol fixture: four metadata passes and three account policy failures; no live host certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === identityRecord.id))
+  identity.withdrawn = await ok(`${identityPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } })
+  assert.equal(identity.withdrawn.status, 'withdrawn')
   const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
   writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })

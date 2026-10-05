@@ -33,6 +33,8 @@ type CheckSpec struct {
 	TimeoutMs  int            `json:"timeout_ms"`
 	Option     string         `json:"option,omitempty"`
 	Connection *SSHConnection `json:"connection,omitempty"`
+	UIDMin     *uint32        `json:"uid_min,omitempty"`
+	UIDMax     *uint32        `json:"uid_max,omitempty"`
 }
 
 // SSHConnection is explicit so Match rules are evaluated for a known connection.
@@ -128,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -164,8 +166,50 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
 		}
+	} else if s.Type == "local_identity_file" || s.Type == "local_accounts" {
+		allowed := map[string]bool{"type": true, "target": true, "timeout_ms": true, "operator": true}
+		if s.Type == "local_identity_file" {
+			for _, name := range []string{"perm", "owner", "group"} {
+				allowed[name] = true
+			}
+			if !isIdentityPath(s.Target) || s.Operator != "subset" || s.Owner != "0" ||
+				(s.Group != "0" && s.Group != "shadow") || !regexp.MustCompile(`^[0-7]{4}$`).MatchString(s.Perm) {
+				return nil, fmt.Errorf("本地身份文件检查需固定路径、权限上限、UID 0 与明确属组")
+			}
+		} else {
+			allowed["option"], allowed["expected"] = true, true
+			if s.Operator != "eq" {
+				return nil, fmt.Errorf("本地账户检查仅支持 eq")
+			}
+			switch s.Option {
+			case "empty_password":
+				if s.Target != "/etc/shadow" || s.Expected != "0" {
+					return nil, fmt.Errorf("空口令字段检查需 /etc/shadow 及期望 0")
+				}
+			case "uid0_accounts":
+				if s.Target != "/etc/passwd" || s.Expected != "root" {
+					return nil, fmt.Errorf("UID 0 检查仅允许本地 passwd 的 root")
+				}
+			case "system_shells":
+				allowed["uid_min"], allowed["uid_max"] = true, true
+				if s.Target != "/etc/passwd" || s.Expected != "0" || s.UIDMin == nil || s.UIDMax == nil ||
+					*s.UIDMin < 1 || *s.UIDMin > *s.UIDMax || *s.UIDMax == ^uint32(0) {
+					return nil, fmt.Errorf("系统账户 shell 检查需明确非 root UID 范围和期望 0")
+				}
+			default:
+				return nil, fmt.Errorf("本地账户检查项尚未支持")
+			}
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("本地身份检查不允许字段 %s", name)
+			}
+		}
 	} else if s.Option != "" || s.Connection != nil {
-		return nil, fmt.Errorf("SSH 字段不能用于其他检查类型")
+		return nil, fmt.Errorf("产品配置字段不能用于其他检查类型")
+	}
+	if s.Type != "local_accounts" && (seen["uid_min"] || seen["uid_max"]) {
+		return nil, fmt.Errorf("UID 范围不能用于其他检查类型")
 	}
 	pattern := ""
 	if s.Type == "file_content" {

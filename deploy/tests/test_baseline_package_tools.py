@@ -54,7 +54,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         self.assertEqual(2, len(document["unsupported"]))
         self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
-        self.assertEqual(50, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(43, sum(row["status"] == "unsupported" for row in review))
         for row in document["items"]:
             self.assertEqual("sshd_effective", row["check"]["type"])
             self.assertEqual({"user", "host", "address", "local_address", "local_port"}, set(row["check"]["connection"]))
@@ -63,6 +63,22 @@ class BaselinePackageToolsTest(unittest.TestCase):
             mapping = next(r for r in review if r["ruleId"] == row["ruleId"])
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(row["check"], mapping["check"])
+
+    def test_identity_candidate_keeps_local_file_and_uid_scope_in_reviewed_definitions(self):
+        definitions = ROOT / "deploy/baseline/identity-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/identity/linux-baseline.json").read_text()))
+        self.assertEqual({f"BL-LINUX-{i:04}" for i in [9,11,12,13,14,15,16]}, {item["ruleId"] for item in document["items"]})
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(),document["source"]["sha256"])
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        for item in document["items"]:
+            mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
+            self.assertEqual("product_candidate",mapping["status"])
+            self.assertEqual(item["check"],mapping["check"])
+            self.assertNotIn("fix_spec",item)
+        shell = next(item["check"] for item in document["items"] if item["ruleId"] == "BL-LINUX-0015")
+        self.assertEqual((1,999),(shell["uid_min"],shell["uid_max"]))
+        self.assertEqual(8,sum(row["status"] == "mapped" for row in review))
 
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)

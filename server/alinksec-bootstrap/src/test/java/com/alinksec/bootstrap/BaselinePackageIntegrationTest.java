@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -133,6 +133,58 @@ class BaselinePackageIntegrationTest {
         check.putObject("connection").put("user", "root").put("host", "admin.example.invalid")
                 .put("address", "192.0.2.10").put("local_address", "192.0.2.20").put("local_port", 22);
         return doc;
+    }
+
+    ObjectNode identityDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/identity/linux-baseline.json")));
+    }
+
+    @Test void localIdentityBoundsAreReviewedDispatchedAndPreservedAcrossVersions() throws Exception {
+        var document = identityDocument(); var pkg = imported(document);
+        packages.review(id(pkg), true, "Confirm Ubuntu file modes, shadow group and UID scope", 7L);
+        assertThrows(IllegalArgumentException.class, () -> test(id(pkg), "windows"));
+        assertThrows(IllegalArgumentException.class, () -> test(id(pkg), "rocky"));
+        long task = test(id(pkg), "ubuntu");
+        var items = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(7, items.size());
+        for (int i=0; i<items.size(); i++) assertEquals(document.path("items").get(i).path("check"), JsonUtils.mapper().readTree(items.get(i).getCheck()));
+        String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0015'", String.class, task);
+        assertEquals(999, JsonUtils.mapper().readTree(snapshot).path("uid_max").intValue());
+        results.onResult("ubuntu", report(task, "ubuntu", false));
+        packages.publish(id(pkg), "Protocol fixture findings reviewed; no host certification", 7L);
+        var next = document.deepCopy(); next.put("version", "2");
+        for (var item : next.path("items")) if (item.path("code").asText().equals("BL-LINUX-0015")) ((ObjectNode)item.path("check")).put("uid_max",499);
+        var changed=imported(next);
+        assertNotEquals(Boolean.TRUE,packages.detail(id(changed)).get("testReady"));
+        assertThrows(IllegalArgumentException.class,()->packages.publish(id(changed),"Reuse old scope evidence",7L));
+        assertEquals(snapshot,jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0015'",String.class,task));
+    }
+
+    @Test void localIdentityRejectsArbitraryReadsProgramsAndNonLinuxPolicies() throws Exception {
+        for (var change : Map.of("target","/etc/passwd-","owner","root","group","ldap","perm","0649","operator","eq","cmd","cat /etc/shadow","connection","ignored").entrySet()) {
+            var doc=identityDocument();((ObjectNode)doc.path("items").get(1).path("check")).put(change.getKey(),change.getValue());
+            assertThrows(IllegalArgumentException.class,()->imported(doc),change.getKey());
+        }
+        var windows=identityDocument();windows.put("osType",2);assertThrows(IllegalArgumentException.class,()->imported(windows));
+        var numeric=identityDocument();((ObjectNode)numeric.path("items").get(1).path("check")).put("owner",0);assertThrows(IllegalArgumentException.class,()->imported(numeric));
+        var rangeOnPassword=identityDocument();((ObjectNode)rangeOnPassword.path("items").get(0).path("check")).put("uid_min",1);assertThrows(IllegalArgumentException.class,()->imported(rangeOnPassword));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_baseline_package",Integer.class));
+        verifyNoInteractions(commands);
+    }
+
+    @Test void localAccountScopeRejectsMissingFractionalOverflowAndDuplicateUIDFields() throws Exception {
+        for (String missing : List.of("uid_min","uid_max")) {
+            var doc=identityDocument();((ObjectNode)doc.path("items").get(5).path("check")).remove(missing);assertThrows(IllegalArgumentException.class,()->imported(doc));
+        }
+        for (long[] range : List.of(new long[]{0,999},new long[]{1000,999},new long[]{1,4294967295L},new long[]{-1,999})) {
+            var doc=identityDocument();var check=(ObjectNode)doc.path("items").get(5).path("check");check.put("uid_min",range[0]).put("uid_max",range[1]);assertThrows(IllegalArgumentException.class,()->imported(doc));
+        }
+        var fractional=identityDocument();((ObjectNode)fractional.path("items").get(5).path("check")).put("uid_max",999.5);assertThrows(IllegalArgumentException.class,()->imported(fractional));
+        var doc=identityDocument();((ObjectNode)doc.path("items").get(5).path("check")).put("uid_max",4294967294L);imported(doc);
+        String duplicate=JsonUtils.write(identityDocument()).replace("\"uid_max\":999","\"uid_max\":1000,\"uid_max\":999");
+        assertThrows(IllegalArgumentException.class,()->packages.importPackage(new ByteArrayInputStream(duplicate.getBytes(java.nio.charset.StandardCharsets.UTF_8)),7L));
     }
 
     @Test void sshContextIsReviewedDispatchedAndPreservedInTaskSnapshots() throws Exception {

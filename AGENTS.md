@@ -28,6 +28,11 @@
 
 # Module development workflow
 
+- Run independent CI jobs in parallel on separate GitHub runners when GitHub
+  capacity permits. Do not apply this machine's serial validation limits across
+  independent CI runners. Keep checks that share ports, containers or state
+  ordered within one runner.
+
 - Complete one functional module on its own branch before moving to another.
 - Stay on that module's branch while completing its functionality, system
   applicability, failure handling, security boundaries, and validation.

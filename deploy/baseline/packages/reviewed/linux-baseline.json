@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "3",
+  "version": "4",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -163,7 +163,7 @@
     },
     {
       "ruleId": "BL-LINUX-0009",
-      "reason": "单独 awk 读取 shadow，执行失败能够返回 error；明确本地账户范围和读取权限，不能扩展到其他身份源。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0010",
@@ -171,27 +171,27 @@
     },
     {
       "ruleId": "BL-LINUX-0011",
-      "reason": "当前为精确 0644/root/root 元数据断言；明确参考策略，不能把更严格权限直接称作不安全。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0012",
-      "reason": "固定 0600/root/root；需按发行版选择规则，避免一律修改属组及权限。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0013",
-      "reason": "同 0011，精确值与安全上限需要区分。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0014",
-      "reason": "同 0012，发行版与认证工具适用性需要核对。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0015",
-      "reason": "多级 grep/wc 管道会掩盖读取失败；检查的是 shell 文本而非账户锁定，需改为有明确错误传播的查询。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0016",
-      "reason": "单独 awk 能传播读取错误；明确仅本地 passwd 账户，不宣称覆盖外部身份源。"
+      "reason": "通用观测包未包含本项；独立 Ubuntu 24.04 本地身份文件候选见 packages/identity/linux-baseline.json，需确认该产品文件、属组和账户范围后重新审核测试。"
     },
     {
       "ruleId": "BL-LINUX-0017",
@@ -341,8 +341,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.2",
+    "version": "2026-10-05.3",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "1b2250f8640d6c7b6fd7dc5bb3211e4ef26becc524c79e8f5d0f6e066a16cba2"
+    "sha256": "98edf79d67cf70639f6077a42f6b67dd46fa114b9594e0f2265627cba5c7528f"
   }
 }
