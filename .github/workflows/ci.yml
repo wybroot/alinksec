@@ -51,7 +51,7 @@ jobs:
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
           - arch: amd64
