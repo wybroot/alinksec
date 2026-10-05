@@ -126,7 +126,11 @@ func TestNativeSSHEffectiveConfiguration(t *testing.T) {
 			spec.Target = config
 			spec.Connection.Address = tc.address
 			result := checkSSHEffective(&spec)
-			if result.Error || result.Passed != tc.rootPass || !strings.Contains(result.Actual, "permitrootlogin="+tc.rootValue) || !strings.Contains(result.Actual, "addr="+tc.address) {
+			// Older OpenSSH prints the deprecated synonym without-password.
+			// Both spellings prohibit passwords but still permit other root auth.
+			rootMatches := strings.HasSuffix(result.Actual, "permitrootlogin="+tc.rootValue) ||
+				tc.rootValue == "prohibit-password" && strings.HasSuffix(result.Actual, "permitrootlogin=without-password")
+			if result.Error || result.Passed != tc.rootPass || !rootMatches || !strings.Contains(result.Actual, "addr="+tc.address) {
 				t.Fatalf("Include/duplicate/Match result: %+v", result)
 			}
 			t.Logf("native SSH configuration evidence (isolated fixture): %s", result.Actual)

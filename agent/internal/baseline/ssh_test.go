@@ -9,6 +9,7 @@ func TestSSHOutputRequiresOneValidOption(t *testing.T) {
 	for _, tc := range []struct{ output, option, value string }{
 		{"permitrootlogin no\nmaxauthtries 3", "permitrootlogin", "no"},
 		{"PermitRootLogin prohibit-password", "permitrootlogin", "prohibit-password"},
+		{"permitrootlogin without-password", "permitrootlogin", "without-password"},
 		{"MaxAuthTries 4", "maxauthtries", "4"},
 	} {
 		value, err := sshOption(tc.output, tc.option)

@@ -34,7 +34,7 @@ python3 -B deploy/baseline/build-package.py \
   --output-dir .tmp/site-ssh-candidate
 ```
 
-按 [模板审核流程](18-基线模板审核与系统适配.md) 导入、确认来源及连接条件、选适用主机测试，然后评估完整证据再发布。查询得到 `yes`、`prohibit-password` 或 `forced-commands-only` 均不满足本参考的 root 登录 `no` 要求；不能把禁止口令误当成禁止全部 root 登录。某个连接满足条件不代表其他用户、地址、端口或主机条件也满足。
+按 [模板审核流程](18-基线模板审核与系统适配.md) 导入、确认来源及连接条件、选适用主机测试，然后评估完整证据再发布。查询得到 `yes`、`prohibit-password`（旧同义名称 `without-password`）或 `forced-commands-only` 均不满足本参考的 root 登录 `no` 要求；不能把禁止口令误当成禁止全部 root 登录。原始输出名称保留在证据中。某个连接满足条件不代表其他用户、地址、端口或主机条件也满足。
 
 ## 执行与证据边界
 
