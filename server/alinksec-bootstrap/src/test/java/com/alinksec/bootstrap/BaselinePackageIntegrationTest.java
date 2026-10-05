@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -133,6 +133,38 @@ class BaselinePackageIntegrationTest {
         check.putObject("connection").put("user", "root").put("host", "admin.example.invalid")
                 .put("address", "192.0.2.10").put("local_address", "192.0.2.20").put("local_port", 22);
         return doc;
+    }
+
+    ObjectNode pamDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/pam/linux-baseline.json")));
+    }
+
+    @Test void pamServiceAndReferenceAreReviewedDispatchedAndSnapshotted() throws Exception {
+        var doc=pamDocument();var pkg=imported(doc);
+        packages.review(id(pkg),true,"Confirm passwd local-only password chain and explicit quality reference",7L);
+        assertThrows(IllegalArgumentException.class,()->test(id(pkg),"windows"));
+        assertThrows(IllegalArgumentException.class,()->test(id(pkg),"rocky"));
+        long task=test(id(pkg),"ubuntu");var sent=dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(2,sent.size());
+        for(int i=0;i<sent.size();i++)assertEquals(doc.path("items").get(i).path("check"),JsonUtils.mapper().readTree(sent.get(i).getCheck()));
+        String snapshot=jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0002'",String.class,task);
+        assertTrue(snapshot.contains("enforce_for_root=1"));
+        results.onResult("ubuntu",report(task,"ubuntu",false));packages.publish(id(pkg),"Complete protocol fixture; findings retained",7L);
+        var next=doc.deepCopy();next.put("version","2");var changed=imported(next);
+        assertThrows(IllegalArgumentException.class,()->packages.publish(id(changed),"Reuse previous evidence",7L));
+        assertEquals(snapshot,jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0002'",String.class,task));
+    }
+
+    @Test void pamDefinitionsRejectOtherServicesExecutionFieldsAndWeakenedReferences() throws Exception {
+        for(var change:Map.of("target","/etc/pam.d/sshd","cmd","cat /etc/shadow","option","auth","operator","regex","expected","minlen>=1","service","other").entrySet()){
+            var doc=pamDocument();((ObjectNode)doc.path("items").get(0).path("check")).put(change.getKey(),change.getValue());
+            assertThrows(IllegalArgumentException.class,()->imported(doc),change.getKey());
+        }
+        var windows=pamDocument();windows.put("osType",2);assertThrows(IllegalArgumentException.class,()->imported(windows));
+        var nil=pamDocument();((ObjectNode)nil.path("items").get(0).path("check")).putNull("connection");assertThrows(IllegalArgumentException.class,()->imported(nil));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_baseline_package",Integer.class));verifyNoInteractions(commands);
     }
 
     ObjectNode identityDocument() throws Exception {

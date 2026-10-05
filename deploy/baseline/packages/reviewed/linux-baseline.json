@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "4",
+  "version": "5",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -135,7 +135,7 @@
     },
     {
       "ruleId": "BL-LINUX-0002",
-      "reason": "名称声称字符复杂度，实际只匹配 minlen 以 8 开始的行，既没检查 minclass，也没核对认证链；拆分并验证有效配置。"
+      "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-PASSWORD 独立候选，需确认 passwd 链及 Linux-PAM/libpwquality 产品条件。"
     },
     {
       "ruleId": "BL-LINUX-0003",
@@ -151,7 +151,7 @@
     },
     {
       "ruleId": "BL-LINUX-0006",
-      "reason": "仅匹配 SHA512 文本，不能证明已存口令或 PAM 使用的算法；按产品确认算法与实际生效配置，避免盲目自动改写。"
+      "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-PASSWORD 独立候选，需确认 passwd 链及 Linux-PAM/libpwquality 产品条件。"
     },
     {
       "ruleId": "BL-LINUX-0007",
@@ -341,8 +341,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.3",
+    "version": "2026-10-05.4",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "98edf79d67cf70639f6077a42f6b67dd46fa114b9594e0f2265627cba5c7528f"
+    "sha256": "b4a502eab2468681a080764355da3b5984fce57058189b84d8533d55fb965e3e"
   }
 }

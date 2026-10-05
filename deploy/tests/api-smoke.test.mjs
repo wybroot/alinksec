@@ -515,6 +515,58 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === identityRecord.id))
   identity.withdrawn = await ok(`${identityPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } })
   assert.equal(identity.withdrawn.status, 'withdrawn')
+  // The PAM service and reference remain immutable; full reports here are
+  // protocol fixtures. Actual password changes occur only in the dedicated image.
+  const pamDocument = JSON.parse(readFileSync(new URL('../baseline/packages/pam/linux-baseline.json', import.meta.url)))
+  pamDocument.code = `API-${mode}-pam`
+  const pamBoundary = 'alinksec-pam-fixture-boundary'
+  const pamUpload = document => ({ method: 'POST', token: tokens.admin,
+    rawBody: Buffer.from(`--${pamBoundary}\r\nContent-Disposition: form-data; name="file"; filename="pam.json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(document)}\r\n--${pamBoundary}--\r\n`),
+    extraHeaders: { 'Content-Type': `multipart/form-data; boundary=${pamBoundary}` } })
+  const invalidPAM = structuredClone(pamDocument); invalidPAM.items[0].check.target = '/etc/pam.d/sshd'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidPAM))).status, 400)
+  const pam = { candidate: await ok('/api/baseline/packages/import', pamUpload(pamDocument)) }; fixtures.pam = pam
+  const pamRecord = { id: pam.candidate.id, code: pamDocument.code }; baselinePackages.push(pamRecord)
+  const pamPrefix = `/api/baseline/packages/${pamRecord.id}`
+  pam.approved = await ok(`${pamPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm passwd local password chain and explicit quality/hash references' } })
+  pamRecord.template = Number(pam.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${pamPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'complete']) {
+    pam.testing = await ok(`${pamPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(pam.testing.test_task_id); baselineTaskIds.push(taskId)
+    const rawChecks = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n')
+    assert.deepEqual(rawChecks.map(value => JSON.parse(value)), pamDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must retain selected PAM service and full reference')
+    const option = mode === 'sqlite' ? `json_extract(i."check", '$.option')` : `CAST(i."check" AS JSONB)->>'option'`
+    const hash = `${option}='unix_hash'`
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : hash},
+        CASE WHEN ${hash} THEN 'scope=passwd-password-chain service=/etc/pam.d/passwd stack=local-unix-deny-permit quality_present=true unix_use_authtok=true algorithm=yescrypt inputs=4 expected=yescrypt'
+        ELSE 'scope=passwd-password-chain service=/etc/pam.d/passwd stack=local-unix-deny-permit quality_present=true unix_use_authtok=true algorithm=yescrypt inputs=4 minlen=8 minclass=1 dcredit=0 ucredit=0 lcredit=0 ocredit=0 enforcing=1 enforce_for_root=0' END,
+        ${outcome === 'error' ? "'PAM chain is unconfirmed'" : `CASE WHEN ${hash} THEN '' ELSE 'PAM password quality reference mismatch' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${hash} THEN 'pass' ELSE 'fail' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${outcome === 'error' ? 0 : 1},${outcome === 'error' ? 2 : 1},${outcome === 'error' ? 0 : 50},${outcome === 'error' ? 2 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    if (outcome === 'error') {
+      pam.error = await ok(pamPrefix, { token: tokens.admin }); assert.equal(pam.error.testReady, false)
+      assert.equal((await request(`${pamPrefix}/publish`, { ...options, body: { note: 'Unsupported PAM chain cannot publish' } })).status, 400)
+    } else {
+      pam.completed = await ok(pamPrefix, { token: tokens.admin }); assert.equal(pam.completed.testReady, true)
+      const items = pam.completed.testResults[0].items
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 1)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
+      assert.ok(items.every(item => !item.fixable && item.actual.includes('service=/etc/pam.d/passwd')))
+      assert.ok(!JSON.stringify(pam.completed).includes('DO_NOT_REPORT_PAM_SECRET'))
+    }
+  }
+  pam.published = await ok(`${pamPrefix}/publish`, { ...options, body: { note: 'Protocol fixture: declared hash selection passes, quality reference fails; no production credentials changed' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === pamRecord.id))
+  pam.withdrawn = await ok(`${pamPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pam.withdrawn.status, 'withdrawn')
   const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
   writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })

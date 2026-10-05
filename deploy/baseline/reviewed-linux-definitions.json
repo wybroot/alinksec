@@ -1,7 +1,7 @@
 {
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.3",
+    "version": "2026-10-05.4",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json"
   },
   "platforms": {
@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "4",
+      "version": "5",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -142,7 +142,7 @@
         },
         {
           "ruleId": "BL-LINUX-0002",
-          "reason": "名称声称字符复杂度，实际只匹配 minlen 以 8 开始的行，既没检查 minclass，也没核对认证链；拆分并验证有效配置。"
+          "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-PASSWORD 独立候选，需确认 passwd 链及 Linux-PAM/libpwquality 产品条件。"
         },
         {
           "ruleId": "BL-LINUX-0003",
@@ -158,7 +158,7 @@
         },
         {
           "ruleId": "BL-LINUX-0006",
-          "reason": "仅匹配 SHA512 文本，不能证明已存口令或 PAM 使用的算法；按产品确认算法与实际生效配置，避免盲目自动改写。"
+          "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-PASSWORD 独立候选，需确认 passwd 链及 Linux-PAM/libpwquality 产品条件。"
         },
         {
           "ruleId": "BL-LINUX-0007",
@@ -370,13 +370,21 @@
       },
       {
         "ruleId": "BL-LINUX-0002",
-        "name": "pwquality 口令复杂度策略",
+        "name": "passwd 服务强制口令质量与已检查口令的传递",
         "category": "身份鉴别",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "名称声称字符复杂度，实际只匹配 minlen 以 8 开始的行，既没检查 minclass，也没核对认证链；拆分并验证有效配置。",
+        "status": "product_candidate",
+        "reason": "独立 Ubuntu24.04 passwd PAM 候选；按已支持本地链及配置覆盖解释，不宣称覆盖全部认证链或现存口令。",
         "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：名称声称字符复杂度，实际只匹配 minlen 以 8 开始的行，既没检查 minclass，也没核对认证链；拆分并验证有效配置。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "remediation": "限定 passwd 的 password 管理组和已支持的本地 PAM 链：requisite pam_pwquality、指定跳转的 pam_unix、requisite pam_deny、required pam_permit。按 libpwquality 1.4.5 的默认值、排序 drop-in、主配置及模块参数顺序解释；参考 minlen>=12、minclass>=3、credit<=0、enforcing=1、enforce_for_root 出现，并要求 pam_unix use_authtok。只核对指定长度/类别参考，不证明字典、旧口令、全部服务、外部身份源、实际应用调用或现存口令质量。 Include 循环、未知模块/控制、子栈、无权限、缺失/非普通文件、配置错误或读取变化保持 error；不提供 PAM 或口令自动修复。",
+        "check": {
+          "type": "pam_password",
+          "target": "/etc/pam.d/passwd",
+          "operator": "eq",
+          "timeout_ms": 5000,
+          "option": "quality",
+          "expected": "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+        }
       },
       {
         "ruleId": "BL-LINUX-0003",
@@ -410,13 +418,21 @@
       },
       {
         "ruleId": "BL-LINUX-0006",
-        "name": "口令散列算法生效策略",
+        "name": "passwd 服务 pam_unix 的新口令散列选择为 yescrypt",
         "category": "身份鉴别",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "仅匹配 SHA512 文本，不能证明已存口令或 PAM 使用的算法；按产品确认算法与实际生效配置，避免盲目自动改写。",
+        "status": "product_candidate",
+        "reason": "独立 Ubuntu24.04 passwd PAM 候选；按已支持本地链及配置覆盖解释，不宣称覆盖全部认证链或现存口令。",
         "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：仅匹配 SHA512 文本，不能证明已存口令或 PAM 使用的算法；按产品确认算法与实际生效配置，避免盲目自动改写。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "remediation": "只核对 passwd 已支持 password 链中明确的 pam_unix yescrypt 选择；没有显式算法时无法确认编译默认值。它不读取、报告或认证现有口令哈希，不证明全部服务、外部身份源、实际应用调用或已存口令使用此算法。 Include 循环、未知模块/控制、子栈、无权限、缺失/非普通文件、配置错误或读取变化保持 error；不提供 PAM 或口令自动修复。",
+        "check": {
+          "type": "pam_password",
+          "target": "/etc/pam.d/passwd",
+          "operator": "eq",
+          "timeout_ms": 5000,
+          "option": "unix_hash",
+          "expected": "yescrypt"
+        }
       },
       {
         "ruleId": "BL-LINUX-0007",

@@ -105,6 +105,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkSSHEffective(cs)
 	case "local_identity_file", "local_accounts":
 		result = checkLocalIdentity(cs)
+	case "pam_password":
+		result = checkPAMPassword(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}

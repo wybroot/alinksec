@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -165,6 +165,19 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		case "eq", "regex":
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
+		}
+	} else if s.Type == "pam_password" {
+		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}
+		if s.Target != "/etc/pam.d/passwd" || s.Operator != "eq" ||
+			(s.Option != "quality" && s.Option != "unix_hash") ||
+			(s.Option == "quality" && s.Expected != pamQualityReference) ||
+			(s.Option == "unix_hash" && s.Expected != "yescrypt") {
+			return nil, fmt.Errorf("PAM 口令检查仅支持 passwd 服务的明确质量参考或 yescrypt 选择")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("PAM 口令检查不允许字段 %s", name)
+			}
 		}
 	} else if s.Type == "local_identity_file" || s.Type == "local_accounts" {
 		allowed := map[string]bool{"type": true, "target": true, "timeout_ms": true, "operator": true}
