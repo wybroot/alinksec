@@ -1,7 +1,7 @@
 {
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.1",
+    "version": "2026-10-05.2",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json"
   },
   "platforms": {
@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "2",
+      "version": "3",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -162,11 +162,11 @@
         },
         {
           "ruleId": "BL-LINUX-0007",
-          "reason": "只看主配置文件任意匹配行，未处理 Include、重复和 Match；需读取有效策略并确认目标连接条件。"
+          "reason": "已有独立 Ubuntu 24.04 OpenSSH 指定连接候选；该通用观测包不包含 SSH 检查，须单独确认组件、路径和连接条件后审核测试。"
         },
         {
           "ruleId": "BL-LINUX-0008",
-          "reason": "同上，仅文件中的 1–4 声明。"
+          "reason": "已有独立 Ubuntu 24.04 OpenSSH 指定连接候选；该通用观测包不包含 SSH 检查，须单独确认组件、路径和连接条件后审核测试。"
         },
         {
           "ruleId": "BL-LINUX-0009",
@@ -420,23 +420,55 @@
       },
       {
         "ruleId": "BL-LINUX-0007",
-        "name": "SSH 有效 root 登录策略",
+        "name": "指定示例连接的 OpenSSH root 登录配置为 no",
         "category": "身份鉴别",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "只看主配置文件任意匹配行，未处理 Include、重复和 Match；需读取有效策略并确认目标连接条件。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：只看主配置文件任意匹配行，未处理 Include、重复和 Match；需读取有效策略并确认目标连接条件。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "已提供独立 Ubuntu 24.04 OpenSSH 候选；使用 OpenSSH 自身解析 Include、重复项和指定连接的 Match。",
+        "scope": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。",
+        "remediation": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。 prohibit-password 仍允许部分 root 登录，本参考策略要求 no；管理员评估业务需求后人工调整并验证实际服务。",
+        "check": {
+          "type": "sshd_effective",
+          "target": "/etc/ssh/sshd_config",
+          "option": "permitrootlogin",
+          "connection": {
+            "user": "root",
+            "host": "admin.example.invalid",
+            "address": "192.0.2.10",
+            "local_address": "192.0.2.20",
+            "local_port": 22
+          },
+          "operator": "eq",
+          "expected": "no",
+          "timeout_ms": 5000
+        },
+        "candidate": "packages/ssh/linux-baseline.json"
       },
       {
         "ruleId": "BL-LINUX-0008",
-        "name": "SSH 有效认证重试次数",
+        "name": "指定示例连接的 OpenSSH MaxAuthTries 为 1 至 4",
         "category": "身份鉴别",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "同上，仅文件中的 1–4 声明。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：同上，仅文件中的 1–4 声明。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "已提供独立 Ubuntu 24.04 OpenSSH 候选；使用 OpenSSH 自身解析 Include、重复项和指定连接的 Match。",
+        "scope": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。",
+        "remediation": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。 1 至 4 是本项目参考阈值，不是 OpenSSH 默认值或完整账户锁定策略。",
+        "check": {
+          "type": "sshd_effective",
+          "target": "/etc/ssh/sshd_config",
+          "option": "maxauthtries",
+          "connection": {
+            "user": "root",
+            "host": "admin.example.invalid",
+            "address": "192.0.2.10",
+            "local_address": "192.0.2.20",
+            "local_port": 22
+          },
+          "operator": "regex",
+          "expected": "^[1-4]$",
+          "timeout_ms": 5000
+        },
+        "candidate": "packages/ssh/linux-baseline.json"
       },
       {
         "ruleId": "BL-LINUX-0009",

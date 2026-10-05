@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -124,6 +124,77 @@ class BaselinePackageIntegrationTest {
                 }
             }
         }
+    }
+
+    ObjectNode sshDocument() {
+        var doc = document("SSH", 1, "^ubuntu 24\\.04$", "1");
+        var check = ((ObjectNode) doc.path("items").get(0)).putObject("check");
+        check.put("type", "sshd_effective").put("target", "/etc/ssh/sshd_config").put("option", "permitrootlogin").put("operator", "eq").put("expected", "no");
+        check.putObject("connection").put("user", "root").put("host", "admin.example.invalid")
+                .put("address", "192.0.2.10").put("local_address", "192.0.2.20").put("local_port", 22);
+        return doc;
+    }
+
+    @Test void sshContextIsReviewedDispatchedAndPreservedInTaskSnapshots() throws Exception {
+        var first = sshDocument(); var pkg = imported(first);
+        packages.review(id(pkg), true, "Confirm this specific connection", 7L);
+        long test = test(id(pkg), "ubuntu");
+        var sent = JsonUtils.mapper().readTree(dispatched.get(dispatched.size() - 1).getBaselineCheck().getItems(0).getCheck());
+        assertEquals(first.path("items").get(0).path("check"), sent);
+        results.onResult("ubuntu", report(test, "ubuntu", false));
+        packages.publish(id(pkg), "Configuration-only protocol fixture; not live daemon validation", 7L);
+        assertFalse((Boolean) tasks.coverage(List.of("rocky"), List.of()).get(0).get("covered"));
+        String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=?", String.class, test);
+        assertEquals(sent, JsonUtils.mapper().readTree(snapshot));
+        var next = first.deepCopy(); next.put("version", "2");
+        ((ObjectNode) next.path("items").get(0).path("check").path("connection")).put("address", "198.51.100.10");
+        var changed = imported(next);
+        assertEquals("candidate", changed.get("status"));
+        assertNotEquals(Boolean.TRUE, packages.detail(id(changed)).get("testReady"));
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse previous context evidence", 7L));
+        assertEquals(snapshot, jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=?", String.class, test));
+    }
+
+    @Test void sshPackagesRejectMissingInjectedAndCrossPlatformConnections() {
+        for (String field : List.of("user", "host", "address", "local_address", "local_port")) {
+            var doc = sshDocument(); ((ObjectNode) doc.path("items").get(0).path("check").path("connection")).remove(field);
+            assertThrows(IllegalArgumentException.class, () -> imported(doc), field);
+        }
+        for (var invalid : Map.of("user", "root,addr=198.51.100.10", "host", "localhost;touch /tmp/probe", "address", "example.org", "local_address", "fe80::1%eth0").entrySet()) {
+            var doc = sshDocument(); ((ObjectNode) doc.path("items").get(0).path("check").path("connection")).put(invalid.getKey(), invalid.getValue());
+            assertThrows(IllegalArgumentException.class, () -> imported(doc));
+        }
+        var wrongUser = sshDocument(); ((ObjectNode) wrongUser.path("items").get(0).path("check").path("connection")).put("user", "other");
+        assertThrows(IllegalArgumentException.class, () -> imported(wrongUser));
+        for (String value : List.of("127.000.0.1", "256.0.0.1", "::ffff:192.0.2.1", "::ffff:c000:201")) {
+            var doc = sshDocument(); ((ObjectNode) doc.path("items").get(0).path("check").path("connection")).put("address", value);
+            assertThrows(IllegalArgumentException.class, () -> imported(doc));
+        }
+        for (int port : List.of(0, 65536)) {
+            var doc = sshDocument(); ((ObjectNode) doc.path("items").get(0).path("check").path("connection")).put("local_port", port);
+            assertThrows(IllegalArgumentException.class, () -> imported(doc));
+        }
+        for (String extension : List.of("cmd", "binary", "flags")) {
+            var doc = sshDocument(); ((ObjectNode) doc.path("items").get(0).path("check")).put(extension, "unreviewed");
+            assertThrows(IllegalArgumentException.class, () -> imported(doc));
+        }
+        var windows = sshDocument(); windows.put("osType", 2);
+        assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        var unsupported = sshDocument(); ((ObjectNode) unsupported.path("items").get(0).path("check")).put("option", "authorizedkeyscommand");
+        assertThrows(IllegalArgumentException.class, () -> imported(unsupported));
+        var numericPort = sshDocument(); ((ObjectNode) numericPort.path("items").get(0).path("check").path("connection")).put("local_port", "22");
+        assertThrows(IllegalArgumentException.class, () -> imported(numericPort));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class));
+        verifyNoInteractions(commands);
+    }
+
+    @Test void sshConnectionSupportsIPv6AndRejectsDuplicateNestedFields() throws Exception {
+        var doc = sshDocument(); var connection = (ObjectNode) doc.path("items").get(0).path("check").path("connection");
+        connection.put("address", "2001:db8::10").put("local_address", "2001:db8::20");
+        imported(doc);
+        doc.put("version", "2");
+        String duplicate = JsonUtils.write(doc).replace("\"user\":\"root\"", "\"user\":\"wrong\",\"user\":\"root\"");
+        assertThrows(IllegalArgumentException.class, () -> packages.importPackage(new ByteArrayInputStream(duplicate.getBytes(java.nio.charset.StandardCharsets.UTF_8)), 7L));
     }
 
     @Test void legacyRetirementPreservesTaskSnapshotsAndUnrelatedTemplates() throws Exception {

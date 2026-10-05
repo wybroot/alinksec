@@ -123,6 +123,22 @@ public final class BaselinePackageFormat {
                     catch (NumberFormatException e) { throw new IllegalArgumentException("期望值必须为有限数值"); }
                 }
             }
+            case "sshd_effective" -> {
+                fields(check, "type", "target", "option", "connection", "operator", "expected", "timeout_ms");
+                require(os == 1, "sshd_effective 当前仅支持 Linux OpenSSH"); target(check, os);
+                require(Set.of("permitrootlogin", "maxauthtries").contains(text(check, "option", 32)), "SSH 配置项尚未支持");
+                JsonNode connection = check.path("connection");
+                fields(connection, "user", "host", "address", "local_address", "local_port");
+                require(text(connection, "user", 64).matches("[A-Za-z_][A-Za-z0-9_.-]{0,63}"), "SSH 用户无效");
+                require(!check.path("option").asText().equals("permitrootlogin") || connection.path("user").asText().equals("root"), "root 登录策略必须使用 root 连接条件");
+                require(text(connection, "host", 253).matches("[A-Za-z0-9][A-Za-z0-9.-]{0,252}"), "SSH 来源主机无效");
+                require(ipLiteral(text(connection, "address", 45)) && ipLiteral(text(connection, "local_address", 45)), "SSH 地址需为 IPv4 或 IPv6 字面值");
+                require(connection.path("local_port").isInt() && connection.path("local_port").intValue() >= 1
+                        && connection.path("local_port").intValue() <= 65535, "SSH 本地端口需为 1 至 65535");
+                String op = text(check, "operator", 32), expected = text(check, "expected", 1000);
+                require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
+                if (op.equals("regex")) regex(expected);
+            }
             default -> throw new IllegalArgumentException("不支持的检查类型: " + type);
         }
         if (check.has("timeout_ms")) require(check.get("timeout_ms").isInt()
@@ -138,6 +154,17 @@ public final class BaselinePackageFormat {
         String value = text(node, "target", 1024);
         require(os == 1 ? value.startsWith("/") : value.matches("^[A-Za-z]:\\\\.*"), "检查路径必须为目标平台的绝对路径");
         require(!Arrays.asList(value.replace('\\', '/').split("/")).contains(".."), "检查路径不能包含上级目录");
+    }
+    private static boolean ipLiteral(String value) {
+        if (value.matches("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")) {
+            for (String part : value.split("\\."))
+                if (Integer.parseInt(part) > 255 || part.length() > 1 && part.startsWith("0")) return false;
+            return true;
+        }
+        // Only hex/colon literals reach getByName: no DNS lookup or zone IDs.
+        if (!value.contains(":") || !value.matches("[0-9A-Fa-f:]+")) return false;
+        try { return java.net.InetAddress.getByName(value) instanceof java.net.Inet6Address; }
+        catch (java.net.UnknownHostException e) { return false; }
     }
     private static void regex(String value) {
         // RE2/J and Go share the linear-time RE2 syntax, rather than Java backtracking syntax.

@@ -112,9 +112,10 @@ agent/
 | type | 语义 | 关键字段 | 示例 |
 |------|------|----------|------|
 | `file_line` | 文件中是否存在/不存在匹配行 | target、operator(contains/not_contains/regex)、expected、ignore_case | 检查 pam 配置 |
-| `file_content` | 文件整体内容正则校验 | target、regex | 检查配置值 `PermitRootLogin no` |
+| `file_content` | 文件整体内容正则校验 | target、regex | 文件中是否含指定文本（不解释产品配置） |
 | `file_perm` | 文件/目录权限位 | target、perm(如 0644)、owner、group | /etc/passwd 644 |
 | `cmd_output` | 执行 Agent 内置白名单命令并比对输出 | cmd、operator(eq/gt/lt/regex)、expected、timeout_ms | `sysctl -n net.ipv4.tcp_syncookies` = 1 |
+| `sshd_effective` | Linux OpenSSH 解释磁盘配置及明确连接条件 | target、option、connection(user/host/address/local_address/local_port)、operator(eq/regex)、expected、timeout_ms | 指定 root 连接的 PermitRootLogin 为 no；详见 [OpenSSH 配置核查](21-OpenSSH配置核查.md) |
 | `service_status` | 服务启用状态 | name、expected(enabled/disabled/running) | sshd 禁 root 时 firewalld 状态 |
 | `account_policy` | 口令/账户策略 | key(minlen/maxdays/lockout…)、operator、expected | 密码最长有效期 90 天 |
 | `mount_opt` | 挂载点选项 | mount、option(nosuid/noexec/nodev)、required(bool) | /tmp nodev,nosuid |

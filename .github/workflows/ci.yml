@@ -132,8 +132,16 @@ jobs:
           bash deploy/tests/sqlite-maintenance-local.sh
         env:
           ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
+      - name: Ensure native OpenSSH configuration checks are available
+        run: |
+          if ! test -x /usr/sbin/sshd; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends openssh-server
+          fi
       - run: go test -v ./...
         working-directory: agent
+        env:
+          ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
       - name: Check concurrent guard policy updates
         run: go test -race ./internal/guard ./internal/baseline
         working-directory: agent

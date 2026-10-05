@@ -46,6 +46,24 @@ class BaselinePackageToolsTest(unittest.TestCase):
         self.assertTrue(all(row["check"]["cmd"] in registry["linux"] for row in document["items"]))
         self.assertTrue(all("fix_spec" not in row for row in document["items"]))
 
+    def test_ssh_candidate_has_explicit_context_and_does_not_expand_generic_coverage(self):
+        definitions = ROOT / "deploy/baseline/ssh-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/ssh/linux-baseline.json").read_text()))
+        self.assertEqual({"BL-LINUX-0007", "BL-LINUX-0008"}, {row["ruleId"] for row in document["items"]})
+        self.assertEqual(2, len(document["unsupported"]))
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        self.assertEqual(50, sum(row["status"] == "unsupported" for row in review))
+        for row in document["items"]:
+            self.assertEqual("sshd_effective", row["check"]["type"])
+            self.assertEqual({"user", "host", "address", "local_address", "local_port"}, set(row["check"]["connection"]))
+            self.assertNotIn("cmd", row["check"])
+            self.assertNotIn("fix_spec", row)
+            mapping = next(r for r in review if r["ruleId"] == row["ruleId"])
+            self.assertEqual("product_candidate", mapping["status"])
+            self.assertEqual(row["check"], mapping["check"])
+
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)
         definition = json.loads(self.definitions.read_text())

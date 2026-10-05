@@ -396,6 +396,60 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     fixtures.platforms[pkg.code.endsWith('linux') ? 'linux' : 'windows'].withdrawn = withdrawn
     assert.equal(withdrawn.status, 'withdrawn')
   }
+  // A separate product candidate preserves connection context through the real
+  // API. Complete reports below are protocol fixtures, not native SSH evidence.
+  const sshDocument = JSON.parse(readFileSync(new URL('../baseline/packages/ssh/linux-baseline.json', import.meta.url)))
+  sshDocument.code = `API-${mode}-ssh`
+  const sshBoundary = 'alinksec-ssh-fixture-boundary'
+  const sshUpload = document => ({ method: 'POST', token: tokens.admin,
+    rawBody: Buffer.from(`--${sshBoundary}\r\nContent-Disposition: form-data; name="file"; filename="ssh.json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(document)}\r\n--${sshBoundary}--\r\n`),
+    extraHeaders: { 'Content-Type': `multipart/form-data; boundary=${sshBoundary}` } })
+  const invalidSSH = structuredClone(sshDocument)
+  invalidSSH.items[0].check.connection.address = '192.0.2.10,user=other'
+  assert.equal((await request('/api/baseline/packages/import', sshUpload(invalidSSH))).status, 400)
+  const ssh = { candidate: await ok('/api/baseline/packages/import', sshUpload(sshDocument)) }; fixtures.ssh = ssh
+  const sshRecord = { id: ssh.candidate.id, code: sshDocument.code }; baselinePackages.push(sshRecord)
+  const sshPrefix = `/api/baseline/packages/${sshRecord.id}`
+  ssh.approved = await ok(`${sshPrefix}/review`, { ...options, body: { approved: true, note: 'Review explicit sample connection only' } })
+  sshRecord.template = Number(ssh.approved.template_id)
+  assert.equal((await request(`${sshPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-windows'] } })).status, 400)
+  for (const outcome of ['error', 'fail']) {
+    ssh.testing = await ok(`${sshPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(ssh.testing.test_task_id); baselineTaskIds.push(taskId)
+    const rawChecks = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n')
+    const checks = rawChecks.map(value => JSON.parse(value))
+    assert.equal(checks.length, 2)
+    assert.ok(checks.every(check => check.type === 'sshd_effective'))
+    for (const check of checks) assert.deepEqual(check.connection, sshDocument.items[0].check.connection)
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('sshd_effective') && payload.includes('192.0.2.10'))
+    assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must preserve both snapshotted check definitions')
+    const option = mode === 'sqlite' ? `json_extract(i."check", '$.option')` : `CAST(i."check" AS JSONB)->>'option'`
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,false,
+        CASE WHEN ${option}='permitrootlogin' THEN 'connection=(user=root,host=admin.example.invalid,addr=192.0.2.10,laddr=192.0.2.20,lport=22) permitrootlogin=yes'
+             ELSE 'connection=(user=root,host=admin.example.invalid,addr=192.0.2.10,laddr=192.0.2.20,lport=22) maxauthtries=6' END,
+        '${outcome === 'error' ? 'SSH configuration query failed' : 'Sample connection policy mismatch'}','${outcome}'
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,0,2,0,${outcome === 'error' ? 2 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    if (outcome === 'error') {
+      ssh.error = await ok(sshPrefix, { token: tokens.admin })
+      assert.equal(ssh.error.testReady, false)
+      assert.equal((await request(`${sshPrefix}/publish`, { ...options, body: { note: 'Query errors cannot publish' } })).status, 400)
+    } else {
+      ssh.completed = await ok(sshPrefix, { token: tokens.admin })
+      assert.equal(ssh.completed.testReady, true)
+      assert.ok(ssh.completed.testResults[0].items.every(item => item.actual.includes('addr=192.0.2.10') && item.message === 'Sample connection policy mismatch'))
+    }
+  }
+  ssh.published = await ok(`${sshPrefix}/publish`, { ...options, body: { note: 'Protocol fixtures: both sample-context policies are noncompliant; no live host certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === sshRecord.id))
+  ssh.withdrawn = await ok(`${sshPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } })
+  assert.equal(ssh.withdrawn.status, 'withdrawn')
   const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
   writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })

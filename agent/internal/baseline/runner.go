@@ -101,6 +101,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkFilePerm(cs)
 	case "cmd_output":
 		result = checkCmdOutput(cs)
+	case "sshd_effective":
+		result = checkSSHEffective(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}
@@ -210,6 +212,14 @@ func checkCmdOutput(cs *CheckSpec) ItemResult {
 
 // Bound both output and waits for inherited pipes; Linux kills the process group.
 func executeBaselineCommand(ctx context.Context, cmd *exec.Cmd, cs *CheckSpec) ItemResult {
+	result := collectBaselineCommand(ctx, cmd, cs.TimeoutMs)
+	if result.Error {
+		return result
+	}
+	return evaluateOutput(result.Actual, cs)
+}
+
+func collectBaselineCommand(ctx context.Context, cmd *exec.Cmd, timeoutMs int) ItemResult {
 	configureBaselineCommand(cmd)
 	defer cleanupBaselineCommand(cmd)
 	cmd.WaitDelay = 250 * time.Millisecond
@@ -229,12 +239,12 @@ func executeBaselineCommand(ctx context.Context, cmd *exec.Cmd, cs *CheckSpec) I
 	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return ItemResult{Error: true, Actual: output,
-			Message: fmt.Sprintf("命令执行超时（%dms）", cs.TimeoutMs)}
+			Message: fmt.Sprintf("命令执行超时（%dms）", timeoutMs)}
 	}
 	if err != nil {
 		return ItemResult{Error: true, Actual: output, Message: "命令执行失败: " + err.Error()}
 	}
-	return evaluateOutput(output, cs)
+	return ItemResult{Actual: output}
 }
 
 type boundedOutput struct {

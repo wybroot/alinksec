@@ -26,8 +26,10 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r))
 const baseURL='http://127.0.0.1:'+server.address().port
 const errors=[],writes=[],unexpected=[]
 let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErrors=false
-const ids=Object.fromEntries(Object.entries(fixtures.platforms).map(([platform,stages])=>[stages.candidate.id,platform]))
-const details=Object.fromEntries(Object.values(fixtures.platforms).map(stages=>[stages.candidate.id,structuredClone(stages.candidate)]))
+const stagesByPlatform={...fixtures.platforms,ssh:fixtures.ssh}
+assert.ok(fixtures.ssh?.completed,'Capture the current SSH REST candidate before browser validation')
+const ids=Object.fromEntries(Object.entries(stagesByPlatform).map(([platform,stages])=>[stages.candidate.id,platform]))
+const details=Object.fromEntries(Object.values(stagesByPlatform).map(stages=>[stages.candidate.id,structuredClone(stages.candidate)]))
 const summary=(doc)=>({...fixtures.list.find(pkg=>pkg.id===doc.id),status:doc.status,template_id:doc.template_id,test_task_id:doc.test_task_id})
 process.once('SIGTERM',async()=>{await browser?.close();process.exit(1)})
 try {
@@ -56,7 +58,7 @@ try {
     }
     const match=path.match(/^\/api\/baseline\/packages\/([^/]+)(?:\/(review|test|publish|withdraw))?$/)
     if(match&&ids[match[1]]){
-      const id=match[1],operation=match[2],stages=fixtures.platforms[ids[id]]
+      const id=match[1],operation=match[2],stages=stagesByPlatform[ids[id]]
       if(method==='GET'){
         if(reportStage&&details[id].status==='approved'&&details[id].test_task_id)details[id]=structuredClone(stages[reportStage])
         return ok(details[id])
@@ -189,8 +191,27 @@ try {
     for(const action of ['审核通过','拒绝候选版本','下发测试核查','发布为可选模板','撤回版本'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
     await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   }
+  details[fixtures.ssh.candidate.id]=structuredClone(fixtures.ssh.completed)
+  await page.setViewportSize({width:1440,height:1000})
+  await page.reload()
+  const ssh=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 SSH 指定连接配置（示例需调整）',exact:true})})
+  await ssh.getByRole('button',{name:'查看版本',exact:true}).click()
+  await expect(dialog.getByRole('heading',{name:/Ubuntu 24.04 SSH 指定连接配置/})).toBeVisible()
+  const definition=dialog.locator('pre').filter({hasText:'"connection"'}).last()
+  await expect(definition).toContainText('192.0.2.10')
+  await expect(definition).toContainText('"local_port": 22')
+  await definition.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/ssh-context-desktop.png',fullPage:true,animations:'disabled'})
+  await dialog.locator('.el-table__expand-icon').click()
+  await expect(dialog.getByText('Sample connection policy mismatch',{exact:true})).toHaveCount(2)
+  const actual=dialog.getByText(/connection=.*permitrootlogin=yes/)
+  await expect(actual).toBeVisible()
+  await actual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/ssh-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  for(const action of ['审核通过','下发测试核查','发布为可选模板'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+  await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
-  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','error and legacy evidence block publication until retest','execution errors separated from noncompliance','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review, evidence and creation dialogs'],writes,errors,unexpected}))
+  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','error and legacy evidence block publication until retest','execution errors separated from noncompliance','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review, evidence and creation dialogs','SSH explicit connection and noncompliant evidence'],writes,errors,unexpected}))
   console.log('PASS baseline candidates, review, publication, OS selection, roles and mobile layout')
 } catch(error) {
   writeFileSync(root+'/browser-result.json',JSON.stringify({passed:false,mode,error:error.message,writes,errors,unexpected}))
