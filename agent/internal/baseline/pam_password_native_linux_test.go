@@ -145,20 +145,25 @@ func TestNativePAMPassword(t *testing.T) {
 			t.Fatalf("native class override not observed: %s", value)
 		}
 	})
-	t.Run("writer must consume the checked token", func(t *testing.T) {
+	t.Run("reference requires explicit use_authtok even when token is reused", func(t *testing.T) {
 		configure(pamQuality+strings.ReplaceAll(pamWriter, " use_authtok", ""), pamPolicy+"dictcheck=0\n")
 		check("quality", false, false)
 		value := probe(strong, short)
-		if !strings.Contains(value, "rc=0 algorithm=yescrypt first=0 second=1") {
-			t.Fatalf("native second unvalidated token not observed: %s", value)
+		// Linux-PAM 1.5.3 reuses a present PAM_AUTHTOK even without this
+		// option. Absence fails our explicit reference; it does not prove
+		// that this particular chain necessarily requests another token.
+		if !strings.Contains(value, "rc=0 algorithm=yescrypt first=1 second=0") {
+			t.Fatalf("native existing checked token was not reused: %s", value)
 		}
-		t.Logf("native PAM behavior evidence (isolated Ubuntu24 fixture): unbound-writer %s", value)
+		t.Logf("native PAM behavior evidence (isolated Ubuntu24 fixture): missing-explicit-binding-token-reused %s", value)
 	})
 	t.Run("early permit bypass is unconfirmed", func(t *testing.T) {
 		configure("password sufficient pam_permit.so\n"+pamQuality+pamWriter, pamPolicy)
 		check("quality", false, true)
 		check("unix_hash", false, true)
-		value := probe(strong, strong)
+		// Use a token different from the currently stored strong token so
+		// success without a credential update can be observed accurately.
+		value := probe(short, short)
 		if !strings.HasPrefix(value, "rc=0 ") || !strings.Contains(value, "first=0") {
 			t.Fatalf("native early bypass not observed: %s", value)
 		}
