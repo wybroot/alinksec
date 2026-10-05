@@ -478,7 +478,7 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
     assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must preserve all seven identity snapshots')
     const type = mode === 'sqlite' ? `json_extract(i."check", '$.type')` : `CAST(i."check" AS JSONB)->>'type'`
-    const target = mode === 'sqlite' ? `json_extract(i."check", '$.target')` : `CAST(i."check" AS JSONB)->>'target'`
+    const target = mode === 'sqlite' ? `json_extract(i."check", '$.target')` : `(CAST(i."check" AS JSONB)->>'target')`
     const option = mode === 'sqlite' ? `json_extract(i."check", '$.option')` : `CAST(i."check" AS JSONB)->>'option'`
     const metadata = `${type}='local_identity_file'`
     sql(`BEGIN;
