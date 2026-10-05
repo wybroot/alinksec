@@ -11,7 +11,7 @@
     "sysctl -n net.ipv4.conf.all.log_martians",
     "sysctl -n net.ipv4.ip_forward",
     "command -v alinksec-agent >/dev/null 2>&1 && echo yes || echo no",
-    "stat -c %U /var/log/messages",
+    "stat -L -c '%f %u' /var/log/messages",
     "sysctl -n net.ipv6.conf.all.accept_redirects",
     "findmnt --noheadings --raw --output OPTIONS --target /tmp"
   ],

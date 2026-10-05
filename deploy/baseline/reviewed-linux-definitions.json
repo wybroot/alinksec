@@ -1,7 +1,7 @@
 {
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05",
+    "version": "2026-10-05.1",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json"
   },
   "platforms": {
@@ -12,22 +12,22 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "1",
+      "version": "2",
       "items": [
         {
           "code": "BL-LINUX-0030",
           "ruleId": "BL-LINUX-0030",
-          "name": "/var/log/messages 的实际属主为 root",
+          "name": "/var/log/messages 的最终目标为 UID 0 属主的普通文件",
           "category": "安全审计",
           "severity": 2,
           "check": {
             "type": "cmd_output",
-            "cmd": "stat -c %U /var/log/messages",
-            "operator": "eq",
-            "expected": "root",
+            "cmd": "stat -L -c '%f %u' /var/log/messages",
+            "operator": "regex",
+            "expected": "^8[0-9a-f]{3} 0$",
             "timeout_ms": 5000
           },
-          "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；文件缺失或查询失败是执行异常。不得据此证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+          "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；-L 查询符号链接的最终目标，%f 核对普通文件类型，%u 核对数值属主 UID 0。文件缺失、断链或查询失败是执行异常；目录等非普通文件不通过。不证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
         },
         {
           "code": "BL-LINUX-0031",
@@ -650,20 +650,20 @@
       },
       {
         "ruleId": "BL-LINUX-0030",
-        "name": "/var/log/messages 的实际属主为 root",
+        "name": "/var/log/messages 的最终目标为 UID 0 属主的普通文件",
         "category": "安全审计",
         "severity": 2,
         "status": "mapped",
         "reason": "`stat ... || echo root` 会在文件缺失、权限不足或命令失败时通过；优先删除成功默认值并保留错误。",
-        "scope": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；文件缺失或查询失败是执行异常。不得据此证明日志服务运行或全部日志权限。",
+        "scope": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；-L 查询符号链接的最终目标，%f 核对普通文件类型，%u 核对数值属主 UID 0。文件缺失、断链或查询失败是执行异常；目录等非普通文件不通过。不证明日志服务运行或全部日志权限。",
         "check": {
           "type": "cmd_output",
-          "cmd": "stat -c %U /var/log/messages",
-          "operator": "eq",
-          "expected": "root",
+          "cmd": "stat -L -c '%f %u' /var/log/messages",
+          "operator": "regex",
+          "expected": "^8[0-9a-f]{3} 0$",
           "timeout_ms": 5000
         },
-        "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；文件缺失或查询失败是执行异常。不得据此证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+        "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；-L 查询符号链接的最终目标，%f 核对普通文件类型，%u 核对数值属主 UID 0。文件缺失、断链或查询失败是执行异常；目录等非普通文件不通过。不证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
       },
       {
         "ruleId": "BL-LINUX-0031",

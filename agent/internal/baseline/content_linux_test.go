@@ -3,10 +3,14 @@
 package baseline
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestRetiredFailureMaskingSelectorsAreRejected(t *testing.T) {
@@ -28,16 +32,45 @@ func TestRetiredFailureMaskingSelectorsAreRejected(t *testing.T) {
 	}
 }
 
+func TestMessagesMetadataFollowsSymlinksAndRequiresARegularFile(t *testing.T) {
+	root := t.TempDir()
+	file, link := filepath.Join(root, "messages"), filepath.Join(root, "link")
+	if err := os.WriteFile(file, []byte("log evidence"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	query := func(path string) ItemResult {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return executeBaselineCommand(ctx, exec.CommandContext(ctx, "stat", "-L", "-c", "%f %u", path),
+			&CheckSpec{Operator: "regex", Expected: "^8[0-9a-f]{3} " + strconv.Itoa(os.Getuid()) + "$", TimeoutMs: 1000})
+	}
+	if result := query(link); result.Error || !result.Passed {
+		t.Fatalf("link must report the regular target metadata: %+v", result)
+	}
+	if result := query(root); result.Error || result.Passed {
+		t.Fatalf("a directory must not qualify as a log file: %+v", result)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if result := query(link); !result.Error || result.Passed {
+		t.Fatalf("a dangling link must preserve stat failure: %+v", result)
+	}
+}
+
 func TestReviewedQueriesPropagateFailureEvenWithPassingOutput(t *testing.T) {
 	path := t.TempDir()
-	for _, fixture := range []struct{ binary, output string }{{"stat", "root"}, {"sysctl", "0"}, {"findmnt", "rw,nosuid,nodev"}} {
+	for _, fixture := range []struct{ binary, output string }{{"stat", "81a4 0"}, {"sysctl", "0"}, {"findmnt", "rw,nosuid,nodev"}} {
 		if err := os.WriteFile(filepath.Join(path, fixture.binary), []byte("#!/bin/sh\nprintf '%s\\n' '"+fixture.output+"'\nexit 1\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", path)
 	for _, check := range []CheckSpec{
-		{Cmd: "stat -c %U /var/log/messages", Operator: "eq", Expected: "root"},
+		{Cmd: "stat -L -c '%f %u' /var/log/messages", Operator: "regex", Expected: "^8[0-9a-f]{3} 0$"},
 		{Cmd: "sysctl -n net.ipv6.conf.all.accept_redirects", Operator: "eq", Expected: "0"},
 		{Cmd: "findmnt --noheadings --raw --output OPTIONS --target /tmp", Operator: "regex", Expected: ".*nosuid.*nodev.*"},
 	} {
@@ -98,10 +131,13 @@ func TestNativeReviewedLinuxQueriesReturnEvidence(t *testing.T) {
 		t.Run(check.Cmd, func(t *testing.T) {
 			copy := *check
 			copy.Operator, copy.Expected = "regex", "^[^\\s]+(\\n[^\\s]+)*$"
+			if check.Cmd == "stat -L -c '%f %u' /var/log/messages" {
+				copy.Expected = "^[0-9a-f]+ [0-9]+$"
+			}
 			result := checkCmdOutput(&copy)
 			// messages is not a universal Linux log path. Missing it must remain
 			// a real observation error, never a synthetic root ownership pass.
-			if check.Cmd == "stat -c %U /var/log/messages" {
+			if check.Cmd == "stat -L -c '%f %u' /var/log/messages" {
 				if _, err := os.Stat("/var/log/messages"); os.IsNotExist(err) {
 					if !result.Error || result.Passed {
 						t.Fatalf("missing messages must be an error: %+v", result)

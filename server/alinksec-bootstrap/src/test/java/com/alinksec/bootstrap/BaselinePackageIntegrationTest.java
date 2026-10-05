@@ -140,7 +140,8 @@ class BaselinePackageIntegrationTest {
                 var evidence = legacy.queryForMap("SELECT * FROM t_baseline_result WHERE task_id=1");
                 legacy.update("INSERT INTO t_baseline_template(code,name,os_type,enabled) VALUES('USER-REFERENCE','User reference',1,true)");
                 for (int repeat = 0; repeat < 2; repeat++)
-                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource("db/common/V006__retire_legacy_baseline.sql"));
+                    for (String path : List.of("db/common/V006__retire_legacy_baseline.sql", "db/common/V007__baseline_log_target.sql"))
+                        org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource(path));
                 assertEquals(snapshot, legacy.queryForMap("SELECT * FROM t_baseline_task_item WHERE task_id=1"));
                 assertEquals(evidence, legacy.queryForMap("SELECT * FROM t_baseline_result WHERE task_id=1"));
                 assertTrue(DatabaseDialect.readBoolean(legacy.queryForObject("SELECT enabled FROM t_baseline_template WHERE code='USER-REFERENCE'", Object.class)));

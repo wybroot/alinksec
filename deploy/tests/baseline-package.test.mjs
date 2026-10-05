@@ -13,7 +13,7 @@ test('server and Agent compile the same platform-specific command set', () => {
 })
 
 test('PostgreSQL and SQLite apply the same baseline migrations', () => {
-  for (const migration of ['V004__baseline_packages.sql', 'V005__baseline_execution_evidence.sql', 'V006__retire_legacy_baseline.sql']) {
+  for (const migration of ['V004__baseline_packages.sql', 'V005__baseline_execution_evidence.sql', 'V006__retire_legacy_baseline.sql', 'V007__baseline_log_target.sql']) {
     assert.deepEqual(readFileSync(new URL(`../migrations/${migration}`, import.meta.url)),
       readFileSync(new URL(`../../server/alinksec-bootstrap/src/main/resources/db/common/${migration}`, import.meta.url)))
   }
