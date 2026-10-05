@@ -1,0 +1,348 @@
+{
+  "code": "ALINKSEC-LINUX-REVIEWED",
+  "name": "Linux 已审核参考观测（需确认组件）",
+  "standard": "ALinkSec 参考观测（非完整合规标准）",
+  "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
+  "osType": 1,
+  "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0030",
+      "ruleId": "BL-LINUX-0030",
+      "name": "/var/log/messages 的实际属主为 root",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "stat -c %U /var/log/messages",
+        "operator": "eq",
+        "expected": "root",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；文件缺失或查询失败是执行异常。不得据此证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0031",
+      "ruleId": "BL-LINUX-0031",
+      "name": "net.ipv4.tcp_syncookies 当前值为 1",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察当前内核参数；不证明完整 SYN Flood 防护或重启后的持久配置。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0032",
+      "ruleId": "BL-LINUX-0032",
+      "name": "IPv4 all.accept_redirects 当前值为 0",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；各接口、default 参数及转发状态仍需人工核对，不宣称全部接口已拒绝重定向。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0033",
+      "ruleId": "BL-LINUX-0033",
+      "name": "IPv6 all.accept_redirects 当前值为 0",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv6.conf.all.accept_redirects",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "需启用 IPv6 且参数存在；缺少参数或查询失败是执行异常，不以 0 代替。仅观察 all 参数，不证明所有接口策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0034",
+      "ruleId": "BL-LINUX-0034",
+      "name": "IPv4 all.accept_source_route 当前值为 0",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；仍需核对实际接口、default 参数和主机网络角色。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0035",
+      "ruleId": "BL-LINUX-0035",
+      "name": "ICMP 广播回显忽略参数当前值为 1",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察当前内核参数；不证明完整 ICMP 或网络防护策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0037",
+      "ruleId": "BL-LINUX-0037",
+      "name": "IPv4 all.log_martians 当前值为 1",
+      "category": "入侵防范",
+      "severity": 1,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.log_martians",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；不证明日志已持久化、集中传输或覆盖全部网络接口。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0047",
+      "ruleId": "BL-LINUX-0047",
+      "name": "findmnt 返回的 /tmp 挂载记录均含 nosuid 和 nodev",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "findmnt --noheadings --raw --output OPTIONS --target /tmp",
+        "operator": "regex",
+        "expected": "^(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*)(?:\\n(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*))*$",
+        "timeout_ms": 5000
+      },
+      "remediation": "适用于 util-linux findmnt 可查询当前挂载命名空间的主机；--target 包含父挂载。每条返回记录必须同时含两个独立选项；叠加挂载的旧记录也计入，保守判定。查询失败是异常；不证明 noexec、独立分区或临时文件清理。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    }
+  ],
+  "unsupported": [
+    {
+      "ruleId": "BL-LINUX-0001",
+      "reason": "仅匹配 login.defs 文本；不能据此确认实际口令长度策略，需要核对认证模块及生效范围。"
+    },
+    {
+      "ruleId": "BL-LINUX-0002",
+      "reason": "名称声称字符复杂度，实际只匹配 minlen 以 8 开始的行，既没检查 minclass，也没核对认证链；拆分并验证有效配置。"
+    },
+    {
+      "ruleId": "BL-LINUX-0003",
+      "reason": "仅检查文件声明，不检查已有账户的实际有效期；明确范围并分离账户检查。"
+    },
+    {
+      "ruleId": "BL-LINUX-0004",
+      "reason": "同上，声明不能代表已有账户生效策略。"
+    },
+    {
+      "ruleId": "BL-LINUX-0005",
+      "reason": "子串可出现在注释中，也未校验 deny、unlock_time、PAM 顺序和其他 include；停止用此项证明有效锁定策略。"
+    },
+    {
+      "ruleId": "BL-LINUX-0006",
+      "reason": "仅匹配 SHA512 文本，不能证明已存口令或 PAM 使用的算法；按产品确认算法与实际生效配置，避免盲目自动改写。"
+    },
+    {
+      "ruleId": "BL-LINUX-0007",
+      "reason": "只看主配置文件任意匹配行，未处理 Include、重复和 Match；需读取有效策略并确认目标连接条件。"
+    },
+    {
+      "ruleId": "BL-LINUX-0008",
+      "reason": "同上，仅文件中的 1–4 声明。"
+    },
+    {
+      "ruleId": "BL-LINUX-0009",
+      "reason": "单独 awk 读取 shadow，执行失败能够返回 error；明确本地账户范围和读取权限，不能扩展到其他身份源。"
+    },
+    {
+      "ruleId": "BL-LINUX-0010",
+      "reason": "任意 TMOUT= 声明均可命中，包括 0 或非数值；需核对有效正整数、上限及支持 shell。"
+    },
+    {
+      "ruleId": "BL-LINUX-0011",
+      "reason": "当前为精确 0644/root/root 元数据断言；明确参考策略，不能把更严格权限直接称作不安全。"
+    },
+    {
+      "ruleId": "BL-LINUX-0012",
+      "reason": "固定 0600/root/root；需按发行版选择规则，避免一律修改属组及权限。"
+    },
+    {
+      "ruleId": "BL-LINUX-0013",
+      "reason": "同 0011，精确值与安全上限需要区分。"
+    },
+    {
+      "ruleId": "BL-LINUX-0014",
+      "reason": "同 0012，发行版与认证工具适用性需要核对。"
+    },
+    {
+      "ruleId": "BL-LINUX-0015",
+      "reason": "多级 grep/wc 管道会掩盖读取失败；检查的是 shell 文本而非账户锁定，需改为有明确错误传播的查询。"
+    },
+    {
+      "ruleId": "BL-LINUX-0016",
+      "reason": "单独 awk 能传播读取错误；明确仅本地 passwd 账户，不宣称覆盖外部身份源。"
+    },
+    {
+      "ruleId": "BL-LINUX-0017",
+      "reason": "仅任意文本声明，未确认后续覆盖及 shell；按实际支持范围重新定义。"
+    },
+    {
+      "ruleId": "BL-LINUX-0018",
+      "reason": "not_contains 会把注释当违规，也忽略 include 文件；需有效 sudo 配置解析。"
+    },
+    {
+      "ruleId": "BL-LINUX-0019",
+      "reason": "固定文件和权限；无 cron 或不同调度实现不能直接给出通用不合规结论。"
+    },
+    {
+      "ruleId": "BL-LINUX-0020",
+      "reason": "声明与名称的安全结论需重新审核；有效 SSH 配置与实际产品策略分别处理。"
+    },
+    {
+      "ruleId": "BL-LINUX-0021",
+      "reason": "仅 PATH 中存在 auditctl，不证明 auditd 安装、运行或内核审计可用；修正名称及检查条件。"
+    },
+    {
+      "ruleId": "BL-LINUX-0022",
+      "reason": "systemctl 错误被转换为 inactive，无法区分未运行和执行异常；需要有明确状态与错误的查询。"
+    },
+    {
+      "ruleId": "BL-LINUX-0023",
+      "reason": "能取得目录元数据，仍需核对目录、模式及服务适用范围。"
+    },
+    {
+      "ruleId": "BL-LINUX-0024",
+      "reason": "同 0022，也不能把其他日志服务直接解释为不合规。"
+    },
+    {
+      "ruleId": "BL-LINUX-0025",
+      "reason": "单一子串可在注释命中，且没验证实际加载规则、权限掩码或其他身份文件；不能宣称完整覆盖。"
+    },
+    {
+      "ruleId": "BL-LINUX-0026",
+      "reason": "仅 Bash 配置声明，不证明日志持久化或其他 shell 生效。"
+    },
+    {
+      "ruleId": "BL-LINUX-0027",
+      "reason": "精确文件元数据参考断言，需产品路径和权限策略适用性。"
+    },
+    {
+      "ruleId": "BL-LINUX-0028",
+      "reason": "同 0027，root/utmp 及 0664 不能视为全 Linux 策略。"
+    },
+    {
+      "ruleId": "BL-LINUX-0029",
+      "reason": "实际查找 audit 目录 watch，不能证明 sudo 使用记录；重新映射规则。"
+    },
+    {
+      "ruleId": "BL-LINUX-0036",
+      "reason": "固定 all=1，需网络角色、接口与路由策略适用性，避免通用修复破坏已有网络。"
+    },
+    {
+      "ruleId": "BL-LINUX-0038",
+      "reason": "查询本身有明确错误；非路由主机条件没有进入适用范围，需要按产品用途区分。"
+    },
+    {
+      "ruleId": "BL-LINUX-0039",
+      "reason": "contains 可命中注释，且未处理 limits.d、用户策略与生效条件；不能证明完整关闭。"
+    },
+    {
+      "ruleId": "BL-LINUX-0040",
+      "reason": "shell OR 链把无法查询与禁用混在一起；按实际机制拆分、保留错误与适用性。"
+    },
+    {
+      "ruleId": "BL-LINUX-0041",
+      "reason": "精确元数据断言，需文件及产品适用性；缺失不应泛化为所有 Linux 不合规。"
+    },
+    {
+      "ruleId": "BL-LINUX-0042",
+      "reason": "实际仅找 SUID，以 passwd 修改时间作为基准，管道忽略 find 错误；不能证明 SGID 或未授权新增。"
+    },
+    {
+      "ruleId": "BL-LINUX-0043",
+      "reason": "任意非空值包括 none 都可匹配，也没读横幅内容；需有效配置和实际文件内容检查。"
+    },
+    {
+      "ruleId": "BL-LINUX-0044",
+      "reason": "任意数字声明不能证明退出清理；名称、范围和策略需要重写。"
+    },
+    {
+      "ruleId": "BL-LINUX-0045",
+      "reason": "嵌套 shell 引号和变量展开有歧义；不验证有效 shell 配置，需固定且经过原生测试的实现。"
+    },
+    {
+      "ruleId": "BL-LINUX-0046",
+      "reason": "管道计数不证明实际清理策略、路径或定时器有效；需查询确切服务状态与配置。"
+    },
+    {
+      "ruleId": "BL-LINUX-0048",
+      "reason": "rsyslog.conf 任意 cron. 文本可在注释出现，不能证明生效或其他日志实现；按产品明确策略。"
+    },
+    {
+      "ruleId": "BL-LINUX-0049",
+      "reason": "PATH 中存在可执行文件不代表服务运行、通信成功或检测能力；重新定义观察内容。"
+    },
+    {
+      "ruleId": "BL-LINUX-0050",
+      "reason": "旧 perm_exists 字段无效；本产品未提供可据以确认恶意代码检测能力的统一特征库文件。存在文件不能证明非空、格式有效、版本或检测能力。"
+    },
+    {
+      "ruleId": "BL-LINUX-0051",
+      "reason": "子串可能在注释命中，未覆盖仓库级配置及其他包管理器；按产品和有效配置拆分。"
+    },
+    {
+      "ruleId": "BL-LINUX-0052",
+      "reason": "查询/管道错误通过 echo 0 被转成通过，固定 grep 引号也需核对；必须保留真实查询失败。"
+    },
+    {
+      "ruleId": "BL-LINUX-0053",
+      "reason": "失败被成功默认值掩盖，表达式还含乱码，遗漏多种源格式；停用该断言并按有效源格式重新实现。"
+    },
+    {
+      "ruleId": "BL-LINUX-0054",
+      "reason": "旧 perm_exists 字段无效；cron 文件存在不能证明有效命令、权限、调度加载或成功执行，本产品没有统一的病毒扫描 cron 任务契约。"
+    },
+    {
+      "ruleId": "BL-LINUX-0055",
+      "reason": "OR 链可能拼接 inactive/active，未覆盖其他实现；需分离查询、运行状态与同步证据。"
+    },
+    {
+      "ruleId": "BL-LINUX-0056",
+      "reason": "任意 soft 或 hard 数字行都可通过，不代表二者、数值界限或实际生效；先明确策略及范围。"
+    },
+    {
+      "ruleId": "BL-LINUX-0057",
+      "reason": "同 0056，需适用主体与确切限制。"
+    },
+    {
+      "ruleId": "BL-LINUX-0058",
+      "reason": "文件权限不能证明认证模块使用该文件；按产品确认适用性。"
+    },
+    {
+      "ruleId": "BL-LINUX-0059",
+      "reason": "grep 计数两条不能证明生效 unit/include/override 或实际认证；需有效 systemd 单元定义验证。"
+    },
+    {
+      "ruleId": "BL-LINUX-0060",
+      "reason": "is-enabled 输出与退出码被 fallback 混合，也未确认有效触发行为；需明确 masked/disabled 状态及策略。"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Linux reference content review",
+    "version": "2026-10-05",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
+    "sha256": "b056f969988e7c24e648495966759c6f0132b046b20b8ec7b762559ef1d9a5ce"
+  }
+}

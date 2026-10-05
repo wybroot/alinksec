@@ -6,7 +6,7 @@ import (
 )
 
 func TestApprovedCmdOutputRejectsUnknownCommands(t *testing.T) {
-	want := 26
+	want := 14
 	if runtime.GOOS == "windows" {
 		want = 4
 	}

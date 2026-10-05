@@ -1,31 +1,31 @@
 {
   "code": "ALINKSEC-LINUX-BASE",
-  "name": "Linux 基础安全核查",
+  "name": "Linux 内核参数参考核查",
   "standard": "ALinkSec 基础核查（非完整合规基线）",
-  "product": "linux",
+  "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；需 procps sysctl",
   "osType": 1,
-  "osVersionPattern": "^.*$",
-  "version": "1",
+  "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
+  "version": "2",
   "items": [
     {
       "code": "ALINKSEC-LINUX-001",
       "ruleId": "ALINKSEC-LINUX-001",
-      "name": "IPv4 转发关闭",
+      "name": "ICMP 广播回显忽略参数当前值为 1",
       "category": "基础防护",
       "severity": 3,
       "check": {
         "type": "cmd_output",
-        "cmd": "sysctl -n net.ipv4.ip_forward",
+        "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
         "operator": "eq",
-        "expected": "0",
+        "expected": "1",
         "timeout_ms": 5000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "仅观察当前内核参数；不证明完整 ICMP 或网络防护策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
     },
     {
       "code": "ALINKSEC-LINUX-002",
       "ruleId": "ALINKSEC-LINUX-002",
-      "name": "TCP SYN Cookie 已启用",
+      "name": "net.ipv4.tcp_syncookies 当前值为 1",
       "category": "基础防护",
       "severity": 3,
       "check": {
@@ -35,12 +35,12 @@
         "expected": "1",
         "timeout_ms": 5000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "仅观察当前内核参数；不证明完整 SYN Flood 防护或重启后的持久配置。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
     },
     {
       "code": "ALINKSEC-LINUX-003",
       "ruleId": "ALINKSEC-LINUX-003",
-      "name": "拒绝 IPv4 重定向",
+      "name": "IPv4 all.accept_redirects 当前值为 0",
       "category": "基础防护",
       "severity": 3,
       "check": {
@@ -50,12 +50,12 @@
         "expected": "0",
         "timeout_ms": 5000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "仅观察 all 参数；各接口、default 参数及转发状态仍需人工核对，不宣称全部接口已拒绝重定向。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
     },
     {
       "code": "ALINKSEC-LINUX-004",
       "ruleId": "ALINKSEC-LINUX-004",
-      "name": "拒绝 IPv4 源路由",
+      "name": "IPv4 all.accept_source_route 当前值为 0",
       "category": "基础防护",
       "severity": 3,
       "check": {
@@ -65,15 +65,20 @@
         "expected": "0",
         "timeout_ms": 5000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "仅观察 all 参数；仍需核对实际接口、default 参数和主机网络角色。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
     }
   ],
-  "unsupported": [],
+  "unsupported": [
+    {
+      "ruleId": "ALINKSEC-LINUX-IP-FORWARD",
+      "reason": "IPv4 转发取决于路由、容器和业务角色；os_type/os_version 不包含该角色信息，通用候选不据此断言必须关闭。"
+    }
+  ],
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec reviewed starter definitions",
-    "version": "1",
-    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline",
-    "sha256": "367b24692b21120ec2c50e4e0de0855ce45e7c41d7c39bc1458175d83294f276"
+    "version": "2",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/starter-definitions.json",
+    "sha256": "4333510148d3b80a3309c410f7dada573e7a1666b610ef6703321d2d5627991c"
   }
 }

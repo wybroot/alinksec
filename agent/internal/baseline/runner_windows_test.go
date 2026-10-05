@@ -3,8 +3,12 @@
 package baseline
 
 import (
+	"context"
 	"encoding/json"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNativeWindowsBaselineQueriesReturnEvidence(t *testing.T) {
@@ -32,5 +36,34 @@ func TestNativeWindowsBaselineQueriesReturnEvidence(t *testing.T) {
 	}
 	if isApprovedCmdOutput(platforms["windows"][2] + " & echo injected") {
 		t.Fatal("modified PowerShell selector must be rejected")
+	}
+}
+
+func TestFirewallQueryRejectsMissingProfilesInsteadOfPassingAnEmptyCount(t *testing.T) {
+	var platforms map[string][]string
+	if err := json.Unmarshal(commandRegistry, &platforms); err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "powershell.exe -NoProfile -NonInteractive -Command \""
+	script := strings.TrimSuffix(strings.TrimPrefix(platforms["windows"][0], prefix), "\"")
+	for _, test := range []struct {
+		name, profiles string
+		error, passed  bool
+	}{
+		{"none", "", true, false},
+		{"two", "[pscustomobject]@{Enabled=$true}; [pscustomobject]@{Enabled=$true}", true, false},
+		{"three enabled", "1..3 | ForEach-Object { [pscustomobject]@{Enabled=$true} }", false, true},
+		{"one disabled", "[pscustomobject]@{Enabled=$false}; [pscustomobject]@{Enabled=$true}; [pscustomobject]@{Enabled=$true}", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			fixture := "function Get-NetFirewallProfile { param($PolicyStore,$ErrorAction); " + test.profiles + " }; "
+			cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", fixture+script)
+			result := executeBaselineCommand(ctx, cmd, &CheckSpec{Operator: "eq", Expected: "0", TimeoutMs: 30000})
+			if result.Error != test.error || result.Passed != test.passed {
+				t.Fatalf("firewall profile query: %+v", result)
+			}
+		})
 	}
 }

@@ -298,9 +298,13 @@ test(`${mode}: webhook credentials are absent from audit records`, async () => {
 })
 
 test(`${mode}: baseline candidates, mixed systems, snapshots and publication lifecycle`, async () => {
-  sql("INSERT INTO t_agent(agent_id,hostname,os_type,os_version) VALUES ('ci-smoke-windows','ci-windows-test-host',2,'Windows Server 2022');")
+  sql("UPDATE t_agent SET os_version='ubuntu 24.04' WHERE agent_id='ci-smoke-001'; INSERT INTO t_agent(agent_id,hostname,os_type,os_version) VALUES ('ci-smoke-windows','ci-windows-test-host',2,'Windows Server 2022');")
   const fixtures = { mode, capturedFrom: 'disposable REST API; complete test results seeded as protocol fixtures', platforms: {} }
   const options = { token: tokens.admin, method: 'POST' }
+  const retired = (await ok('/api/baseline/templates', { token: tokens.viewer })).find(row => row.code === 'DJBH2.0-LINUX')
+  assert.equal(retired.name, 'Linux 旧参考模板（已停用）')
+  assert.ok(retired.enabled === false || retired.enabled === 0)
+  assert.equal((await request('/api/baseline/tasks', { ...options, body: { agentIds: ['ci-smoke-001'], templateIds: [retired.id] } })).status, 400)
   const previousCommands = sql("SELECT count(*) FROM t_command WHERE type='baseline_check';")
   for (const [platform, agent] of [['linux', 'ci-smoke-001'], ['windows', 'ci-smoke-windows']]) {
     const document = JSON.parse(readFileSync(new URL(`../baseline/packages/${platform}-baseline.json`, import.meta.url)))
@@ -316,7 +320,7 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     assert.match(candidate.id, /^[a-f0-9-]{36}$/)
     const record = { id: candidate.id, code: document.code }; baselinePackages.push(record)
     const stages = { candidate }; fixtures.platforms[platform] = stages
-    assert.equal(candidate.status, 'candidate'); assert.equal(candidate.diff.length, 4)
+    assert.equal(candidate.status, 'candidate'); assert.equal(candidate.diff.length, document.items.length + document.unsupported.length)
     const prefix = `/api/baseline/packages/${candidate.id}`
     assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'No review' } })).status, 400)
     stages.approved = await ok(`${prefix}/review`, { ...options, body: { approved: true, note: 'Fixture review' } })
@@ -355,7 +359,7 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     assert.deepEqual(task.task.template_ids, [record.template])
     const taskList = await ok('/api/baseline/tasks?page=1&size=100', { token: tokens.viewer })
     assert.deepEqual(taskList.list.find(row => Number(row.id) === testId).template_ids, [record.template])
-    assert.equal(task.templates[0].version, '1'); assert.equal(task.templates[0].content_sha256, candidate.content_sha256)
+    assert.equal(task.templates[0].version, document.version); assert.equal(task.templates[0].content_sha256, candidate.content_sha256)
     // API fixtures model a complete Agent report. Native check execution is validated separately.
     const expected = mode === 'sqlite' ? `json_extract(i."check", '$.expected')` : `CAST(i."check" AS JSONB)->>'expected'`
     sql(`BEGIN;
@@ -370,12 +374,15 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     stages.published = await ok(`${prefix}/publish`, { ...options, body: { note: 'Protocol fixture results reviewed' } })
     assert.equal(stages.published.status, 'published')
     const details = await ok(`/api/baseline/tasks/${testId}/agents/${agent}/items`, { token: tokens.viewer })
-    assert.equal(details.length, 4); assert.ok(details.every(item => item.template_version === '1' && !item.fixable))
+    assert.equal(details.length, 4); assert.ok(details.every(item => item.template_version === document.version && !item.fixable))
     await waitForSql(`SELECT count(*) FROM t_audit_log WHERE path='${prefix}/review' AND status=200;`, '1')
   }
   const agents = ['ci-smoke-001', 'ci-smoke-windows']
   fixtures.coverage = await ok('/api/baseline/coverage', { ...options, body: { agentIds: agents, templateIds: [] } })
   assert.ok(fixtures.coverage.every(row => row.covered))
+  const unknown = await ok('/api/baseline/coverage', { ...options, body: { agentIds: ['ci-smoke-002'], templateIds: [] } })
+  assert.equal(unknown[0].covered, false)
+  assert.equal((await request('/api/baseline/tasks', { ...options, body: { agentIds: ['ci-smoke-002'] } })).status, 400)
   const created = await ok('/api/baseline/tasks', { token: tokens.operator, method: 'POST', body: { agentIds: agents } })
   baselineTaskIds.push(Number(created.taskId))
   const windowsPayload = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-windows' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))

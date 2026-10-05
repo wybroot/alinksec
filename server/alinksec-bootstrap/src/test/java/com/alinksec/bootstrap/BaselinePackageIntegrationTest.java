@@ -54,7 +54,100 @@ class BaselinePackageIntegrationTest {
         jdbc.update("UPDATE t_baseline_template SET enabled=false");
         agent("ubuntu", 1, "ubuntu 24.04"); agent("windows", 2, "Windows Server 2022"); agent("rocky", 1, "rocky 9.4");
     }
+    void enableSyntheticRepairFixture() {
+        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        jdbc.update("UPDATE t_baseline_item SET enabled=true, \"check\"=? WHERE template_id=1",
+                "{\"type\":\"file_line\",\"target\":\"/test-fixture\",\"operator\":\"contains\",\"expected\":\"safe\"}");
+        jdbc.update("UPDATE t_baseline_item SET fix_spec=? WHERE template_id=1 AND code='BL-LINUX-0001'",
+                "{\"risk\":\"auto\",\"steps\":[{\"action\":\"file_line_ensure\",\"path\":\"/test-fixture\",\"line\":\"safe\",\"position\":\"append\"}]}");
+    }
     @AfterEach void cleanup() { source.destroy(); }
+
+    @Test void retiredLegacyTemplateCannotCreateNewTasksOrRepairs() {
+        assertFalse(DatabaseDialect.readBoolean(jdbc.queryForObject("SELECT enabled FROM t_baseline_template WHERE id=1", Object.class)));
+        assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item WHERE template_id=1 AND NOT enabled AND fix_spec IS NULL", Integer.class));
+        assertEquals("Linux 旧参考模板（已停用）", jdbc.queryForObject("SELECT name FROM t_baseline_template WHERE id=1", String.class));
+        assertEquals("恶意代码特征库有效性", jdbc.queryForObject("SELECT name FROM t_baseline_item WHERE code='BL-LINUX-0050'", String.class));
+        assertFalse((Boolean) tasks.coverage(List.of("ubuntu"), List.of()).get(0).get("covered"));
+        assertThrows(IllegalArgumentException.class, () -> tasks.createTask("Retired", List.of("ubuntu"), List.of(1L), 7L));
+        assertTrue(dispatched.isEmpty());
+    }
+
+    @Test void taskCreationRejectsPersistedRetiredSelectorsWithoutPartialDispatch() throws Exception {
+        var pkg = published(document("LINUX", 1, "^.*$", "1"), "ubuntu");
+        var retired = JsonUtils.mapper().createObjectNode().put("type", "cmd_output")
+                .put("cmd", "stat -c %U /var/log/messages 2>/dev/null || echo root").put("operator", "eq").put("expected", "root");
+        jdbc.update("UPDATE t_baseline_item SET \"check\"=? WHERE template_id=?", JsonUtils.write(retired), template(pkg));
+        int before = jdbc.queryForObject("SELECT count(*) FROM t_baseline_task", Integer.class);
+        dispatched.clear();
+        assertThrows(IllegalArgumentException.class, () -> tasks.createTask("Unsafe", List.of("ubuntu"), List.of(), 7L));
+        assertEquals(before, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task", Integer.class));
+        assertTrue(dispatched.isEmpty());
+    }
+
+    @Test void storedCandidateMustStillMeetTheCurrentCommandPolicyAtReviewAndPublication() throws Exception {
+        var pkg = imported(document("LINUX", 1, "^.*$", "1"));
+        var unsafe = document("LINUX", 1, "^.*$", "1");
+        ((ObjectNode) unsafe.path("items").get(0)).putObject("check").put("type", "cmd_output")
+                .put("cmd", "stat -c %U /var/log/messages 2>/dev/null || echo root").put("operator", "eq").put("expected", "root");
+        jdbc.update("UPDATE t_baseline_package SET document=? WHERE id=?", JsonUtils.write(unsafe), id(pkg));
+        assertThrows(IllegalArgumentException.class, () -> packages.review(id(pkg), true, "Old approval", 7L));
+        assertEquals("candidate", packages.detail(id(pkg)).get("status"));
+        jdbc.update("UPDATE t_baseline_package SET document=? WHERE id=?", JsonUtils.write(document("LINUX", 1, "^.*$", "1")), id(pkg));
+        packages.review(id(pkg), true, "Review", 7L);
+        long test = test(id(pkg), "ubuntu"); results.onResult("ubuntu", report(test, "ubuntu", true));
+        jdbc.update("UPDATE t_baseline_package SET document=? WHERE id=?", JsonUtils.write(unsafe), id(pkg));
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "Prior evidence", 7L));
+        assertEquals("approved", packages.detail(id(pkg)).get("status"));
+        assertFalse(DatabaseDialect.readBoolean(jdbc.queryForObject("SELECT enabled FROM t_baseline_template WHERE id=?", Object.class, template(packages.detail(id(pkg))))));
+    }
+
+    @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json")) {
+            try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
+                var doc = BaselinePackageFormat.read(input).document();
+                int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
+                for (String version : List.of("", "unknown", "Other OS 999"))
+                    assertFalse(BaselinePackageFormat.applies(os, pattern, Map.of("os_type", os, "os_version", version)));
+                assertTrue(BaselinePackageFormat.applies(os, pattern, Map.of("os_type", os,
+                        "os_version", os == 1 ? "ubuntu 24.04" : "Microsoft Windows Server 2022 Standard 21H2")));
+                if (path.contains("reviewed")) {
+                    assertEquals(8, doc.path("items").size()); assertEquals(52, doc.path("unsupported").size());
+                    var pkg = imported((ObjectNode) doc); packages.review(id(pkg), true, "Review narrow scope", 7L);
+                    long task = test(id(pkg), "ubuntu");
+                    assertEquals(8, jdbc.queryForObject("SELECT count(*) FROM t_baseline_task_expected WHERE task_id=?", Integer.class, task));
+                    results.onResult("ubuntu", report(task, "ubuntu", false));
+                    packages.publish(id(pkg), "Protocol fixture; not native host compliance evidence", 7L);
+                    assertEquals(52, ((Number) packages.detail(id(pkg)).get("unsupported_count")).intValue());
+                }
+            }
+        }
+    }
+
+    @Test void legacyRetirementPreservesTaskSnapshotsAndUnrelatedTemplates() throws Exception {
+        try (var old = new SingleConnectionDataSource(DriverManager.getConnection("jdbc:sqlite:" + root.resolve("retirement.sqlite")), true)) {
+            var legacy = new JdbcTemplate(old);
+            try (var connection = old.getConnection()) {
+                for (String path : List.of("db/sqlite/V001__initial.sql", "db/common/V002__security_libraries.sql", "db/common/V003__library_schedules.sql"))
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource(path));
+                legacy.update("INSERT INTO t_baseline_task(task_no,name,scope,template_ids,status) VALUES('historical','Historical','{}','[1]',2)");
+                legacy.update("INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message) VALUES(1,'old-agent',1,true,'original evidence','original message')");
+                for (String path : List.of("db/common/V004__baseline_packages.sql", "db/common/V005__baseline_execution_evidence.sql"))
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource(path));
+                var snapshot = legacy.queryForMap("SELECT * FROM t_baseline_task_item WHERE task_id=1");
+                var evidence = legacy.queryForMap("SELECT * FROM t_baseline_result WHERE task_id=1");
+                legacy.update("INSERT INTO t_baseline_template(code,name,os_type,enabled) VALUES('USER-REFERENCE','User reference',1,true)");
+                for (int repeat = 0; repeat < 2; repeat++)
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection, new org.springframework.core.io.ClassPathResource("db/common/V006__retire_legacy_baseline.sql"));
+                assertEquals(snapshot, legacy.queryForMap("SELECT * FROM t_baseline_task_item WHERE task_id=1"));
+                assertEquals(evidence, legacy.queryForMap("SELECT * FROM t_baseline_result WHERE task_id=1"));
+                assertTrue(DatabaseDialect.readBoolean(legacy.queryForObject("SELECT enabled FROM t_baseline_template WHERE code='USER-REFERENCE'", Object.class)));
+                assertEquals(60, legacy.queryForObject("SELECT count(*) FROM t_baseline_item WHERE template_id=1 AND NOT enabled AND fix_spec IS NULL", Integer.class));
+            }
+        }
+    }
     @SuppressWarnings("unchecked") private <T> T transactional(T target) {
         var factory = new ProxyFactory(target); factory.setProxyTargetClass(true);
         factory.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
@@ -256,7 +349,7 @@ class BaselinePackageIntegrationTest {
     }
 
     @Test void configurationRepairRequiresCurrentFailedEvidenceAndApplicableEnabledTemplate() {
-        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
         var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
@@ -271,7 +364,7 @@ class BaselinePackageIntegrationTest {
         dispatched.clear();
         jdbc.update("UPDATE t_baseline_template SET enabled=false WHERE id=1");
         assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Disabled", target, 7L));
-        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        enableSyntheticRepairFixture();
         jdbc.update("UPDATE t_agent SET os_type=2 WHERE agent_id='ubuntu'");
         assertThrows(IllegalArgumentException.class, () -> fixes.createTask("Wrong OS", target, 7L));
         jdbc.update("UPDATE t_agent SET os_type=1 WHERE agent_id='ubuntu'");
@@ -281,7 +374,7 @@ class BaselinePackageIntegrationTest {
     }
 
     @Test void configurationRepairRejectsExecutionErrorsAndLaterSuccessfulResults() {
-        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
         var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
@@ -349,7 +442,7 @@ class BaselinePackageIntegrationTest {
     }
 
     @Test void aLateOlderTaskCannotReplaceNewerComplianceEvidenceForRepair() {
-        jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+        enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
         var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
@@ -414,7 +507,7 @@ class BaselinePackageIntegrationTest {
                     mock(com.alinksec.service.download.AgentDownloadTokenService.class), props, List.of(), pooledManager), pooledManager);
             try {
                 var actualTasks = transactional(new BaselineTaskService(pooledJdbc, service, database), pooledManager);
-                jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=1");
+                enableSyntheticRepairFixture();
                 var transaction = new org.springframework.transaction.support.TransactionTemplate(pooledManager);
                 assertThrows(IllegalStateException.class, () -> transaction.execute(status -> {
                     actualTasks.createTask("rolled back", List.of("ubuntu"), List.of(1L), 7L);

@@ -2,25 +2,25 @@
   "code": "ALINKSEC-WINDOWS-BASE",
   "name": "Windows 基础安全核查",
   "standard": "ALinkSec 基础核查（非完整合规基线）",
-  "product": "windows",
+  "product": "Windows 10/11、Windows Server 2019/2022/2025；需 NetSecurity、Defender 与 EventLog",
   "osType": 2,
-  "osVersionPattern": "^.*$",
-  "version": "1",
+  "osVersionPattern": "^(Microsoft )?Windows (10|11|Server (2019|2022|2025))([ .][A-Za-z0-9._ -]+)?$",
+  "version": "2",
   "items": [
     {
       "code": "ALINKSEC-WINDOWS-001",
       "ruleId": "ALINKSEC-WINDOWS-001",
-      "name": "所有防火墙配置已启用",
+      "name": "有效策略的三个防火墙配置均已启用",
       "category": "基础防护",
       "severity": 3,
       "check": {
         "type": "cmd_output",
-        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
         "operator": "eq",
         "expected": "0",
         "timeout_ms": 15000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "读取 ActiveStore 的 Domain、Private、Public 三个配置；缺失配置或查询失败是执行异常。不证明规则集允许的流量安全；由管理员核对业务规则，本包不自动修复。"
     },
     {
       "code": "ALINKSEC-WINDOWS-002",
@@ -35,7 +35,7 @@
         "expected": "True",
         "timeout_ms": 15000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "只确认 Defender 的 RealTimeProtectionEnabled 当前值；缺少 Defender 或查询失败是执行异常。其他杀毒产品不据此判为合规；人工核对当前检测产品和更新策略，本包不自动修复。"
     },
     {
       "code": "ALINKSEC-WINDOWS-003",
@@ -50,7 +50,7 @@
         "expected": "Running",
         "timeout_ms": 15000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "只确认 EventLog 服务当前状态为 Running；不证明日志保留、审计策略、完整性或集中传输。由管理员审查日志策略，本包不自动修复。"
     },
     {
       "code": "ALINKSEC-WINDOWS-004",
@@ -65,15 +65,15 @@
         "expected": "1",
         "timeout_ms": 15000
       },
-      "remediation": "人工审查后按系统和业务需要调整；本包不提供自动修复。"
+      "remediation": "只确认 EnableLUA 注册表配置为 1；不证明所有 UAC 提示或重启后的生效状态。按 Microsoft 的 UAC 策略核对，本包不自动修复。"
     }
   ],
   "unsupported": [],
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec reviewed starter definitions",
-    "version": "1",
-    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline",
-    "sha256": "367b24692b21120ec2c50e4e0de0855ce45e7c41d7c39bc1458175d83294f276"
+    "version": "2",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/starter-definitions.json",
+    "sha256": "4333510148d3b80a3309c410f7dada573e7a1666b610ef6703321d2d5627991c"
   }
 }

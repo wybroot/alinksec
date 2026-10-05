@@ -2,6 +2,7 @@
   <div class="template-page">
     <div class="page-header"><div><h2>基线模板</h2><p>依据 Agent 上报的系统选择已发布模板；候选版本需经审核和测试。</p></div><el-button :loading="loading" @click="load">刷新</el-button></div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" />
+    <el-alert v-if="legacyRetired" title="旧 Linux 参考模板已停用。历史核查保留；新核查请导入适用候选包，确认检查范围并完成审核、测试和发布。" type="info" :closable="false" />
     <div v-if="admin" class="panel import-panel">
       <label>候选模板包 <input type="file" accept=".json,application/json" @change="file = $event.target.files[0]" /></label>
       <el-button type="primary" :disabled="!file" :loading="busy" @click="importFile">导入候选版本</el-button>
@@ -80,6 +81,7 @@ import { ElMessage } from 'element-plus'
 import { getUser, fetchBaselineTemplates, fetchBaselinePackages, fetchBaselinePackage, importBaselinePackage, reviewBaselinePackage, testBaselinePackage, publishBaselinePackage, withdrawBaselinePackage } from '../api'
 const admin = computed(() => getUser()?.role === 'admin')
 const packages = ref([]), templates = ref([]), loading = ref(false), loadError = ref(''), file = ref(null), busy = ref(false)
+const legacyRetired = ref(false)
 const visible = ref(false), detail = ref(null), detailLoading = ref(false), detailError = ref(''), note = ref(''), testAgents = ref([])
 const os = (type) => ({ 1: 'Linux', 2: 'Windows' }[Number(type)] || '未知系统')
 const status = (value) => ({ candidate: '待审核', approved: '待测试 / 发布', published: '已发布', withdrawn: '已撤回', rejected: '已拒绝' }[value] || value)
@@ -88,7 +90,7 @@ const change = (value) => ({ added: '新增', changed: '修改', removed: '撤�
 const json = (value) => value == null ? '无' : JSON.stringify(value, null, 2)
 async function load() {
   loading.value = true; loadError.value = ''
-  try { const [list, published] = await Promise.all([fetchBaselinePackages(), fetchBaselineTemplates()]); packages.value = list; templates.value = published.filter((t) => t.enabled === true || t.enabled === 1) }
+  try { const [list, published] = await Promise.all([fetchBaselinePackages(), fetchBaselineTemplates()]); packages.value = list; templates.value = published.filter((t) => t.enabled === true || t.enabled === 1); legacyRetired.value = published.some((t) => t.code === 'DJBH2.0-LINUX' && !(t.enabled === true || t.enabled === 1)) }
   catch (e) { loadError.value = e.message }
   finally { loading.value = false }
 }

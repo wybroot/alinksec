@@ -89,6 +89,7 @@ public class BaselinePackageService {
         note = note(note); if (approve) ensureBase(pkg);
         Long template = null;
         if (approve) {
+            validateStoredPackage(pkg);
             JsonNode doc = JsonUtils.read(String.valueOf(pkg.get("document")));
             template = jdbc.queryForObject("""
                     INSERT INTO t_baseline_template(code,name,standard,os_type,version,item_count,enabled,package_id,os_version_pattern)
@@ -126,6 +127,7 @@ public class BaselinePackageService {
     public Map<String, Object> publish(String id, String note, Long user) {
         Map<String, Object> pkg = locked(id);
         require("approved".equals(pkg.get("status")), "只有已审核候选版本可以发布");
+        validateStoredPackage(pkg);
         note = note(note); ensureBase(pkg);
         require(pkg.get("test_task_id") instanceof Number, "发布前需在适用测试主机上完成核查");
         long test = ((Number) pkg.get("test_task_id")).longValue();
@@ -144,6 +146,18 @@ public class BaselinePackageService {
         jdbc.update("UPDATE t_baseline_template SET enabled=true WHERE id=?", pkg.get("template_id"));
         jdbc.update("UPDATE t_baseline_package SET status='published',publication_note=?,published_at=? WHERE id=?", note, now(), id);
         return detail(id);
+    }
+
+    private static void validateStoredPackage(Map<String, Object> pkg) {
+        // A server upgrade may retire a command after import or testing.
+        // Previous results cannot authorize publication of a retired selector.
+        try {
+            var validated = BaselinePackageFormat.read(new java.io.ByteArrayInputStream(
+                    String.valueOf(pkg.get("document")).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            require(validated.sha256().equals(pkg.get("content_sha256")), "模板内容摘要不一致，请重新导入审核");
+        } catch (IOException e) {
+            throw new IllegalArgumentException("模板定义不再有效，请使用新版本重新导入审核", e);
+        }
     }
 
     @Transactional

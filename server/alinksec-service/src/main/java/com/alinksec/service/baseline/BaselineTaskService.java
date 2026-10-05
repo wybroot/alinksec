@@ -131,6 +131,14 @@ public class BaselineTaskService {
         if (coverage(plan).stream().anyMatch(row -> ((Number) row.get("itemCount")).intValue() > 500)) {
             throw new IllegalArgumentException("每台主机单次最多下发 500 项检查，请缩小模板集合");
         }
+        // Revalidate persisted definitions too: legacy/manual database changes
+        // cannot bypass the compiled command set or strict package check format.
+        for (var item : plan.items) {
+            var template = plan.templates.stream().filter(t -> ((Number) t.get("id")).longValue()
+                    == ((Number) item.get("template_id")).longValue()).findFirst().orElseThrow();
+            BaselinePackageFormat.validateCheck(JsonUtils.read((String) item.get("check")),
+                    ((Number) template.get("os_type")).intValue());
+        }
         List<Long> selected = plan.items.stream().map(i -> ((Number) i.get("template_id")).longValue()).distinct().toList();
         String taskNo = "BL" + LocalDateTime.now().format(NO_FMT) + java.util.UUID.randomUUID().toString().substring(0, 8);
         long taskId = jdbc.queryForObject("INSERT INTO t_baseline_task(task_no,name,scope,template_ids,status,created_by,started_at) "

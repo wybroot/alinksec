@@ -29,6 +29,23 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertFalse(any("fix_spec" in item for item in document["items"]))
             self.assertEqual(hashlib.sha256(self.definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
 
+    def test_review_accounts_for_every_legacy_rule_without_silent_coverage(self):
+        definitions = ROOT / "deploy/baseline/reviewed-linux-definitions.json"
+        review = json.loads(definitions.read_text())["review"]["rules"]
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/reviewed/linux-baseline.json").read_text()))
+        rules = {f"BL-LINUX-{index:04}" for index in range(1, 61)}
+        self.assertEqual(rules, {row["ruleId"] for row in review})
+        self.assertEqual(60, len(review))
+        self.assertEqual(8, len(document["items"]))
+        self.assertEqual(52, len(document["unsupported"]))
+        self.assertEqual(rules, {row["ruleId"] for row in document["items"] + document["unsupported"]})
+        self.assertTrue(all(row["reason"] for row in document["unsupported"]))
+        self.assertTrue(all("check" not in row for row in review if row["status"] == "unsupported"))
+        registry = json.loads((ROOT / "agent/internal/baseline/commands.json").read_text())
+        self.assertTrue(all(row["check"]["cmd"] in registry["linux"] for row in document["items"]))
+        self.assertTrue(all("fix_spec" not in row for row in document["items"]))
+
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)
         definition = json.loads(self.definitions.read_text())
