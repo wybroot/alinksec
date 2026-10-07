@@ -10,4 +10,5 @@ docker run --rm --network=none --memory=128m --memory-swap=192m --cpus=1 --pids-
   --workdir /workspace/agent/internal/baseline \
   --env ALINKSEC_RSYSLOG_CRON_NATIVE_REQUIRED=true \
   alinksec-rsyslog-cron-native-validation:latest \
-  /workspace/.tmp/baseline-native.test -test.v -test.timeout=90s -test.run '^TestNativeRsyslogCronRouting$'
+  /workspace/.tmp/baseline-native.test -test.v -test.timeout=90s \
+  -test.run '^(TestNativeRsyslogCronRouting|TestRsyslogCronRefusesUnsafeOrAmbiguousInputs)$'

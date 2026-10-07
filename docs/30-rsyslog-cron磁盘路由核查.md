@@ -20,7 +20,7 @@
 
 生产不调用rsyslogd（包括`-N1`）、不执行配置动作、不读日志、不修改文件或服务。不证明实际运行入口/已加载配置、cron实际发送、系统socket与systemd激活、限流、重复合并、队列/丢包、目标文件类型或授权/可写性、日志轮转和事件交付。管理员需根据实际业务另行核对这些状态。
 
-原生CI使用Ubuntu24精确包、禁止服务自启的专用容器，无网络、capabilities全部删除、128MiB内存/192MiB含swap、1CPU、64PID、repo只读。仅修改容器私有配置和Unix socket，受控daemon使用私有pid并在每场景结束清理。真实`rsyslogd -N1`解析有限夹具，再通过imuxsock发送八个不同severity的cron datagram和其他facility负例；私有control.log确保消息已处理，daemon正常关闭后比对cron.log实际八位掩码。覆盖正条件累加、精确/否定、none、提前/后置丢弃、连续动作、包含顺序/位置、注释和ACL拒绝边界。原生能读取ACL配置不扩张本候选的无ACL范围。这里证明精确产品有限夹具中的路由语义，不能证明用户主机事件交付。
+原生CI使用Ubuntu24精确包、禁止服务自启的专用容器，无网络、capabilities全部删除、128MiB内存/192MiB含swap、1CPU、64PID、repo只读。仅修改容器私有配置和Unix socket，受控daemon使用私有pid并在每场景结束清理。真实`rsyslogd -N1`解析有限夹具，再通过imuxsock发送八个不同severity的cron datagram和其他facility负例；私有control.log确保消息已处理，daemon正常关闭后比对cron.log实际八位掩码。覆盖正条件累加、精确/否定、none、提前/后置丢弃、连续动作、包含顺序/位置、注释和ACL拒绝边界。容器还必跑全部不可信/歧义输入边界，包括访问与包含目录默认ACL；必跑模式不能跳过ACL夹具。原生能读取ACL配置不扩张本候选的无ACL范围。这里证明精确产品有限夹具中的路由语义，不能证明用户主机事件交付。
 
 审核/下发/任务快照/错误阻止发布、完成fail允许发布和新版本需独立证据的协议测试，以及双数据库REST与桌面/移动端证据展示，均与原生结果分开。资源受限本机串行验证，双架构CI独立runner并行。
 

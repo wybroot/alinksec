@@ -155,7 +155,7 @@ func TestRsyslogCronRefusesUnsafeOrAmbiguousInputs(t *testing.T) {
 				}
 			}
 			if err != nil {
-				if (kind == "access-acl" || kind == "default-acl") && (err == unix.EINVAL || err == unix.EOPNOTSUPP) {
+				if os.Getenv("ALINKSEC_RSYSLOG_CRON_NATIVE_REQUIRED") != "true" && (kind == "access-acl" || kind == "default-acl") && (err == unix.EINVAL || err == unix.EOPNOTSUPP) {
 					t.Skip("local filesystem cannot create ACL fixture; mandatory native container covers it")
 				}
 				t.Fatal(err)
