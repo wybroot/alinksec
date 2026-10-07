@@ -654,6 +654,49 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   audit.published = await ok(`${auditPrefix}/publish`, { ...options, body: { note: 'Complete kernel protocol fixture; no event delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditRecord.id))
   audit.withdrawn = await ok(`${auditPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(audit.withdrawn.status, 'withdrawn')
+  const cronDocument = JSON.parse(readFileSync(new URL('../baseline/packages/cron/linux-baseline.json', import.meta.url)))
+  cronDocument.code = `API-${mode}-cron`
+  const invalidCron = structuredClone(cronDocument); invalidCron.items[0].check.target = '/etc/crontab'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidCron))).status, 400)
+  const cron = { candidate: await ok('/api/baseline/packages/import', pamUpload(cronDocument)) }; fixtures.cron = cron
+  const cronRecord = { id: cron.candidate.id, code: cronDocument.code }; baselinePackages.push(cronRecord)
+  const cronPrefix = `/api/baseline/packages/${cronRecord.id}`
+  cron.approved = await ok(`${cronPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm installed Debian cron and all direct system table metadata; protocol fixture' } })
+  cronRecord.template = Number(cron.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${cronPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed', 'pass']) {
+    cron.testing = await ok(`${cronPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(cron.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, cronDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('debian_cron_metadata') && payload.includes(cronDocument.items[0].check.expected))
+    const pass = outcome === 'pass', error = outcome === 'error'
+    const quoted = value => "'" + value.replaceAll("'", "''") + "'"
+    const actual = 'scope=on-disk-debian-cron-system-tables loaded_state=unverified package=cron version=3.0pl1-184ubuntu2 crontab_mode=0644 cron.d_mode=0755 entries=3 checked=5 violations=' + (pass ? '0' : '1') +
+      ' access_acl=none default_acl=none reference=crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0' + (pass ? '' : ' examples=/etc/cron.d/task.backup:mode=0666,uid=0,gid=0')
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass},${quoted(actual)},${quoted(error ? 'Unconfirmed cron package, ACL or directory changes' : pass ? '' : 'Cron system table metadata reference mismatch')},${quoted(error ? 'error' : pass ? 'pass' : 'fail')}
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    cron[outcome] = await ok(cronPrefix, { token: tokens.admin })
+    assert.equal(cron[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${cronPrefix}/publish`, { ...options, body: { note: 'Incomplete metadata blocks publication' } })).status, 400)
+    else {
+      const item = cron[outcome].testResults[0].items[0]
+      assert.equal(item.execution_status, pass ? 'pass' : 'fail')
+      assert.ok(!item.fixable && item.actual.includes('loaded_state=unverified'))
+      assert.equal(cron[outcome].testResults[0].score, pass ? 100 : 0)
+    }
+  }
+  cron.published = await ok(`${cronPrefix}/publish`, { ...options, body: { note: 'Complete system table metadata protocol fixture; no scheduler or job execution certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === cronRecord.id))
+  cron.withdrawn = await ok(`${cronPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(cron.withdrawn.status, 'withdrawn')
+
   const auditdDocument = JSON.parse(readFileSync(new URL('../baseline/packages/auditd/linux-baseline.json', import.meta.url)))
   auditdDocument.code = `API-${mode}-auditd`
   const invalidAuditd = structuredClone(auditdDocument); invalidAuditd.items[0].check.target = '/tmp/auditd.conf'

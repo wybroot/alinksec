@@ -148,6 +148,12 @@ public final class BaselinePackageFormat {
                 require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
                         : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
             }
+            case "debian_cron_metadata" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "cron 系统任务元数据检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("system-tables") && text(check, "operator", 32).equals("eq"), "cron 检查需固定系统任务范围");
+                require(text(check, "expected", 1000).equals("crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0"), "cron 元数据参考不能隐式扩展");
+            }
             case "auditd_config" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "auditd 配置检查仅支持 Linux");

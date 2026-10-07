@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -173,6 +173,41 @@ class BaselinePackageIntegrationTest {
         }
         var windows = logMetadataDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
         var nil = logMetadataDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
+    }
+
+    ObjectNode cronDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/cron/linux-baseline.json")));
+    }
+
+    @Test void cronMetadataScopeSnapshotsAndErrorsControlPublication() throws Exception {
+        var doc = cronDocument(); var pkg = imported(doc);
+        packages.review(id(pkg), true, "Confirm installed Debian cron and all direct entry metadata scope", 7L);
+        for (String host : List.of("windows", "rocky")) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), host));
+        long task = test(id(pkg), "ubuntu");
+        var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(1, sent.size());
+        assertEquals(doc.path("items").get(0).path("check"), JsonUtils.mapper().readTree(sent.get(0).getCheck()));
+        var response = report(task, "ubuntu", false);
+        results.onResult("ubuntu", response.toBuilder().setItems(0, response.getItems(0).toBuilder().setExecutionStatus("error").setMessage("Unconfirmed package, ACL or directory changes")).build());
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "Incomplete cron metadata", 7L));
+        long retry = test(id(pkg), "ubuntu"); results.onResult("ubuntu", report(retry, "ubuntu", false));
+        packages.publish(id(pkg), "Complete metadata protocol fixture, no task execution proof", 7L);
+        String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0019'", String.class, task);
+        assertEquals(doc.path("items").get(0).path("check"), JsonUtils.mapper().readTree(snapshot));
+        var next = doc.deepCopy(); next.put("version", "2"); var changed = imported(next);
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse old metadata evidence", 7L));
+    }
+
+    @Test void cronDefinitionsRejectPathsFieldsPlatformsAndWeakenedPolicy() throws Exception {
+        for (var change : Map.of("target", "/etc/crontab", "cmd", "cron -f", "operator", "regex", "expected", "uid=0", "owner", "root", "group", "0", "option", "any").entrySet()) {
+            var doc = cronDocument(); ((ObjectNode)doc.path("items").get(0).path("check")).put(change.getKey(), change.getValue());
+            assertThrows(IllegalArgumentException.class, () -> imported(doc), change.getKey());
+        }
+        var windows = cronDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        var nil = cronDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
     }
 

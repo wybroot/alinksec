@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "9",
+  "version": "10",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -203,7 +203,7 @@
     },
     {
       "ruleId": "BL-LINUX-0019",
-      "reason": "固定文件和权限；无 cron 或不同调度实现不能直接给出通用不合规结论。"
+      "reason": "通用包不含此项；使用独立 Ubuntu24 Debian cron 系统任务元数据候选，需精确软件包与路径适用性，非调度或日志证明。"
     },
     {
       "ruleId": "BL-LINUX-0020",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "eb0675d41b84d6815894e7a1d0e278e236985e1ea336cf2fe86a67fe85620823"
+    "sha256": "aa605ac464b20634c4d7fd0e6f8d422b881ac9c3bf88353d2a8c54f89e64df51"
   }
 }

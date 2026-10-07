@@ -117,6 +117,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkLinuxAudit(cs)
 	case "auditd_config":
 		result = checkAuditdConfig(cs)
+	case "debian_cron_metadata":
+		result = checkCronMetadata(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}

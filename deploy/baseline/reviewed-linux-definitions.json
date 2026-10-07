@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "9",
+      "version": "10",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -210,7 +210,7 @@
         },
         {
           "ruleId": "BL-LINUX-0019",
-          "reason": "固定文件和权限；无 cron 或不同调度实现不能直接给出通用不合规结论。"
+          "reason": "通用包不含此项；使用独立 Ubuntu24 Debian cron 系统任务元数据候选，需精确软件包与路径适用性，非调度或日志证明。"
         },
         {
           "ruleId": "BL-LINUX-0020",
@@ -665,13 +665,20 @@
       },
       {
         "ruleId": "BL-LINUX-0019",
-        "name": "cron 系统任务文件权限",
+        "name": "Debian cron 系统任务表与直接条目元数据",
         "category": "访问控制",
-        "severity": 2,
-        "status": "unsupported",
-        "reason": "固定文件和权限；无 cron 或不同调度实现不能直接给出通用不合规结论。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：固定文件和权限；无 cron 或不同调度实现不能直接给出通用不合规结论。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "severity": 3,
+        "status": "product_candidate",
+        "reason": "通用包不含此项；使用独立 Ubuntu24 Debian cron 系统任务元数据候选，需精确软件包与路径适用性，非调度或日志证明。",
+        "scope": "Ubuntu24.04 已完整安装 cron 3.0pl1-184ubuntu2；/etc/crontab、/etc/cron.d 与全部直接条目的当前磁盘元数据。",
+        "remediation": "仅 Ubuntu24.04 已完整安装的 Debian cron 3.0pl1-184ubuntu2，软件包查询固定且前后确认；管理员确认默认系统任务路径与可信安装。核查 /etc/crontab、/etc/cron.d 及其全部直接条目（包括点文件和备份名）的磁盘元数据：普通单硬链接文件模式位不超0644，目录不超0755，数值UID/GID均0，无ACL。更严格模式满足位上限，不证明可读或可用。缺失、其他产品/版本、链接、子目录/特殊文件、ACL、未支持文件名、超过128条目、读取异常或期间变化为error，明确模式/UID/GID偏差为fail。仅元数据，不读任务内容、不执行命令、不改变服务，不证明调度器加载/运行、任务语法/执行、cron.hourly等run-parts目录、用户spool、父目录完整授权或日志策略；loaded_state=unverified。无自动修复，管理员按实际业务处置后重新测试。",
+        "check": {
+          "type": "debian_cron_metadata",
+          "target": "system-tables",
+          "operator": "eq",
+          "expected": "crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0020",
