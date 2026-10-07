@@ -405,3 +405,7 @@ Set `JAVA_BIN`, `MAVEN_BIN`, `GO_BIN`, `ALINKSEC_MAVEN_REPO`, and
 paths. The PostgreSQL wrapper uses one 256 MiB database container and runs
 migration/permission, mTLS, and API checks before removing it. Publication also
 requires successful full CI on the exact release commit and the Release workflow.
+
+## Isolated PAM checks
+
+Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, then run `bash deploy/tests/pam-password-native.sh`. The dedicated Ubuntu24 image serially checks actual password changes and login authentication, including lockout thresholds, consecutive-failure reset, root behavior, finite unlock and bypass controls. Never run these native mutation tests against host PAM: the wrapper mounts source read-only, uses no network or data volumes, and removes the container. Both Linux architectures must execute the tests in CI; ordinary test skips are not acceptance. Production checks read only the fixed service configurations. See [login check scope](../../docs/24-PAM登录失败锁定核查.md).

@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -139,6 +139,41 @@ class BaselinePackageIntegrationTest {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
         return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/pam/linux-baseline.json")));
+    }
+
+    ObjectNode pamAuthDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/pam-auth/linux-baseline.json")));
+    }
+
+    @Test void pamAuthScopeIsDispatchedAndUnconfirmedChainsBlockPublication() throws Exception {
+        var doc=pamAuthDocument(); var pkg=imported(doc);
+        packages.review(id(pkg),true,"Confirm exact login auth topology and finite ordinary/root lockout reference",7L);
+        for(String host:List.of("windows","rocky")) assertThrows(IllegalArgumentException.class,()->test(id(pkg),host));
+        long task=test(id(pkg),"ubuntu");
+        var sent=dispatched.get(dispatched.size()-1).getBaselineCheck().getItems(0);
+        assertEquals(doc.path("items").get(0).path("check"),JsonUtils.mapper().readTree(sent.getCheck()));
+        var response=report(task,"ubuntu",false);
+        results.onResult("ubuntu",response.toBuilder().setItems(0,response.getItems(0).toBuilder().setExecutionStatus("error").setMessage("Unconfirmed auth chain")).build());
+        assertThrows(IllegalArgumentException.class,()->packages.publish(id(pkg),"Cannot confirm chain",7L));
+        long retry=test(id(pkg),"ubuntu");
+        results.onResult("ubuntu",report(retry,"ubuntu",false));
+        packages.publish(id(pkg),"Protocol fixture: complete noncompliance findings retained",7L);
+        String snapshot=jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=?",String.class,task);
+        assertEquals(doc.path("items").get(0).path("check"),JsonUtils.mapper().readTree(snapshot));
+        var next=doc.deepCopy();next.put("version","2");var changed=imported(next);
+        assertThrows(IllegalArgumentException.class,()->packages.publish(id(changed),"Reuse old test",7L));
+    }
+
+    @Test void pamAuthDefinitionsRejectOtherServicesFieldsPlatformsAndWeakenedReference() throws Exception {
+        for(var change:Map.of("target","/etc/pam.d/sshd","cmd","cat /etc/shadow","option","other","operator","regex","expected","deny=0","config","/tmp/policy").entrySet()){
+            var doc=pamAuthDocument();((ObjectNode)doc.path("items").get(0).path("check")).put(change.getKey(),change.getValue());
+            assertThrows(IllegalArgumentException.class,()->imported(doc),change.getKey());
+        }
+        var windows=pamAuthDocument();windows.put("osType",2);assertThrows(IllegalArgumentException.class,()->imported(windows));
+        var nil=pamAuthDocument();((ObjectNode)nil.path("items").get(0).path("check")).putNull("cmd");assertThrows(IllegalArgumentException.class,()->imported(nil));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_baseline_package",Integer.class));verifyNoInteractions(commands);
     }
 
     @Test void pamServiceAndReferenceAreReviewedDispatchedAndSnapshotted() throws Exception {

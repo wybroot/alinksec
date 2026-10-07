@@ -54,7 +54,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         self.assertEqual(2, len(document["unsupported"]))
         self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
-        self.assertEqual(41, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(40, sum(row["status"] == "unsupported" for row in review))
         for row in document["items"]:
             self.assertEqual("sshd_effective", row["check"]["type"])
             self.assertEqual({"user", "host", "address", "local_address", "local_port"}, set(row["check"]["connection"]))
@@ -97,6 +97,22 @@ class BaselinePackageToolsTest(unittest.TestCase):
         quality = next(item["check"] for item in document["items"] if item["check"]["option"] == "quality")
         self.assertIn("enforce_for_root=1", quality["expected"])
         self.assertIn("use_authtok=1", quality["expected"])
+
+    def test_pam_auth_candidate_binds_login_and_three_stage_lockout_reference(self):
+        definitions = ROOT / "deploy/baseline/pam-auth-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/pam-auth/linux-baseline.json").read_text()))
+        self.assertEqual(["BL-LINUX-0005"], [item["ruleId"] for item in document["items"]])
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
+        item = document["items"][0]
+        self.assertEqual("pam_auth", item["check"]["type"])
+        self.assertEqual("/etc/pam.d/login", item["check"]["target"])
+        self.assertIn("root_unlock_time=900..86400", item["check"]["expected"])
+        self.assertNotIn("fix_spec", item)
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
+        self.assertEqual("product_candidate", mapping["status"])
+        self.assertEqual(item["check"], mapping["check"])
 
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)

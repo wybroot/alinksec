@@ -1,7 +1,7 @@
 {
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.4",
+    "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json"
   },
   "platforms": {
@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "5",
+      "version": "6",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -154,7 +154,7 @@
         },
         {
           "ruleId": "BL-LINUX-0005",
-          "reason": "子串可出现在注释中，也未校验 deny、unlock_time、PAM 顺序和其他 include；停止用此项证明有效锁定策略。"
+          "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-AUTH 独立候选，需确认 login 认证链及 Linux-PAM 产品条件。"
         },
         {
           "ruleId": "BL-LINUX-0006",
@@ -408,13 +408,21 @@
       },
       {
         "ruleId": "BL-LINUX-0005",
-        "name": "PAM 登录失败锁定策略",
+        "name": "login 服务本地认证链的连续失败锁定参考",
         "category": "身份鉴别",
         "severity": 4,
-        "status": "unsupported",
-        "reason": "子串可出现在注释中，也未校验 deny、unlock_time、PAM 顺序和其他 include；停止用此项证明有效锁定策略。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：子串可出现在注释中，也未校验 deny、unlock_time、PAM 顺序和其他 include；停止用此项证明有效锁定策略。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "独立 Ubuntu24.04 login PAM 候选；只核对已支持认证链、三个阶段一致计数与明确有限解锁参考，不宣称全部登录或运行期锁定。",
+        "scope": "Ubuntu24.04 login 的已支持本地 auth 链及固定 faillock.conf；只读阶段一致参数，不证明实际全部登录或计数持久性。",
+        "remediation": "限定 Ubuntu24.04 login 的 auth 组及明确 preauth/unix/authfail/authsucc/deny 顺序和控制；解析固定 faillock.conf 及各阶段模块覆盖，要求三个阶段计数设置一致。参考 deny 1–5、fail_interval 至少900秒、普通与root有限解锁900–86400秒、显式even_deny_root。仅只读认证配置，不证明应用调用、全部PAM服务、计数文件可写/持久、NSS身份源或运行期模块行为。未知链、额外模块/身份源、substack、任意配置/计数目录、异常或读取变化保持error。无自动修复，不尝试登录、不读取口令/哈希/计数记录。",
+        "check": {
+          "type": "pam_auth",
+          "target": "/etc/pam.d/login",
+          "option": "faillock",
+          "operator": "eq",
+          "expected": "deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0006",

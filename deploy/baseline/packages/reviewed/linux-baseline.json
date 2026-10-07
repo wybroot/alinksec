@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "5",
+  "version": "6",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -147,7 +147,7 @@
     },
     {
       "ruleId": "BL-LINUX-0005",
-      "reason": "子串可出现在注释中，也未校验 deny、unlock_time、PAM 顺序和其他 include；停止用此项证明有效锁定策略。"
+      "reason": "通用观测包不含此产品检查；另见 ALINKSEC-UBUNTU24-PAM-AUTH 独立候选，需确认 login 认证链及 Linux-PAM 产品条件。"
     },
     {
       "ruleId": "BL-LINUX-0006",
@@ -341,8 +341,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-05.4",
+    "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "b4a502eab2468681a080764355da3b5984fce57058189b84d8533d55fb965e3e"
+    "sha256": "4115ce1f1dffcfc11e9947fd1118f1363adc12d2ea0933156e83b946b5c27a39"
   }
 }

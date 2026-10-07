@@ -139,6 +139,13 @@ public final class BaselinePackageFormat {
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
             }
+            case "pam_auth" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "PAM 认证检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("/etc/pam.d/login"), "PAM 认证检查限定 login 服务");
+                require(text(check, "option", 32).equals("faillock") && text(check, "operator", 32).equals("eq"), "PAM 认证检查项或运算符不支持");
+                require(text(check, "expected", 1000).equals("deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400"), "PAM 锁定参考要求不能隐式扩展");
+            }
             case "pam_password" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "PAM 口令检查仅支持 Linux");

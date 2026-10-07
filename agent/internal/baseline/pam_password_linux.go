@@ -140,10 +140,14 @@ func (r *pamRead) lines(path string) ([]string, error) {
 	return lines, nil
 }
 
-// Expand only the password management group; other groups are outside this check.
+// Expand only the selected management group; other groups are outside this check.
 // Includes remain inside this directory; fallback/vendor trees and substacks are
 // deliberately unconfirmed rather than guessed.
 func (r *pamRead) expand(directory, name string, depth int) error {
+	return r.expandGroup(directory, name, "password", depth)
+}
+
+func (r *pamRead) expandGroup(directory, name, group string, depth int) error {
 	if !pamServiceName.MatchString(name) || depth > 8 || r.visiting[name] {
 		return fmt.Errorf("PAM include 名称、深度或循环无效")
 	}
@@ -177,14 +181,14 @@ func (r *pamRead) expand(directory, name string, depth int) error {
 			if len(first) != 2 {
 				return fmt.Errorf("PAM include 格式无效")
 			}
-			if err := r.expand(directory, first[1], depth+1); err != nil {
+			if err := r.expandGroup(directory, first[1], group, depth+1); err != nil {
 				return err
 			}
 			continue
 		}
 		kind := strings.ToLower(first[0])
-		if kind != "password" {
-			if kind != "auth" && kind != "account" && kind != "session" {
+		if kind != group {
+			if kind != "auth" && kind != "password" && kind != "account" && kind != "session" {
 				return fmt.Errorf("PAM 管理组尚未支持")
 			}
 			continue
@@ -203,7 +207,7 @@ func (r *pamRead) expand(directory, name string, depth int) error {
 		} else {
 			parts := strings.Fields(rest)
 			if len(parts) < 2 {
-				return fmt.Errorf("PAM password 行无效")
+				return fmt.Errorf("PAM 管理组行无效")
 			}
 			control = strings.ToLower(parts[0])
 			rest = strings.TrimSpace(rest[len(parts[0]):])
@@ -216,7 +220,7 @@ func (r *pamRead) expand(directory, name string, depth int) error {
 			if len(parts) != 1 {
 				return fmt.Errorf("PAM include 格式无效")
 			}
-			if err := r.expand(directory, parts[0], depth+1); err != nil {
+			if err := r.expandGroup(directory, parts[0], group, depth+1); err != nil {
 				return err
 			}
 			continue

@@ -149,7 +149,7 @@ jobs:
           go test -c -o ../.tmp/baseline-native.test ./internal/baseline
           cd internal/baseline
           sudo env ALINKSEC_IDENTITY_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLocalIdentity$'
-      - name: Check isolated Ubuntu24 PAM password behavior
+      - name: Check isolated Ubuntu24 PAM password and login lockout behavior
         run: |
           cp .tmp/baseline-native.test .tmp/pam-native.test
           bash deploy/tests/pam-password-native.sh
