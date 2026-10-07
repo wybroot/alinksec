@@ -54,7 +54,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         self.assertEqual(2, len(document["unsupported"]))
         self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
-        self.assertEqual(38, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(35, sum(row["status"] == "unsupported" for row in review))
         for row in document["items"]:
             self.assertEqual("sshd_effective", row["check"]["type"])
             self.assertEqual({"user", "host", "address", "local_address", "local_port"}, set(row["check"]["connection"]))
@@ -113,6 +113,21 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
+
+    def test_log_metadata_candidate_preserves_fixed_scope_and_mapping(self):
+        definitions = ROOT / "deploy/baseline/log-metadata-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/log-metadata/linux-baseline.json").read_text()))
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
+        self.assertEqual({"BL-LINUX-0023", "BL-LINUX-0027", "BL-LINUX-0028"}, {item["ruleId"] for item in document["items"]})
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        for item in document["items"]:
+            self.assertEqual("linux_log_metadata", item["check"]["type"])
+            self.assertEqual("subset", item["check"]["operator"])
+            self.assertNotIn("fix_spec", item)
+            mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
+            self.assertEqual("product_candidate", mapping["status"])
+            self.assertEqual(item["check"], mapping["check"])
 
     def test_systemd_candidate_preserves_exact_units_without_generic_coverage_expansion(self):
         definitions = ROOT / "deploy/baseline/systemd-definitions.json"

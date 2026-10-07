@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "7",
+  "version": "8",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -219,7 +219,7 @@
     },
     {
       "ruleId": "BL-LINUX-0023",
-      "reason": "能取得目录元数据，仍需核对目录、模式及服务适用范围。"
+      "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
     },
     {
       "ruleId": "BL-LINUX-0024",
@@ -235,11 +235,11 @@
     },
     {
       "ruleId": "BL-LINUX-0027",
-      "reason": "精确文件元数据参考断言，需产品路径和权限策略适用性。"
+      "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
     },
     {
       "ruleId": "BL-LINUX-0028",
-      "reason": "同 0027，root/utmp 及 0664 不能视为全 Linux 策略。"
+      "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
     },
     {
       "ruleId": "BL-LINUX-0029",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "4f645a581a0236218b30ea8e99ff8a8d13c443f6ad6635c49221061e2b929d8a"
+    "sha256": "89eec25eec13c03ada6983140b29a6f4cf927b98c8c65e07b7885b4e04706f79"
   }
 }

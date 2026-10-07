@@ -120,6 +120,7 @@ agent/
 | `local_accounts` | 本地 passwd/shadow 的账户字段与明确范围 | target、option、operator(eq)、expected；system_shells 必填 uid_min/uid_max | 空口令字段、指定非root UID范围shell及UID0名称；不输出口令/哈希、不读取外部身份源 |
 | `pam_password` | passwd 服务已支持本地 password 链的质量/新口令散列参考 | 固定 target、option(quality/unix_hash)、operator(eq)、明确 expected、timeout_ms | Include、控制顺序及 pwquality 覆盖；其他链保持无法确认，见 [PAM口令链核查](23-PAM口令链核查.md) |
 | `systemd_service` | 本地 systemd 系统管理器的 auditd/rsyslog 当前单元状态 | 固定 target、operator(eq)、expected(loaded/active/running)、timeout_ms | 缺失、总线/查询错误和切换状态保持error；不是审计事件或日志投递证明，见 [服务状态核查](25-systemd服务状态核查.md) |
+| `linux_log_metadata` | Linux固定审计目录及btmp/wtmp元数据 | 固定target、perm、owner(0)、group(0/utmp)、operator(subset)、timeout_ms | 类型、数值ID与ACL边界；不解析实际日志目标/写入策略，见 [固定日志元数据核查](26-固定日志元数据核查.md) |
 | `service_status` | 服务启用状态 | name、expected(enabled/disabled/running) | sshd 禁 root 时 firewalld 状态 |
 | `account_policy` | 口令/账户策略 | key(minlen/maxdays/lockout…)、operator、expected | 密码最长有效期 90 天 |
 | `mount_opt` | 挂载点选项 | mount、option(nosuid/noexec/nodev)、required(bool) | /tmp nodev,nosuid |

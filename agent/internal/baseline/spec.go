@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -165,6 +165,17 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		case "eq", "regex":
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
+		}
+	} else if s.Type == "linux_log_metadata" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "perm": true, "owner": true, "group": true, "timeout_ms": true}
+		perm, group := logMetadataPolicy(s.Target)
+		if perm == "" || s.Operator != "subset" || s.Perm != perm || s.Owner != "0" || s.Group != group {
+			return nil, fmt.Errorf("日志元数据检查需固定路径、权限上限、UID 0 与明确属组")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("日志元数据检查不允许字段 %s", name)
+			}
 		}
 	} else if s.Type == "systemd_service" {
 		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}

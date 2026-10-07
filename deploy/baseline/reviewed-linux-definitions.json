@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "7",
+      "version": "8",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -226,7 +226,7 @@
         },
         {
           "ruleId": "BL-LINUX-0023",
-          "reason": "能取得目录元数据，仍需核对目录、模式及服务适用范围。"
+          "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
         },
         {
           "ruleId": "BL-LINUX-0024",
@@ -242,11 +242,11 @@
         },
         {
           "ruleId": "BL-LINUX-0027",
-          "reason": "精确文件元数据参考断言，需产品路径和权限策略适用性。"
+          "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
         },
         {
           "ruleId": "BL-LINUX-0028",
-          "reason": "同 0027，root/utmp 及 0664 不能视为全 Linux 策略。"
+          "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。"
         },
         {
           "ruleId": "BL-LINUX-0029",
@@ -712,13 +712,22 @@
       },
       {
         "ruleId": "BL-LINUX-0023",
-        "name": "审计日志目录权限",
+        "name": "固定审计目录元数据",
         "category": "安全审计",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "能取得目录元数据，仍需核对目录、模式及服务适用范围。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：能取得目录元数据，仍需核对目录、模式及服务适用范围。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。",
+        "scope": "Ubuntu24.04 固定路径 /var/log/audit 的类型、POSIX模式、UID/GID及ACL边界；非实际日志写入/投递证明。",
+        "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。",
+        "check": {
+          "type": "linux_log_metadata",
+          "target": "/var/log/audit",
+          "operator": "subset",
+          "perm": "0700",
+          "owner": "0",
+          "group": "0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0024",
@@ -759,23 +768,41 @@
       },
       {
         "ruleId": "BL-LINUX-0027",
-        "name": "btmp 日志文件权限",
+        "name": "固定 btmp 文件元数据",
         "category": "安全审计",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "精确文件元数据参考断言，需产品路径和权限策略适用性。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：精确文件元数据参考断言，需产品路径和权限策略适用性。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。",
+        "scope": "Ubuntu24.04 固定路径 /var/log/btmp 的类型、POSIX模式、UID/GID及ACL边界；非实际日志写入/投递证明。",
+        "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。",
+        "check": {
+          "type": "linux_log_metadata",
+          "target": "/var/log/btmp",
+          "operator": "subset",
+          "perm": "0660",
+          "owner": "0",
+          "group": "utmp",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0028",
-        "name": "wtmp 日志文件权限",
+        "name": "固定 wtmp 文件元数据",
         "category": "安全审计",
         "severity": 1,
-        "status": "unsupported",
-        "reason": "同 0027，root/utmp 及 0664 不能视为全 Linux 策略。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：同 0027，root/utmp 及 0664 不能视为全 Linux 策略。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；使用独立固定日志元数据候选。只观察固定路径，需管理员确认传统产品路径；不解析 auditd/logrotate 有效策略。",
+        "scope": "Ubuntu24.04 固定路径 /var/log/wtmp 的类型、POSIX模式、UID/GID及ACL边界；非实际日志写入/投递证明。",
+        "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。",
+        "check": {
+          "type": "linux_log_metadata",
+          "target": "/var/log/wtmp",
+          "operator": "subset",
+          "perm": "0664",
+          "owner": "0",
+          "group": "utmp",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0029",

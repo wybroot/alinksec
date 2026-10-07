@@ -567,6 +567,50 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   pam.published = await ok(`${pamPrefix}/publish`, { ...options, body: { note: 'Protocol fixture: declared hash selection passes, quality reference fails; no production credentials changed' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === pamRecord.id))
   pam.withdrawn = await ok(`${pamPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pam.withdrawn.status, 'withdrawn')
+  const logDocument = JSON.parse(readFileSync(new URL('../baseline/packages/log-metadata/linux-baseline.json', import.meta.url)))
+  logDocument.code = `API-${mode}-log-metadata`
+  const invalidLog = structuredClone(logDocument); invalidLog.items[0].check.target = '/tmp/audit'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidLog))).status, 400)
+  const logMetadata = { candidate: await ok('/api/baseline/packages/import', pamUpload(logDocument)) }; fixtures.logMetadata = logMetadata
+  const logRecord = { id: logMetadata.candidate.id, code: logDocument.code }; baselinePackages.push(logRecord)
+  const logPrefix = `/api/baseline/packages/${logRecord.id}`
+  logMetadata.approved = await ok(`${logPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm traditional fixed paths and local utmp group; metadata protocol fixture' } })
+  logRecord.template = Number(logMetadata.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${logPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed']) {
+    logMetadata.testing = await ok(`${logPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(logMetadata.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, logDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('linux_log_metadata') && logDocument.items.every(item => payload.includes(item.check.target)))
+    const badMode = "i.code='BL-LINUX-0027'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : `NOT (${badMode})`},
+        CASE WHEN i.code='BL-LINUX-0023' THEN 'scope=fixed-log-path target=/var/log/audit kind=directory mode=0700 uid=0 gid=0 access_acl=none default_acl=none allowed_mode=0700 expected_uid=0 expected_gid=0'
+        WHEN ${badMode} THEN 'scope=fixed-log-path target=/var/log/btmp kind=regular mode=0666 uid=0 gid=43 access_acl=none default_acl=n/a allowed_mode=0660 expected_uid=0 expected_gid=43'
+        ELSE 'scope=fixed-log-path target=/var/log/wtmp kind=regular mode=0600 uid=0 gid=43 access_acl=none default_acl=n/a allowed_mode=0664 expected_uid=0 expected_gid=43' END,
+        ${outcome === 'error' ? "'ACL or path applicability unconfirmed'" : `CASE WHEN ${badMode} THEN 'Log metadata reference mismatch' ELSE '' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${badMode} THEN 'fail' ELSE 'pass' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',3,${outcome === 'error' ? 0 : 2},${outcome === 'error' ? 3 : 1},${outcome === 'error' ? 0 : 66.67},${outcome === 'error' ? 3 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    logMetadata[outcome] = await ok(logPrefix, { token: tokens.admin })
+    assert.equal(logMetadata[outcome].testReady, outcome !== 'error')
+    if (outcome === 'error') assert.equal((await request(`${logPrefix}/publish`, { ...options, body: { note: 'Unconfirmed metadata blocks publication' } })).status, 400)
+    else {
+      const items = logMetadata.completed.testResults[0].items
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 2)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
+      assert.ok(items.every(item => !item.fixable && item.actual.includes('scope=fixed-log-path')))
+    }
+  }
+  logMetadata.published = await ok(`${logPrefix}/publish`, { ...options, body: { note: 'Complete fixed metadata protocol fixture; no log delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === logRecord.id))
+  logMetadata.withdrawn = await ok(`${logPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(logMetadata.withdrawn.status, 'withdrawn')
   const serviceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd/linux-baseline.json', import.meta.url)))
   serviceDocument.code = `API-${mode}-systemd`
   const invalidService = structuredClone(serviceDocument); invalidService.items[0].check.target = 'ssh.service'

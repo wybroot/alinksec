@@ -111,6 +111,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkPAMAuth(cs)
 	case "systemd_service":
 		result = checkSystemdService(cs)
+	case "linux_log_metadata":
+		result = checkLogMetadata(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}

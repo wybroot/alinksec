@@ -139,6 +139,16 @@ public final class BaselinePackageFormat {
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
             }
+            case "linux_log_metadata" -> {
+                fields(check, "type", "target", "operator", "perm", "owner", "group", "timeout_ms");
+                require(os == 1, "日志元数据检查仅支持 Linux");
+                String path = text(check, "target", 1024);
+                require(Set.of("/var/log/audit", "/var/log/btmp", "/var/log/wtmp").contains(path), "日志路径限定固定参考路径");
+                String perm = path.equals("/var/log/audit") ? "0700" : path.equals("/var/log/btmp") ? "0660" : "0664";
+                String group = path.equals("/var/log/audit") ? "0" : "utmp";
+                require(text(check, "operator", 32).equals("subset") && text(check, "perm", 4).equals(perm), "日志权限上限不能隐式扩展");
+                require(text(check, "owner", 64).equals("0") && text(check, "group", 64).equals(group), "日志数值属主及本地属组需明确");
+            }
             case "systemd_service" -> {
                 fields(check, "type", "target", "operator", "expected", "timeout_ms");
                 require(os == 1, "systemd 服务检查仅支持 Linux");
