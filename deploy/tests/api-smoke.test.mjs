@@ -654,6 +654,51 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   audit.published = await ok(`${auditPrefix}/publish`, { ...options, body: { note: 'Complete kernel protocol fixture; no event delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditRecord.id))
   audit.withdrawn = await ok(`${auditPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(audit.withdrawn.status, 'withdrawn')
+  const auditdDocument = JSON.parse(readFileSync(new URL('../baseline/packages/auditd/linux-baseline.json', import.meta.url)))
+  auditdDocument.code = `API-${mode}-auditd`
+  const invalidAuditd = structuredClone(auditdDocument); invalidAuditd.items[0].check.target = '/tmp/auditd.conf'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidAuditd))).status, 400)
+  const auditd = { candidate: await ok('/api/baseline/packages/import', pamUpload(auditdDocument)) }; fixtures.auditd = auditd
+  const auditdRecord = { id: auditd.candidate.id, code: auditdDocument.code }; baselinePackages.push(auditdRecord)
+  const auditdPrefix = `/api/baseline/packages/${auditdRecord.id}`
+  auditd.approved = await ok(`${auditdPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm on-disk auditd 3.1.2 declarations and numeric log GID; protocol fixture' } })
+  auditdRecord.template = Number(auditd.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${auditdPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed']) {
+    auditd.testing = await ok(`${auditdPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(auditd.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, auditdDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('auditd_config') && auditdDocument.items.every(item => payload.includes(item.check.expected)))
+    const badRetention = "i.code='BL-AUDITD-0002'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : `NOT (${badRetention})`},
+        'scope=on-disk-auditd-3.1.2 config=/etc/audit/auditd.conf loaded_state=unverified local_events=yes write_logs=yes log_format=enriched ' ||
+        CASE WHEN ${badRetention} THEN 'option=keep_logs max_log_file=8 max_log_file_action=rotate'
+        WHEN i.code='BL-AUDITD-0003' THEN 'option=log_file_metadata log_file=/var/log/audit/custom.log log_group=0 kind=regular mode=0600 uid=0 gid=0 access_acl=none allowed_mode=0640 expected_uid=0 expected_gid=0'
+        ELSE 'option=local_logging' END,
+        ${outcome === 'error' ? "'Unsupported auditd configuration or symbolic log GID'" : `CASE WHEN ${badRetention} THEN 'On-disk keep_logs declaration reference mismatch' ELSE '' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${badRetention} THEN 'fail' ELSE 'pass' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',3,${outcome === 'error' ? 0 : 2},${outcome === 'error' ? 3 : 1},${outcome === 'error' ? 0 : 67},${outcome === 'error' ? 3 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    auditd[outcome] = await ok(auditdPrefix, { token: tokens.admin })
+    assert.equal(auditd[outcome].testReady, outcome !== 'error')
+    if (outcome === 'error') assert.equal((await request(`${auditdPrefix}/publish`, { ...options, body: { note: 'Unconfirmed on-disk configuration blocks publication' } })).status, 400)
+    else {
+      const items = auditd.completed.testResults[0].items
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 2)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
+      assert.ok(items.every(item => !item.fixable && item.actual.includes('loaded_state=unverified')))
+    }
+  }
+  auditd.published = await ok(`${auditdPrefix}/publish`, { ...options, body: { note: 'Complete on-disk declaration protocol fixture; no daemon loading or log delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditdRecord.id))
+  auditd.withdrawn = await ok(`${auditdPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(auditd.withdrawn.status, 'withdrawn')
   const serviceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd/linux-baseline.json', import.meta.url)))
   serviceDocument.code = `API-${mode}-systemd`
   const invalidService = structuredClone(serviceDocument); invalidService.items[0].check.target = 'ssh.service'

@@ -162,6 +162,22 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual(item["check"], mapping["check"])
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
 
+    def test_auditd_candidate_keeps_disk_declarations_separate_from_legacy_coverage(self):
+        definitions = ROOT / "deploy/baseline/auditd-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/auditd/linux-baseline.json").read_text()))
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
+        self.assertEqual({"local_logging", "keep_logs", "log_file_metadata"}, {item["check"]["option"] for item in document["items"]})
+        self.assertEqual(2, len(document["unsupported"]))
+        for item in document["items"]:
+            self.assertEqual("auditd_config", item["check"]["type"])
+            self.assertEqual("/etc/audit/auditd.conf", item["check"]["target"])
+            self.assertNotIn("cmd", item["check"])
+            self.assertNotIn("fix_spec", item)
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        self.assertEqual(33, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
+
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)
         definition = json.loads(self.definitions.read_text())

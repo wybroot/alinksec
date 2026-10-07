@@ -148,6 +148,18 @@ public final class BaselinePackageFormat {
                 require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
                         : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
             }
+            case "auditd_config" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "auditd 配置检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("/etc/audit/auditd.conf") && text(check, "operator", 32).equals("eq"), "auditd 检查需固定磁盘配置和明确参考");
+                String expected = switch (text(check, "option", 32)) {
+                    case "local_logging" -> "local_events=yes,write_logs=yes,log_format=raw|enriched";
+                    case "keep_logs" -> "local_logging=1,max_log_file>=1,max_log_file_action=keep_logs";
+                    case "log_file_metadata" -> "local_logging=1,regular,mode<=0640,uid=0,gid=declared_numeric_log_group";
+                    default -> throw new IllegalArgumentException("auditd 配置检查项尚未支持");
+                };
+                require(text(check, "expected", 1000).equals(expected), "auditd 参考不能隐式扩展");
+            }
             case "linux_log_metadata" -> {
                 fields(check, "type", "target", "operator", "perm", "owner", "group", "timeout_ms");
                 require(os == 1, "日志元数据检查仅支持 Linux");

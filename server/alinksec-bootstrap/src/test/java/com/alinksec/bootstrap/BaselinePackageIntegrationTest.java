@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -173,6 +173,44 @@ class BaselinePackageIntegrationTest {
         }
         var windows = logMetadataDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
         var nil = logMetadataDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
+    }
+
+    ObjectNode auditdDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/auditd/linux-baseline.json")));
+    }
+
+    @Test void auditdDeclaredScopeSnapshotsAndErrorsControlPublication() throws Exception {
+        var doc = auditdDocument(); var pkg = imported(doc);
+        packages.review(id(pkg), true, "Confirm on-disk auditd 3.1.2 scope, no runtime loading proof", 7L);
+        for (String host : List.of("windows", "rocky")) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), host));
+        long task = test(id(pkg), "ubuntu");
+        var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(3, sent.size());
+        for (int i=0; i<sent.size(); i++) assertEquals(doc.path("items").get(i).path("check"), JsonUtils.mapper().readTree(sent.get(i).getCheck()));
+        var response = report(task, "ubuntu", false);
+        results.onResult("ubuntu", response.toBuilder().setItems(0, response.getItems(0).toBuilder().setExecutionStatus("error").setMessage("Unsupported auditd configuration or symbolic GID")).build());
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "Incomplete disk configuration observation", 7L));
+        long retry = test(id(pkg), "ubuntu"); results.onResult("ubuntu", report(retry, "ubuntu", false));
+        packages.publish(id(pkg), "Complete declaration protocol fixture, not daemon delivery proof", 7L);
+        String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-AUDITD-0003'", String.class, task);
+        assertEquals(doc.path("items").get(2).path("check"), JsonUtils.mapper().readTree(snapshot));
+        var next = doc.deepCopy(); next.put("version", "2"); var changed = imported(next);
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse old disk configuration evidence", 7L));
+    }
+
+    @Test void auditdDefinitionsRejectOtherFilesFieldsPlatformsAndWeakenedPolicy() throws Exception {
+        for (var change : Map.of("target", "/tmp/auditd.conf", "cmd", "auditd -f", "operator", "regex", "expected", "yes", "owner", "root", "group", "adm", "option", "any").entrySet()) {
+            var doc = auditdDocument(); ((ObjectNode)doc.path("items").get(0).path("check")).put(change.getKey(), change.getValue());
+            assertThrows(IllegalArgumentException.class, () -> imported(doc), change.getKey());
+        }
+        for (int i : List.of(1, 2)) {
+            var weak = auditdDocument(); ((ObjectNode)weak.path("items").get(i).path("check")).put("expected", "ignore"); assertThrows(IllegalArgumentException.class, () -> imported(weak));
+        }
+        var windows = auditdDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        var nil = auditdDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
     }
 
