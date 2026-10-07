@@ -611,6 +611,49 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   logMetadata.published = await ok(`${logPrefix}/publish`, { ...options, body: { note: 'Complete fixed metadata protocol fixture; no log delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === logRecord.id))
   logMetadata.withdrawn = await ok(`${logPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(logMetadata.withdrawn.status, 'withdrawn')
+  const auditDocument = JSON.parse(readFileSync(new URL('../baseline/packages/audit/linux-baseline.json', import.meta.url)))
+  auditDocument.code = `API-${mode}-audit`
+  const invalidAudit = structuredClone(auditDocument); invalidAudit.items[0].check.target = '/etc/passwd'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidAudit))).status, 400)
+  const audit = { candidate: await ok('/api/baseline/packages/import', pamUpload(auditDocument)) }; fixtures.audit = audit
+  const auditRecord = { id: audit.candidate.id, code: auditDocument.code }; baselinePackages.push(auditRecord)
+  const auditPrefix = `/api/baseline/packages/${auditRecord.id}`
+  audit.approved = await ok(`${auditPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm initial namespace kernel audit and limited loaded watch reference; protocol fixture' } })
+  auditRecord.template = Number(audit.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${auditPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed']) {
+    audit.testing = await ok(`${auditPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(audit.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, auditDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('linux_audit') && auditDocument.items.every(item => payload.includes(item.check.option)))
+    const badMode = "i.code='BL-LINUX-0025'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : `NOT (${badMode})`},
+        CASE WHEN i.code='BL-LINUX-0021' THEN 'scope=kernel-audit enabled=1 daemon_pid=0 lost=0 backlog=0'
+        ELSE 'scope=kernel-audit enabled=1 daemon_pid=0 lost=0 backlog=0 rules=3 reference=always_exit_all identity_watches=wa /etc/passwd=wa /etc/shadow=wa /etc/group=wa /etc/gshadow=none' END,
+        ${outcome === 'error' ? "'Kernel audit query unavailable or rule form unsupported'" : `CASE WHEN ${badMode} THEN 'Loaded identity watch reference mismatch' ELSE '' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${badMode} THEN 'fail' ELSE 'pass' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${outcome === 'error' ? 0 : 1},${outcome === 'error' ? 2 : 1},${outcome === 'error' ? 0 : 50},${outcome === 'error' ? 2 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    audit[outcome] = await ok(auditPrefix, { token: tokens.admin })
+    assert.equal(audit[outcome].testReady, outcome !== 'error')
+    if (outcome === 'error') assert.equal((await request(`${auditPrefix}/publish`, { ...options, body: { note: 'Unconfirmed kernel query blocks publication' } })).status, 400)
+    else {
+      const items = audit.completed.testResults[0].items
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 1)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
+      assert.ok(items.every(item => !item.fixable && item.actual.includes('scope=kernel-audit')))
+    }
+  }
+  audit.published = await ok(`${auditPrefix}/publish`, { ...options, body: { note: 'Complete kernel protocol fixture; no event delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditRecord.id))
+  audit.withdrawn = await ok(`${auditPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(audit.withdrawn.status, 'withdrawn')
   const serviceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd/linux-baseline.json', import.meta.url)))
   serviceDocument.code = `API-${mode}-systemd`
   const invalidService = structuredClone(serviceDocument); invalidService.items[0].check.target = 'ssh.service'

@@ -154,6 +154,8 @@ jobs:
         run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
       - name: Check native systemd service observations with isolated runner units
         run: bash deploy/tests/systemd-native.sh
+      - name: Check native kernel audit and isolated private watch rules
+        run: bash deploy/tests/audit-native.sh
       - name: Check isolated Ubuntu24 PAM password and login lockout behavior
         run: |
           cp .tmp/baseline-native.test .tmp/pam-native.test

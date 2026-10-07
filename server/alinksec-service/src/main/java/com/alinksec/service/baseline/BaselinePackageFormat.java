@@ -139,6 +139,15 @@ public final class BaselinePackageFormat {
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
             }
+            case "linux_audit" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "内核审计检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("kernel") && text(check, "operator", 32).equals("eq"), "内核审计仅支持固定查询和明确参考");
+                String option = text(check, "option", 32);
+                require(Set.of("enabled", "identity_watches").contains(option), "内核审计检查项尚未支持");
+                require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
+                        : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
+            }
             case "linux_log_metadata" -> {
                 fields(check, "type", "target", "operator", "perm", "owner", "group", "timeout_ms");
                 require(os == 1, "日志元数据检查仅支持 Linux");

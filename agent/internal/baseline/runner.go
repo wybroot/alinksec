@@ -113,6 +113,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkSystemdService(cs)
 	case "linux_log_metadata":
 		result = checkLogMetadata(cs)
+	case "linux_audit":
+		result = checkLinuxAudit(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}

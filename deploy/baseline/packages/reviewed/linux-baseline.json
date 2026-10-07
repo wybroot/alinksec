@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "8",
+  "version": "9",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -211,7 +211,7 @@
     },
     {
       "ruleId": "BL-LINUX-0021",
-      "reason": "仅 PATH 中存在 auditctl，不证明 auditd 安装、运行或内核审计可用；修正名称及检查条件。"
+      "reason": "通用包不含此项；使用独立 Ubuntu24.04 内核审计候选。只读内核状态与有限规则形式，CAP/命名空间、未知规则或变化保持error，不证明事件交付或持久配置。"
     },
     {
       "ruleId": "BL-LINUX-0022",
@@ -227,7 +227,7 @@
     },
     {
       "ruleId": "BL-LINUX-0025",
-      "reason": "单一子串可在注释命中，且没验证实际加载规则、权限掩码或其他身份文件；不能宣称完整覆盖。"
+      "reason": "通用包不含此项；使用独立 Ubuntu24.04 内核审计候选。只读内核状态与有限规则形式，CAP/命名空间、未知规则或变化保持error，不证明事件交付或持久配置。"
     },
     {
       "ruleId": "BL-LINUX-0026",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "89eec25eec13c03ada6983140b29a6f4cf927b98c8c65e07b7885b4e04706f79"
+    "sha256": "eb0675d41b84d6815894e7a1d0e278e236985e1ea336cf2fe86a67fe85620823"
   }
 }

@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata", "linux_audit":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -165,6 +165,17 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		case "eq", "regex":
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
+		}
+	} else if s.Type == "linux_audit" {
+		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}
+		if s.Target != "kernel" || s.Operator != "eq" ||
+			(s.Option != "enabled" && s.Option != "identity_watches") || s.Expected != auditReference(s.Option) {
+			return nil, fmt.Errorf("内核审计检查仅支持明确的启用状态或四个身份文件 watch 参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("内核审计检查不允许字段 %s", name)
+			}
 		}
 	} else if s.Type == "linux_log_metadata" {
 		allowed := map[string]bool{"type": true, "target": true, "operator": true, "perm": true, "owner": true, "group": true, "timeout_ms": true}
