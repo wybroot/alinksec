@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "10",
+  "version": "11",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -287,7 +287,7 @@
     },
     {
       "ruleId": "BL-LINUX-0048",
-      "reason": "rsyslog.conf 任意 cron. 文本可在注释出现，不能证明生效或其他日志实现；按产品明确策略。"
+      "reason": "通用包不含此项；独立 Ubuntu24 rsyslog 候选解释八级 cron 专用文件磁盘路由，实际加载与事件交付仍未验证。"
     },
     {
       "ruleId": "BL-LINUX-0049",
@@ -341,8 +341,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-07",
+    "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "aa605ac464b20634c4d7fd0e6f8d422b881ac9c3bf88353d2a8c54f89e64df51"
+    "sha256": "28396936945f2891e040bacb29a512efe56a7bca1f444b200f653db9b7905fb6"
   }
 }

@@ -148,6 +148,12 @@ public final class BaselinePackageFormat {
                 require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
                         : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
             }
+            case "rsyslog_cron_routing" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "rsyslog cron 路由检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("/etc/rsyslog.conf") && text(check, "operator", 32).equals("eq"), "rsyslog 检查需固定磁盘配置");
+                require(text(check, "expected", 1000).equals("imuxsock=on,cron.emerg..debug=/var/log/cron.log"), "rsyslog cron 路由参考不能隐式扩展");
+            }
             case "debian_cron_metadata" -> {
                 fields(check, "type", "target", "operator", "expected", "timeout_ms");
                 require(os == 1, "cron 系统任务元数据检查仅支持 Linux");

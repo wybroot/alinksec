@@ -697,6 +697,48 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === cronRecord.id))
   cron.withdrawn = await ok(`${cronPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(cron.withdrawn.status, 'withdrawn')
 
+  const rsyslogCronDocument = JSON.parse(readFileSync(new URL('../baseline/packages/rsyslog-cron/linux-baseline.json', import.meta.url)))
+  rsyslogCronDocument.code = `API-${mode}-rsyslog-cron`
+  const invalidRsyslogCron = structuredClone(rsyslogCronDocument); invalidRsyslogCron.items[0].check.target = '/tmp/rsyslog.conf'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidRsyslogCron))).status, 400)
+  const rsyslogCron = { candidate: await ok('/api/baseline/packages/import', pamUpload(rsyslogCronDocument)) }; fixtures.rsyslogCron = rsyslogCron
+  const rsyslogCronRecord = { id: rsyslogCron.candidate.id, code: rsyslogCronDocument.code }; baselinePackages.push(rsyslogCronRecord)
+  const rsyslogCronPrefix = `/api/baseline/packages/${rsyslogCronRecord.id}`
+  rsyslogCron.approved = await ok(`${rsyslogCronPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm exact rsyslog package and finite disk cron routing; protocol fixture' } })
+  rsyslogCronRecord.template = Number(rsyslogCron.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${rsyslogCronPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed', 'pass']) {
+    rsyslogCron.testing = await ok(`${rsyslogCronPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(rsyslogCron.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, rsyslogCronDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('rsyslog_cron_routing') && payload.includes(rsyslogCronDocument.items[0].check.expected))
+    const pass = outcome === 'pass', error = outcome === 'error'
+    const quoted = value => "'" + value.replaceAll("'", "''") + "'"
+    const actual = 'scope=on-disk-rsyslog-cron-routing loaded_state=unverified delivery_state=unverified package=rsyslog version=8.2312.0-3ubuntu9.4 imuxsock=true destination=/var/log/cron.log covered_mask=' + (pass ? '0xff missing_mask=0x00' : '0x7f missing_mask=0x80') + ' files=2 rules=4'
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass},${quoted(actual)},${quoted(error ? 'Unknown rsyslog syntax, package, ACL or configuration changes' : pass ? '' : 'Cron dedicated log routing reference mismatch')},${quoted(error ? 'error' : pass ? 'pass' : 'fail')}
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    rsyslogCron[outcome] = await ok(rsyslogCronPrefix, { token: tokens.admin })
+    assert.equal(rsyslogCron[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${rsyslogCronPrefix}/publish`, { ...options, body: { note: 'Incomplete configuration blocks publication' } })).status, 400)
+    else {
+      const item = rsyslogCron[outcome].testResults[0].items[0]
+      assert.equal(item.execution_status, pass ? 'pass' : 'fail')
+      assert.ok(!item.fixable && item.actual.includes('loaded_state=unverified'))
+      assert.equal(rsyslogCron[outcome].testResults[0].score, pass ? 100 : 0)
+    }
+  }
+  rsyslogCron.published = await ok(`${rsyslogCronPrefix}/publish`, { ...options, body: { note: 'Complete routing protocol fixture; no loaded state or event delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === rsyslogCronRecord.id))
+  rsyslogCron.withdrawn = await ok(`${rsyslogCronPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(rsyslogCron.withdrawn.status, 'withdrawn')
+
   const auditdDocument = JSON.parse(readFileSync(new URL('../baseline/packages/auditd/linux-baseline.json', import.meta.url)))
   auditdDocument.code = `API-${mode}-auditd`
   const invalidAuditd = structuredClone(auditdDocument); invalidAuditd.items[0].check.target = '/tmp/auditd.conf'
