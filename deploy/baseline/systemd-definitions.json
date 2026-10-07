@@ -1,0 +1,51 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu 24.04 systemd audit/logging service observation review",
+    "version": "2026-10-07",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/systemd-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-SYSTEMD",
+      "name": "Ubuntu 24.04 审计与日志服务状态核查",
+      "standard": "systemd 服务状态参考（非完整合规）",
+      "product": "Ubuntu 24.04 systemd 255 系统管理器；auditd.service/rsyslog.service 单元及本地总线可查询",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0022",
+          "ruleId": "BL-LINUX-0022",
+          "name": "auditd 系统服务当前运行状态",
+          "category": "安全审计",
+          "severity": 3,
+          "check": {
+            "type": "systemd_service",
+            "target": "auditd.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 auditd.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。"
+        },
+        {
+          "code": "BL-LINUX-0024",
+          "ruleId": "BL-LINUX-0024",
+          "name": "rsyslog 系统服务当前运行状态",
+          "category": "安全审计",
+          "severity": 2,
+          "check": {
+            "type": "systemd_service",
+            "target": "rsyslog.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 rsyslog.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

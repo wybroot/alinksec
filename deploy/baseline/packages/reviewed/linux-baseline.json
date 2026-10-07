@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "6",
+  "version": "7",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-07",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "4115ce1f1dffcfc11e9947fd1118f1363adc12d2ea0933156e83b946b5c27a39"
+    "sha256": "4f645a581a0236218b30ea8e99ff8a8d13c443f6ad6635c49221061e2b929d8a"
   }
 }

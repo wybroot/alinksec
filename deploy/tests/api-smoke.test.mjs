@@ -567,6 +567,49 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   pam.published = await ok(`${pamPrefix}/publish`, { ...options, body: { note: 'Protocol fixture: declared hash selection passes, quality reference fails; no production credentials changed' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === pamRecord.id))
   pam.withdrawn = await ok(`${pamPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pam.withdrawn.status, 'withdrawn')
+  const serviceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd/linux-baseline.json', import.meta.url)))
+  serviceDocument.code = `API-${mode}-systemd`
+  const invalidService = structuredClone(serviceDocument); invalidService.items[0].check.target = 'ssh.service'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidService))).status, 400)
+  const systemd = { candidate: await ok('/api/baseline/packages/import', pamUpload(serviceDocument)) }; fixtures.systemd = systemd
+  const serviceRecord = { id: systemd.candidate.id, code: serviceDocument.code }; baselinePackages.push(serviceRecord)
+  const servicePrefix = `/api/baseline/packages/${serviceRecord.id}`
+  systemd.approved = await ok(`${servicePrefix}/review`, { ...options, body: { approved: true, note: 'Confirm Ubuntu24 local system manager and exact service state scope; protocol fixture' } })
+  serviceRecord.template = Number(systemd.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${servicePrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed']) {
+    systemd.testing = await ok(`${servicePrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(systemd.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, serviceDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('systemd_service') && payload.includes('auditd.service') && payload.includes('rsyslog.service'))
+    const audit = "i.code='BL-LINUX-0022'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : audit},
+        CASE WHEN ${audit} THEN 'manager=local-system unit=auditd.service Id=auditd.service LoadState=loaded ActiveState=active SubState=running MainPID=42'
+        ELSE 'manager=local-system unit=rsyslog.service Id=rsyslog.service LoadState=loaded ActiveState=inactive SubState=dead MainPID=0' END,
+        ${outcome === 'error' ? "'System bus unavailable'" : `CASE WHEN ${audit} THEN '' ELSE 'Service running reference mismatch' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${audit} THEN 'pass' ELSE 'fail' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${outcome === 'error' ? 0 : 1},${outcome === 'error' ? 2 : 1},${outcome === 'error' ? 0 : 50},${outcome === 'error' ? 2 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    systemd[outcome] = await ok(servicePrefix, { token: tokens.admin })
+    assert.equal(systemd[outcome].testReady, outcome !== 'error')
+    if (outcome === 'error') assert.equal((await request(`${servicePrefix}/publish`, { ...options, body: { note: 'Unconfirmed service query blocks publication' } })).status, 400)
+    else {
+      const items = systemd.completed.testResults[0].items
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 1)
+      assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
+      assert.ok(items.every(item => !item.fixable && item.actual.includes('manager=local-system')))
+    }
+  }
+  systemd.published = await ok(`${servicePrefix}/publish`, { ...options, body: { note: 'Complete service state protocol fixture; no audit event or log delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === serviceRecord.id))
+  systemd.withdrawn = await ok(`${servicePrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(systemd.withdrawn.status, 'withdrawn')
   const authDocument = JSON.parse(readFileSync(new URL('../baseline/packages/pam-auth/linux-baseline.json', import.meta.url)))
   authDocument.code = `API-${mode}-pam-auth`
   const invalidAuth = structuredClone(authDocument); invalidAuth.items[0].check.target = '/etc/pam.d/sshd'

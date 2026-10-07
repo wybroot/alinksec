@@ -409,3 +409,7 @@ requires successful full CI on the exact release commit and the Release workflow
 ## Isolated PAM checks
 
 Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, then run `bash deploy/tests/pam-password-native.sh`. The dedicated Ubuntu24 image serially checks actual password changes and login authentication, including lockout thresholds, consecutive-failure reset, root behavior, finite unlock and bypass controls. Never run these native mutation tests against host PAM: the wrapper mounts source read-only, uses no network or data volumes, and removes the container. Both Linux architectures must execute the tests in CI; ordinary test skips are not acceptance. Production checks read only the fixed service configurations. See [login check scope](../../docs/24-PAM登录失败锁定核查.md).
+
+## Native systemd observations
+
+`bash deploy/tests/systemd-native.sh` requires a disposable GitHub-hosted Ubuntu24 runner and the compiled `.tmp/baseline-native.test`. It serially creates one unique test service, verifies running/inactive/failed/exited/masked/missing/invalid states and ignored client environment redirects, and cleans up that unit. Existing auditd/rsyslog units are queried read-only; these observations do not assert event capture or log delivery. Both architectures must execute this opt-in test in CI, not merely skip it in ordinary Go tests. Do not enable mutation fixtures on a user host. See [check scope](../../docs/25-systemd服务状态核查.md).

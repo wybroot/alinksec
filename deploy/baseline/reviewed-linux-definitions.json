@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "6",
+      "version": "7",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -695,13 +695,20 @@
       },
       {
         "ruleId": "BL-LINUX-0022",
-        "name": "auditd 服务运行状态",
+        "name": "auditd 系统服务当前运行状态",
         "category": "安全审计",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "systemctl 错误被转换为 inactive，无法区分未运行和执行异常；需要有明确状态与错误的查询。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：systemctl 错误被转换为 inactive，无法区分未运行和执行异常；需要有明确状态与错误的查询。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；请使用独立 Ubuntu24.04 systemd 服务状态候选。只观察已支持单元当前状态，缺失/查询失败保持error，不证明审计或日志交付。",
+        "scope": "Ubuntu24.04 本地 systemd 系统管理器的 auditd.service；观察单元当前加载与运行状态，不证明审计事件或日志交付。",
+        "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 auditd.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。",
+        "check": {
+          "type": "systemd_service",
+          "target": "auditd.service",
+          "operator": "eq",
+          "expected": "loaded/active/running",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0023",
@@ -715,13 +722,20 @@
       },
       {
         "ruleId": "BL-LINUX-0024",
-        "name": "rsyslog 服务运行状态",
+        "name": "rsyslog 系统服务当前运行状态",
         "category": "安全审计",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "同 0022，也不能把其他日志服务直接解释为不合规。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：同 0022，也不能把其他日志服务直接解释为不合规。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；请使用独立 Ubuntu24.04 systemd 服务状态候选。只观察已支持单元当前状态，缺失/查询失败保持error，不证明审计或日志交付。",
+        "scope": "Ubuntu24.04 本地 systemd 系统管理器的 rsyslog.service；观察单元当前加载与运行状态，不证明审计事件或日志交付。",
+        "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 rsyslog.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。",
+        "check": {
+          "type": "systemd_service",
+          "target": "rsyslog.service",
+          "operator": "eq",
+          "expected": "loaded/active/running",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0025",

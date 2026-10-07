@@ -109,6 +109,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkPAMPassword(cs)
 	case "pam_auth":
 		result = checkPAMAuth(cs)
+	case "systemd_service":
+		result = checkSystemdService(cs)
 	default:
 		result = ItemResult{Error: true, Message: "未知检查类型 " + cs.Type}
 	}

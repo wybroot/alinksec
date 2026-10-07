@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -165,6 +165,16 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		case "eq", "regex":
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
+		}
+	} else if s.Type == "systemd_service" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
+		if (s.Target != "auditd.service" && s.Target != "rsyslog.service") || s.Operator != "eq" || s.Expected != "loaded/active/running" {
+			return nil, fmt.Errorf("systemd 服务检查仅支持 auditd/rsyslog 的 loaded/active/running 参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("systemd 服务检查不允许字段 %s", name)
+			}
 		}
 	} else if s.Type == "pam_auth" {
 		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}

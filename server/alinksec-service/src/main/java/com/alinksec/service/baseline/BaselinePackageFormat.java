@@ -139,6 +139,12 @@ public final class BaselinePackageFormat {
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
             }
+            case "systemd_service" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "systemd 服务检查仅支持 Linux");
+                require(Set.of("auditd.service", "rsyslog.service").contains(text(check, "target", 1024)), "systemd 检查限定 auditd/rsyslog 系统服务");
+                require(text(check, "operator", 32).equals("eq") && text(check, "expected", 1000).equals("loaded/active/running"), "systemd 运行参考不能隐式扩展");
+            }
             case "pam_auth" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "PAM 认证检查仅支持 Linux");
