@@ -281,7 +281,7 @@ try {
   await page.reload()
   const services=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 审计与日志服务状态核查',exact:true})})
   await services.getByRole('button',{name:'查看版本',exact:true}).click()
-  const serviceDefinitions=dialog.locator('.el-table').filter({has:dialog.getByText('检查定义',{exact:true})}).locator('pre')
+  const serviceDefinitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
   await expect(serviceDefinitions).toHaveCount(2)
   await expect(serviceDefinitions.nth(0)).toContainText('auditd.service')
   await expect(serviceDefinitions.nth(1)).toContainText('rsyslog.service')
