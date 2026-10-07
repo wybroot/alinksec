@@ -25,3 +25,5 @@
 审核/下发/任务快照/错误阻止发布、完成fail允许发布和新版本需独立证据的协议测试，以及双数据库REST与桌面/移动端证据展示，均与原生结果分开。资源受限本机串行验证，双架构CI独立runner并行。
 
 源码依据为[Ubuntu精确包归档](https://archive.ubuntu.com/ubuntu/pool/main/r/rsyslog/)、[Ubuntu源包](https://packages.ubuntu.com/en/source/noble/rsyslog)、[上游8.2312.0选择器源码](https://github.com/rsyslog/rsyslog/blob/v8.2312.0/runtime/conf.c)、[上游包含实现](https://github.com/rsyslog/rsyslog/blob/v8.2312.0/grammar/rainerscript.c)、[上游系统socket声明](https://docs.rsyslog.com/doc/reference/parameters/imuxsock-syssock-use.html)。实现以精确源码及原生对照为准，不将当前文档推广到所有版本。
+
+后端测试在JDK21测试JVM启动时预加载现有版本Byte Buddy instrumentation，避免CI反复发生Mockito自挂载初始化失败。依赖仅test scope，Surefire保留调用者argLine；本地在动态Agent加载和Attach均关闭的条件下检查完整测试，受资源watchdog保护。依据[Mockito5.11实现](https://github.com/mockito/mockito/blob/v5.11.0/src/main/java/org/mockito/internal/creation/bytebuddy/InlineDelegateByteBuddyMockMaker.java)。
