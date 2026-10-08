@@ -739,6 +739,48 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === rsyslogCronRecord.id))
   rsyslogCron.withdrawn = await ok(`${rsyslogCronPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(rsyslogCron.withdrawn.status, 'withdrawn')
 
+  const aptInstallDocument = JSON.parse(readFileSync(new URL('../baseline/packages/apt/linux-baseline.json', import.meta.url)))
+  aptInstallDocument.code = `API-${mode}-apt-install`
+  const invalidAptInstall = structuredClone(aptInstallDocument); invalidAptInstall.items[0].check.target = '/tmp/apt'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidAptInstall))).status, 400)
+  const aptInstall = { candidate: await ok('/api/baseline/packages/import', pamUpload(aptInstallDocument)) }; fixtures.aptInstall = aptInstall
+  const aptInstallRecord = { id: aptInstall.candidate.id, code: aptInstallDocument.code }; baselinePackages.push(aptInstallRecord)
+  const aptInstallPrefix = `/api/baseline/packages/${aptInstallRecord.id}`
+  aptInstall.approved = await ok(`${aptInstallPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm exact APT package and finite default disk install policy; protocol fixture' } })
+  aptInstallRecord.template = Number(aptInstall.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${aptInstallPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed', 'pass']) {
+    aptInstall.testing = await ok(`${aptInstallPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(aptInstall.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, aptInstallDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('apt_install_policy') && payload.includes(aptInstallDocument.items[0].check.expected))
+    const pass = outcome === 'pass', error = outcome === 'error'
+    const quoted = value => "'" + value.replaceAll("'", "''") + "'"
+    const actual = 'scope=default-on-disk-apt-install-policy environment_state=unverified command_line_state=unverified source_trust_state=unverified installation_state=unverified package=apt/libapt-pkg6.0t64 version=2.8.3 apt.allowunauthenticated=false(global-default) apt.force-yes=false(global-default) apt-get.allowunauthenticated=false(global-default) apt-get.force-yes=' + (pass ? 'false' : 'true') + '(binary) main_present=true files=2'
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass},${quoted(actual)},${quoted(error ? 'Unknown APT syntax, boolean, package, ACL or configuration changes' : pass ? '' : 'APT default install policy reference mismatch')},${quoted(error ? 'error' : pass ? 'pass' : 'fail')}
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    aptInstall[outcome] = await ok(aptInstallPrefix, { token: tokens.admin })
+    assert.equal(aptInstall[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${aptInstallPrefix}/publish`, { ...options, body: { note: 'Incomplete configuration blocks publication' } })).status, 400)
+    else {
+      const item = aptInstall[outcome].testResults[0].items[0]
+      assert.equal(item.execution_status, pass ? 'pass' : 'fail')
+      assert.ok(!item.fixable && item.actual.includes('source_trust_state=unverified'))
+      assert.equal(aptInstall[outcome].testResults[0].score, pass ? 100 : 0)
+    }
+  }
+  aptInstall.published = await ok(`${aptInstallPrefix}/publish`, { ...options, body: { note: 'Complete install policy protocol fixture; actual invocation and source trust unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === aptInstallRecord.id))
+  aptInstall.withdrawn = await ok(`${aptInstallPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(aptInstall.withdrawn.status, 'withdrawn')
+
   const sudoersDocument = JSON.parse(readFileSync(new URL('../baseline/packages/sudoers/linux-baseline.json', import.meta.url)))
   sudoersDocument.code = `API-${mode}-sudoers`
   const invalidSudoers = structuredClone(sudoersDocument); invalidSudoers.items[0].check.expected = 'on'

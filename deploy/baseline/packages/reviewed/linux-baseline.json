@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "12",
+  "version": "13",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -303,7 +303,7 @@
     },
     {
       "ruleId": "BL-LINUX-0052",
-      "reason": "查询/管道错误通过 echo 0 被转成通过，固定 grep 引号也需核对；必须保留真实查询失败。"
+      "reason": "通用包不含此项；独立 Ubuntu24 APT 候选核对默认磁盘 apt/apt-get 未认证安装与Force-Yes声明，环境/命令行覆盖、软件源信任和实际安装仍未验证。"
     },
     {
       "ruleId": "BL-LINUX-0053",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "4ef3f716570989aad2c7836e4aec7a176ea002fdfd4e0eb7299c9a62303adb55"
+    "sha256": "1dde9cc3605e075dbd217d919deda6740e0e6f7bfd5a70d1dea1610460d405c8"
   }
 }

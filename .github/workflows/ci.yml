@@ -164,6 +164,8 @@ jobs:
         run: bash deploy/tests/rsyslog-cron-native.sh
       - name: Check isolated sudoers native declarations and mandatory input boundaries
         run: bash deploy/tests/sudoers-native.sh
+      - name: Check isolated APT native installation declarations and mandatory input boundaries
+        run: bash deploy/tests/apt-native.sh
       - name: Check isolated Ubuntu24 PAM password and login lockout behavior
         run: |
           cp .tmp/baseline-native.test .tmp/pam-native.test

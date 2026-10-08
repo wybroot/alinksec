@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "12",
+      "version": "13",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -310,7 +310,7 @@
         },
         {
           "ruleId": "BL-LINUX-0052",
-          "reason": "查询/管道错误通过 echo 0 被转成通过，固定 grep 引号也需核对；必须保留真实查询失败。"
+          "reason": "通用包不含此项；独立 Ubuntu24 APT 候选核对默认磁盘 apt/apt-get 未认证安装与Force-Yes声明，环境/命令行覆盖、软件源信任和实际安装仍未验证。"
         },
         {
           "ruleId": "BL-LINUX-0053",
@@ -1138,13 +1138,20 @@
       },
       {
         "ruleId": "BL-LINUX-0052",
-        "name": "APT 有效未认证软件策略",
+        "name": "APT 默认磁盘未认证安装策略",
         "category": "恶意代码防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "查询/管道错误通过 echo 0 被转成通过，固定 grep 引号也需核对；必须保留真实查询失败。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：查询/管道错误通过 echo 0 被转成通过，固定 grep 引号也需核对；必须保留真实查询失败。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立 Ubuntu24 APT 候选核对默认磁盘 apt/apt-get 未认证安装与Force-Yes声明，环境/命令行覆盖、软件源信任和实际安装仍未验证。",
+        "scope": "仅 Ubuntu24.04 完整安装 apt 与 libapt-pkg6.0t64 2.8.3，管理员确认可信安装及默认配置入口适用性。固定读取 /etc/apt/apt.conf.d 再读取存在的 /etc/apt/apt.conf，按原生隐藏文件、扩展名和 ASCII 文件名选择与字节排序，主文件缺失采用此版本默认值且验证名称集合稳定。支持有限引号标量、作用域、列表、普通行注释、整行块注释、顶层 #clear，按 apt/apt-get 专属 Binary 树覆盖；布尔值限明确词和0/1，缺失/空值使用已核实 false 默认，未知值保持error。本参考同时要求两个前端 AllowUnauthenticated=false、Force-Yes=false。含 #include、配置加载路径/RootDir 改写、嵌套 Binary、未支持语法/布尔值、链接/硬链接/特殊文件、ACL、不可信元数据、读取失败/超限/期间变化均error。输入UID/GID0、组/其他不可写；32片段、单64KiB、总256KiB、4096行、每目录128名称、作用域16层、共享deadline且前后确认两包版本。仅默认磁盘声明：environment_state、command_line_state、source_trust_state、installation_state均unverified；不读取管理员调用环境，不执行apt-config/apt/apt-get、钩子或安装，不更新索引/访问网络，不读取软件源/密钥/仓库签名，不证明真实安装调用或软件源可信，无自动修复。实际使用APT_CONFIG、-c、-o、--allow-unauthenticated及其他前端须另核对。",
+        "remediation": "仅 Ubuntu24.04 完整安装 apt 与 libapt-pkg6.0t64 2.8.3，管理员确认可信安装及默认配置入口适用性。固定读取 /etc/apt/apt.conf.d 再读取存在的 /etc/apt/apt.conf，按原生隐藏文件、扩展名和 ASCII 文件名选择与字节排序，主文件缺失采用此版本默认值且验证名称集合稳定。支持有限引号标量、作用域、列表、普通行注释、整行块注释、顶层 #clear，按 apt/apt-get 专属 Binary 树覆盖；布尔值限明确词和0/1，缺失/空值使用已核实 false 默认，未知值保持error。本参考同时要求两个前端 AllowUnauthenticated=false、Force-Yes=false。含 #include、配置加载路径/RootDir 改写、嵌套 Binary、未支持语法/布尔值、链接/硬链接/特殊文件、ACL、不可信元数据、读取失败/超限/期间变化均error。输入UID/GID0、组/其他不可写；32片段、单64KiB、总256KiB、4096行、每目录128名称、作用域16层、共享deadline且前后确认两包版本。仅默认磁盘声明：environment_state、command_line_state、source_trust_state、installation_state均unverified；不读取管理员调用环境，不执行apt-config/apt/apt-get、钩子或安装，不更新索引/访问网络，不读取软件源/密钥/仓库签名，不证明真实安装调用或软件源可信，无自动修复。实际使用APT_CONFIG、-c、-o、--allow-unauthenticated及其他前端须另核对。",
+        "check": {
+          "type": "apt_install_policy",
+          "target": "/etc/apt",
+          "operator": "eq",
+          "expected": "apt/apt-get:AllowUnauthenticated=false,Force-Yes=false",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0053",

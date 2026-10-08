@@ -148,6 +148,12 @@ public final class BaselinePackageFormat {
                 require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
                         : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
             }
+            case "apt_install_policy" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "APT 安装策略检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("/etc/apt") && text(check, "operator", 32).equals("eq"), "APT 检查需固定磁盘配置");
+                require(text(check, "expected", 1000).equals("apt/apt-get:AllowUnauthenticated=false,Force-Yes=false"), "APT 安装策略参考不能隐式扩展");
+            }
             case "sudoers_policy" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "sudoers 检查仅支持 Linux");
