@@ -2,7 +2,7 @@
 // external commands, key parsing, hooks or network. argv root redirects only the
 // disposable fixture. Production never links or invokes this executable.
 #include <apt-pkg/configuration.h>
-#include <apt-pkg/debmetaindex.h>
+#include <apt-pkg/indexfile.h>
 #include <apt-pkg/error.h>
 #include <apt-pkg/init.h>
 #include <apt-pkg/sourcelist.h>
@@ -21,14 +21,16 @@ int main(int argc, char **argv) {
   pkgSourceList sources;
   if (!sources.ReadMainList()) { _error->DumpErrors(); return 1; }
   for (auto const *index : sources) {
-    auto *deb = dynamic_cast<debReleaseIndex *>(const_cast<metaIndex *>(index));
-    if (deb == nullptr) return 2;
-    auto options = deb->GetReleaseOptions();
+    auto targets = index->GetIndexTargets();
+    if (targets.empty()) return 2;
+    for (auto const &target : targets)
+      for (auto key : {IndexTarget::ALLOW_INSECURE, IndexTarget::ALLOW_WEAK, IndexTarget::ALLOW_DOWNGRADE_TO_INSECURE})
+        if (target.OptionBool(key) != targets.front().OptionBool(key)) return 2;
     std::string trusted = index->GetTrusted() == metaIndex::TRI_YES ? "true" :
                           index->GetTrusted() == metaIndex::TRI_NO ? "false" : "unset";
     std::cout << index->GetURI() << '\t' << index->GetDist() << '\t' << trusted << '\t' << index->GetSignedBy();
-    for (auto key : {"ALLOW_INSECURE", "ALLOW_WEAK", "ALLOW_DOWNGRADE_TO_INSECURE"})
-      std::cout << '\t' << (options.count(key) ? "true" : "false");
+    for (auto key : {IndexTarget::ALLOW_INSECURE, IndexTarget::ALLOW_WEAK, IndexTarget::ALLOW_DOWNGRADE_TO_INSECURE})
+      std::cout << '\t' << (targets.front().OptionBool(key) ? "true" : "false");
     std::cout << '\n';
   }
   if (_error->PendingError()) { _error->DumpErrors(); return 1; }
