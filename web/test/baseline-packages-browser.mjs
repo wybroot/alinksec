@@ -452,7 +452,7 @@ try {
   await expect(dialog.getByText('Sudoers declared policy reference mismatch',{exact:true})).toBeVisible()
   const sudoersActual=dialog.getByText(/scope=on-disk-sudoers-declarations.*logfile=\/var\/log\/other.log/).last()
   await expect(sudoersActual).toContainText('authorization_state=unverified authentication_state=unverified delivery_state=unverified')
-  await expect(sudoersActual).toContainText('version=1.9.15p5-3ubuntu5.24.04.3')
+  await expect(sudoersActual).toContainText('version=1.9.15p5-3ubuntu5.24.04.4')
   await expect(sudoersActual).toContainText('authenticate=on exempt_group=unset nopasswd_tags=0')
   await sudoersActual.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/sudoers-evidence-desktop.png',fullPage:true,animations:'disabled'})

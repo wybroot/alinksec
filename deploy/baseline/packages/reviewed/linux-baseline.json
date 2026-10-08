@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "e5d0a20d834ece4305a06b04833f42e34c57ccde42972819d965e648e08ee0c3"
+    "sha256": "4ef3f716570989aad2c7836e4aec7a176ea002fdfd4e0eb7299c9a62303adb55"
   }
 }

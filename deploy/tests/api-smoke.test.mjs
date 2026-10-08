@@ -762,7 +762,7 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     sql(`BEGIN;
       INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
       SELECT e.task_id,e.agent_id,e.item_id,${error ? 'false' : pass ? 'true' : `NOT (${badLogging})`},
-        'scope=on-disk-sudoers-declarations authorization_state=unverified authentication_state=unverified delivery_state=unverified package=sudo version=1.9.15p5-3ubuntu5.24.04.3 authenticate=on exempt_group=unset nopasswd_tags=0 log_allowed=on logfile=${pass ? '/var/log/sudo.log' : '/var/log/other.log'} files=2 commands=3',
+        'scope=on-disk-sudoers-declarations authorization_state=unverified authentication_state=unverified delivery_state=unverified package=sudo version=1.9.15p5-3ubuntu5.24.04.4 authenticate=on exempt_group=unset nopasswd_tags=0 log_allowed=on logfile=${pass ? '/var/log/sudo.log' : '/var/log/other.log'} files=2 commands=3',
         ${error ? "'Unknown sudoers policy, ACL or changed configuration'" : pass ? "''" : `CASE WHEN ${badLogging} THEN 'Sudoers declared policy reference mismatch' ELSE '' END`},
         ${error ? "'error'" : pass ? "'pass'" : `CASE WHEN ${badLogging} THEN 'fail' ELSE 'pass' END`}
       FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};

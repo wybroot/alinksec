@@ -1,6 +1,6 @@
 package baseline
 
-const sudoPackageVersion = "1.9.15p5-3ubuntu5.24.04.3"
+const sudoPackageVersion = "1.9.15p5-3ubuntu5.24.04.4"
 
 func sudoersReference(option string) string {
 	switch option {
