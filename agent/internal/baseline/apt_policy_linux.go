@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -28,8 +27,6 @@ func aptPackage(ctx context.Context, timeout int) ItemResult {
 }
 func checkAPTPolicy(cs *CheckSpec) ItemResult  { return aptPolicyWithin(cs, "/", aptPackage) }
 func checkAPTSources(cs *CheckSpec) ItemResult { return aptPolicyWithin(cs, "/", aptPackage) }
-
-var aptPartName = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
 
 func aptPartSelected(name string) bool {
 	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") || !aptPartName.MatchString(name) {

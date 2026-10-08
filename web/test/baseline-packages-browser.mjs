@@ -478,7 +478,7 @@ try {
   await page.screenshot({path:root+'/apt-sources-scope-desktop.png',fullPage:true,animations:'disabled'})
   await dialog.locator('.el-table__expand-icon').click()
   await expect(dialog.getByText('APT source authentication declaration reference mismatch',{exact:true})).toBeVisible()
-  const aptSourceActual=dialog.getByText(/scope=default-on-disk-apt-sources-policy.*apt-get.force-yes=true/)
+  const aptSourceActual=dialog.getByText(/scope=default-on-disk-apt-source-declarations.*trusted_yes=1/)
   await expect(aptSourceActual).toContainText('environment_state=unverified command_line_state=unverified key_identity_state=unverified key_material_state=unverified repository_signature_state=unverified cached_release_state=unverified installation_state=unverified')
   await expect(aptSourceActual).toContainText('version=2.8.3')
   await expect(aptSourceActual).toContainText('active_declarations=1 releases=1')

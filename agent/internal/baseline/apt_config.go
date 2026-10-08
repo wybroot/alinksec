@@ -15,6 +15,7 @@ type aptToken struct {
 	quoted bool
 }
 
+var aptPartName = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
 var aptName = regexp.MustCompile(`^[A-Za-z0-9_./+-]+(::[A-Za-z0-9_./+-]+)*(::)?$`)
 var aptBoolKeys = []string{"apt::get::allowunauthenticated", "apt::get::force-yes"}
 
