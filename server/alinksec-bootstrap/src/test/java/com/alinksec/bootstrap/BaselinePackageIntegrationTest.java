@@ -267,7 +267,7 @@ class BaselinePackageIntegrationTest {
         packages.publish(id(pkg), "Complete install policy protocol fixture, actual invocation/trust unverified", 7L);
         String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0052'", String.class, task);
         assertEquals(doc.path("items").get(0).path("check"), JsonUtils.mapper().readTree(snapshot));
-        var next = doc.deepCopy(); next.put("version", "2"); var changed = imported(next);
+        var next = doc.deepCopy(); next.put("version", "3"); var changed = imported(next);
         assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse old install policy evidence", 7L));
     }
 
