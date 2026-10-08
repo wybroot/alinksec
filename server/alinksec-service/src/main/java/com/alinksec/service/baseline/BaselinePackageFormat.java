@@ -148,6 +148,17 @@ public final class BaselinePackageFormat {
                 require(text(check, "expected", 1000).equals(option.equals("enabled") ? "enabled=1|2"
                         : "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa"), "内核审计参考不能隐式扩展");
             }
+            case "sudoers_policy" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "sudoers 检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("/etc/sudoers") && text(check, "operator", 32).equals("eq"), "sudoers 检查需固定磁盘策略");
+                String expected = switch (text(check, "option", 32)) {
+                    case "authentication" -> "authenticate=on,exempt_group=unset,nopasswd_tags=0";
+                    case "allowed_logging" -> "log_allowed=on,logfile=/var/log/sudo.log";
+                    default -> throw new IllegalArgumentException("sudoers 检查项尚未支持");
+                };
+                require(text(check, "expected", 1000).equals(expected), "sudoers 参考不能隐式扩展");
+            }
             case "rsyslog_cron_routing" -> {
                 fields(check, "type", "target", "operator", "expected", "timeout_ms");
                 require(os == 1, "rsyslog cron 路由检查仅支持 Linux");

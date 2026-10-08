@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "11",
+  "version": "12",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -199,7 +199,7 @@
     },
     {
       "ruleId": "BL-LINUX-0018",
-      "reason": "not_contains 会把注释当违规，也忽略 include 文件；需有效 sudo 配置解析。"
+      "reason": "通用包不含此项；请使用独立 Ubuntu24 sudoers 磁盘策略候选，只核对有限声明参考，实际授权、认证和日志交付仍需人工验证。"
     },
     {
       "ruleId": "BL-LINUX-0019",
@@ -243,7 +243,7 @@
     },
     {
       "ruleId": "BL-LINUX-0029",
-      "reason": "实际查找 audit 目录 watch，不能证明 sudo 使用记录；重新映射规则。"
+      "reason": "通用包不含此项；请使用独立 Ubuntu24 sudoers 磁盘策略候选，只核对有限声明参考，实际授权、认证和日志交付仍需人工验证。"
     },
     {
       "ruleId": "BL-LINUX-0036",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "28396936945f2891e040bacb29a512efe56a7bca1f444b200f653db9b7905fb6"
+    "sha256": "e5d0a20d834ece4305a06b04833f42e34c57ccde42972819d965e648e08ee0c3"
   }
 }

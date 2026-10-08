@@ -739,6 +739,48 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === rsyslogCronRecord.id))
   rsyslogCron.withdrawn = await ok(`${rsyslogCronPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(rsyslogCron.withdrawn.status, 'withdrawn')
 
+  const sudoersDocument = JSON.parse(readFileSync(new URL('../baseline/packages/sudoers/linux-baseline.json', import.meta.url)))
+  sudoersDocument.code = `API-${mode}-sudoers`
+  const invalidSudoers = structuredClone(sudoersDocument); invalidSudoers.items[0].check.expected = 'on'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidSudoers))).status, 400)
+  const sudoers = { candidate: await ok('/api/baseline/packages/import', pamUpload(sudoersDocument)) }; fixtures.sudoers = sudoers
+  const sudoersRecord = { id: sudoers.candidate.id, code: sudoersDocument.code }; baselinePackages.push(sudoersRecord)
+  const sudoersPrefix = `/api/baseline/packages/${sudoersRecord.id}`
+  sudoers.approved = await ok(`${sudoersPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm exact sudo package and finite disk declarations; protocol fixture' } })
+  sudoersRecord.template = Number(sudoers.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${sudoersPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed', 'pass']) {
+    sudoers.testing = await ok(`${sudoersPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(sudoers.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, sudoersDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('sudoers_policy') && sudoersDocument.items.every(item => payload.includes(item.check.expected)))
+    const pass = outcome === 'pass', error = outcome === 'error'
+    const badLogging = "i.code='BL-LINUX-0029'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${error ? 'false' : pass ? 'true' : `NOT (${badLogging})`},
+        'scope=on-disk-sudoers-declarations authorization_state=unverified authentication_state=unverified delivery_state=unverified package=sudo version=1.9.15p5-3ubuntu5.24.04.3 authenticate=on exempt_group=unset nopasswd_tags=0 log_allowed=on logfile=${pass ? '/var/log/sudo.log' : '/var/log/other.log'} files=2 commands=3',
+        ${error ? "'Unknown sudoers policy, ACL or changed configuration'" : pass ? "''" : `CASE WHEN ${badLogging} THEN 'Sudoers declared policy reference mismatch' ELSE '' END`},
+        ${error ? "'error'" : pass ? "'pass'" : `CASE WHEN ${badLogging} THEN 'fail' ELSE 'pass' END`}
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${error ? 0 : pass ? 2 : 1},${error ? 2 : pass ? 0 : 1},${error ? 0 : pass ? 100 : 50},${error ? 2 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    sudoers[outcome] = await ok(sudoersPrefix, { token: tokens.admin })
+    assert.equal(sudoers[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${sudoersPrefix}/publish`, { ...options, body: { note: 'Incomplete declarations block publication' } })).status, 400)
+    else {
+      assert.ok(sudoers[outcome].testResults[0].items.every(item => !item.fixable && item.actual.includes('authorization_state=unverified')))
+      assert.equal(sudoers[outcome].testResults[0].score, pass ? 100 : 50)
+    }
+  }
+  sudoers.published = await ok(`${sudoersPrefix}/publish`, { ...options, body: { note: 'Complete declaration protocol fixture; no authorization, authentication or delivery certification' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === sudoersRecord.id))
+  sudoers.withdrawn = await ok(`${sudoersPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(sudoers.withdrawn.status, 'withdrawn')
+
   const auditdDocument = JSON.parse(readFileSync(new URL('../baseline/packages/auditd/linux-baseline.json', import.meta.url)))
   auditdDocument.code = `API-${mode}-auditd`
   const invalidAuditd = structuredClone(auditdDocument); invalidAuditd.items[0].check.target = '/tmp/auditd.conf'
