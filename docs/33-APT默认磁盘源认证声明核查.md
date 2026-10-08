@@ -20,7 +20,7 @@
 
 配置沿用默认 `apt.conf.d` 按原生名称选择与字节排序，再读取存在的 `apt.conf`；保留空节点、顶层 `#clear` 与 apt/apt-get Binary 覆盖语义。源列表先读取存在的 `sources.list`，再读取 `sources.list.d` 中非隐藏、ASCII 有限文件名且扩展名精确为 `.list/.sources` 的片段。冒号名称可被原生选中；大写扩展名、备份、隐藏名称不解释，但完整名称集合仍参与稳定性检查。选中名称指向非普通输入时严格 error，较原生忽略行为更保守。要求默认源目录存在。
 
-单行格式支持 `deb/deb-src`、有限无凭据 HTTP/HTTPS URI、普通套件/组件名称，选项限 `signed-by`、`trusted`、三个 `allow-*` 与 `arch`。Deb822 支持 Types、URIs、Suites、Components、Signed-By、Trusted、Enabled、Architectures，字段名不区分大小写、支持续行和列首注释。多 URI/套件按笛卡尔积解释，deb/deb-src 与多个组件共享 Release 范围。`Enabled=no` 的已支持段落不检查密钥路径，全部字段与基本语法仍需在有限范围内。
+单行格式支持 `deb/deb-src`、有限无凭据 HTTP/HTTPS URI、普通套件/组件名称，选项限 `signed-by`、`trusted`、三个 `allow-*` 与 `arch`。Deb822 支持 Types、URIs、Suites、Components、Signed-By、Trusted、Enabled、Architectures，字段名不区分大小写、支持续行和列首注释。多 URI/套件按笛卡尔积解释，deb/deb-src 与多个组件共享 Release 范围。原生先验证 `Types` 再判断 `Enabled`；禁用段落缺失/未知类型也保持 error。`Enabled=no` 的已支持段落不检查密钥路径，全部字段与基本语法仍需在有限范围内。
 
 APT 2.8.3 的 `ParseStanza` **没有映射** Deb822 `Allow-Insecure/Allow-Weak/Allow-Downgrade-To-Insecure` 字段。本候选对这些字段报 error，避免把字段文字误当作有效原生覆盖。此行为由固定版本源码及真实 libapt 对照确认；不能套用其他版本的语义。
 

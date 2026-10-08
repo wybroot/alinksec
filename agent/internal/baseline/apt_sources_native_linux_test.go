@@ -62,8 +62,12 @@ func TestNativeAPTSourcesPolicy(t *testing.T) {
 				cmd.Env = []string{"LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 				out, err := cmd.Output()
 				if c.nativeError {
-					if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != 1 || !strings.Contains(string(e.Stderr), "Conflicting values") {
-						t.Fatalf("native must reject semantic conflict: err=%v out=%q", err, out)
+					wantError := c.nativeErrorText
+					if wantError == "" {
+						wantError = "Conflicting values"
+					}
+					if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != 1 || !strings.Contains(string(e.Stderr), wantError) {
+						t.Fatalf("native must reject declared parsing error %q: err=%v out=%q", wantError, err, out)
 					}
 					continue
 				}

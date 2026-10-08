@@ -108,7 +108,19 @@ func (s *aptSources) parseDeb822(raw string) error {
 		if len(fields) == 0 {
 			return nil
 		}
-		// APT returns before validating disabled stanza content. We still constrain
+		types := strings.Fields(fields["types"])
+		if len(types) == 0 || len(types) > 2 {
+			return fmt.Errorf("APT Deb822源缺Types或类型超限")
+		}
+		seen := map[string]bool{}
+		for _, typ := range types {
+			if typ != "deb" && typ != "deb-src" || seen[typ] {
+				return fmt.Errorf("APT Deb822源Types未支持")
+			}
+			seen[typ] = true
+		}
+		// Native ParseFileDeb822 validates Types before ParseStanza checks Enabled.
+		// The remaining disabled stanza content is not interpreted. We still constrain
 		// the complete grammar/known field set, but do not inspect disabled keyrings.
 		if v, ok := fields["enabled"]; ok {
 			if v == "" {
@@ -124,17 +136,6 @@ func (s *aptSources) parseDeb822(raw string) error {
 				previous = ""
 				return nil
 			}
-		}
-		types := strings.Fields(fields["types"])
-		if len(types) == 0 || len(types) > 2 {
-			return fmt.Errorf("APT Deb822源缺Types或类型超限")
-		}
-		seen := map[string]bool{}
-		for _, typ := range types {
-			if typ != "deb" && typ != "deb-src" || seen[typ] {
-				return fmt.Errorf("APT Deb822源Types未支持")
-			}
-			seen[typ] = true
 		}
 		opts := map[string]string{}
 		for _, key := range []string{"trusted", "signed-by"} {

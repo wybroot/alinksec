@@ -23,7 +23,8 @@ type aptSourceCase struct {
 	parts                               map[string]string
 	passed, candidateError, nativeError bool
 	// Native libapt meta-index fields. No acquire/transport/signature invocation.
-	native []string
+	native          []string
+	nativeErrorText string
 }
 
 func aptSourceCases() []aptSourceCase {
@@ -51,7 +52,9 @@ func aptSourceCases() []aptSourceCase {
 		{name: "multiple-keyrings", parts: map[string]string{"keys.sources": strings.Replace(sourceStanza, sourceKey, sourceKey+" /etc/apt/keyrings/second.asc", 1)}, passed: true, native: []string{strings.Replace(safe, sourceKey, sourceKey+",/etc/apt/keyrings/second.asc", 1)}},
 		{name: "multi-uri-suite-continuation", parts: map[string]string{"multi.sources": strings.Replace(strings.Replace(sourceStanza, "noble\n", "noble noble-updates\n", 1), "https://example.invalid/archive\n", "https://example.invalid/archive\n https://mirror.invalid/archive\n", 1)}, passed: true, native: []string{safe, strings.Replace(safe, "\tnoble\t", "\tnoble-updates\t", 1), strings.Replace(safe, "example.invalid", "mirror.invalid", 1), strings.Replace(strings.Replace(safe, "example.invalid", "mirror.invalid", 1), "\tnoble\t", "\tnoble-updates\t", 1)}},
 		{name: "disabled-stanza", main: sourceLine, parts: map[string]string{"disabled.sources": "Enabled: no\nTypes: deb\nURIs: malformed\nSigned-By: /missing.gpg\n"}, passed: true, native: []string{safe}},
-		{name: "no-active-sources", parts: map[string]string{"disabled.sources": "Enabled: no\n"}},
+		{name: "no-active-sources", parts: map[string]string{"disabled.sources": "Enabled: no\nTypes: deb\n"}},
+		{name: "disabled-missing-type", parts: map[string]string{"disabled.sources": "Enabled: no\n"}, candidateError: true, nativeError: true, nativeErrorText: "Malformed stanza"},
+		{name: "disabled-unknown-type", parts: map[string]string{"disabled.sources": "Types: unknown\nEnabled: no\n"}, candidateError: true, nativeError: true, nativeErrorText: "Type 'unknown' is not known"},
 		{name: "filename-selection", main: sourceLine, parts: map[string]string{".hidden.list": "deb [trusted=yes] https://ignored.invalid/ noble main\n", "not-a-source.conf": "garbage\n", "unsafe.LIST": "garbage\n", "unsafe~.list": "garbage\n", "noextension": "garbage\n", "colon:valid.sources": sourceStanza}, passed: true, native: []string{safe}},
 		{name: "same-release-consistent", main: sourceLine + strings.Replace(sourceLine, "deb ", "deb-src ", 1), passed: true, native: []string{safe}},
 		{name: "conflicting-keyrings", main: sourceLine + strings.Replace(sourceLine, sourceKey, "/etc/apt/keyrings/second.asc", 1), candidateError: true, nativeError: true},
