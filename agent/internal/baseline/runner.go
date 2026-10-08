@@ -120,9 +120,11 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 	case "debian_cron_metadata":
 		result = checkCronMetadata(cs)
 	case "sudoers_policy":
-		return checkSudoers(cs)
+		result = checkSudoers(cs)
 	case "apt_install_policy":
-		return checkAPTPolicy(cs)
+		result = checkAPTPolicy(cs)
+	case "apt_sources_policy":
+		result = checkAPTSources(cs)
 	case "rsyslog_cron_routing":
 		result = checkRsyslogCron(cs)
 	default:

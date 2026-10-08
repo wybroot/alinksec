@@ -781,6 +781,48 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === aptInstallRecord.id))
   aptInstall.withdrawn = await ok(`${aptInstallPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(aptInstall.withdrawn.status, 'withdrawn')
 
+  const aptSourcesDocument = JSON.parse(readFileSync(new URL('../baseline/packages/apt-sources/linux-baseline.json', import.meta.url)))
+  aptSourcesDocument.code = `API-${mode}-apt-sources`
+  const invalidAptSources = structuredClone(aptSourcesDocument); invalidAptSources.items[0].check.target = '/tmp/apt'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidAptSources))).status, 400)
+  const aptSources = { candidate: await ok('/api/baseline/packages/import', pamUpload(aptSourcesDocument)) }; fixtures.aptSources = aptSources
+  const aptSourcesRecord = { id: aptSources.candidate.id, code: aptSourcesDocument.code }; baselinePackages.push(aptSourcesRecord)
+  const aptSourcesPrefix = `/api/baseline/packages/${aptSourcesRecord.id}`
+  aptSources.approved = await ok(`${aptSourcesPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm exact APT package and finite default disk source authentication declarations; protocol fixture' } })
+  aptSourcesRecord.template = Number(aptSources.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${aptSourcesPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'completed', 'pass']) {
+    aptSources.testing = await ok(`${aptSourcesPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(aptSources.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, aptSourcesDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('apt_sources_policy') && payload.includes(aptSourcesDocument.items[0].check.expected))
+    const pass = outcome === 'pass', error = outcome === 'error'
+    const quoted = value => "'" + value.replaceAll("'", "''") + "'"
+    const actual = 'scope=default-on-disk-apt-source-declarations environment_state=unverified command_line_state=unverified key_identity_state=unverified key_material_state=unverified repository_signature_state=unverified cached_release_state=unverified installation_state=unverified package=apt/libapt-pkg6.0t64 version=2.8.3 apt.allowinsecurerepositories=false(global-default) apt.allowweakrepositories=false(global-default) apt.allowdowngradetoinsecurerepositories=false(global-default) apt-get.allowinsecurerepositories=false(global-default) apt-get.allowweakrepositories=false(global-default) apt-get.allowdowngradetoinsecurerepositories=false(global-default) active_declarations=1 releases=1 disabled_stanzas=0 trusted_yes=' + (pass ? '0' : '1') + ' source_bypass_yes=0 missing_explicit_keyring=0 keyring_files=1 files=2'
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass},${quoted(actual)},${quoted(error ? 'Unknown APT syntax, boolean, package, ACL or configuration changes' : pass ? '' : 'APT source authentication declaration reference mismatch')},${quoted(error ? 'error' : pass ? 'pass' : 'fail')}
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    aptSources[outcome] = await ok(aptSourcesPrefix, { token: tokens.admin })
+    assert.equal(aptSources[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${aptSourcesPrefix}/publish`, { ...options, body: { note: 'Incomplete configuration blocks publication' } })).status, 400)
+    else {
+      const item = aptSources[outcome].testResults[0].items[0]
+      assert.equal(item.execution_status, pass ? 'pass' : 'fail')
+      assert.ok(!item.fixable && item.actual.includes('repository_signature_state=unverified'))
+      assert.equal(aptSources[outcome].testResults[0].score, pass ? 100 : 0)
+    }
+  }
+  aptSources.published = await ok(`${aptSourcesPrefix}/publish`, { ...options, body: { note: 'Complete source declaration protocol fixture; actual invocation and source trust unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === aptSourcesRecord.id))
+  aptSources.withdrawn = await ok(`${aptSourcesPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(aptSources.withdrawn.status, 'withdrawn')
+
   const sudoersDocument = JSON.parse(readFileSync(new URL('../baseline/packages/sudoers/linux-baseline.json', import.meta.url)))
   sudoersDocument.code = `API-${mode}-sudoers`
   const invalidSudoers = structuredClone(sudoersDocument); invalidSudoers.items[0].check.expected = 'on'

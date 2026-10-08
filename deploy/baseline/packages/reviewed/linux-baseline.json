@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "13",
+  "version": "14",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -307,7 +307,7 @@
     },
     {
       "ruleId": "BL-LINUX-0053",
-      "reason": "失败被成功默认值掩盖，表达式还含乱码，遗漏多种源格式；停用该断言并按有效源格式重新实现。"
+      "reason": "通用包不含此项；独立Ubuntu24 APT源候选核对有限默认磁盘认证绕过声明及显式文件Signed-By范围，密钥身份/内容、仓库签名、缓存Release与真实调用仍未验证。"
     },
     {
       "ruleId": "BL-LINUX-0054",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "1dde9cc3605e075dbd217d919deda6740e0e6f7bfd5a70d1dea1610460d405c8"
+    "sha256": "3b78d02b4f328e4609ba6b50fc13b2468dd263a3813c29fdc0404d596cec1e38"
   }
 }

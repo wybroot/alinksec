@@ -12,7 +12,7 @@
       "product": "Ubuntu24.04 apt/libapt-pkg6.0t64 2.8.3 完整安装、默认配置入口与有限语法；管理员确认可信安装和适用性",
       "osType": 1,
       "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
-      "version": "1",
+      "version": "2",
       "items": [
         {
           "code": "BL-LINUX-0052",
@@ -33,7 +33,7 @@
       "unsupported": [
         {
           "ruleId": "BL-LINUX-0053",
-          "reason": "本包不核查软件源信任；需解释有效 .list/.sources、各源信任开关、签名与密钥范围并取得独立原生证据。"
+          "reason": "默认磁盘源认证与显式Signed-By声明由独立APT源候选提供；密钥身份、仓库签名和真实调用仍未验证。"
         }
       ]
     }

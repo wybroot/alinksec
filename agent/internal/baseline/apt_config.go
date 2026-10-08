@@ -151,7 +151,9 @@ func (tree aptTree) assign(key, value string) error {
 	return nil
 }
 
-func (tree aptTree) parse(raw string) error {
+func (tree aptTree) parse(raw string) error { return tree.parseMode(raw, false) }
+
+func (tree aptTree) parseMode(raw string, sourceMode bool) error {
 	tokens, err := aptTokens(raw)
 	if err != nil {
 		return err
@@ -185,7 +187,7 @@ func (tree aptTree) parse(raw string) error {
 				}
 				key := strings.ToLower(tokens[pos].value)
 				pos += 2
-				if aptLoadingKey(key, true) {
+				if aptLoadingKey(key, true) || sourceMode && aptSourceLoadingKey(key, true) {
 					return fmt.Errorf("APT 配置加载树清除未支持")
 				}
 				if _, ok := tree[key]; ok {
@@ -203,6 +205,9 @@ func (tree aptTree) parse(raw string) error {
 					return bad()
 				}
 				pos++
+				if sourceMode && aptSourceLoadingKey(parent, false) {
+					return fmt.Errorf("APT 软件源加载重定向/额外源未支持")
+				}
 				if err := tree.assign(fmt.Sprintf("%s::$%d", parent, statements), tok.value); err != nil {
 					return err
 				}
@@ -234,6 +239,9 @@ func (tree aptTree) parse(raw string) error {
 				pos++
 				if strings.HasSuffix(key, "::") {
 					key += fmt.Sprintf("$%d", statements)
+				}
+				if sourceMode && aptSourceLoadingKey(key, false) {
+					return fmt.Errorf("APT 软件源加载重定向/额外源未支持")
 				}
 				if err := tree.assign(key, next.value); err != nil {
 					return err

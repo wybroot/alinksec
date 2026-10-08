@@ -10,4 +10,4 @@ docker run --rm --network=none --memory=128m --memory-swap=192m --cpus=1 --pids-
   --env ALINKSEC_APT_NATIVE_REQUIRED=true \
   alinksec-apt-native-validation:latest \
   /workspace/.tmp/baseline-native.test -test.v -test.timeout=90s \
-  -test.run '^(TestNativeAPTInstallPolicy|TestAPTPolicyCases|TestAPTRefusesUnsafeInputs|TestAPTChangesAndOneDeadline|TestAPTUnknownSyntaxAndBooleans)$'
+  -test.run '^(TestNativeAPTInstallPolicy|TestAPTPolicyCases|TestAPTRefusesUnsafeInputs|TestAPTChangesAndOneDeadline|TestAPTUnknownSyntaxAndBooleans|TestNativeAPTSourcesPolicy|TestAPTSourcesPolicyCases|TestAPTSourcesUnsupportedSyntax|TestAPTSourcesUnsafeInputs|TestAPTSourcesChangesAndLimits)$'

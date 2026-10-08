@@ -58,6 +58,37 @@ func TestRunPreservesCheckIDs(t *testing.T) {
 	}
 }
 
+func TestRunPreservesProductDeclarationIDs(t *testing.T) {
+	// Product/version rejection is still a report for the dispatched item.
+	// These checks previously returned before the common item-ID assignment.
+	specs := []*CheckSpec{aptSpec(), aptSourcesSpec(), {Type: "sudoers_policy", Target: "/etc/sudoers", Option: "authentication", Operator: "eq", Expected: sudoersReference("authentication"), TimeoutMs: 100}}
+	var checks []*pb.BaselineCheckSpec
+	for _, cs := range specs {
+		cs.TimeoutMs = 100
+		definition := map[string]any{"type": cs.Type, "target": cs.Target, "operator": cs.Operator, "expected": cs.Expected, "timeout_ms": cs.TimeoutMs}
+		if cs.Option != "" {
+			definition["option"] = cs.Option
+		}
+		raw, err := json.Marshal(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseCheck(string(raw)); err != nil {
+			t.Fatal(err)
+		}
+		checks = append(checks, &pb.BaselineCheckSpec{ItemId: cs.Type, Check: string(raw)})
+	}
+	r := Run("product-declarations", checks, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(r.Items) != len(checks) {
+		t.Fatalf("incomplete product reports: %+v", r)
+	}
+	for i, item := range r.Items {
+		if item.ItemId != checks[i].ItemId {
+			t.Fatalf("lost dispatched item ID: %+v", item)
+		}
+	}
+}
+
 func TestLargeEvidenceIsValidAndFitsOneGRPCReport(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "config")
 	if err := os.WriteFile(file, []byte(strings.Repeat("安", 5000)+"\n"), 0600); err != nil {

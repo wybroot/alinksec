@@ -5,7 +5,7 @@
   "product": "Ubuntu24.04 apt/libapt-pkg6.0t64 2.8.3 完整安装、默认配置入口与有限语法；管理员确认可信安装和适用性",
   "osType": 1,
   "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
-  "version": "1",
+  "version": "2",
   "items": [
     {
       "code": "BL-LINUX-0052",
@@ -26,7 +26,7 @@
   "unsupported": [
     {
       "ruleId": "BL-LINUX-0053",
-      "reason": "本包不核查软件源信任；需解释有效 .list/.sources、各源信任开关、签名与密钥范围并取得独立原生证据。"
+      "reason": "默认磁盘源认证与显式Signed-By声明由独立APT源候选提供；密钥身份、仓库签名和真实调用仍未验证。"
     }
   ],
   "schemaVersion": 1,
@@ -34,6 +34,6 @@
     "name": "ALinkSec Ubuntu24 APT install declaration review",
     "version": "2026-10-08",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/apt-definitions.json",
-    "sha256": "6dfd9283ce7951e4ddbb73ce4825bc589a44914a31842520da30b84022237bf5"
+    "sha256": "23118e3c800cf57e74ab3a408deee8fc131c09bfa8b7f5e529ffe1299eee32d7"
   }
 }

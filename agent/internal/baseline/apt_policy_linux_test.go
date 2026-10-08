@@ -4,6 +4,7 @@ package baseline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -166,7 +167,7 @@ func TestAPTRefusesUnsafeInputs(t *testing.T) {
 				err = os.WriteFile(path, []byte("Dir::Etc::Main \"elsewhere\";\n"), 0644)
 			}
 			if err != nil {
-				if os.Getenv("ALINKSEC_APT_NATIVE_REQUIRED") != "true" && (kind == "uid" && err == unix.EPERM || (kind == "access-acl" || kind == "default-acl") && (err == unix.EINVAL || err == unix.EOPNOTSUPP)) {
+				if os.Getenv("ALINKSEC_APT_NATIVE_REQUIRED") != "true" && (kind == "uid" && (errors.Is(err, unix.EPERM) || errors.Is(err, unix.EINVAL)) || (kind == "access-acl" || kind == "default-acl") && (err == unix.EINVAL || err == unix.EOPNOTSUPP)) {
 					t.Skip("local fixture unavailable; mandatory isolated native container covers it")
 				}
 				t.Fatal(err)

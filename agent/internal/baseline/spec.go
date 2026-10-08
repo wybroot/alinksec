@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -166,9 +166,9 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		default:
 			return nil, fmt.Errorf("SSH 检查仅支持 eq 或 regex")
 		}
-	} else if s.Type == "apt_install_policy" {
+	} else if s.Type == "apt_install_policy" || s.Type == "apt_sources_policy" {
 		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
-		if !validAPTPolicy(&s) {
+		if !validAPTPolicy(&s) && !validAPTSources(&s) {
 			return nil, fmt.Errorf("APT 安装检查需固定磁盘配置与完整明确参考")
 		}
 		for name := range seen {

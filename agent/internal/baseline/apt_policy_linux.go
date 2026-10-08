@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,7 +26,8 @@ func aptPackage(ctx context.Context, timeout int) ItemResult {
 	}
 	return r
 }
-func checkAPTPolicy(cs *CheckSpec) ItemResult { return aptPolicyWithin(cs, "/", aptPackage) }
+func checkAPTPolicy(cs *CheckSpec) ItemResult  { return aptPolicyWithin(cs, "/", aptPackage) }
+func checkAPTSources(cs *CheckSpec) ItemResult { return aptPolicyWithin(cs, "/", aptPackage) }
 
 var aptPartName = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
 
@@ -64,7 +66,11 @@ func aptNames(f *os.File) ([]string, error) {
 func aptPolicyWithin(cs *CheckSpec, root string, probe func(context.Context, int) ItemResult) ItemResult {
 	actual := "scope=default-on-disk-apt-install-policy environment_state=unverified command_line_state=unverified source_trust_state=unverified installation_state=unverified"
 	failure := func(message string) ItemResult { return ItemResult{Error: true, Actual: actual, Message: message} }
-	if !validAPTPolicy(cs) {
+	sourceMode := validAPTSources(cs)
+	if sourceMode {
+		actual = "scope=default-on-disk-apt-source-declarations environment_state=unverified command_line_state=unverified key_identity_state=unverified key_material_state=unverified repository_signature_state=unverified cached_release_state=unverified installation_state=unverified"
+	}
+	if !validAPTPolicy(cs) && !sourceMode {
 		return failure("APT 安装策略参考无效")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cs.TimeoutMs)*time.Millisecond)
@@ -135,20 +141,20 @@ func aptPolicyWithin(cs *CheckSpec, root string, probe func(context.Context, int
 	}
 	tree := aptTree{}
 	files, total, lines := 0, 0, 0
-	parseFile := func(target string) error {
-		if ctx.Err() != nil || files >= 33 {
-			return fmt.Errorf("APT 检查超时或超过32个配置片段")
+	readFile := func(target string) ([]byte, error) {
+		if ctx.Err() != nil || files >= 66 {
+			return nil, fmt.Errorf("APT 检查超时或超过32个配置片段")
 		}
 		e, err := open(target, false)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if e.stat.Size > 64*1024 {
-			return fmt.Errorf("APT 单文件超过64KiB")
+			return nil, fmt.Errorf("APT 单文件超过64KiB")
 		}
 		fd, err := unix.Open(fmt.Sprintf("/proc/self/fd/%d", e.f.Fd()), unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 		if err != nil {
-			return fmt.Errorf("无法读取 APT 配置")
+			return nil, fmt.Errorf("无法读取 APT 配置")
 		}
 		r := os.NewFile(uintptr(fd), target)
 		raw, err := io.ReadAll(io.LimitReader(r, 64*1024+1))
@@ -157,9 +163,16 @@ func aptPolicyWithin(cs *CheckSpec, root string, probe func(context.Context, int
 		total += len(raw)
 		lines += strings.Count(string(raw), "\n")
 		if err != nil || len(raw) > 64*1024 || total > 256*1024 || lines > 4096 || ctx.Err() != nil || len(raw) > 0 && raw[len(raw)-1] != '\n' {
-			return fmt.Errorf("APT 配置读取失败、超限、未终止行或超时")
+			return nil, fmt.Errorf("APT 配置读取失败、超限、未终止行或超时")
 		}
-		return tree.parse(string(raw))
+		return raw, nil
+	}
+	parseFile := func(target string) error {
+		raw, err := readFile(target)
+		if err != nil {
+			return err
+		}
+		return tree.parseMode(string(raw), sourceMode)
 	}
 	for _, name := range partNames {
 		if aptPartSelected(name) {
@@ -174,6 +187,91 @@ func aptPolicyWithin(cs *CheckSpec, root string, probe func(context.Context, int
 			return failure(err.Error())
 		}
 	}
+	directorySnapshots := []struct {
+		e     *cronMetadataEntry
+		names []string
+	}{{parent, parentNames}, {parts, partNames}}
+	sourceResult := ItemResult{}
+	if sourceMode {
+		// Source-loading redirects and additional volatile source entries require
+		// another contract; Binary overlays must not silently change our scope.
+		for key := range tree {
+			k := aptContextKey(key)
+			for _, banned := range []string{"dir::etc::sourcelist", "dir::etc::sourceparts", "apt::sources::with"} {
+				if k == banned || strings.HasPrefix(k, banned+"::") {
+					return failure("APT 软件源加载重定向/额外源未支持")
+				}
+			}
+			for _, boolean := range aptSourceBoolKeys {
+				if strings.HasPrefix(k, boolean+"::") {
+					return failure("APT 软件源布尔项不能含列表/子项")
+				}
+			}
+		}
+		sourcesDir, err := open("/etc/apt/sources.list.d", true)
+		if err != nil {
+			return failure(err.Error())
+		}
+		sourceNames, err := aptNames(sourcesDir.f)
+		if err != nil {
+			return failure(err.Error())
+		}
+		directorySnapshots = append(directorySnapshots, struct {
+			e     *cronMetadataEntry
+			names []string
+		}{sourcesDir, sourceNames})
+		selected := 0
+		for _, name := range sourceNames {
+			if aptSourceSelected(name) {
+				selected++
+			}
+		}
+		if selected > 32 {
+			return failure("APT 超过32个软件源片段")
+		}
+		sources := aptSources{}
+		loadSource := func(target string) error {
+			raw, err := readFile(target)
+			if err != nil {
+				return err
+			}
+			return sources.parse(string(raw), strings.HasSuffix(target, ".sources"))
+		}
+		if slices.Contains(parentNames, "sources.list") {
+			if err := loadSource("/etc/apt/sources.list"); err != nil {
+				return failure(err.Error())
+			}
+		}
+		for _, name := range sourceNames {
+			if aptSourceSelected(name) {
+				if err := loadSource("/etc/apt/sources.list.d/" + name); err != nil {
+					return failure(err.Error())
+				}
+			}
+		}
+		keyDirs := map[string]bool{}
+		sourceResult = evaluateAPTSources(tree, &sources, func(target string) error {
+			dir := path.Dir(target)
+			if !keyDirs[dir] {
+				if _, err := open(dir, true); err != nil {
+					return err
+				}
+				keyDirs[dir] = true
+			}
+			e, err := open(target, false)
+			if err != nil {
+				return err
+			}
+			if e.stat.Size < 1 || e.stat.Size > 1024*1024 || e.stat.Mode&0444 != 0444 {
+				return fmt.Errorf("APT keyring需非空、最多1MiB且所有用户可读；不验证密钥内容")
+			}
+			return nil
+		})
+		if sourceResult.Error {
+			return failure(sourceResult.Message)
+		}
+	}
+
 	if r := probe(ctx, cs.TimeoutMs); r.Error {
 		return failure(r.Message)
 	}
@@ -195,15 +293,20 @@ func aptPolicyWithin(cs *CheckSpec, root string, probe func(context.Context, int
 			}
 		}
 	}
-	for _, pair := range []struct {
-		e     *cronMetadataEntry
-		names []string
-	}{{parent, parentNames}, {parts, partNames}} {
+	for _, pair := range directorySnapshots {
 		after, err := aptNames(pair.e.f)
 		if err != nil || !slices.Equal(after, pair.names) {
 			return failure("APT 配置名称集合在检查期间变化")
 		}
 	}
+	if sourceMode {
+		if ctx.Err() != nil {
+			return failure("APT 检查超时")
+		}
+		sourceResult.Actual = actual + " " + sourceResult.Actual + fmt.Sprintf(" files=%d", files)
+		return sourceResult
+	}
+
 	passed := true
 	for _, binary := range []string{"apt", "apt-get"} {
 		for _, key := range aptBoolKeys {
