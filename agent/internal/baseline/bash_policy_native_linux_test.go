@@ -150,12 +150,16 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 				script := `printf 'ALINKSEC_NATIVE\t%s\t%s\t%s\t%s\t%s\n' "${TMOUT-absent}" "$(umask)" "${HISTTIMEFORMAT-absent}" "${HISTSIZE-absent}" "${HISTFILESIZE-absent}"; printf 'ALINKSEC_ATTRIBUTES\t'; declare -p TMOUT 2>/dev/null || :`
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				flag := "-ic"
+				// A command string (-ic) does not initialize the history list.
+				// Feed an interactive command stream to exercise startup defaults;
+				// only public fixture commands reach the inert history destination.
+				flag := "-i"
 				if login {
-					flag = "-lic"
+					flag = "-li"
 				}
-				cmd := exec.CommandContext(ctx, "/bin/bash", flag, script)
-				cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C", "TERM=dumb", "TZ=UTC"}
+				cmd := exec.CommandContext(ctx, "/bin/bash", flag)
+				cmd.Stdin = strings.NewReader(script + "\nexit\n")
+				cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C", "TERM=dumb", "TZ=UTC", "HISTFILE=/dev/null"}
 				cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: tc.uid, Gid: tc.uid}}
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout = &stdout
@@ -185,7 +189,7 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 					expected := []string{tc.want.tmout, tc.want.loginMask, tc.want.format, tc.want.size, tc.want.fileSize}
 					for i := range expected {
 						if fields[i] != expected[i] {
-							t.Fatalf("native field index=%d differs from controlled fixture", i)
+							t.Fatalf("native fixture field index=%d got=%q want=%q", i, fields[i], expected[i])
 						}
 					}
 					ro := strings.Contains(attributes, "-r")
@@ -206,7 +210,7 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 					t.Fatalf("%s: %+v", option, result)
 				}
 				comparisons++
-				t.Logf("native Bash global declaration evidence: case=%s option=%s native_login_tmout=%s native_login_umask=%s native_nonlogin_umask=%s passed=%t actual=%s", tc.name, option, loginFields[0], loginFields[1], nonloginFields[1], result.Passed, result.Actual)
+				t.Logf("native Bash global declaration evidence: case=%s option=%s native_login_tmout=%s native_login_umask=%s native_nonlogin_umask=%s native_HISTSIZE=%s native_HISTFILESIZE=%s passed=%t actual=%s", tc.name, option, loginFields[0], loginFields[1], nonloginFields[1], loginFields[3], loginFields[4], result.Passed, result.Actual)
 			}
 		})
 	}

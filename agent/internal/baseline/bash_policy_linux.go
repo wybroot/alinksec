@@ -185,6 +185,9 @@ func bashPolicyWithin(ctx context.Context, cs *CheckSpec, paths bashPolicyPaths,
 			return failure("Bash配置权限或ACL无法复核")
 		}
 	}
+	if ctx.Err() != nil || r.budget() != nil {
+		return failure("Bash最终权限复核超过共同截止时间")
+	}
 	result := d.result(cs.Option)
 	result.Actual = prefix + result.Actual + fmt.Sprintf(" inputs=%d bytes=%d access_acl=none default_acl=none", len(r.inputs), r.bytes)
 	return result
