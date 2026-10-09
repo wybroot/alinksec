@@ -28,7 +28,7 @@
 
 主文件先读，随后按C字节顺序读取全部非隐藏`*.conf`。备份名称只要以`.conf`结尾也进入读取；其他扩展名和隐藏文件按原生glob规则排除。每个soft/hard分别使用同域最后一个声明，`-`同时设置二者。仅支持`*`默认和字面`root`两种域，以及core/nofile/nproc三种资源；显式root要求是本参考自身的要求，不把缺少root声明推断为root实际无限。
 
-root用户声明优先于默认声明，本候选保留默认与显式root两套数值。输出原始声明和归一化soft：如soft=12000、hard=8192，原生PAM会把soft降为8192。缺少任一声明仍是unspecified，不读取或猜测应用继承的rlimit。完整非负整数最大2147483647，允许前导零并归一化。`-1`、`unlimited`、`infinity`不满足本参考的显式有限要求；nofile的无限值在原生模块中转换为nr_open，本检查不会将它猜成一个有限声明。
+Ubuntu的显式root补丁要求root字面声明，默认/组声明不用于root；本候选保留默认与显式root两套数值。输出原始声明和归一化soft：如soft=12000、hard=8192，原生PAM会把soft降为8192。缺少任一声明仍是unspecified，不读取或猜测应用继承的rlimit。完整非负整数最大2147483647，允许前导零并归一化。`-1`、`unlimited`、`infinity`不满足本参考的显式有限要求；nofile的无限值在原生模块中尝试转换为nr_open，本检查不会将它猜成一个有限声明。Ubuntu的EPERM补丁可能在提高hard上限失败时仍返回PAM成功，保留继承值；因此required模块存在或返回成功均不证明限制已经应用。
 
 命名用户、组、UID/GID范围、`<domain> -`豁免、其他资源、未知或不完整语法为error；错误不回显未知值或配置原文。若其他资源或账户策略存在，不表示它们不合规，而是超出此候选的解释范围。
 
@@ -40,8 +40,8 @@ root用户声明优先于默认声明，本候选保留默认与显式root两套
 
 专用一次性Ubuntu24 PAM镜像共享已有口令/登录锁定验证基础设施。新增C探针在独立子进程打开实际login PAM session，读取三种getrlimit；普通用户降权后检查有界文件打开和fork被拒绝，并对照root的nproc例外。仅在有专用标记、root且确认容器的环境写入隔离/etc；仓库只读挂载、无宿主/etc/数据卷、无网络，容器结束移除。探针不索取口令、不输出账户凭据或哈希，不制造崩溃/core文件。
 
-原生对照包括三项普通/root会话、有序drop-in、root优先级、soft归一化、三种独立不满足、无限值及nofile转换、提前sufficient跳过limits、conf选项跳过drop-in，以及实际普通文件/fork拒绝和root例外。原生结果须绑定当前提交的amd64/arm64 CI。SQLite/PostgreSQL与浏览器完整报告是明确标注的协议夹具；混合2通过/1失败和2通过/1异常分别保留，后者阻断发布，版本改变一项仍需整包新证据。
+原生对照包括三项普通/root会话、有序drop-in、root优先级、soft归一化、三种独立不满足、无限值及nofile提高上限被拒绝但PAM成功、提前sufficient跳过limits、conf选项跳过drop-in，以及实际普通文件/fork拒绝和root例外。原生结果须绑定当前提交的amd64/arm64 CI。SQLite/PostgreSQL与浏览器完整报告是明确标注的协议夹具；混合2通过/1失败和2通过/1异常分别保留，后者阻断发布，版本改变一项仍需整包新证据。
 
-解释依据固定Linux-PAM1.5.3 [模块源码](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.c)、[limits手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/limits.conf.5.xml)、[模块手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.8.xml)和[控制流程](https://github.com/linux-pam/linux-pam/blob/v1.5.3/libpam/pam_dispatch.c)，以及[Ubuntu24 limits手册](https://manpages.ubuntu.com/manpages/noble/man5/limits.conf.5.html)。来源文件经Git blob和SHA256核对，不声称tag/软件包签名认证。
+解释依据固定Linux-PAM1.5.3 [模块源码](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.c)、[limits手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/limits.conf.5.xml)、[模块手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.8.xml)和[控制流程](https://github.com/linux-pam/linux-pam/blob/v1.5.3/libpam/pam_dispatch.c)，以及[Ubuntu24 limits手册](https://manpages.ubuntu.com/manpages/noble/man5/limits.conf.5.html)。另核对官方Ubuntu [1.5.3-5ubuntu5.7源码补丁包](https://archive.ubuntu.com/ubuntu/pool/main/p/pam/pam_1.5.3-5ubuntu5.7.debian.tar.xz)中的显式root、初始化、soft默认及EPERM补丁和构建选项；该包未启用vendor配置目录。来源文件经Git blob和SHA256核对，不声称tag/软件包签名认证。
 
 旧60项现37项具有限定范围实现、23项未支持。通用review版本16仍8项/52排除，其中29项指向独立产品候选，不扩大通用包覆盖。基线模块整体仍未完成，继续按[模块计划](19-模块完善计划.md)在当前分支推进，PR保持草稿。

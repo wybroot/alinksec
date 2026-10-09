@@ -17,9 +17,7 @@ static int no_conversation(int count, const struct pam_message **messages,
     (void)count; (void)messages; (void)response; (void)data;
     return PAM_CONV_ERR;
 }
-static void limit_json(const char *name, int resource) {
-    struct rlimit value;
-    if (getrlimit(resource, &value) != 0) exit(3);
+static void limit_value_json(const char *name, struct rlimit value) {
     printf(",\"%s_soft\":\"", name);
     if (value.rlim_cur == RLIM_INFINITY) printf("unlimited");
     else printf("%llu", (unsigned long long)value.rlim_cur);
@@ -28,16 +26,28 @@ static void limit_json(const char *name, int resource) {
     else printf("%llu", (unsigned long long)value.rlim_max);
     printf("\"");
 }
+static void limit_json(const char *name, int resource) {
+    struct rlimit value;
+    if (getrlimit(resource, &value) != 0) exit(3);
+    limit_value_json(name, value);
+}
 int main(int argc, char **argv) {
     if (argc != 3 || (strcmp(argv[1], "root") && strcmp(argv[1], "alinksec-pam-test"))) return 2;
     struct passwd *user = getpwnam(argv[1]);
     if (!user) return 2;
     uid_t uid = user->pw_uid; gid_t gid = user->pw_gid;
+    if (strcmp(argv[2], "ceiling") == 0) {
+        const struct rlimit ceiling = {1024, 65536};
+        if (setrlimit(RLIMIT_NOFILE, &ceiling) != 0) return 6;
+    }
+    struct rlimit initial_nofile;
+    if (getrlimit(RLIMIT_NOFILE, &initial_nofile) != 0) return 3;
     struct pam_conv conversation = {no_conversation, NULL};
     pam_handle_t *handle = NULL;
     int rc = pam_start("login", argv[1], &conversation, &handle);
     if (rc == PAM_SUCCESS) rc = pam_open_session(handle, 0);
     printf("{\"rc\":%d", rc);
+    limit_value_json("initial_nofile", initial_nofile);
     limit_json("core", RLIMIT_CORE);
     limit_json("nofile", RLIMIT_NOFILE);
     limit_json("nproc", RLIMIT_NPROC);
