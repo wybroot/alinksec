@@ -109,6 +109,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkPAMPassword(cs)
 	case "pam_auth":
 		result = checkPAMAuth(cs)
+	case "pam_limits":
+		result = checkPAMLimits(cs)
 	case "systemd_service":
 		result = checkSystemdService(cs)
 	case "systemd_ctrl_alt_del":

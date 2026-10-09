@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "15",
+  "version": "16",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -255,7 +255,7 @@
     },
     {
       "ruleId": "BL-LINUX-0039",
-      "reason": "contains 可命中注释，且未处理 limits.d、用户策略与生效条件；不能证明完整关闭。"
+      "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
     },
     {
       "ruleId": "BL-LINUX-0040",
@@ -319,11 +319,11 @@
     },
     {
       "ruleId": "BL-LINUX-0056",
-      "reason": "任意 soft 或 hard 数字行都可通过，不代表二者、数值界限或实际生效；先明确策略及范围。"
+      "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
     },
     {
       "ruleId": "BL-LINUX-0057",
-      "reason": "同 0056，需适用主体与确切限制。"
+      "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
     },
     {
       "ruleId": "BL-LINUX-0058",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-09",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "774954626d7bcfd1c9757412454384654ab9a7da709a3f37c4fca2e218f8558b"
+    "sha256": "604ab114270d9f5febcb903a4454153bda7c372e042c63d0ef4a92ade0adac89"
   }
 }

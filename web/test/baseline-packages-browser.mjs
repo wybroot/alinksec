@@ -28,6 +28,8 @@ const errors=[],writes=[],unexpected=[]
 let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErrors=false
 const stagesByPlatform={...fixtures.platforms,ssh:fixtures.ssh,identity:fixtures.identity,pam:fixtures.pam,pamAuth:fixtures.pamAuth,systemd:fixtures.systemd,logMetadata:fixtures.logMetadata,audit:fixtures.audit,auditd:fixtures.auditd,cron:fixtures.cron,rsyslogCron:fixtures.rsyslogCron,sudoers:fixtures.sudoers,aptInstall:fixtures.aptInstall,aptSources:fixtures.aptSources}
 stagesByPlatform.ctrlAltDel=fixtures.ctrlAltDel
+stagesByPlatform.pamLimits=fixtures.pamLimits
+assert.ok(fixtures.pamLimits?.completed && fixtures.pamLimits?.pass && fixtures.pamLimits?.error,'Capture current three-resource PAM limits REST candidate before browser validation')
 assert.ok(fixtures.ctrlAltDel?.completed && fixtures.ctrlAltDel?.pass,'Capture current loaded Ctrl-Alt-Del policy REST candidate before browser validation')
 assert.ok(fixtures.ssh?.completed,'Capture the current SSH REST candidate before browser validation')
 assert.ok(fixtures.identity?.completed,'Capture the current identity REST candidate before browser validation')
@@ -493,6 +495,35 @@ try {
   await page.screenshot({path:root+'/apt-sources-evidence-mobile.png',fullPage:true,animations:'disabled'})
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   await page.setViewportSize({width:1440,height:1000})
+  details[fixtures.pamLimits.candidate.id]=structuredClone(fixtures.pamLimits.completed)
+  await page.reload()
+  const limits=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 PAM会话资源限制核查',exact:true})})
+  await limits.getByRole('button',{name:'查看版本',exact:true}).click()
+  const limitsDefinitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
+  await expect(limitsDefinitions).toHaveCount(3)
+  for(const [index,option] of ['core','nofile','nproc'].entries()){
+    await expect(limitsDefinitions.nth(index)).toContainText('pam_limits')
+    await expect(limitsDefinitions.nth(index)).toContainText('/etc/pam.d/login')
+    await expect(limitsDefinitions.nth(index)).toContainText(option)
+    await expect(limitsDefinitions.nth(index)).toContainText('default_and_explicit_root_soft=')
+  }
+  await limitsDefinitions.first().scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/pam-limits-scope-desktop.png',fullPage:true,animations:'disabled'})
+  await dialog.locator('.el-table__expand-icon').click()
+  await expect(dialog.getByText('Root hard nofile outside finite reference',{exact:true})).toBeVisible()
+  const limitsActual=dialog.getByText(/scope=login-pam-limits-declarations.*option=nofile/)
+  await expect(limitsActual).toContainText('invocation_state=unverified existing_process_state=unverified core_delivery_state=unverified nproc_privileged_enforcement_state=unverified')
+  await expect(limitsActual).toContainText('explicit_root_declared_hard=99999')
+  await expect(dialog.getByText(/scope=login-pam-limits-declarations.*option=core/)).toHaveCount(1)
+  await expect(dialog.getByText(/scope=login-pam-limits-declarations.*option=nproc/)).toHaveCount(1)
+  await limitsActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/pam-limits-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+  await page.setViewportSize({width:390,height:844})
+  await limitsActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/pam-limits-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+  await page.setViewportSize({width:1440,height:1000})
   details[fixtures.ctrlAltDel.candidate.id]=structuredClone(fixtures.ctrlAltDel.completed)
   await page.reload()
   const cad=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 Ctrl-Alt-Del 当前策略核查',exact:true})})
@@ -542,7 +573,7 @@ try {
   await page.screenshot({path:root+'/sudoers-evidence-mobile.png',fullPage:true,animations:'disabled'})
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
-  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['Ctrl-Alt-Del loaded mask and independent burst action with explicit keyboard/persistence limits on desktop/mobile','Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','error and legacy evidence block publication until retest','execution errors separated from noncompliance','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review, evidence and creation dialogs','SSH explicit connection and noncompliant evidence','identity UID range, stricter metadata and redacted noncompliance','PAM passwd scope, explicit quality reference and separate hash/quality evidence','PAM login scope, finite root/ordinary lockout reference and noncompliance evidence on desktop/mobile','systemd exact local service units, running reference and inactive evidence on desktop/mobile','fixed log paths, mode ceilings, numeric IDs and noncompliance evidence on desktop/mobile','kernel audit enabled state, limited loaded watch reference and missing gshadow evidence on desktop/mobile','on-disk auditd scope, keep_logs noncompliance, configured target and unverified loaded state on desktop/mobile','Debian cron exact package and all direct entries, backup metadata failure and unverified loaded state on desktop/mobile','rsyslog cron finite disk routing, missing debug severity and unverified loaded/delivery state on desktop/mobile','sudoers explicit finite disk declarations, logfile noncompliance and unverified authorization/authentication/delivery on desktop/mobile','APT finite default disk installation policy, Force-Yes noncompliance and unverified actual invocation/source trust on desktop/mobile','APT finite source authentication declarations, Trusted=yes noncompliance and unverified key identity/material/repository signatures on desktop/mobile'],writes,errors,unexpected}))
+  writeFileSync(root+'/browser-result.json',JSON.stringify({passed:true,mode,checks:['PAM three-resource batch soft/hard declarations, mixed results and explicit runtime limits on desktop/mobile','Ctrl-Alt-Del loaded mask and independent burst action with explicit keyboard/persistence limits on desktop/mobile','Linux/Windows candidate import and metadata diff','review failure retains state','explicit test before publication','error and legacy evidence block publication until retest','execution errors separated from noncompliance','withdrawal','automatic mixed-system selection and uncovered hosts','administrator controls','mobile review, evidence and creation dialogs','SSH explicit connection and noncompliant evidence','identity UID range, stricter metadata and redacted noncompliance','PAM passwd scope, explicit quality reference and separate hash/quality evidence','PAM login scope, finite root/ordinary lockout reference and noncompliance evidence on desktop/mobile','systemd exact local service units, running reference and inactive evidence on desktop/mobile','fixed log paths, mode ceilings, numeric IDs and noncompliance evidence on desktop/mobile','kernel audit enabled state, limited loaded watch reference and missing gshadow evidence on desktop/mobile','on-disk auditd scope, keep_logs noncompliance, configured target and unverified loaded state on desktop/mobile','Debian cron exact package and all direct entries, backup metadata failure and unverified loaded state on desktop/mobile','rsyslog cron finite disk routing, missing debug severity and unverified loaded/delivery state on desktop/mobile','sudoers explicit finite disk declarations, logfile noncompliance and unverified authorization/authentication/delivery on desktop/mobile','APT finite default disk installation policy, Force-Yes noncompliance and unverified actual invocation/source trust on desktop/mobile','APT finite source authentication declarations, Trusted=yes noncompliance and unverified key identity/material/repository signatures on desktop/mobile'],writes,errors,unexpected}))
   console.log('PASS baseline candidates, review, publication, OS selection, roles and mobile layout')
 } catch(error) {
   writeFileSync(root+'/browser-result.json',JSON.stringify({passed:false,mode,error:error.message,writes,errors,unexpected}))

@@ -10,4 +10,4 @@ docker run --rm --network=none --memory=256m --memory-swap=384m --cpus=1 --pids-
   --mount "type=bind,src=$repo,dst=/workspace,readonly" \
   --workdir /workspace/agent/internal/baseline \
   alinksec-pam-native-validation:latest \
-  /workspace/.tmp/pam-native.test -test.v -test.run '^TestNativePAM(Password|Auth)$'
+  /workspace/.tmp/pam-native.test -test.v -test.run '^TestNativePAM(Password|Auth|Limits)$'

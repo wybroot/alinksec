@@ -166,7 +166,7 @@ jobs:
         run: bash deploy/tests/sudoers-native.sh
       - name: Check isolated APT native installation/source declarations and mandatory input boundaries
         run: bash deploy/tests/apt-native.sh
-      - name: Check isolated Ubuntu24 PAM password and login lockout behavior
+      - name: Check isolated Ubuntu24 PAM password, login lockout and resource limits
         run: |
           cp .tmp/baseline-native.test .tmp/pam-native.test
           bash deploy/tests/pam-password-native.sh

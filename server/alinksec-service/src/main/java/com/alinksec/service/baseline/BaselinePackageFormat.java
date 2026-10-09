@@ -217,6 +217,18 @@ public final class BaselinePackageFormat {
                 require(Set.of("auditd.service", "rsyslog.service").contains(text(check, "target", 1024)), "systemd 检查限定 auditd/rsyslog 系统服务");
                 require(text(check, "operator", 32).equals("eq") && text(check, "expected", 1000).equals("loaded/active/running"), "systemd 运行参考不能隐式扩展");
             }
+            case "pam_limits" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "PAM limits检查仅支持Linux");
+                require(text(check, "target", 1024).equals("/etc/pam.d/login") && text(check, "operator", 32).equals("eq"), "PAM limits限定login入口和完整参考");
+                String reference = switch (text(check, "option", 32)) {
+                    case "core" -> "default_and_explicit_root_soft=0,hard=0";
+                    case "nofile" -> "default_and_explicit_root_soft=1024..65536,hard=1024..65536";
+                    case "nproc" -> "default_and_explicit_root_soft=1..4096,hard=1..4096";
+                    default -> "";
+                };
+                require(!reference.isEmpty() && text(check, "expected", 1000).equals(reference), "PAM limits完整soft/hard参考不能隐式扩展");
+            }
             case "pam_auth" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "PAM 认证检查仅支持 Linux");

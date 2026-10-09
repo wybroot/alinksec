@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "15",
+      "version": "16",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -262,7 +262,7 @@
         },
         {
           "ruleId": "BL-LINUX-0039",
-          "reason": "contains 可命中注释，且未处理 limits.d、用户策略与生效条件；不能证明完整关闭。"
+          "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
         },
         {
           "ruleId": "BL-LINUX-0040",
@@ -326,11 +326,11 @@
         },
         {
           "ruleId": "BL-LINUX-0056",
-          "reason": "任意 soft 或 hard 数字行都可通过，不代表二者、数值界限或实际生效；先明确策略及范围。"
+          "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
         },
         {
           "ruleId": "BL-LINUX-0057",
-          "reason": "同 0056，需适用主体与确切限制。"
+          "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。"
         },
         {
           "ruleId": "BL-LINUX-0058",
@@ -355,7 +355,8 @@
       "mount": "https://github.com/util-linux/util-linux/blob/master/misc-utils/findmnt.8.adoc",
       "stat": "https://github.com/coreutils/coreutils/blob/master/doc/coreutils.texi",
       "pam": "https://github.com/linux-pam/linux-pam/blob/master/modules/pam_faillock/pam_faillock.8.xml",
-      "ssh": "https://man.openbsd.org/sshd_config"
+      "ssh": "https://man.openbsd.org/sshd_config",
+      "pam_limits": "https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.c"
     },
     "rules": [
       {
@@ -994,13 +995,21 @@
       },
       {
         "ruleId": "BL-LINUX-0039",
-        "name": "进程 core dump 生效限制",
+        "name": "login PAM core软硬限制声明",
         "category": "入侵防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "contains 可命中注释，且未处理 limits.d、用户策略与生效条件；不能证明完整关闭。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：contains 可命中注释，且未处理 limits.d、用户策略与生效条件；不能证明完整关闭。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。",
+        "scope": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "check": {
+          "type": "pam_limits",
+          "target": "/etc/pam.d/login",
+          "option": "core",
+          "operator": "eq",
+          "expected": "default_and_explicit_root_soft=0,hard=0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0040",
@@ -1192,23 +1201,39 @@
       },
       {
         "ruleId": "BL-LINUX-0056",
-        "name": "文件句柄生效限制",
+        "name": "login PAM文件句柄软硬限制声明",
         "category": "资源控制",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "任意 soft 或 hard 数字行都可通过，不代表二者、数值界限或实际生效；先明确策略及范围。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：任意 soft 或 hard 数字行都可通过，不代表二者、数值界限或实际生效；先明确策略及范围。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。",
+        "scope": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "check": {
+          "type": "pam_limits",
+          "target": "/etc/pam.d/login",
+          "option": "nofile",
+          "operator": "eq",
+          "expected": "default_and_explicit_root_soft=1024..65536,hard=1024..65536",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0057",
-        "name": "用户进程生效限制",
+        "name": "login PAM用户进程软硬限制声明",
         "category": "资源控制",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "同 0056，需适用主体与确切限制。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：同 0056，需适用主体与确切限制。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 PAM limits候选核对login有限session链及默认/显式root soft和hard磁盘声明；真实调用及现存进程未验证。",
+        "scope": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。",
+        "check": {
+          "type": "pam_limits",
+          "target": "/etc/pam.d/login",
+          "option": "nproc",
+          "operator": "eq",
+          "expected": "default_and_explicit_root_soft=1..4096,hard=1..4096",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0058",

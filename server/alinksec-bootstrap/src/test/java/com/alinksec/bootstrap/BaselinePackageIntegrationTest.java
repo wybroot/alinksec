@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -466,6 +466,51 @@ class BaselinePackageIntegrationTest {
         }
         var windows = ctrlAltDelDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
         var nil = ctrlAltDelDocument(); ((ObjectNode) nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
+    }
+
+    ObjectNode pamLimitsDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/pam-limits/linux-baseline.json")));
+    }
+
+    @Test void pamLimitsBatchPreservesEverySnapshotAndAnyErrorBlocksPublication() throws Exception {
+        var doc = pamLimitsDocument(); var pkg = imported(doc);
+        packages.review(id(pkg), true, "Confirm login session and three soft/hard declaration policies", 7L);
+        for (String host : List.of("windows", "rocky")) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), host));
+        long task = test(id(pkg), "ubuntu");
+        var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(3, sent.size());
+        for (int i=0; i<3; i++) assertEquals(doc.path("items").get(i).path("check"), JsonUtils.mapper().readTree(sent.get(i).getCheck()));
+        var response = report(task, "ubuntu", true);
+        results.onResult("ubuntu", response.toBuilder().setItems(1, response.getItems(1).toBuilder().setPassed(false).setExecutionStatus("error").setMessage("Unconfirmed session chain")).build());
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "Other two passed", 7L));
+        long retry = test(id(pkg), "ubuntu");
+        response = report(retry, "ubuntu", true);
+        results.onResult("ubuntu", response.toBuilder().setItems(1, response.getItems(1).toBuilder().setPassed(false).setExecutionStatus("fail").setMessage("Hard nofile outside reference")).build());
+        packages.publish(id(pkg), "Complete mixed reference results; actual session invocation unverified", 7L);
+        var next = doc.deepCopy(); next.put("version", "2");
+        ((ObjectNode) next.path("items").get(2).path("check")).put("timeout_ms", 6000);
+        var changed = imported(next); packages.review(id(changed), true, "Version2 changes one resource definition", 7L);
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse version1 evidence", 7L));
+        long fresh = test(id(changed), "ubuntu"); results.onResult("ubuntu", report(fresh, "ubuntu", true));
+        packages.publish(id(changed), "Fresh three-item protocol evidence", 7L);
+        for (var item : doc.path("items")) {
+            String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code=?", String.class, task, item.path("code").asText());
+            assertEquals(item.path("check"), JsonUtils.mapper().readTree(snapshot));
+        }
+    }
+
+    @Test void pamLimitsBatchRejectsWeakenedReferencesAndUnsupportedScopes() throws Exception {
+        for (int index=0; index<3; index++) {
+            for (var change : Map.of("target", "/etc/pam.d/sshd", "cmd", "ulimit -a", "option", "memlock", "operator", "contains", "expected", "hard=0").entrySet()) {
+                var doc = pamLimitsDocument(); ((ObjectNode)doc.path("items").get(index).path("check")).put(change.getKey(), change.getValue());
+                assertThrows(IllegalArgumentException.class, () -> imported(doc), change.getKey());
+            }
+        }
+        var windows = pamLimitsDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        var nil = pamLimitsDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("uid_min"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
     }
 
