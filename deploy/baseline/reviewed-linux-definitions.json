@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "16",
+      "version": "17",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -214,7 +214,7 @@
         },
         {
           "ruleId": "BL-LINUX-0020",
-          "reason": "声明与名称的安全结论需重新审核；有效 SSH 配置与实际产品策略分别处理。"
+          "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0021",
@@ -278,7 +278,7 @@
         },
         {
           "ruleId": "BL-LINUX-0043",
-          "reason": "任意非空值包括 none 都可匹配，也没读横幅内容；需有效配置和实际文件内容检查。"
+          "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0044",
@@ -691,13 +691,28 @@
       },
       {
         "ruleId": "BL-LINUX-0020",
-        "name": "SSH 有效 UseDNS 策略",
+        "name": "指定示例连接的UseDNS名称解析依赖参考",
         "category": "访问控制",
         "severity": 1,
-        "status": "unsupported",
-        "reason": "声明与名称的安全结论需重新审核；有效 SSH 配置与实际产品策略分别处理。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：声明与名称的安全结论需重新审核；有效 SSH 配置与实际产品策略分别处理。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。",
+        "scope": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。",
+        "remediation": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。",
+        "check": {
+          "type": "sshd_notice",
+          "target": "/etc/ssh/sshd_config",
+          "option": "usedns",
+          "connection": {
+            "user": "root",
+            "host": "admin.example.invalid",
+            "address": "192.0.2.10",
+            "local_address": "192.0.2.20",
+            "local_port": 22
+          },
+          "operator": "eq",
+          "expected": "no",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0021",
@@ -1043,13 +1058,28 @@
       },
       {
         "ruleId": "BL-LINUX-0043",
-        "name": "SSH 有效登录横幅",
+        "name": "指定示例连接的issue.net审核横幅内容",
         "category": "剩余信息保护",
         "severity": 1,
-        "status": "unsupported",
-        "reason": "任意非空值包括 none 都可匹配，也没读横幅内容；需有效配置和实际文件内容检查。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：任意非空值包括 none 都可匹配，也没读横幅内容；需有效配置和实际文件内容检查。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。",
+        "scope": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。",
+        "remediation": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。",
+        "check": {
+          "type": "sshd_notice",
+          "target": "/etc/ssh/sshd_config",
+          "option": "banner",
+          "connection": {
+            "user": "root",
+            "host": "admin.example.invalid",
+            "address": "192.0.2.10",
+            "local_address": "192.0.2.20",
+            "local_port": 22
+          },
+          "operator": "eq",
+          "expected": "file=/etc/issue.net,sha256=d0eacfbc40497e185ff4c5a6f905668a7f3d775bd1ec645658ba15b2d49839b5",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0044",

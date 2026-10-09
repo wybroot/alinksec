@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "16",
+  "version": "17",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -207,7 +207,7 @@
     },
     {
       "ruleId": "BL-LINUX-0020",
-      "reason": "声明与名称的安全结论需重新审核；有效 SSH 配置与实际产品策略分别处理。"
+      "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0021",
@@ -271,7 +271,7 @@
     },
     {
       "ruleId": "BL-LINUX-0043",
-      "reason": "任意非空值包括 none 都可匹配，也没读横幅内容；需有效配置和实际文件内容检查。"
+      "reason": "通用包不含此项；独立Ubuntu24 SSH提示候选核对明确连接的UseDNS名称解析依赖参考或固定issue.net审核内容摘要；实际名称解析、运行实例和横幅交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0044",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-09",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "604ab114270d9f5febcb903a4454153bda7c372e042c63d0ef4a92ade0adac89"
+    "sha256": "9f35aea20322774bdc271b4944c4468f12e631d31fa802a9b1ff90f20a99ce11"
   }
 }

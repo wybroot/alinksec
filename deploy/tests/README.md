@@ -421,3 +421,5 @@ Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, t
 `systemd-native.sh` 在临时 Ubuntu24 GitHub-hosted runner 串行验证服务观察和当前 Ctrl-Alt-Del 两条管理器路径。唯一无依赖 target 与唯一运行时管理器片段完整清理并核对原 burst 值；真实特殊目标仅只读查询，不触发按键、信号或关机。范围见 [Ctrl-Alt-Del核查](../../docs/34-Ctrl-Alt-Del当前systemd策略核查.md)。
 
 PAM隔离验证同时成组覆盖core/nofile/nproc声明和实际getrlimit/普通文件与fork拒绝，含root nproc例外；只在专用无宿主/etc挂载的Ubuntu24镜像打开会话。生产候选仍为只读声明观察，范围见 [PAM会话资源限制](../../docs/35-PAM会话资源限制核查.md)。
+
+OpenSSH名称解析/横幅批次：CI的`Check native OpenSSH name resolution and banner declarations with mandatory input boundaries`以root执行`TestNativeSSHNotice`，需`ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true`和Ubuntu24精确OpenSSH9.6包。六组/十次原生比较，必须执行数值UID/GID、ACL、链接/FIFO、有限Include及变化/截止时间边界，不能跳过。仅临时主机密钥/配置、实际固定选择器只读，无监听/认证/宿主配置变更。SQLite/PostgreSQL REST保留两项完整快照和三种结果阶段，页面增加三张桌面/手机图；报告为协议夹具。范围见[核查说明](../../docs/36-OpenSSH名称解析与横幅声明核查.md)。

@@ -28,8 +28,7 @@ func checkSSHEffective(cs *CheckSpec) ItemResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cs.TimeoutMs)*time.Millisecond)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/usr/sbin/sshd", "-T", "-f", cs.Target, "-C", cs.Connection.argument())
-	result := collectBaselineCommand(ctx, cmd, cs.TimeoutMs)
+	result := querySSHConfiguration(ctx, cs.Target, cs.Connection, cs.TimeoutMs)
 	if result.Error {
 		result.Actual = prefix + result.Actual
 		return result
@@ -41,6 +40,12 @@ func checkSSHEffective(cs *CheckSpec) ItemResult {
 	result = evaluateOutput(value, cs)
 	result.Actual = prefix + cs.Option + "=" + value
 	return result
+}
+
+func querySSHConfiguration(ctx context.Context, target string, connection *SSHConnection, timeout int) ItemResult {
+	cmd := exec.CommandContext(ctx, "/usr/sbin/sshd", "-T", "-f", target, "-C", connection.argument())
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C"}
+	return collectBaselineCommand(ctx, cmd, timeout)
 }
 
 func sshOption(output, option string) (string, error) {

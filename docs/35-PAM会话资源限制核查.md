@@ -44,4 +44,4 @@ Ubuntu的显式root补丁要求root字面声明，默认/组声明不用于root�
 
 解释依据固定Linux-PAM1.5.3 [模块源码](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.c)、[limits手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/limits.conf.5.xml)、[模块手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.8.xml)和[控制流程](https://github.com/linux-pam/linux-pam/blob/v1.5.3/libpam/pam_dispatch.c)，以及[Ubuntu24 limits手册](https://manpages.ubuntu.com/manpages/noble/man5/limits.conf.5.html)。另核对官方Ubuntu [1.5.3-5ubuntu5.7源码补丁包](https://archive.ubuntu.com/ubuntu/pool/main/p/pam/pam_1.5.3-5ubuntu5.7.debian.tar.xz)中的显式root、初始化、soft默认及EPERM补丁和构建选项；该包未启用vendor配置目录。来源文件经Git blob和SHA256核对，不声称tag/软件包签名认证。
 
-旧60项现37项具有限定范围实现、23项未支持。通用review版本16仍8项/52排除，其中29项指向独立产品候选，不扩大通用包覆盖。基线模块整体仍未完成，继续按[模块计划](19-模块完善计划.md)在当前分支推进，PR保持草稿。
+旧60项现39项具有限定范围实现、21项未支持。通用review版本17仍8项/52排除，其中31项指向独立产品候选，不扩大通用包覆盖。基线模块整体仍未完成，继续按[模块计划](19-模块完善计划.md)在当前分支推进，PR保持草稿。

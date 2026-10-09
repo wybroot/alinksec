@@ -910,6 +910,55 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   auditd.published = await ok(`${auditdPrefix}/publish`, { ...options, body: { note: 'Complete on-disk declaration protocol fixture; no daemon loading or log delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditdRecord.id))
   auditd.withdrawn = await ok(`${auditdPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(auditd.withdrawn.status, 'withdrawn')
+  // These two reports are protocol fixtures. Native parser/content evidence is
+  // produced by the separate SSH notice runner, never inferred from this SQL.
+  const noticeDocument = JSON.parse(readFileSync(new URL('../baseline/packages/ssh-notice/linux-baseline.json', import.meta.url)))
+  noticeDocument.code = `API-${mode}-ssh-notice`
+  for (const index of [0, 1]) {
+    const invalid = structuredClone(noticeDocument); invalid.items[index].check.expected = 'any nonempty banner'
+    assert.equal((await request('/api/baseline/packages/import', pamUpload(invalid))).status, 400)
+  }
+  const sshNotice = { candidate: await ok('/api/baseline/packages/import', pamUpload(noticeDocument)) }; fixtures.sshNotice = sshNotice
+  const noticeRecord = { id: sshNotice.candidate.id, code: noticeDocument.code }; baselinePackages.push(noticeRecord)
+  const noticePrefix = `/api/baseline/packages/${noticeRecord.id}`
+  sshNotice.approved = await ok(`${noticePrefix}/review`, { ...options, body: { approved: true, note: 'Explicit sample connection and approved banner digest; disk declaration fixture' } })
+  noticeRecord.template = Number(sshNotice.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${noticePrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  const noticeDigest = noticeDocument.items[1].check.expected.split('sha256=')[1]
+  const noticeBytes = readFileSync(new URL('../baseline/ssh-banner-reference.txt', import.meta.url)).length
+  for (const outcome of ['error', 'pass', 'completed']) {
+    sshNotice.testing = await ok(`${noticePrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(sshNotice.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, noticeDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('sshd_notice') && payload.includes(noticeDigest))
+    const error = outcome === 'error', pass = outcome === 'pass', banner = "i.code='BL-LINUX-0043'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass ? 'true' : `NOT (${banner})`},
+        'scope=ssh-notice-disk-declarations connection=(user=root,host=admin.example.invalid,addr=192.0.2.10,laddr=192.0.2.20,lport=22) loaded_state=unverified command_line_state=unverified banner_delivery_state=unverified name_resolution_state=unverified snapshot_state=non_atomic ' ||
+        CASE WHEN ${banner} THEN 'option=banner banner=/etc/issue.net bytes=${noticeBytes} sha256=${pass ? noticeDigest : '0'.repeat(64)} content_state=${error ? 'unconfirmed' : 'digest_checked'}'
+             ELSE 'option=usedns usedns=no' END,
+        CASE WHEN ${banner} THEN ${error ? "'SSH banner input unconfirmed'" : pass ? "''" : "'Banner content digest differs from reviewed reference'"} ELSE '' END,
+        CASE WHEN ${banner} THEN '${error ? 'error' : pass ? 'pass' : 'fail'}' ELSE 'pass' END
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${pass ? 2 : 1},${pass ? 0 : 1},${pass ? 100 : 50},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    sshNotice[outcome] = await ok(noticePrefix, { token: tokens.admin })
+    assert.equal(sshNotice[outcome].testReady, !error)
+    const items = sshNotice[outcome].testResults[0].items
+    assert.equal(items.filter(item => item.execution_status === 'pass').length, pass ? 2 : 1)
+    assert.equal(items.filter(item => item.execution_status === 'error').length, error ? 1 : 0)
+    assert.equal(items.filter(item => item.execution_status === 'fail').length, !pass && !error ? 1 : 0)
+    assert.ok(items.every(item => !item.fixable && item.actual.includes('banner_delivery_state=unverified')))
+    if (error) assert.equal((await request(`${noticePrefix}/publish`, { ...options, body: { note: 'Banner error blocks both-item batch despite UseDNS pass' } })).status, 400)
+  }
+  sshNotice.published = await ok(`${noticePrefix}/publish`, { ...options, body: { note: 'Complete mixed disk declaration fixture; running SSH and banner delivery unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === noticeRecord.id))
+  sshNotice.withdrawn = await ok(`${noticePrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(sshNotice.withdrawn.status, 'withdrawn')
   const limitsDocument = JSON.parse(readFileSync(new URL('../baseline/packages/pam-limits/linux-baseline.json', import.meta.url)))
   limitsDocument.code = `API-${mode}-pam-limits`
   for (const index of [0, 1, 2]) {

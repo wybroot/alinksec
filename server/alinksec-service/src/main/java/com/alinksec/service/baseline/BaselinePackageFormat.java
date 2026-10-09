@@ -123,10 +123,11 @@ public final class BaselinePackageFormat {
                     catch (NumberFormatException e) { throw new IllegalArgumentException("期望值必须为有限数值"); }
                 }
             }
-            case "sshd_effective" -> {
+            case "sshd_effective", "sshd_notice" -> {
                 fields(check, "type", "target", "option", "connection", "operator", "expected", "timeout_ms");
                 require(os == 1, "sshd_effective 当前仅支持 Linux OpenSSH"); target(check, os);
-                require(Set.of("permitrootlogin", "maxauthtries").contains(text(check, "option", 32)), "SSH 配置项尚未支持");
+                String option = text(check, "option", 32);
+                require((type.equals("sshd_notice") ? Set.of("usedns", "banner") : Set.of("permitrootlogin", "maxauthtries")).contains(option), "SSH 配置项尚未支持");
                 JsonNode connection = check.path("connection");
                 fields(connection, "user", "host", "address", "local_address", "local_port");
                 require(text(connection, "user", 64).matches("[A-Za-z_][A-Za-z0-9_.-]{0,63}"), "SSH 用户无效");
@@ -138,6 +139,10 @@ public final class BaselinePackageFormat {
                 String op = text(check, "operator", 32), expected = text(check, "expected", 1000);
                 require(Set.of("eq", "regex").contains(op), "SSH 检查仅支持 eq 或 regex");
                 if (op.equals("regex")) regex(expected);
+                if (type.equals("sshd_notice")) {
+                    require(check.path("target").asText().equals("/etc/ssh/sshd_config") && op.equals("eq"), "SSH提示需固定配置和完整参考");
+                    require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
+                }
             }
             case "linux_audit" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");

@@ -105,7 +105,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json", "packages/ssh-notice/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -466,6 +466,54 @@ class BaselinePackageIntegrationTest {
         }
         var windows = ctrlAltDelDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
         var nil = ctrlAltDelDocument(); ((ObjectNode) nil.path("items").get(0).path("check")).putNull("cmd"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
+    }
+
+    ObjectNode sshNoticeDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/ssh-notice/linux-baseline.json")));
+    }
+
+    @Test void sshNoticeBatchPreservesConnectionAndDigestAndRequiresFreshWholeBatchEvidence() throws Exception {
+        var doc = sshNoticeDocument(); var pkg = imported(doc);
+        packages.review(id(pkg), true, "Review both sample connection and banner text digest", 7L);
+        for (String host : List.of("windows", "rocky")) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), host));
+        long original = test(id(pkg), "ubuntu");
+        var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(2, sent.size());
+        for (int i=0; i<2; i++) assertEquals(doc.path("items").get(i).path("check"), JsonUtils.mapper().readTree(sent.get(i).getCheck()));
+        var response = report(original, "ubuntu", true);
+        results.onResult("ubuntu", response.toBuilder().setItems(1, response.getItems(1).toBuilder().setPassed(false).setExecutionStatus("error").setMessage("Banner input unconfirmed")).build());
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "UseDNS passed", 7L));
+        long retry = test(id(pkg), "ubuntu"); response = report(retry, "ubuntu", true);
+        results.onResult("ubuntu", response.toBuilder().setItems(1, response.getItems(1).toBuilder().setPassed(false).setExecutionStatus("fail").setMessage("Banner digest mismatch")).build());
+        packages.publish(id(pkg), "Complete mixed disk-only reference evidence", 7L);
+        var next = doc.deepCopy(); next.put("version", "2");
+        ((ObjectNode) next.path("items").get(1).path("check")).put("expected", "file=/etc/issue.net,sha256=" + "b".repeat(64));
+        var changed = imported(next); packages.review(id(changed), true, "Revised reviewed text changes banner digest", 7L);
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse old UseDNS and banner evidence", 7L));
+        long fresh = test(id(changed), "ubuntu"); results.onResult("ubuntu", report(fresh, "ubuntu", true));
+        packages.publish(id(changed), "Fresh whole-batch protocol fixture", 7L);
+        for (var item : doc.path("items")) {
+            String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code=?", String.class, original, item.path("code").asText());
+            assertEquals(item.path("check"), JsonUtils.mapper().readTree(snapshot));
+        }
+    }
+
+    @Test void sshNoticeRejectsOtherPathsWeakReferencesAndUnsupportedExtensions() throws Exception {
+        for (int index=0; index<2; index++) {
+            for (var change : Map.of("target", "/tmp/sshd_config", "option", "permitrootlogin", "operator", "regex", "expected", "any nonempty file", "cmd", "cat /etc/shadow").entrySet()) {
+                var doc = sshNoticeDocument(); ((ObjectNode)doc.path("items").get(index).path("check")).put(change.getKey(), change.getValue());
+                assertThrows(IllegalArgumentException.class, () -> imported(doc), change.getKey());
+            }
+        }
+        var arbitrary = sshNoticeDocument(); ((ObjectNode)arbitrary.path("items").get(1).path("check")).put("expected", "file=/etc/shadow,sha256="+"a".repeat(64));
+        assertThrows(IllegalArgumentException.class, () -> imported(arbitrary));
+        var windows = sshNoticeDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        var nil = sshNoticeDocument(); ((ObjectNode)nil.path("items").get(0).path("check")).putNull("uid_min"); assertThrows(IllegalArgumentException.class, () -> imported(nil));
+        var injection = sshNoticeDocument(); ((ObjectNode)injection.path("items").get(1).path("check").path("connection")).put("host", "admin.example.invalid,addr=127.0.0.1");
+        assertThrows(IllegalArgumentException.class, () -> imported(injection));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
     }
 
