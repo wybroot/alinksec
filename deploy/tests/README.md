@@ -417,3 +417,5 @@ Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, t
 `bash deploy/tests/auditd-native.sh` uses one disposable Ubuntu24 container, drops all capabilities, disables networking and mounts the repository read-only. The real auditd 3.1.2 parser accepts or rejects private disk configuration; after valid parsing, audit-control denial prevents daemon registration. This validates configuration parsing and private log metadata, without proving daemon operation or log delivery. Duplicate/long-line inputs remain Agent errors even when the native parser accepts them. See [on-disk scope](../../docs/28-auditd磁盘配置与日志目标核查.md).
 
 `sudoers-native.sh` 在精确Ubuntu24 sudo包的隔离容器中，用原生visudo/cvtsudoers对照16组有限声明语义。工作区只读、网络关闭、capabilities为零，访问/默认ACL边界必跑；不执行提权命令，不把磁盘声明当实际授权、认证或日志交付。详见 [sudoers核查范围](../../docs/31-sudoers磁盘策略核查.md)。
+
+`systemd-native.sh` 在临时 Ubuntu24 GitHub-hosted runner 串行验证服务观察和当前 Ctrl-Alt-Del 两条管理器路径。唯一无依赖 target 与唯一运行时管理器片段完整清理并核对原 burst 值；真实特殊目标仅只读查询，不触发按键、信号或关机。范围见 [Ctrl-Alt-Del核查](../../docs/34-Ctrl-Alt-Del当前systemd策略核查.md)。

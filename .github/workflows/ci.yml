@@ -152,7 +152,7 @@ jobs:
       - name: Check native fixed log metadata and ACL boundaries
         working-directory: agent/internal/baseline
         run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
-      - name: Check native systemd service observations with isolated runner units
+      - name: Check native systemd service and Ctrl-Alt-Del observations with isolated runner fixtures
         run: bash deploy/tests/systemd-native.sh
       - name: Check native kernel audit and isolated private watch rules
         run: bash deploy/tests/audit-native.sh

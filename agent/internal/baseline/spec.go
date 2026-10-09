@@ -130,7 +130,7 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
@@ -236,6 +236,16 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		for name := range seen {
 			if !allowed[name] {
 				return nil, fmt.Errorf("日志元数据检查不允许字段 %s", name)
+			}
+		}
+	} else if s.Type == "systemd_ctrl_alt_del" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
+		if s.Target != "ctrl-alt-del.target" || s.Operator != "eq" || s.Expected != ctrlAltDelReference {
+			return nil, fmt.Errorf("Ctrl-Alt-Del 检查需固定系统目标及完整屏蔽和连续按键参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("Ctrl-Alt-Del 检查不允许字段 %s", name)
 			}
 		}
 	} else if s.Type == "systemd_service" {

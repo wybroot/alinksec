@@ -910,6 +910,48 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   auditd.published = await ok(`${auditdPrefix}/publish`, { ...options, body: { note: 'Complete on-disk declaration protocol fixture; no daemon loading or log delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditdRecord.id))
   auditd.withdrawn = await ok(`${auditdPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(auditd.withdrawn.status, 'withdrawn')
+  const cadDocument = JSON.parse(readFileSync(new URL('../baseline/packages/ctrl-alt-del/linux-baseline.json', import.meta.url)))
+  cadDocument.code = `API-${mode}-ctrl-alt-del`
+  const invalidCad = structuredClone(cadDocument); invalidCad.items[0].check.expected = 'masked'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidCad))).status, 400)
+  const ctrlAltDel = { candidate: await ok('/api/baseline/packages/import', pamUpload(cadDocument)) }; fixtures.ctrlAltDel = ctrlAltDel
+  const cadRecord = { id: ctrlAltDel.candidate.id, code: cadDocument.code }; baselinePackages.push(cadRecord)
+  const cadPrefix = `/api/baseline/packages/${cadRecord.id}`
+  ctrlAltDel.approved = await ok(`${cadPrefix}/review`, { ...options, body: { approved: true, note: 'Confirm loaded systemd255 target and burst policy; protocol fixture' } })
+  cadRecord.template = Number(ctrlAltDel.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${cadPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'pass', 'completed']) {
+    ctrlAltDel.testing = await ok(`${cadPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(ctrlAltDel.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, cadDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('systemd_ctrl_alt_del') && payload.includes(cadDocument.items[0].check.expected))
+    const error = outcome === 'error', pass = outcome === 'pass'
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass ? 'true' : 'false'},
+        'scope=loaded-systemd-ctrl-alt-del manager=local-system unit=ctrl-alt-del.target persistence_state=unverified keyboard_path_state=unverified trigger_test_state=unverified Version=255.4-1ubuntu8.11 SystemState=running CtrlAltDelBurstAction=${pass || error ? 'none' : 'reboot-force'} Id=ctrl-alt-del.target Names=ctrl-alt-del.target LoadState=masked ActiveState=inactive SubState=dead UnitFileState=masked-runtime NeedDaemonReload=${error ? 'yes' : 'no'}',
+        ${error ? "'Loaded target observation incomplete or changed'" : pass ? "''" : "'Masked target still permits burst action'"},
+        '${error ? 'error' : pass ? 'pass' : 'fail'}'
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    ctrlAltDel[outcome] = await ok(cadPrefix, { token: tokens.admin })
+    assert.equal(ctrlAltDel[outcome].testReady, !error)
+    if (error) assert.equal((await request(`${cadPrefix}/publish`, { ...options, body: { note: 'Incomplete loaded policy blocks publication' } })).status, 400)
+    else {
+      const item = ctrlAltDel[outcome].testResults[0].items[0]
+      assert.equal(item.execution_status, pass ? 'pass' : 'fail')
+      assert.ok(!item.fixable && item.actual.includes('trigger_test_state=unverified'))
+      assert.equal(ctrlAltDel[outcome].testResults[0].score, pass ? 100 : 0)
+    }
+  }
+  ctrlAltDel.published = await ok(`${cadPrefix}/publish`, { ...options, body: { note: 'Complete loaded policy fixture; actual keyboard path and persistence unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === cadRecord.id))
+  ctrlAltDel.withdrawn = await ok(`${cadPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(ctrlAltDel.withdrawn.status, 'withdrawn')
   const serviceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd/linux-baseline.json', import.meta.url)))
   serviceDocument.code = `API-${mode}-systemd`
   const invalidService = structuredClone(serviceDocument); invalidService.items[0].check.target = 'ssh.service'

@@ -205,6 +205,12 @@ public final class BaselinePackageFormat {
                 require(text(check, "operator", 32).equals("subset") && text(check, "perm", 4).equals(perm), "日志权限上限不能隐式扩展");
                 require(text(check, "owner", 64).equals("0") && text(check, "group", 64).equals(group), "日志数值属主及本地属组需明确");
             }
+            case "systemd_ctrl_alt_del" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "Ctrl-Alt-Del 检查仅支持 Linux");
+                require(text(check, "target", 1024).equals("ctrl-alt-del.target"), "Ctrl-Alt-Del 检查限定系统目标");
+                require(text(check, "operator", 32).equals("eq") && text(check, "expected", 1000).equals("masked/inactive/dead,burst_action=none"), "Ctrl-Alt-Del 屏蔽与连续按键参考不能隐式扩展");
+            }
             case "systemd_service" -> {
                 fields(check, "type", "target", "operator", "expected", "timeout_ms");
                 require(os == 1, "systemd 服务检查仅支持 Linux");
