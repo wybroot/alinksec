@@ -138,6 +138,11 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends openssh-server
           fi
+          # Root sshd -T also requires its privilege-separation directory.
+          # Preparing this runner directory does not start an SSH listener.
+          if ! sudo test -e /run/sshd; then
+            sudo install -d -o root -g root -m 0755 /run/sshd
+          fi
       - run: go test -v ./...
         working-directory: agent
         env:

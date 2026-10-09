@@ -46,6 +46,8 @@ file=/etc/issue.net,sha256=<64位小写十六进制>
 
 当前提交CI在Ubuntu24 amd64/arm64独立runner中生成临时主机密钥与私有配置，用真实OpenSSH验证六组场景、十次原生比较：默认值、Include词法顺序/首值、两个Address上下文、合成Host、文案变化/缺失与原生语法错误。必跑root夹具覆盖数值UID/GID、访问/默认ACL、链接/硬链接/FIFO、超限、循环、变化与共同截止时间，不能跳过；实际生产选择器仅只读观察并保留item ID。原有SSH/PAM等原生回归保留。REST和页面完整回报是标注的协议夹具，与原生证据分开，生产前端验收绑定当前提交。
 
+root执行的`sshd -T`还要求运行目录`/run/sshd`存在且可信。CI仅在独立runner缺少该目录时创建root:root、0755目录，不启动SSH服务；生产检查不会代建目录，缺少原生运行前提仍保持error。隔离夹具查询失败时记录解析器诊断，生产配置错误继续脱敏。
+
 语义来源为[Ubuntu24 sshd_config手册](https://manpages.ubuntu.com/manpages/noble/man5/sshd_config.5.html)及OpenSSH9.6源码的[配置解释](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/servconf.c)、[横幅读取与发送](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/auth2.c)。原生横幅读取允许更大文本并在真实认证阶段发送；本项目16KiB及审核摘要是更窄的参考，不能把`-T`输出当成原生已读取或交付横幅。
 
 旧60项现39项具有限定范围实现、21项未支持；通用review版本17仍8项/52排除，其中31项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。

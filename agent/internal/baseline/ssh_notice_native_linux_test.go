@@ -72,7 +72,15 @@ func TestNativeSSHNotice(t *testing.T) {
 		connection := *s.Connection
 		s.Connection = &connection
 		s.Connection.Address = address
-		result := noticeRun(s, paths, querySSHConfiguration)
+		result := noticeRun(s, paths, func(ctx context.Context, config string, connection *SSHConnection, timeout int) ItemResult {
+			result := querySSHConfiguration(ctx, config, connection, timeout)
+			if result.Error {
+				// Only isolated fixture diagnostics are logged; production errors
+				// remain redacted by sshNoticeWithin.
+				t.Logf("native isolated SSH parser diagnostic: %+v", result)
+			}
+			return result
+		})
 		if result.Passed != passed || result.Error != executionError {
 			t.Fatalf("native %s %s: %+v", option, address, result)
 		}
