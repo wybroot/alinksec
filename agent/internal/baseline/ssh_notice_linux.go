@@ -13,12 +13,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
-
-	"golang.org/x/sys/unix"
 )
 
 var sshNoticeVersion = regexp.MustCompile(`^1:9\.6p1-3ubuntu13(\.[0-9]+)?$`)
@@ -165,21 +162,7 @@ func sshNoticeOptions(output string) (map[string]string, error) {
 }
 
 func (n *sshNoticeRead) trusted(path string, input pamInput) error {
-	s := input.info.Sys().(*syscall.Stat_t)
-	if s.Uid != n.paths.uid || s.Gid != n.paths.gid || s.Mode&0022 != 0 || input.info.Mode().IsRegular() && s.Nlink != 1 {
-		return fmt.Errorf("不可信SSH输入")
-	}
-	attrs := []string{"system.posix_acl_access"}
-	if input.info.IsDir() {
-		attrs = append(attrs, "system.posix_acl_default")
-	}
-	for _, attr := range attrs {
-		size, err := unix.Getxattr(fmt.Sprintf("/proc/self/fd/%d", input.file.Fd()), attr, nil)
-		if err != nil && err != unix.ENODATA || size > 0 {
-			return fmt.Errorf("SSH输入ACL未确认")
-		}
-	}
-	return nil
+	return trustedDiskInput(input, n.paths.uid, n.paths.gid)
 }
 func (n *sshNoticeRead) openDirectory(path string) error {
 	if _, ok := n.r.inputs[path]; !ok {

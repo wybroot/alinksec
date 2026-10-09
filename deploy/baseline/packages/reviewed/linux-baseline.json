@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "17",
+  "version": "18",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -139,11 +139,11 @@
     },
     {
       "ruleId": "BL-LINUX-0003",
-      "reason": "仅检查文件声明，不检查已有账户的实际有效期；明确范围并分离账户检查。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。"
     },
     {
       "ruleId": "BL-LINUX-0004",
-      "reason": "同上，声明不能代表已有账户生效策略。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。"
     },
     {
       "ruleId": "BL-LINUX-0005",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-09",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "9f35aea20322774bdc271b4944c4468f12e631d31fa802a9b1ff90f20a99ce11"
+    "sha256": "b2da9035c422fbe6c9a42956901b1257d1195c73fa0ab728da717d42914c676b"
   }
 }

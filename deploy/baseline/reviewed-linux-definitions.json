@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "17",
+      "version": "18",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -146,11 +146,11 @@
         },
         {
           "ruleId": "BL-LINUX-0003",
-          "reason": "仅检查文件声明，不检查已有账户的实际有效期；明确范围并分离账户检查。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。"
         },
         {
           "ruleId": "BL-LINUX-0004",
-          "reason": "同上，声明不能代表已有账户生效策略。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。"
         },
         {
           "ruleId": "BL-LINUX-0005",
@@ -389,23 +389,39 @@
       },
       {
         "ruleId": "BL-LINUX-0003",
-        "name": "login.defs 新账户口令有效期声明",
+        "name": "普通本地新账户的口令有效期默认声明",
         "category": "身份鉴别",
-        "severity": 3,
-        "status": "unsupported",
-        "reason": "仅检查文件声明，不检查已有账户的实际有效期；明确范围并分离账户检查。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：仅检查文件声明，不检查已有账户的实际有效期；明确范围并分离账户检查。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "severity": 2,
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。",
+        "check": {
+          "type": "shadow_account_defaults",
+          "target": "/etc/login.defs",
+          "option": "max_days",
+          "operator": "eq",
+          "expected": "max_days=1..90,min_days<=max_days",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0004",
-        "name": "login.defs 新账户到期警告声明",
+        "name": "普通本地新账户的口令到期预警默认声明",
         "category": "身份鉴别",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "同上，声明不能代表已有账户生效策略。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：同上，声明不能代表已有账户生效策略。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-SHADOW-DEFAULTS独立Ubuntu24候选，仅核对普通本地新账户的有限有效期/预警默认声明；已有账户和实际创建/到期/预警未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。",
+        "check": {
+          "type": "shadow_account_defaults",
+          "target": "/etc/login.defs",
+          "option": "warn_days",
+          "operator": "eq",
+          "expected": "warn_days=7..14,warn_days<=max_days",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0005",

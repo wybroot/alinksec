@@ -130,13 +130,13 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "shadow_account_defaults", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
 	if s.TimeoutMs == 0 {
-		if s.Type == "sshd_notice" && seen["timeout_ms"] {
-			return nil, fmt.Errorf("SSH提示显式超时必须为100至30000毫秒整数")
+		if (s.Type == "sshd_notice" || s.Type == "shadow_account_defaults") && seen["timeout_ms"] {
+			return nil, fmt.Errorf("检查显式超时必须为100至30000毫秒整数")
 		}
 		s.TimeoutMs = 5000
 	}
@@ -177,6 +177,16 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		for name := range seen {
 			if !allowed[name] {
 				return nil, fmt.Errorf("SSH提示检查不允许字段 %s", name)
+			}
+		}
+	} else if s.Type == "shadow_account_defaults" {
+		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}
+		if !validShadowDefaults(&s) {
+			return nil, fmt.Errorf("Shadow需固定login.defs及普通新账户有效期/预警完整参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("Shadow新账户默认声明不允许字段 %s", name)
 			}
 		}
 	} else if s.Type == "pam_limits" {

@@ -144,6 +144,14 @@ public final class BaselinePackageFormat {
                     require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
                 }
             }
+            case "shadow_account_defaults" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "Shadow新账户默认声明仅支持Linux Ubuntu24");
+                require(text(check, "target", 1024).equals("/etc/login.defs") && text(check, "operator", 32).equals("eq"), "Shadow需固定login.defs和完整参考");
+                String option = text(check, "option", 32);
+                require(Set.of("max_days", "warn_days").contains(option), "Shadow默认声明项未支持");
+                require(text(check, "expected", 1000).equals(option.equals("max_days") ? "max_days=1..90,min_days<=max_days" : "warn_days=7..14,warn_days<=max_days"), "Shadow默认声明参考不能隐式扩展");
+            }
             case "linux_audit" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "内核审计检查仅支持 Linux");

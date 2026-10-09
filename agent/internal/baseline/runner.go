@@ -105,6 +105,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkSSHEffective(cs)
 	case "sshd_notice":
 		result = checkSSHNotice(cs)
+	case "shadow_account_defaults":
+		result = checkShadowAccountDefaults(cs)
 	case "local_identity_file", "local_accounts":
 		result = checkLocalIdentity(cs)
 	case "pam_password":

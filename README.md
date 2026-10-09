@@ -517,6 +517,7 @@ validation reference is in English.
 | [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
 | [18 · Baseline Template Review](docs/18-基线模板审核与系统适配.md) | Linux/Windows candidates, applicability, review, test, publication and task snapshots |
 | [20 · Legacy Baseline Content Review](docs/20-旧基线模板内容审核.md) | Retirement of 60 legacy rules, reviewed observations and unsupported scope |
+| [37 · Shadow Account Defaults](docs/37-Shadow新账户口令有效期与预警默认声明核查.md) | Ubuntu24 finite new-account aging declarations, isolated native comparison and explicit existing-account limits |
 | [19 · Module Completion Plan](docs/19-模块完善计划.md) | One module per branch, baseline quality gates and ordered backlog |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
