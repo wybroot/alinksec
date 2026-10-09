@@ -26,6 +26,6 @@ systemd 255 普通 Ctrl-Alt-Del 信号尝试启动 `ctrl-alt-del.target`；连�
 
 Go 故障注入覆盖目标已屏蔽但 burst=reboot-force、运行中再屏蔽、disabled 与 loaded alias、待重载、未知版本/属性、查询退出失败、共同截止时间和两次状态变化。后端覆盖严格导入、系统范围、快照及完整执行异常阻止发布；定义版本更新必须取得新测试证据。SQLite/PostgreSQL REST 和生产前端报告使用明确协议夹具，桌面/手机均展示 masked 但 burst 非 none 的不合规实测值与未验证边界。
 
-原生测试只允许临时 GitHub-hosted Ubuntu24 runner：使用唯一无依赖普通 target 和唯一 `/run/systemd/system.conf.d` 片段，验证真实管理器加载 none 及四种动作属性、runtime mask、活动/disabled 状态及未重载变化。测试只启动/停止唯一无关 target，清理片段后重载并核对原 burst 值；真实 `ctrl-alt-del.target` 仅作只读查询和 Run 调度核对。测试从不启动真实 Ctrl-Alt-Del/重启/关机目标，从不发送 SIGINT 或按键事件。原生查询证明属性观察与分类，不提供实际重启触发证据。
+原生测试只允许临时 GitHub-hosted Ubuntu24 runner：使用唯一无依赖普通 target 和唯一 `/run/systemd/system.conf.d` 片段，验证真实管理器加载 none 及四种动作属性、runtime mask、活动/disabled 状态及未重载变化。停止的屏蔽 target 可能被管理器回收，替换定义后新查询会重新加载未屏蔽状态；此时为 fail，保留的旧状态若报告待重载则为 error。另保持唯一 target 活动，修改定义后强制验证真实 NeedDaemonReload=yes 的 error，再重载核对。测试只启动/停止唯一无关 target，清理片段后重载并核对原 burst 值；真实 `ctrl-alt-del.target` 仅作只读查询和 Run 调度核对。测试从不启动真实 Ctrl-Alt-Del/重启/关机目标，从不发送 SIGINT 或按键事件。原生查询证明属性观察与分类，不提供实际重启触发证据。
 
 源码语义依据固定 systemd v255 的 manager.c、main.c、dbus-manager.c、dbus-unit.c、emergency-action.c 及手册；源码摘要用于记录来源，不作为 Ubuntu 包或标签签名认证。

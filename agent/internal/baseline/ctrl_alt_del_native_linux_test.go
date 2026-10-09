@@ -113,10 +113,26 @@ func TestNativeSystemdCtrlAltDel(t *testing.T) {
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// The cached mask must not produce pass when its on-disk definition changes.
-	check("mask replaced without reload", false, true)
+	// An inactive mask may be garbage collected and freshly loaded by the next
+	// show. A retained stale mask must error; a freshly loaded unmasked target
+	// must fail. Neither observation may pass.
+	changed := checkCtrlAltDel(spec)
+	t.Logf("native Ctrl-Alt-Del mask replaced without reload: passed=%t error=%t actual=%s message=%s", changed.Passed, changed.Error, changed.Actual, changed.Message)
+	if changed.Passed || changed.Error && !strings.Contains(changed.Actual, "NeedDaemonReload=yes") ||
+		!changed.Error && (!strings.Contains(changed.Actual, "LoadState=loaded") || !strings.Contains(changed.Actual, "UnitFileState=disabled")) {
+		t.Fatalf("changed mask was not classified as stale or freshly unmasked: %+v", changed)
+	}
 	run("daemon-reload")
 	check("unmasked after reload", false, false)
+	// Keep the target loaded to test the actual pending-reload property instead
+	// of relying on inactive unit retention across separate D-Bus clients.
+	run("start", unit)
+	if err := os.WriteFile(path, []byte(contents+"# Changed retained target definition\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("retained active target pending reload", false, true)
+	run("daemon-reload")
+	check("retained active target after reload", false, false)
 	// Restore before observing the real special target. It is never modified.
 	if err := os.Remove(dropin); err != nil {
 		t.Fatal(err)
