@@ -50,4 +50,4 @@ root执行的`sshd -T`还要求运行目录`/run/sshd`存在且可信。CI仅在
 
 语义来源为[Ubuntu24 sshd_config手册](https://manpages.ubuntu.com/manpages/noble/man5/sshd_config.5.html)及OpenSSH9.6源码的[配置解释](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/servconf.c)、[横幅读取与发送](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/auth2.c)。原生横幅读取允许更大文本并在真实认证阶段发送；本项目16KiB及审核摘要是更窄的参考，不能把`-T`输出当成原生已读取或交付横幅。
 
-旧60项现41项具有限定范围实现、19项未支持；通用review版本18仍8项/52排除，其中33项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。
+旧60项现46项具有限定范围实现、14项未支持；通用review版本19仍8项/52排除，其中38项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。

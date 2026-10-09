@@ -37,4 +37,4 @@ login.defs参数是新建账户时的默认输入，不会自动更新已有账�
 
 语义来源为[Ubuntu24 login.defs手册](https://manpages.ubuntu.com/manpages/noble/man5/login.defs.5.html)、[useradd手册](https://manpages.ubuntu.com/manpages/noble/man8/useradd.8.html)以及Shadow4.13源码的[配置读取](https://github.com/shadow-maint/shadow/blob/4.13/lib/getdef.c)和[账户创建](https://github.com/shadow-maint/shadow/blob/4.13/src/useradd.c)。源码tag及Ubuntu Debian补丁归档用于交叉核对，摘要校验不宣称发行商签名认证；实际安装产品语义由隔离原生验证确认。手册与源码对未声明最小天数存在不同表述，本检查保留缺失状态，不凭任一默认值判定。
 
-旧60项现41项具有限定范围实现、19项未支持。通用review版本18仍8项/52排除，其中33项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。
+旧60项现46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。

@@ -144,6 +144,14 @@ public final class BaselinePackageFormat {
                     require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
                 }
             }
+            case "bash_global_policy" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "Bash全局启动声明仅支持Linux Ubuntu24");
+                require(text(check, "target", 1024).equals("/etc") && text(check, "operator", 32).equals("eq"), "Bash需固定系统目录和完整参考");
+                var references = Map.of("login_timeout", "TMOUT=1..600,readonly=1,exported=1", "login_umask", "umask=027|077", "nonlogin_umask", "umask=027|077", "history_time", "HISTTIMEFORMAT=%F %T %z ", "history_capacity", "HISTSIZE=1000..10000,HISTFILESIZE=1000..10000");
+                String option = text(check, "option", 32);
+                require(references.containsKey(option) && references.get(option).equals(text(check, "expected", 1000)), "Bash声明项和完整参考不能隐式扩展");
+            }
             case "shadow_account_defaults" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "Shadow新账户默认声明仅支持Linux Ubuntu24");

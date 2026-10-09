@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "18",
+      "version": "19",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -174,7 +174,7 @@
         },
         {
           "ruleId": "BL-LINUX-0010",
-          "reason": "任意 TMOUT= 声明均可命中，包括 0 或非数值；需核对有效正整数、上限及支持 shell。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0011",
@@ -202,7 +202,7 @@
         },
         {
           "ruleId": "BL-LINUX-0017",
-          "reason": "仅任意文本声明，未确认后续覆盖及 shell；按实际支持范围重新定义。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0018",
@@ -238,7 +238,7 @@
         },
         {
           "ruleId": "BL-LINUX-0026",
-          "reason": "仅 Bash 配置声明，不证明日志持久化或其他 shell 生效。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0027",
@@ -282,11 +282,11 @@
         },
         {
           "ruleId": "BL-LINUX-0044",
-          "reason": "任意数字声明不能证明退出清理；名称、范围和策略需要重写。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0045",
-          "reason": "嵌套 shell 引号和变量展开有歧义；不验证有效 shell 配置，需固定且经过原生测试的实现。"
+          "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
         },
         {
           "ruleId": "BL-LINUX-0046",
@@ -532,13 +532,21 @@
       },
       {
         "ruleId": "BL-LINUX-0010",
-        "name": "交互式 shell 超时策略",
+        "name": "Bash交互登录全局超时声明及只读导出属性",
         "category": "身份鉴别",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "任意 TMOUT= 声明均可命中，包括 0 或非数值；需核对有效正整数、上限及支持 shell。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：任意 TMOUT= 声明均可命中，包括 0 或非数值；需核对有效正整数、上限及支持 shell。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "check": {
+          "type": "bash_global_policy",
+          "target": "/etc",
+          "option": "login_timeout",
+          "operator": "eq",
+          "expected": "TMOUT=1..600,readonly=1,exported=1",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0011",
@@ -662,13 +670,21 @@
       },
       {
         "ruleId": "BL-LINUX-0017",
-        "name": "交互式 shell 默认 umask",
+        "name": "Bash交互登录全局umask声明",
         "category": "访问控制",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "仅任意文本声明，未确认后续覆盖及 shell；按实际支持范围重新定义。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：仅任意文本声明，未确认后续覆盖及 shell；按实际支持范围重新定义。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "check": {
+          "type": "bash_global_policy",
+          "target": "/etc",
+          "option": "login_umask",
+          "operator": "eq",
+          "expected": "umask=027|077",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0018",
@@ -821,13 +837,21 @@
       },
       {
         "ruleId": "BL-LINUX-0026",
-        "name": "Bash 历史时间格式",
+        "name": "Bash交互登录全局历史时间格式声明",
         "category": "安全审计",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "仅 Bash 配置声明，不证明日志持久化或其他 shell 生效。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：仅 Bash 配置声明，不证明日志持久化或其他 shell 生效。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "check": {
+          "type": "bash_global_policy",
+          "target": "/etc",
+          "option": "history_time",
+          "operator": "eq",
+          "expected": "HISTTIMEFORMAT=%F %T %z ",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0027",
@@ -1099,23 +1123,39 @@
       },
       {
         "ruleId": "BL-LINUX-0044",
-        "name": "shell 历史保留与清理策略",
+        "name": "Bash交互登录全局历史容量声明",
         "category": "剩余信息保护",
-        "severity": 1,
-        "status": "unsupported",
-        "reason": "任意数字声明不能证明退出清理；名称、范围和策略需要重写。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：任意数字声明不能证明退出清理；名称、范围和策略需要重写。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "severity": 2,
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "check": {
+          "type": "bash_global_policy",
+          "target": "/etc",
+          "option": "history_capacity",
+          "operator": "eq",
+          "expected": "HISTSIZE=1000..10000,HISTFILESIZE=1000..10000",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0045",
-        "name": "Bash 有效 umask",
+        "name": "Bash交互非登录全局umask声明",
         "category": "剩余信息保护",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "嵌套 shell 引号和变量展开有歧义；不验证有效 shell 配置，需固定且经过原生测试的实现。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：嵌套 shell 引号和变量展开有歧义；不验证有效 shell 配置，需固定且经过原生测试的实现。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。",
+        "scope": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。",
+        "check": {
+          "type": "bash_global_policy",
+          "target": "/etc",
+          "option": "nonlogin_umask",
+          "operator": "eq",
+          "expected": "umask=027|077",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0046",

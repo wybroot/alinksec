@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "18",
+  "version": "19",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -167,7 +167,7 @@
     },
     {
       "ruleId": "BL-LINUX-0010",
-      "reason": "任意 TMOUT= 声明均可命中，包括 0 或非数值；需核对有效正整数、上限及支持 shell。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0011",
@@ -195,7 +195,7 @@
     },
     {
       "ruleId": "BL-LINUX-0017",
-      "reason": "仅任意文本声明，未确认后续覆盖及 shell；按实际支持范围重新定义。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0018",
@@ -231,7 +231,7 @@
     },
     {
       "ruleId": "BL-LINUX-0026",
-      "reason": "仅 Bash 配置声明，不证明日志持久化或其他 shell 生效。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0027",
@@ -275,11 +275,11 @@
     },
     {
       "ruleId": "BL-LINUX-0044",
-      "reason": "任意数字声明不能证明退出清理；名称、范围和策略需要重写。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0045",
-      "reason": "嵌套 shell 引号和变量展开有歧义；不验证有效 shell 配置，需固定且经过原生测试的实现。"
+      "reason": "通用观测包不含此项；另见ALINKSEC-UBUNTU24-BASH-GLOBAL独立五项候选，仅核对有限可信系统启动声明；个人配置、实际调用、现存Shell、超时执行及历史交付未验证。"
     },
     {
       "ruleId": "BL-LINUX-0046",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-09",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "b2da9035c422fbe6c9a42956901b1257d1195c73fa0ab728da717d42914c676b"
+    "sha256": "8d56ad29f740cd5749c77d3a71d0b63329cff28c056e474caded8c74bfae35bd"
   }
 }
