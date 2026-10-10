@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "21",
+  "version": "22",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -263,11 +263,11 @@
     },
     {
       "ruleId": "BL-LINUX-0041",
-      "reason": "精确元数据断言，需文件及产品适用性；缺失不应泛化为所有 Linux 不合规。"
+      "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对有限glibc默认配置链元数据，库目标/cache/preload/环境未验证。"
     },
     {
       "ruleId": "BL-LINUX-0042",
-      "reason": "实际仅找 SUID，以 passwd 修改时间作为基准，管道忽略 find 错误；不能证明 SGID 或未授权新增。"
+      "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对固定两目录直接普通文件SUID/SGID与审核摘要绑定清单，完整授权/其他路径/链接目标及真实提权未验证。"
     },
     {
       "ruleId": "BL-LINUX-0043",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "895b4ed091a36f68e4baff851e7f41771d3da554fe02c6d94c51c4032e5408de"
+    "sha256": "329622a1e9f6482eb50c0e8e43408bcb012c51d622d26cafad94f98e0f3241c0"
   }
 }

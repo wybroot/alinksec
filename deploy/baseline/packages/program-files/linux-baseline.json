@@ -1,0 +1,51 @@
+{
+  "code": "ALINKSEC-UBUNTU24-PROGRAM-FILES",
+  "name": "Ubuntu 24.04 链接器与SUID/SGID审核清单核查（示例需审核）",
+  "standard": "ALinkSec 程序文件当前参考（非完整合规标准）",
+  "product": "Ubuntu24 amd64/arm64；libc-bin/libc6 2.39-0ubuntu8系列；有限链接器配置及/usr/bin、/usr/sbin直接普通文件审核清单",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0041",
+      "ruleId": "BL-LINUX-0041",
+      "name": "glibc默认有限链接器配置链当前元数据参考",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "linux_program_files",
+        "target": "system-program-inputs",
+        "option": "linker_metadata",
+        "operator": "eq",
+        "expected": "main+included_conf<=0644,dirs<=0755,uid=0,gid=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装libc-bin/libc6 2.39-0ubuntu8系列。固定/etc/ld.so.conf唯一include /etc/ld.so.conf.d/*.conf，解释全部非隐藏直接.conf片段的有限注释/规范绝对目录行；不执行ldconfig，不读取库、cache/preload或环境。文件模式不超0644、目录不超0755；root:root、无组/其他写、链接/普通硬链接/访问默认ACL，普通元数据上限偏差fail，不可信/未知语法/读取/变化为error。每文件64KiB、总256KiB、1024行/每行1024字节、32片段/128目录成员，持描述符及成员稳定性复核。SUID/SGID项须管理员准备可信/etc/alinksec/privileged-files.reference，并将原始字节SHA256写入新候选完整expected；示例为空批准集，不代表生产授权。固定两目录全部直接条目，普通文件模式位SUID/SGID核对路径、完整模式、UID0、规范GID、内容SHA256，与本机架构已审核集合完全一致；链接/子目录/非普通项明确计数排除，目标与后代/其他路径/能力/真实提权/授权流程未验证。每目录4096项、每架构128批准/128观测、选中文件单8MiB/单次总16MiB，两次完整扫描；选中硬链接/ACL、缺失或不匹配清单摘要/不可信目录/超限/变化保持error，完整集合偏差fail。版本前后、所有读取和复核共用deadline，非原子，无自动修复。管理员按实际业务审核后重测，不自动学习或创建生产清单，不执行特权文件，不证明完整访问授权或库安全。"
+    },
+    {
+      "code": "BL-LINUX-0042",
+      "ruleId": "BL-LINUX-0042",
+      "name": "限定直接普通文件的SUID/SGID当前审核清单核对",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "linux_program_files",
+        "target": "system-program-inputs",
+        "option": "privileged_reference",
+        "operator": "eq",
+        "expected": "scope=/usr/bin+/usr/sbin,sha256=867d6aea7266044df23c0e3d53e4b093dd87c6a2919741062b67986b6f496c23,exact=mode/uid/gid/content",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装libc-bin/libc6 2.39-0ubuntu8系列。固定/etc/ld.so.conf唯一include /etc/ld.so.conf.d/*.conf，解释全部非隐藏直接.conf片段的有限注释/规范绝对目录行；不执行ldconfig，不读取库、cache/preload或环境。文件模式不超0644、目录不超0755；root:root、无组/其他写、链接/普通硬链接/访问默认ACL，普通元数据上限偏差fail，不可信/未知语法/读取/变化为error。每文件64KiB、总256KiB、1024行/每行1024字节、32片段/128目录成员，持描述符及成员稳定性复核。SUID/SGID项须管理员准备可信/etc/alinksec/privileged-files.reference，并将原始字节SHA256写入新候选完整expected；示例为空批准集，不代表生产授权。固定两目录全部直接条目，普通文件模式位SUID/SGID核对路径、完整模式、UID0、规范GID、内容SHA256，与本机架构已审核集合完全一致；链接/子目录/非普通项明确计数排除，目标与后代/其他路径/能力/真实提权/授权流程未验证。每目录4096项、每架构128批准/128观测、选中文件单8MiB/单次总16MiB，两次完整扫描；选中硬链接/ACL、缺失或不匹配清单摘要/不可信目录/超限/变化保持error，完整集合偏差fail。版本前后、所有读取和复核共用deadline，非原子，无自动修复。管理员按实际业务审核后重测，不自动学习或创建生产清单，不执行特权文件，不证明完整访问授权或库安全。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 linker metadata and pinned privileged-file reference review",
+    "version": "2026-10-10",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/program-files-definitions.json",
+    "sha256": "49304408d765d0449dcfba1e6b1c02d8496c66f565a04a3b52c6dc7bb8f46260"
+  }
+}

@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "21",
+      "version": "22",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -270,11 +270,11 @@
         },
         {
           "ruleId": "BL-LINUX-0041",
-          "reason": "精确元数据断言，需文件及产品适用性；缺失不应泛化为所有 Linux 不合规。"
+          "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对有限glibc默认配置链元数据，库目标/cache/preload/环境未验证。"
         },
         {
           "ruleId": "BL-LINUX-0042",
-          "reason": "实际仅找 SUID，以 passwd 修改时间作为基准，管道忽略 find 错误；不能证明 SGID 或未授权新增。"
+          "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对固定两目录直接普通文件SUID/SGID与审核摘要绑定清单，完整授权/其他路径/链接目标及真实提权未验证。"
         },
         {
           "ruleId": "BL-LINUX-0043",
@@ -1094,23 +1094,39 @@
       },
       {
         "ruleId": "BL-LINUX-0041",
-        "name": "动态链接器配置文件权限",
+        "name": "glibc默认有限链接器配置链当前元数据参考",
         "category": "入侵防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "精确元数据断言，需文件及产品适用性；缺失不应泛化为所有 Linux 不合规。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：精确元数据断言，需文件及产品适用性；缺失不应泛化为所有 Linux 不合规。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对有限glibc默认配置链元数据，库目标/cache/preload/环境未验证。",
+        "scope": "Ubuntu24 glibc2.39-0ubuntu8系列，固定main和唯一.conf包含，可信root输入及权限上限；库目录/库/cache/preload/环境未验证。",
+        "remediation": "管理员确认产品与有限配置链适用性，核对全部包含配置元数据和稳定性；不可信、未知、读取或变化保持error，不以文件缺失泛化所有Linux失败，无自动修复。见program-files候选及docs41。",
+        "check": {
+          "type": "linux_program_files",
+          "target": "system-program-inputs",
+          "option": "linker_metadata",
+          "operator": "eq",
+          "expected": "main+included_conf<=0644,dirs<=0755,uid=0,gid=0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0042",
-        "name": "SUID 与 SGID 文件变更授权",
+        "name": "限定直接普通文件的SUID/SGID当前审核清单核对",
         "category": "入侵防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "实际仅找 SUID，以 passwd 修改时间作为基准，管道忽略 find 错误；不能证明 SGID 或未授权新增。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：实际仅找 SUID，以 passwd 修改时间作为基准，管道忽略 find 错误；不能证明 SGID 或未授权新增。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24程序文件候选核对固定两目录直接普通文件SUID/SGID与审核摘要绑定清单，完整授权/其他路径/链接目标及真实提权未验证。",
+        "scope": "Ubuntu24当前文件系统/usr/bin和/usr/sbin的全部直接普通文件，SUID/SGID模式位集合逐项核对管理员清单摘要绑定的本机架构路径/模式/UID/GID/内容；不扫描后代或链接目标。",
+        "remediation": "管理员准备可信固定清单并在新候选绑定原始SHA256，示例为空批准集不能当成生产授权；缺失/摘要不符/ACL/链接硬链接清单/未知或变化error，完整集合偏差fail。其他路径、链接目标、能力、提权执行与授权流程未验证，无自动学习/执行/修复。见program-files及docs41。",
+        "check": {
+          "type": "linux_program_files",
+          "target": "system-program-inputs",
+          "option": "privileged_reference",
+          "operator": "eq",
+          "expected": "scope=/usr/bin+/usr/sbin,sha256=867d6aea7266044df23c0e3d53e4b093dd87c6a2919741062b67986b6f496c23,exact=mode/uid/gid/content",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0043",

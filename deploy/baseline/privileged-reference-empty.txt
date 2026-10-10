@@ -1,0 +1,2 @@
+alinksec-privileged-reference-v1
+scope=/usr/bin,/usr/sbin

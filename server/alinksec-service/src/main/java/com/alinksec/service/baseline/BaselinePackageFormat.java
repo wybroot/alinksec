@@ -144,6 +144,14 @@ public final class BaselinePackageFormat {
                     require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
                 }
             }
+            case "linux_program_files" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "程序文件检查仅支持Linux Ubuntu24");
+                require(text(check, "target", 1024).equals("system-program-inputs") && text(check, "operator", 32).equals("eq"), "程序文件需固定范围及完整参考");
+                String option = text(check, "option", 32), expected = text(check, "expected", 1000);
+                require(option.equals("linker_metadata") ? expected.equals("main+included_conf<=0644,dirs<=0755,uid=0,gid=0")
+                        : option.equals("privileged_reference") && expected.matches("scope=/usr/bin\\+/usr/sbin,sha256=[a-f0-9]{64},exact=mode/uid/gid/content"), "程序文件项或审核摘要参考不能隐式扩展");
+            }
             case "systemd_maintenance" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "systemd维护仅支持Linux Ubuntu24");

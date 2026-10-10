@@ -29,6 +29,8 @@ let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErro
 const stagesByPlatform={...fixtures.platforms,ssh:fixtures.ssh,identity:fixtures.identity,pam:fixtures.pam,pamAuth:fixtures.pamAuth,systemd:fixtures.systemd,logMetadata:fixtures.logMetadata,audit:fixtures.audit,auditd:fixtures.auditd,cron:fixtures.cron,rsyslogCron:fixtures.rsyslogCron,sudoers:fixtures.sudoers,aptInstall:fixtures.aptInstall,aptSources:fixtures.aptSources}
 stagesByPlatform.ctrlAltDel=fixtures.ctrlAltDel
 stagesByPlatform.pamLimits=fixtures.pamLimits
+stagesByPlatform.programFiles=fixtures.programFiles
+assert.ok(fixtures.programFiles?.completed && fixtures.programFiles?.pass && fixtures.programFiles?.error,'Capture current program-file REST candidate before browser validation')
 stagesByPlatform.maintenance=fixtures.maintenance
 assert.ok(fixtures.maintenance?.completed && fixtures.maintenance?.pass && fixtures.maintenance?.error,'Capture current systemd maintenance REST candidate before browser validation')
 stagesByPlatform.ipv4Host=fixtures.ipv4Host
@@ -503,6 +505,35 @@ try {
   await page.setViewportSize({width:390,height:844})
   await aptSourceActual.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/apt-sources-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+  await page.setViewportSize({width:1440,height:1000})
+  details[fixtures.programFiles.candidate.id]=structuredClone(fixtures.programFiles.completed)
+  await page.reload()
+  const programs=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 链接器与SUID/SGID审核清单核查（示例需审核）',exact:true})})
+  await programs.getByRole('button',{name:'查看版本',exact:true}).click()
+  const programDefinitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
+  await expect(programDefinitions).toHaveCount(2)
+  for(const [index,item] of fixtures.programFiles.completed.document.items.entries()){
+    await expect(programDefinitions.nth(index)).toContainText('linux_program_files')
+    await expect(programDefinitions.nth(index)).toContainText('system-program-inputs')
+    await expect(programDefinitions.nth(index)).toContainText(item.check.expected)
+  }
+  await programDefinitions.last().scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/program-files-scope-desktop.png',fullPage:true,animations:'disabled'})
+  await dialog.locator('.el-table__expand-icon').click()
+  await expect(dialog.getByText('Privileged current set differs from reviewed reference',{exact:true})).toBeVisible()
+  const privilegedActual=dialog.getByText(/scope=ubuntu24-system-program-inputs.*option=privileged_reference/)
+  await expect(privilegedActual).toContainText('expected_entries=0 observed_entries=1 mismatches=1')
+  await expect(privilegedActual).toContainText('symlink_targets_state=unverified descendant_files_state=unverified other_paths_state=unverified effective_privilege_state=unverified authorization_process_state=unverified snapshot_state=non_atomic')
+  await expect(privilegedActual).toContainText('excluded_symlinks=1 excluded_directories=1 excluded_other=0')
+  await expect(dialog.getByText(/scope=ubuntu24-system-program-inputs.*option=linker_metadata/)).toContainText('entry=/etc/ld.so.conf included_conf=2 config_inputs=6 permissions_reference_match=true')
+  await privilegedActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/program-files-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+  await page.setViewportSize({width:390,height:844})
+  await privilegedActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/program-files-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  writeFileSync(root+'/program-files-browser-result.json',JSON.stringify({passed:true,mode,items:2,checks:['both full definitions','pinned reviewed reference','known mismatch versus unconfirmed reference','explicit scope exclusions and unverified authorization/execution','viewer controls and desktop/mobile']},null,2))
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   await page.setViewportSize({width:1440,height:1000})
   details[fixtures.maintenance.candidate.id]=structuredClone(fixtures.maintenance.completed)

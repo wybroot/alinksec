@@ -412,6 +412,8 @@ Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, t
 
 ## Native systemd observations
 
+`bash deploy/tests/program-files-native.sh`复用Ubuntu24 PAM镜像，在独立文件系统副本对照glibc配置选择、SUID/SGID数值模式/属主和内容摘要、清单绑定、明确排除与信任/限额/变化边界。128MiB/单CPU/无网络，仓库只读，无宿主/etc或数据卷，root双开关和隔离标记必须齐全；FSETID用于非零GID SGID夹具，SYS_CHROOT只用于私有根ldconfig -N -X读取，不执行特权夹具或写生产清单。真实固定选择器只读，完整REST/页面是协议夹具，见[程序文件范围](../../docs/41-链接器元数据与SUID-SGID审核清单核查.md)。
+
 `systemd-native.sh`同时成组执行维护候选的十三次原生状态对照与只读C时钟探针。仅唯一运行时timer/service，清理timer在六小时后且120秒测试预算内清理，不触发真实清理；唯一通知型sleep不能冒充timesyncd，真实时间服务仅只读观察，不改时钟。busctl带类型ExecStart保留argv边界，强制结构/整数/变化/截止时间不跳过。完整同步/不同步组合为标注的协议夹具，参考边界见[systemd维护说明](../../docs/40-systemd清理调度与内核同步指示核查.md)。
 
 `bash deploy/tests/systemd-native.sh` requires a disposable GitHub-hosted Ubuntu24 runner and the compiled `.tmp/baseline-native.test`. It serially creates one unique test service, verifies running/inactive/failed/exited/masked/missing/invalid states and ignored client environment redirects, and cleans up that unit. Existing auditd/rsyslog units are queried read-only; these observations do not assert event capture or log delivery. Both architectures must execute this opt-in test in CI, not merely skip it in ordinary Go tests. Do not enable mutation fixtures on a user host. See [check scope](../../docs/25-systemd服务状态核查.md).
