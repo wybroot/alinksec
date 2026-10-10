@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "20",
+  "version": "21",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -283,7 +283,7 @@
     },
     {
       "ruleId": "BL-LINUX-0046",
-      "reason": "管道计数不证明实际清理策略、路径或定时器有效；需查询确切服务状态与配置。"
+      "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选核对当前清理timer/service及带类型主命令参考，实际配置、路径/年龄与删除未验证。"
     },
     {
       "ruleId": "BL-LINUX-0048",
@@ -315,7 +315,7 @@
     },
     {
       "ruleId": "BL-LINUX-0055",
-      "reason": "OR 链可能拼接 inactive/active，未覆盖其他实现；需分离查询、运行状态与同步证据。"
+      "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选联合观察timesyncd已加载主命令/运行状态和只读内核同步指示，实际提供者/来源身份/偏移准确性未验证。"
     },
     {
       "ruleId": "BL-LINUX-0056",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "2f7b7c13489de203f42e10387bbd1bae609eb5b8d6648034f888e3d0cd10e832"
+    "sha256": "895b4ed091a36f68e4baff851e7f41771d3da554fe02c6d94c51c4032e5408de"
   }
 }

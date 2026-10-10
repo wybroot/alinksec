@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "20",
+      "version": "21",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -290,7 +290,7 @@
         },
         {
           "ruleId": "BL-LINUX-0046",
-          "reason": "管道计数不证明实际清理策略、路径或定时器有效；需查询确切服务状态与配置。"
+          "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选核对当前清理timer/service及带类型主命令参考，实际配置、路径/年龄与删除未验证。"
         },
         {
           "ruleId": "BL-LINUX-0048",
@@ -322,7 +322,7 @@
         },
         {
           "ruleId": "BL-LINUX-0055",
-          "reason": "OR 链可能拼接 inactive/active，未覆盖其他实现；需分离查询、运行状态与同步证据。"
+          "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选联合观察timesyncd已加载主命令/运行状态和只读内核同步指示，实际提供者/来源身份/偏移准确性未验证。"
         },
         {
           "ruleId": "BL-LINUX-0056",
@@ -1175,13 +1175,21 @@
       },
       {
         "ruleId": "BL-LINUX-0046",
-        "name": "临时文件清理策略",
+        "name": "systemd-tmpfiles-clean当前已加载命令与调度参考",
         "category": "剩余信息保护",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "管道计数不证明实际清理策略、路径或定时器有效；需查询确切服务状态与配置。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：管道计数不证明实际清理策略、路径或定时器有效；需查询确切服务状态与配置。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选核对当前清理timer/service及带类型主命令参考，实际配置、路径/年龄与删除未验证。",
+        "scope": "Ubuntu24 amd64/arm64、systemd255本地已加载timer/service；等待状态、有限正单调调度、正确目标及完整主命令argv参考，实际清理配置和交付未验证。",
+        "remediation": "管理员确认产品适用性与可信组件，核对已加载timer及oneshot服务的完整主命令参数；一项error阻止维护两项整批发布。缺失/未知/待重载/变化error；实际配置/删除/环境/其他执行阶段未验证，无自动修复。详见systemd-maintenance候选及docs40。",
+        "check": {
+          "type": "systemd_maintenance",
+          "target": "local-system",
+          "option": "tmpfiles_clean",
+          "operator": "eq",
+          "expected": "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0047",
@@ -1293,13 +1301,21 @@
       },
       {
         "ruleId": "BL-LINUX-0055",
-        "name": "实际时间同步状态",
+        "name": "timesyncd当前运行状态与内核同步指示联合参考",
         "category": "资源控制",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "OR 链可能拼接 inactive/active，未覆盖其他实现；需分离查询、运行状态与同步证据。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：OR 链可能拼接 inactive/active，未覆盖其他实现；需分离查询、运行状态与同步证据。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 systemd维护候选联合观察timesyncd已加载主命令/运行状态和只读内核同步指示，实际提供者/来源身份/偏移准确性未验证。",
+        "scope": "Ubuntu24 amd64/arm64、systemd255本地timesyncd主命令和运行状态联合adjtimex(modes=0)同步指示；不推断真实提供者/来源/偏移准确性或持续同步。",
+        "remediation": "管理员确认systemd-timesyncd产品及可信组件，分别核对主进程/完整主命令和内核同步指示，不能由服务运行反推已同步。缺失/未知/待重载/变化error，已知不同步fail，整体非原子；不改时钟、不启动时钟服务，无自动修复。详见独立systemd-maintenance候选及docs40。",
+        "check": {
+          "type": "systemd_maintenance",
+          "target": "local-system",
+          "option": "time_sync",
+          "operator": "eq",
+          "expected": "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0056",

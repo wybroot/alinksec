@@ -144,6 +144,14 @@ public final class BaselinePackageFormat {
                     require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
                 }
             }
+            case "systemd_maintenance" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "systemd维护仅支持Linux Ubuntu24");
+                require(text(check, "target", 1024).equals("local-system") && text(check, "operator", 32).equals("eq"), "维护需固定本地管理器和完整参考");
+                var references = Map.of("tmpfiles_clean", "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean", "time_sync", "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0");
+                String option = text(check, "option", 32);
+                require(references.containsKey(option) && references.get(option).equals(text(check, "expected", 1000)), "维护项及参考不能隐式扩展");
+            }
             case "linux_ipv4_host" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "IPv4主机检查仅支持Linux当前命名空间");

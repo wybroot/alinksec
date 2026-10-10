@@ -111,6 +111,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkBashGlobalPolicy(cs)
 	case "linux_ipv4_host":
 		result = checkIPv4Host(cs)
+	case "systemd_maintenance":
+		result = checkSystemdMaintenance(cs)
 	case "local_identity_file", "local_accounts":
 		result = checkLocalIdentity(cs)
 	case "pam_password":

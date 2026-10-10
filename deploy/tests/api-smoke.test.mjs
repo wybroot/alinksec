@@ -910,6 +910,54 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   auditd.published = await ok(`${auditdPrefix}/publish`, { ...options, body: { note: 'Complete on-disk declaration protocol fixture; no daemon loading or log delivery certification' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === auditdRecord.id))
   auditd.withdrawn = await ok(`${auditdPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(auditd.withdrawn.status, 'withdrawn')
+  // Complete maintenance reports are protocol fixtures. Native loaded units,
+  // typed argv and read-only clock observations are validated separately.
+  const maintenanceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd-maintenance/linux-baseline.json', import.meta.url)))
+  maintenanceDocument.code = `API-${mode}-systemd-maintenance`
+  for (const index of [0, 1]) {
+    const invalid = structuredClone(maintenanceDocument); invalid.items[index].check.expected = 'active'
+    assert.equal((await request('/api/baseline/packages/import', pamUpload(invalid))).status, 400)
+  }
+  const maintenance = { candidate: await ok('/api/baseline/packages/import', pamUpload(maintenanceDocument)) }; fixtures.maintenance = maintenance
+  const maintenanceRecord = { id: maintenance.candidate.id, code: maintenanceDocument.code }; baselinePackages.push(maintenanceRecord)
+  const maintenancePrefix = `/api/baseline/packages/${maintenanceRecord.id}`
+  maintenance.approved = await ok(`${maintenancePrefix}/review`, { ...options, body: { approved: true, note: 'Review loaded schedule and independent clock indicator; deletion and accuracy unverified' } })
+  maintenanceRecord.template = Number(maintenance.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${maintenancePrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'pass', 'completed']) {
+    maintenance.testing = await ok(`${maintenancePrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(maintenance.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, maintenanceDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('systemd_maintenance') && maintenanceDocument.items.every(item => payload.includes(item.check.expected)))
+    const error = outcome === 'error', pass = outcome === 'pass', clock = "i.code='BL-LINUX-0055'"
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass ? 'true' : `NOT (${clock})`},
+        'scope=loaded-systemd-maintenance option=' || CASE WHEN ${clock} THEN 'time_sync' ELSE 'tmpfiles_clean' END ||
+        ' manager=local-system cleanup_configuration_state=unverified cleanup_delivery_state=unverified ntp_provider_state=unverified peer_identity_state=unverified offset_accuracy_state=unverified execution_environment_state=unverified persistence_state=unverified snapshot_state=non_atomic Version=255.4 SystemState=running ' ||
+        CASE WHEN ${clock} THEN 'service=systemd-timesyncd.service LoadState=loaded ActiveState=active SubState=running Type=notify MainPID=42 command_reference_match=true clock_source=kernel-realtime kernel_state=${pass ? 0 : 5} kernel_status=${pass ? '0x2001' : '0x40'} max_error_us=100 est_error_us=100'
+        ELSE 'service=systemd-tmpfiles-clean.service LoadState=loaded ActiveState=inactive SubState=dead Type=oneshot MainPID=0 command_reference_match=true timer=systemd-tmpfiles-clean.timer TimerLoadState=loaded TimerActiveState=active TimerSubState=waiting Unit=systemd-tmpfiles-clean.service next_monotonic_us=100000000 RemainAfterExit=no' END,
+        CASE WHEN ${clock} THEN ${error ? "'Clock query changed or unavailable'" : pass ? "''" : "'Running service with unsynchronized kernel indicator'"} ELSE '' END,
+        CASE WHEN ${clock} THEN '${error ? 'error' : pass ? 'pass' : 'fail'}' ELSE 'pass' END
+      FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',2,${pass ? 2 : 1},${pass ? 0 : 1},${pass ? 100 : 50},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    maintenance[outcome] = await ok(maintenancePrefix, { token: tokens.admin })
+    assert.equal(maintenance[outcome].testReady, !error)
+    const items = maintenance[outcome].testResults[0].items
+    assert.equal(items.filter(item => item.execution_status === 'pass').length, pass ? 2 : 1)
+    assert.equal(items.filter(item => item.execution_status === 'error').length, error ? 1 : 0)
+    assert.equal(items.filter(item => item.execution_status === 'fail').length, !pass && !error ? 1 : 0)
+    assert.ok(items.every(item => !item.fixable && item.actual.includes('cleanup_delivery_state=unverified') && item.actual.includes('offset_accuracy_state=unverified')))
+    if (error) assert.equal((await request(`${maintenancePrefix}/publish`, { ...options, body: { note: 'One unavailable indicator blocks publication of both maintenance references' } })).status, 400)
+  }
+  maintenance.published = await ok(`${maintenancePrefix}/publish`, { ...options, body: { note: 'Complete mixed reference fixture; actual cleanup and accuracy unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === maintenanceRecord.id))
+  maintenance.withdrawn = await ok(`${maintenancePrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(maintenance.withdrawn.status, 'withdrawn')
   // Protocol fixtures only; native IPv4 values and local role boundaries run in
   // independently destroyed network namespaces, with no packet-proof claims.
   const ipv4Document = JSON.parse(readFileSync(new URL('../baseline/packages/ipv4-host/linux-baseline.json', import.meta.url)))

@@ -29,6 +29,8 @@ let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErro
 const stagesByPlatform={...fixtures.platforms,ssh:fixtures.ssh,identity:fixtures.identity,pam:fixtures.pam,pamAuth:fixtures.pamAuth,systemd:fixtures.systemd,logMetadata:fixtures.logMetadata,audit:fixtures.audit,auditd:fixtures.auditd,cron:fixtures.cron,rsyslogCron:fixtures.rsyslogCron,sudoers:fixtures.sudoers,aptInstall:fixtures.aptInstall,aptSources:fixtures.aptSources}
 stagesByPlatform.ctrlAltDel=fixtures.ctrlAltDel
 stagesByPlatform.pamLimits=fixtures.pamLimits
+stagesByPlatform.maintenance=fixtures.maintenance
+assert.ok(fixtures.maintenance?.completed && fixtures.maintenance?.pass && fixtures.maintenance?.error,'Capture current systemd maintenance REST candidate before browser validation')
 stagesByPlatform.ipv4Host=fixtures.ipv4Host
 assert.ok(fixtures.ipv4Host?.completed && fixtures.ipv4Host?.pass && fixtures.ipv4Host?.error,'Capture current two-item IPv4 role/reference REST candidate before browser validation')
 stagesByPlatform.bashPolicy=fixtures.bashPolicy
@@ -501,6 +503,35 @@ try {
   await page.setViewportSize({width:390,height:844})
   await aptSourceActual.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/apt-sources-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+  await page.setViewportSize({width:1440,height:1000})
+  details[fixtures.maintenance.candidate.id]=structuredClone(fixtures.maintenance.completed)
+  await page.reload()
+  const maintenance=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 systemd 清理调度与内核同步指示核查',exact:true})})
+  await maintenance.getByRole('button',{name:'查看版本',exact:true}).click()
+  const maintenanceDefinitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
+  await expect(maintenanceDefinitions).toHaveCount(2)
+  for(const [index,item] of fixtures.maintenance.completed.document.items.entries()){
+    await expect(maintenanceDefinitions.nth(index)).toContainText('systemd_maintenance')
+    await expect(maintenanceDefinitions.nth(index)).toContainText('local-system')
+    await expect(maintenanceDefinitions.nth(index)).toContainText(item.check.expected)
+  }
+  await maintenanceDefinitions.last().scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/systemd-maintenance-scope-desktop.png',fullPage:true,animations:'disabled'})
+  await dialog.locator('.el-table__expand-icon').click()
+  await expect(dialog.getByText('Running service with unsynchronized kernel indicator',{exact:true})).toBeVisible()
+  const clockActual=dialog.getByText(/scope=loaded-systemd-maintenance.*option=time_sync/)
+  await expect(clockActual).toContainText('ActiveState=active SubState=running Type=notify MainPID=42 command_reference_match=true')
+  await expect(clockActual).toContainText('clock_source=kernel-realtime kernel_state=5 kernel_status=0x40')
+  await expect(clockActual).toContainText('ntp_provider_state=unverified peer_identity_state=unverified offset_accuracy_state=unverified')
+  await expect(dialog.getByText(/scope=loaded-systemd-maintenance.*option=tmpfiles_clean/)).toContainText('TimerActiveState=active TimerSubState=waiting Unit=systemd-tmpfiles-clean.service next_monotonic_us=100000000 RemainAfterExit=no')
+  await clockActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/systemd-maintenance-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+  await page.setViewportSize({width:390,height:844})
+  await clockActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/systemd-maintenance-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  writeFileSync(root+'/systemd-maintenance-browser-result.json',JSON.stringify({passed:true,mode,items:2,checks:['both complete immutable references','loaded cleanup schedule and typed command','running time service with unsynchronized kernel indicator','deletion/provider/accuracy/environment/persistence boundaries','viewer controls and desktop/mobile']},null,2))
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   await page.setViewportSize({width:1440,height:1000})
   details[fixtures.ipv4Host.candidate.id]=structuredClone(fixtures.ipv4Host.completed)

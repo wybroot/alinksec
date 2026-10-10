@@ -412,6 +412,8 @@ Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, t
 
 ## Native systemd observations
 
+`systemd-native.sh`同时成组执行维护候选的十三次原生状态对照与只读C时钟探针。仅唯一运行时timer/service，清理timer在六小时后且120秒测试预算内清理，不触发真实清理；唯一通知型sleep不能冒充timesyncd，真实时间服务仅只读观察，不改时钟。busctl带类型ExecStart保留argv边界，强制结构/整数/变化/截止时间不跳过。完整同步/不同步组合为标注的协议夹具，参考边界见[systemd维护说明](../../docs/40-systemd清理调度与内核同步指示核查.md)。
+
 `bash deploy/tests/systemd-native.sh` requires a disposable GitHub-hosted Ubuntu24 runner and the compiled `.tmp/baseline-native.test`. It serially creates one unique test service, verifies running/inactive/failed/exited/masked/missing/invalid states and ignored client environment redirects, and cleans up that unit. Existing auditd/rsyslog units are queried read-only; these observations do not assert event capture or log delivery. Both architectures must execute this opt-in test in CI, not merely skip it in ordinary Go tests. Do not enable mutation fixtures on a user host. See [check scope](../../docs/25-systemd服务状态核查.md).
 
 `bash deploy/tests/auditd-native.sh` uses one disposable Ubuntu24 container, drops all capabilities, disables networking and mounts the repository read-only. The real auditd 3.1.2 parser accepts or rejects private disk configuration; after valid parsing, audit-control denial prevents daemon registration. This validates configuration parsing and private log metadata, without proving daemon operation or log delivery. Duplicate/long-line inputs remain Agent errors even when the native parser accepts them. See [on-disk scope](../../docs/28-auditd磁盘配置与日志目标核查.md).
