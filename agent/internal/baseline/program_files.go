@@ -3,7 +3,7 @@ package baseline
 import (
 	"crypto/sha256"
 	"fmt"
-	"path/filepath"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -38,9 +38,9 @@ func programInputName(name string) bool {
 	}
 	return true
 }
-func privilegedLogicalPath(path string) bool {
-	parent := filepath.Dir(path)
-	return (parent == "/usr/bin" || parent == "/usr/sbin") && filepath.Clean(path) == path && programInputName(filepath.Base(path))
+func privilegedLogicalPath(value string) bool {
+	parent := path.Dir(value)
+	return (parent == "/usr/bin" || parent == "/usr/sbin") && path.Clean(value) == value && programInputName(path.Base(value))
 }
 func parsePrivilegedReference(raw string, arch string) ([]privilegedEntry, error) {
 	if len(raw) > 64*1024 || !strings.HasPrefix(raw, privilegedReferenceHeader) || !strings.HasSuffix(raw, "\n") || arch != "amd64" && arch != "arm64" {
