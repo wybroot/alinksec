@@ -70,7 +70,7 @@ try {
     '/tmp/alinksec-validation/deploy/tests/postgres-migrations.test.sh']))
   const pgPort = await command('docker', ['inspect', '--format', '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}', container])
   const mavenArgs = ['-B', '-ntp', '-T1', '-f', join(repo, 'server/pom.xml'), '-pl', 'alinksec-bootstrap', '-am',
-    '-Dtest=AgentChannelSecurityIntegrationTest', '-Dsurefire.failIfNoSpecifiedTests=false',
+    '-Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest', '-Dsurefire.failIfNoSpecifiedTests=false',
     '-Dalinksec.integration.database=postgres', '-DargLine=-Xmx192m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=1', 'test']
   if (process.env.ALINKSEC_MAVEN_REPO) mavenArgs.unshift(`-Dmaven.repo.local=${process.env.ALINKSEC_MAVEN_REPO}`)
   await command(process.env.MAVEN_BIN, mavenArgs, { log: true, env: { ...process.env,

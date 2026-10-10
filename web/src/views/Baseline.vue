@@ -1,12 +1,13 @@
 <template>
-  <div>
+  <div class="baseline-page">
     <div class="grid-2">
-      <div class="panel"><h4>等保 2.0 服务器基线 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
+      <div class="panel"><h4>基线核查 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
       <div class="panel"><h4>各检查领域通过率</h4><div ref="catEl" class="chart"></div></div>
     </div>
     <div class="panel">
       <div class="toolbar">
         <el-button type="primary" @click="openCreate">+ 发起核查</el-button>
+        <el-button plain @click="$router.push('/baseline-templates')">基线模板</el-button>
         <div class="spacer"></div>
         <span style="font-size:12px;color:#94a3b8">{{ lastSummary }}</span>
       </div>
@@ -14,11 +15,12 @@
         <el-table-column prop="host" label="主机" width="170" />
         <el-table-column prop="tpl" label="模板" width="220" />
         <el-table-column label="合规率" width="200">
-          <template #default="{ row }"><el-progress :percentage="row.rate" :stroke-width="8" :color="row.rate > 80 ? '#16a34a' : row.rate > 60 ? '#f59e0b' : '#dc2626'" /></template>
+          <template #default="{ row }"><span v-if="row.legacy" style="color:#b45309">旧结果待重新核查</span><el-progress v-else :percentage="row.rate" :stroke-width="8" :color="row.rate > 80 ? '#16a34a' : row.rate > 60 ? '#f59e0b' : '#dc2626'" /></template>
         </el-table-column>
         <el-table-column label="不合规（严重/高/中/低）" width="180">
           <template #default="{ row }"><span class="mono" style="color:#dc2626">{{ row.c }}</span> / {{ row.h }} / {{ row.m }} / {{ row.l }}</template>
         </el-table-column>
+        <el-table-column label="异常 / 旧结果" width="120"><template #default="{ row }">{{ row.errors }} / {{ row.legacy }}</template></el-table-column>
         <el-table-column prop="time" label="核查时间" width="150" />
         <el-table-column label="操作" fixed="right">
           <template #default="{ row }">
@@ -34,13 +36,14 @@
     </div>
 
     <!-- 发起核查 -->
-    <el-dialog v-model="dlg.visible" title="发起基线核查" width="640px">
+    <el-dialog v-model="dlg.visible" title="发起基线核查" width="min(640px, calc(100vw - 32px))">
       <el-form label-width="90px">
         <el-form-item label="任务名称">
           <el-input v-model="dlg.name" placeholder="留空自动生成" maxlength="64" />
         </el-form-item>
         <el-form-item label="基线模板">
-          <el-select v-model="dlg.templateIds" multiple placeholder="选择基线模板（可多选）" style="width:100%">
+          <el-switch v-model="dlg.automatic" active-text="按 Agent 系统自动选择" style="margin-bottom:8px" />
+          <el-select v-if="!dlg.automatic" v-model="dlg.templateIds" multiple placeholder="选择基线模板（可多选）" style="width:100%">
             <el-option v-for="t in templates" :key="t.id" :label="`${t.name}（${t.item_count} 项）`" :value="t.id" />
           </el-select>
         </el-form-item>
@@ -58,7 +61,7 @@
     </el-dialog>
 
     <!-- 单机明细 -->
-    <el-dialog v-model="detail.visible" :title="`${detail.host} · 核查明细`" width="920px">
+    <el-dialog v-model="detail.visible" :title="`${detail.host} · 核查明细`" width="min(920px, calc(100vw - 32px))">
       <div class="toolbar">
         <span style="font-size:12px;color:#94a3b8">未通过且支持自动修复的项可勾选提交：Agent 将 备份 → 执行 → 复核 → 失败自动回滚</span>
         <div class="spacer"></div>
@@ -67,6 +70,7 @@
       <el-table :data="detail.items" stripe max-height="440" @selection-change="(s) => (fixSel = s)">
         <el-table-column type="selection" width="42" :selectable="(r) => !r.passed && r.fixable" />
         <el-table-column prop="code" label="编号" width="130" />
+        <el-table-column prop="template_version" label="模板版本" width="100" />
         <el-table-column prop="name" label="检查项" min-width="200" />
         <el-table-column prop="category" label="类别" width="100" />
         <el-table-column label="严重度" width="80">
@@ -74,9 +78,9 @@
             <span :class="['sev', `sev-${sevClass(row.severity)}`]">{{ sevText(row.severity) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="结果" width="70">
+        <el-table-column label="结果" width="100">
           <template #default="{ row }">
-            <span :style="{ color: row.passed ? '#16a34a' : '#dc2626', fontWeight: 600 }">{{ row.passed ? '通过' : '未通过' }}</span>
+            <span :style="{ color: row.passed ? '#16a34a' : '#dc2626', fontWeight: 600 }">{{ row.execution_status === 'error' ? '执行异常' : row.execution_status === 'legacy' ? (row.passed ? '通过（旧）' : '未通过（旧）') : row.passed ? '通过' : '不合规' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="actual" label="实测值 / 失败原因" min-width="200" show-overflow-tooltip>
@@ -90,6 +94,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <template #footer><el-button @click="detail.visible = false">关闭</el-button></template>
     </el-dialog>
 
     <!-- 修复任务记录 -->
@@ -211,9 +216,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import * as echarts from 'echarts'
 import {
   createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
-  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
+  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
 } from '../api'
 import { useChart } from '../composables/useChart'
 
@@ -232,16 +238,17 @@ const catStats = ref([])
 
 /* ---------------- 发起核查 ---------------- */
 
-const dlg = reactive({ visible: false, loading: false, name: '', templateIds: [], agentIds: [] })
+const dlg = reactive({ visible: false, loading: false, name: '', automatic: true, templateIds: [], agentIds: [] })
 
 async function openCreate() {
   dlg.visible = true
   dlg.name = ''
+  dlg.automatic = true
   dlg.templateIds = []
   dlg.agentIds = []
   try {
     const [tpls, list] = await Promise.all([fetchBaselineTemplates(), fetchAllHosts()])
-    templates.value = (tpls || []).filter((t) => t.enabled !== false)
+    templates.value = (tpls || []).filter((t) => t.enabled === true || t.enabled === 1)
     hosts.value = list
   } catch (e) {
     msg(e.message || '基础数据加载失败', 'error')
@@ -249,11 +256,15 @@ async function openCreate() {
 }
 
 async function submit() {
-  if (!dlg.templateIds.length) return msg('请选择基线模板', 'warning')
+  if (!dlg.automatic && !dlg.templateIds.length) return msg('请选择基线模板', 'warning')
   if (!dlg.agentIds.length) return msg('请选择目标主机', 'warning')
   dlg.loading = true
   try {
-    await createBaselineTask(dlg.agentIds, dlg.templateIds, dlg.name || null)
+    const selected = dlg.automatic ? [] : dlg.templateIds
+    const coverage = await fetchBaselineCoverage(dlg.agentIds, selected)
+    const uncovered = coverage.filter((row) => !row.covered)
+    if (uncovered.length) throw new Error(`以下主机没有适用模板：${uncovered.map((row) => row.agent_id).join('、')}。请先在基线模板页发布相应系统的模板。`)
+    await createBaselineTask(dlg.agentIds, selected, dlg.name || null)
     dlg.visible = false
     msg(`核查任务已下发：${dlg.agentIds.length} 台主机`)
     await load()
@@ -401,7 +412,7 @@ const sevClass = (n) => SEV_CLASS[Number(n)] || 'low'
 
 /* ---------------- 图表（真实数据） ---------------- */
 
-const avgScore = computed(() => rows.value.length
+const avgScore = computed(() => rows.value.length && !rows.value.some((r) => r.legacy)
   ? Math.round(rows.value.reduce((s, r) => s + r.rate, 0) / rows.value.length)
   : null)
 
@@ -414,8 +425,8 @@ const { render: renderScore } = useChart(scoreEl, () => ({
     axisLine: { lineStyle: { width: 14, color: [[1, '#e4ecfd']] } },
     pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
     title: { offsetCenter: [0, '30%'], fontSize: 13, color: '#64748b' },
-    detail: { valueAnimation: true, fontSize: 40, fontWeight: 700, offsetCenter: [0, '-5%'], color: '#0f172a', formatter: (v) => (v == null ? '—' : v) },
-    data: [{ value: avgScore.value ?? 0, name: rows.value.length ? `平均合规得分（${rows.value.length} 台）` : '暂无核查数据' }],
+    detail: { valueAnimation: true, fontSize: 40, fontWeight: 700, offsetCenter: [0, '-5%'], color: '#0f172a', formatter: (v) => (avgScore.value == null ? '—' : v) },
+    data: [{ value: avgScore.value ?? 0, name: rows.value.some((r) => r.legacy) ? '旧结果待重新核查' : rows.value.length ? `平均合规得分（${rows.value.length} 台）` : '暂无核查数据' }],
   }],
 }))
 
@@ -437,7 +448,9 @@ const lastSummary = computed(() => {
   if (!rows.value.length) return '暂无核查数据：点击「发起核查」创建首个任务'
   const failed = rows.value.reduce((s, r) => s + r.c + r.h + r.m + r.l, 0)
   const time = rows.value.map((r) => r.time).sort().pop()
-  return `最近核查：${time} · 覆盖 ${rows.value.length} 台 · 不合规项 ${failed}`
+  const errors = rows.value.reduce((s, r) => s + r.errors, 0)
+  const legacy = rows.value.reduce((s, r) => s + r.legacy, 0)
+  return `最近核查：${time} · 覆盖 ${rows.value.length} 台 · 不合规项 ${failed} · 执行异常 ${errors} · 旧结果 ${legacy}`
 })
 
 /* ---------------- 加载 ---------------- */
@@ -459,3 +472,7 @@ async function load() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.baseline-page,.baseline-page .panel{min-width:0}
+</style>

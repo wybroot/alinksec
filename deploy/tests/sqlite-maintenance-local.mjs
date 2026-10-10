@@ -213,7 +213,7 @@ try {
     VALUES (?, 'maintenance-persistent-software', '1.0')`).run(fixtureId)
   assert.ok(statSync(`${dbFile}-wal`).size > 32, 'Committed fixture writes must remain in WAL')
   const migrations = query(dbFile, 'SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version')
-  assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003'])
+  assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007'])
   await maintenance('backup', 'online.db')
   await maintenance('verify', 'online.db')
   assert.equal(query(join(backupDir, 'online.db'), 'SELECT version FROM t_asset_software')[0].version, '1.0')

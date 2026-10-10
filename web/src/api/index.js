@@ -386,6 +386,8 @@ export async function fetchBaseline() {
     host: r.hostname,
     tpl: r.tpl || '等保 2.0 基线',
     rate: Math.round(Number(r.score) || 0),
+    errors: Number(r.error_count || 0),
+    legacy: Number(r.legacy_count || 0),
     c: Number(r.c || 0),
     h: Number(r.h || 0),
     m: Number(r.m || 0),
@@ -393,6 +395,15 @@ export async function fetchBaseline() {
     time: fmtTime(r.checked_at),
   }))
 }
+
+export const fetchBaselinePackages = () => get('/api/baseline/packages')
+export const fetchBaselinePackage = (id) => get(`/api/baseline/packages/${encodeURIComponent(id)}`)
+export const importBaselinePackage = (file) => upload('/api/baseline/packages/import', file)
+export const reviewBaselinePackage = (id, approved, note) => post(`/api/baseline/packages/${encodeURIComponent(id)}/review`, { approved, note })
+export const testBaselinePackage = (id, agentIds) => post(`/api/baseline/packages/${encodeURIComponent(id)}/test`, { agentIds })
+export const publishBaselinePackage = (id, note) => post(`/api/baseline/packages/${encodeURIComponent(id)}/publish`, { note })
+export const withdrawBaselinePackage = (id, note) => post(`/api/baseline/packages/${encodeURIComponent(id)}/withdraw`, { note })
+export const fetchBaselineCoverage = (agentIds, templateIds = []) => post('/api/baseline/coverage', { agentIds, templateIds })
 
 export async function fetchBaselineTemplates() {
   return get('/api/baseline/templates')

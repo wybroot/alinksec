@@ -28,6 +28,9 @@
     <protobuf.version>4.27.3</protobuf.version>
     <bouncycastle.version>1.78.1</bouncycastle.version>
     <sqlite-jdbc.version>3.46.1.0</sqlite-jdbc.version>
+    <!-- Match Spring Boot 3.3.4's Mockito/Byte Buddy dependency; test-only. -->
+    <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
+    <argLine></argLine>
   </properties>
 
   <dependencyManagement>
@@ -98,6 +101,15 @@
     </dependencies>
   </dependencyManagement>
 
+  <dependencies>
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy-agent</artifactId>
+      <version>${byte-buddy-agent.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
   <!-- 国内网络加速（海外环境可删除本段） -->
   <repositories>
     <repository>
@@ -115,6 +127,16 @@
   <build>
     <pluginManagement>
       <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.4</version>
+          <configuration>
+            <!-- Preload instrumentation instead of relying on JVM self-attach.
+                 Keep caller/coverage flags through Surefire's late argLine. -->
+            <argLine>@{argLine} -javaagent:"${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy-agent.version}/byte-buddy-agent-${byte-buddy-agent.version}.jar"</argLine>
+          </configuration>
+        </plugin>
         <plugin>
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-maven-plugin</artifactId>

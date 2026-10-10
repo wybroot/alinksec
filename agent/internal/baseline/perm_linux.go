@@ -14,11 +14,11 @@ import (
 func checkFilePerm(cs *CheckSpec) ItemResult {
 	fi, err := os.Stat(cs.Target)
 	if err != nil {
-		return ItemResult{Passed: false, Actual: cs.Target, Message: "stat 失败: " + err.Error()}
+		return ItemResult{Error: !os.IsNotExist(err), Actual: cs.Target, Message: "stat 失败: " + err.Error()}
 	}
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
-		return ItemResult{Passed: false, Message: "无法获取文件元数据"}
+		return ItemResult{Error: true, Message: "无法获取文件元数据"}
 	}
 	mode := fmt.Sprintf("%04o", st.Mode&07777)
 	owner := lookupName(passwdNames(), int(st.Uid))

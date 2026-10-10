@@ -19,7 +19,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 基线核查任务编排（docs/04 §4.3）：
@@ -43,91 +42,133 @@ public class BaselineTaskService {
         this.database = database;
     }
 
-    /**
-     * 创建并下发核查任务。
-     *
-     * @param name        任务名（空则自动生成）
-     * @param agentIds    目标主机（t_agent.agent_id）
-     * @param templateIds 基线模板
-     * @param createdBy   创建人（JWT uid）
-     * @return 任务 id
-     */
+    /** Empty templateIds selects all published templates applicable to each Agent. */
     @Transactional
     public long createTask(String name, List<String> agentIds, List<Long> templateIds, Long createdBy) {
-        if (agentIds == null || agentIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择核查目标主机");
-        }
-        // 去重 + 去空（多选组件可能给出重复项）
-        agentIds = agentIds.stream().filter(a -> a != null && !a.isBlank()).distinct().toList();
-        if (agentIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择核查目标主机");
-        }
-        templateIds = templateIds == null ? List.of() : templateIds.stream().distinct().toList();
-        if (templateIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择基线模板");
-        }
-
-        // 主机快照：agent_id + os_type（后续按 OS 过滤适用检查项）
-        List<Map<String, Object>> agents = jdbc.queryForList("""
-                SELECT agent_id, os_type FROM t_agent
-                WHERE agent_id IN (%s)
-                """.formatted(DatabaseDialect.placeholders(agentIds.size())), agentIds.toArray());
-        if (agents.size() != agentIds.size()) {
-            throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
-        }
-
-        String taskNo = "BL" + LocalDateTime.now().format(NO_FMT)
-                + ThreadLocalRandom.current().nextInt(100, 1000);
-        long taskId = jdbc.queryForObject(
-                "INSERT INTO t_baseline_task (task_no, name, scope, template_ids, status, created_by) "
-                        + "VALUES (?, ?, ?, ?, 1, ?) RETURNING id",
-                Long.class, taskNo,
-                name == null || name.isBlank() ? taskNo + " 基线核查" : name,
-                JsonUtils.write(Map.of("group_ids", List.of(), "agent_ids", agentIds)),
-                database.encodeLongList(templateIds), createdBy);
-        jdbc.update("UPDATE t_baseline_task SET started_at = CURRENT_TIMESTAMP WHERE id = ?", taskId);
-
-        int dispatched = 0;
-        for (Map<String, Object> agent : agents) {
-            String agentId = (String) agent.get("agent_id");
-            int osType = ((Number) agent.get("os_type")).intValue();
-            CmdBaselineCheck.Builder check = buildCheckCommand(taskId, templateIds, osType);
-            if (check.getItemsCount() == 0) {
-                // 该 OS 无适用模板项：不入 scope 结果统计会卡进度，直接跳过下发
-                log.info("主机无适用基线检查项，跳过下发: agent={} os_type={}", agentId, osType);
-                continue;
-            }
-            commandService.dispatch(agentId, Command.newBuilder().setBaselineCheck(check), createdBy);
-            dispatched++;
-        }
-        if (dispatched == 0) {
-            throw new IllegalArgumentException("所选主机的操作系统无适用的基线模板（检查模板 os_type）");
-        }
-        log.info("基线核查任务已下发: task_id={} task_no={} agents={} templates={}",
-                taskId, taskNo, dispatched, templateIds);
-        return taskId;
+        return create(name, agentIds, templateIds, createdBy, false);
     }
 
-    /** 组装 CmdBaselineCheck：模板 × 启用项 × 主机 OS */
-    private CmdBaselineCheck.Builder buildCheckCommand(long taskId, List<Long> templateIds, int osType) {
-        List<Object> args = new ArrayList<>(templateIds);
-        args.add(osType);
-        List<Map<String, Object>> items = jdbc.queryForList("""
-                SELECT i.id, CAST(i."check" AS TEXT) AS "check"
-                FROM t_baseline_item i
-                JOIN t_baseline_template t ON t.id = i.template_id
-                WHERE t.id IN (%s) AND t.os_type = ? AND i.enabled
-                ORDER BY i.id
-                """.formatted(DatabaseDialect.placeholders(templateIds.size())), args.toArray());
-        CmdBaselineCheck.Builder builder = CmdBaselineCheck.newBuilder()
-                .setTaskId(String.valueOf(taskId))
-                .addAllTemplateIds(templateIds.stream().map(String::valueOf)::iterator);
-        for (Map<String, Object> item : items) {
-            builder.addItems(BaselineCheckSpec.newBuilder()
-                    .setItemId(String.valueOf(item.get("id")))
-                    .setCheck(String.valueOf(item.get("check"))));
+    @Transactional
+    public long createReviewTask(String name, List<String> agentIds, long templateId, Long createdBy) {
+        return create(name, agentIds, List.of(templateId), createdBy, true);
+    }
+
+    public List<Map<String, Object>> coverage(List<String> agentIds, List<Long> templateIds) {
+        return coverage(plan(agentIds, templateIds, false));
+    }
+
+    private record Plan(List<Map<String, Object>> agents, List<Map<String, Object>> templates,
+                        List<Map<String, Object>> items) {}
+
+    private Plan plan(List<String> agentIds, List<Long> templateIds, boolean review) {
+        if (agentIds == null || agentIds.isEmpty() || agentIds.size() > 500 || agentIds.stream().anyMatch(a -> a == null || a.isBlank())) {
+            throw new IllegalArgumentException("请选择 1 至 500 台核查主机");
         }
-        return builder;
+        agentIds = agentIds.stream().distinct().toList();
+        templateIds = templateIds == null ? List.of() : templateIds.stream().distinct().toList();
+        if (templateIds.size() > 50 || templateIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("模板选择无效或超过 50 项");
+        }
+        List<Map<String, Object>> agents = jdbc.queryForList("SELECT agent_id,os_type,os_version FROM t_agent WHERE deleted=false AND agent_id IN ("
+                + DatabaseDialect.placeholders(agentIds.size()) + ")", agentIds.toArray());
+        if (agents.size() != agentIds.size()) throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
+        List<Map<String, Object>> templates = jdbc.queryForList("SELECT * FROM t_baseline_template"
+                + (templateIds.isEmpty() ? " WHERE enabled" : " WHERE id IN (" + DatabaseDialect.placeholders(templateIds.size()) + ")")
+                + " ORDER BY id", templateIds.toArray());
+        if (!templateIds.isEmpty() && (templates.size() != templateIds.size()
+                || !review && templates.stream().anyMatch(t -> !DatabaseDialect.readBoolean(t.get("enabled"))))) {
+            throw new IllegalArgumentException("部分模板不存在、未发布或已撤回，请刷新后重选");
+        }
+        List<Long> applicable = templates.stream().filter(t -> agents.stream().anyMatch(a -> applies(t, a)))
+                .map(t -> ((Number) t.get("id")).longValue()).toList();
+        List<Map<String, Object>> items = applicable.isEmpty() ? List.of() : jdbc.queryForList("""
+                SELECT id,template_id,code,name,category,severity,CAST("check" AS TEXT) AS "check",
+                       remediation,CAST(fix_spec AS TEXT) AS fix_spec,rule_id
+                FROM t_baseline_item WHERE enabled AND template_id IN (%s) ORDER BY id
+                """.formatted(DatabaseDialect.placeholders(applicable.size())), applicable.toArray());
+        return new Plan(agents, templates, items);
+    }
+
+    private static boolean applies(Map<String, Object> template, Map<String, Object> agent) {
+        return BaselinePackageFormat.applies(((Number) template.get("os_type")).intValue(),
+                (String) template.get("os_version_pattern"), agent);
+    }
+    private static List<Map<String, Object>> agentItems(Plan plan, Map<String, Object> agent) {
+        var ids = plan.templates.stream().filter(t -> applies(t, agent)).map(t -> ((Number) t.get("id")).longValue()).toList();
+        return plan.items.stream().filter(i -> ids.contains(((Number) i.get("template_id")).longValue())).toList();
+    }
+    private static List<Map<String, Object>> coverage(Plan plan) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (var agent : plan.agents) {
+            var items = agentItems(plan, agent);
+            var templates = plan.templates.stream().filter(t -> applies(t, agent)
+                    && items.stream().anyMatch(i -> ((Number) i.get("template_id")).longValue() == ((Number) t.get("id")).longValue()))
+                    .map(t -> Map.of("id", t.get("id"), "name", t.get("name"), "version", t.get("version"))).toList();
+            Map<String, Object> row = new java.util.LinkedHashMap<>(agent);
+            row.put("templates", templates); row.put("itemCount", items.size()); row.put("covered", !items.isEmpty());
+            result.add(row);
+        }
+        return result;
+    }
+
+    private long create(String name, List<String> agentIds, List<Long> templateIds, Long createdBy, boolean review) {
+        if (name != null && name.length() > 128) throw new IllegalArgumentException("任务名称不能超过 128 字");
+        Plan plan = plan(agentIds, templateIds, review);
+        var uncovered = coverage(plan).stream().filter(row -> !Boolean.TRUE.equals(row.get("covered"))).map(row -> row.get("agent_id")).toList();
+        if (!uncovered.isEmpty()) throw new IllegalArgumentException("以下主机没有已发布且适用的检查项: " + uncovered);
+        // Freeze this selection before locking. A newly published series may be
+        // selected by the next task, but cannot enter this one without its lock.
+        var selectedIds = plan.items.stream().map(item -> ((Number) item.get("template_id")).longValue()).distinct().toList();
+        var packageIds = plan.templates.stream().filter(t -> selectedIds.contains(((Number) t.get("id")).longValue()) && t.get("package_id") != null)
+                .map(t -> String.valueOf(t.get("package_id"))).distinct().toList();
+        // All baseline task/repair operations use the same code ordering.
+        if (!packageIds.isEmpty()) jdbc.queryForList("SELECT DISTINCT code FROM t_baseline_package WHERE id IN ("
+                + DatabaseDialect.placeholders(packageIds.size()) + ") ORDER BY code", String.class, packageIds.toArray())
+                .forEach(code -> jdbc.update("UPDATE t_baseline_package_gate SET revision=revision+1 WHERE code=?", code));
+        plan = plan(agentIds, selectedIds, review);
+        uncovered = coverage(plan).stream().filter(row -> !Boolean.TRUE.equals(row.get("covered"))).map(row -> row.get("agent_id")).toList();
+        if (!uncovered.isEmpty()) throw new IllegalArgumentException("以下主机没有已发布且适用的检查项: " + uncovered);
+        if (coverage(plan).stream().anyMatch(row -> ((Number) row.get("itemCount")).intValue() > 500)) {
+            throw new IllegalArgumentException("每台主机单次最多下发 500 项检查，请缩小模板集合");
+        }
+        // Revalidate persisted definitions too: legacy/manual database changes
+        // cannot bypass the compiled command set or strict package check format.
+        for (var item : plan.items) {
+            var template = plan.templates.stream().filter(t -> ((Number) t.get("id")).longValue()
+                    == ((Number) item.get("template_id")).longValue()).findFirst().orElseThrow();
+            BaselinePackageFormat.validateCheck(JsonUtils.read((String) item.get("check")),
+                    ((Number) template.get("os_type")).intValue());
+        }
+        List<Long> selected = plan.items.stream().map(i -> ((Number) i.get("template_id")).longValue()).distinct().toList();
+        String taskNo = "BL" + LocalDateTime.now().format(NO_FMT) + java.util.UUID.randomUUID().toString().substring(0, 8);
+        long taskId = jdbc.queryForObject("INSERT INTO t_baseline_task(task_no,name,scope,template_ids,status,created_by,started_at) "
+                + "VALUES (?,?,?,?,1,?,CURRENT_TIMESTAMP) RETURNING id", Long.class, taskNo,
+                name == null || name.isBlank() ? taskNo + " 基线核查" : name,
+                JsonUtils.write(Map.of("group_ids", List.of(), "agent_ids", plan.agents.stream().map(a -> a.get("agent_id")).toList())),
+                database.encodeLongList(selected), createdBy);
+        for (var template : plan.templates) if (selected.contains(((Number) template.get("id")).longValue())) {
+            String digest = template.get("package_id") == null ? null : jdbc.queryForObject("SELECT content_sha256 FROM t_baseline_package WHERE id=?", String.class, template.get("package_id"));
+            jdbc.update("INSERT INTO t_baseline_task_template(task_id,template_id,code,name,version,package_id,content_sha256) VALUES (?,?,?,?,?,?,?)",
+                    taskId, template.get("id"), template.get("code"), template.get("name"), template.get("version"), template.get("package_id"), digest);
+        }
+        for (var item : plan.items) jdbc.update("""
+                INSERT INTO t_baseline_task_item(task_id,item_id,template_id,code,name,category,severity,"check",remediation,fix_spec,rule_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, taskId, item.get("id"), item.get("template_id"), item.get("code"), item.get("name"), item.get("category"),
+                item.get("severity"), item.get("check"), item.get("remediation"), item.get("fix_spec"), item.get("rule_id"));
+        for (var agent : plan.agents) {
+            String agentId = (String) agent.get("agent_id");
+            var items = agentItems(plan, agent);
+            var check = CmdBaselineCheck.newBuilder().setTaskId(String.valueOf(taskId))
+                    .addAllTemplateIds(items.stream().map(i -> String.valueOf(i.get("template_id"))).distinct().toList());
+            for (var item : items) {
+                jdbc.update("INSERT INTO t_baseline_task_expected(task_id,agent_id,item_id) VALUES (?,?,?)", taskId, agentId, item.get("id"));
+                check.addItems(BaselineCheckSpec.newBuilder().setItemId(String.valueOf(item.get("id"))).setCheck(String.valueOf(item.get("check"))));
+            }
+            commandService.dispatchAfterCommit(agentId, Command.newBuilder().setBaselineCheck(check), createdBy);
+        }
+        log.info("基线核查任务已下发: task_id={} agents={} templates={}", taskId, plan.agents.size(), selected);
+        return taskId;
     }
 
     /**

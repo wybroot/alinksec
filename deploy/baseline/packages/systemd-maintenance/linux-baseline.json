@@ -1,0 +1,51 @@
+{
+  "code": "ALINKSEC-UBUNTU24-SYSTEMD-MAINTENANCE",
+  "name": "Ubuntu 24.04 systemd 清理调度与内核同步指示核查",
+  "standard": "ALinkSec systemd维护当前参考（非完整合规标准）",
+  "product": "Ubuntu24 amd64/arm64；本地systemd255、systemctl/busctl；tmpfiles-clean调度及timesyncd运行/只读内核同步指示",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0046",
+      "ruleId": "BL-LINUX-0046",
+      "name": "systemd-tmpfiles-clean当前已加载命令与调度参考",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "systemd_maintenance",
+        "target": "local-system",
+        "option": "tmpfiles_clean",
+        "operator": "eq",
+        "expected": "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64、本地已加载systemd255管理器，固定查询systemd-tmpfiles-clean.timer/service及systemd-timesyncd.service。清理仅要求timer loaded/active/waiting、正确Unit及有限正NextElapseUSecMonotonic，service loaded/oneshot且inactive/dead、RemainAfterExit=no，主ExecStart恰为/usr/bin/systemd-tmpfiles与两个完整argv（argv0为程序名或绝对路径、argv1为--clean），不忽略命令错误。时钟参考要求timesyncd loaded/active/running、有效MainPID、Type=notify、主ExecStart为/usr/lib/systemd/systemd-timesyncd且仅一个argv，同时adjtimex(modes=0)返回0..4并无STA_UNSYNC/STA_CLOCKERR。systemctl状态与busctl指定属性的带类型JSON共用截止时间，结构化argv边界不能由拼接文字替代；两次完整查询确认单元、命令、调度与时钟状态/位未变化。已知完整偏差为fail，缺失/别名/未知/待重载/切换/读取失败/超限/变化/超时为error，一项error阻止整批发布。命令输出64KiB、最多8 ExecStart/32 argv、单路径或参数1024字节，拒绝额外字段、弱比较、远程/自选单元及命令。清理配置、路径/年龄、条件/其他执行阶段、命名空间/环境、实际删除与交付未验证；时间源身份、真实提供者、偏移准确性、认证与持续同步未验证，内核估计值不是准确性证明。两项只观察当前状态，重启持久性未验证，非原子；组件完整性由管理员确认。生产不启动/停止/重载服务、不触发清理、不读取环境或凭据、不改时钟，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0055",
+      "ruleId": "BL-LINUX-0055",
+      "name": "timesyncd当前运行状态与内核同步指示联合参考",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "systemd_maintenance",
+        "target": "local-system",
+        "option": "time_sync",
+        "operator": "eq",
+        "expected": "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64、本地已加载systemd255管理器，固定查询systemd-tmpfiles-clean.timer/service及systemd-timesyncd.service。清理仅要求timer loaded/active/waiting、正确Unit及有限正NextElapseUSecMonotonic，service loaded/oneshot且inactive/dead、RemainAfterExit=no，主ExecStart恰为/usr/bin/systemd-tmpfiles与两个完整argv（argv0为程序名或绝对路径、argv1为--clean），不忽略命令错误。时钟参考要求timesyncd loaded/active/running、有效MainPID、Type=notify、主ExecStart为/usr/lib/systemd/systemd-timesyncd且仅一个argv，同时adjtimex(modes=0)返回0..4并无STA_UNSYNC/STA_CLOCKERR。systemctl状态与busctl指定属性的带类型JSON共用截止时间，结构化argv边界不能由拼接文字替代；两次完整查询确认单元、命令、调度与时钟状态/位未变化。已知完整偏差为fail，缺失/别名/未知/待重载/切换/读取失败/超限/变化/超时为error，一项error阻止整批发布。命令输出64KiB、最多8 ExecStart/32 argv、单路径或参数1024字节，拒绝额外字段、弱比较、远程/自选单元及命令。清理配置、路径/年龄、条件/其他执行阶段、命名空间/环境、实际删除与交付未验证；时间源身份、真实提供者、偏移准确性、认证与持续同步未验证，内核估计值不是准确性证明。两项只观察当前状态，重启持久性未验证，非原子；组件完整性由管理员确认。生产不启动/停止/重载服务、不触发清理、不读取环境或凭据、不改时钟，无自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 systemd loaded maintenance and kernel clock indication reference",
+    "version": "2026-10-10",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/systemd-maintenance-definitions.json",
+    "sha256": "335b642959116e2653e3be6f226349fe2cee3c3fb442983ee337e02636974880"
+  }
+}

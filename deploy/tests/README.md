@@ -405,3 +405,27 @@ Set `JAVA_BIN`, `MAVEN_BIN`, `GO_BIN`, `ALINKSEC_MAVEN_REPO`, and
 paths. The PostgreSQL wrapper uses one 256 MiB database container and runs
 migration/permission, mTLS, and API checks before removing it. Publication also
 requires successful full CI on the exact release commit and the Release workflow.
+
+## Isolated PAM checks
+
+Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, then run `bash deploy/tests/pam-password-native.sh`. The dedicated Ubuntu24 image serially checks actual password changes and login authentication, including lockout thresholds, consecutive-failure reset, root behavior, finite unlock and bypass controls. Never run these native mutation tests against host PAM: the wrapper mounts source read-only, uses no network or data volumes, and removes the container. Both Linux architectures must execute the tests in CI; ordinary test skips are not acceptance. Production checks read only the fixed service configurations. See [login check scope](../../docs/24-PAM登录失败锁定核查.md).
+
+## Native systemd observations
+
+`bash deploy/tests/program-files-native.sh`复用Ubuntu24 PAM镜像，在独立文件系统副本对照glibc配置选择、SUID/SGID数值模式/属主和内容摘要、清单绑定、明确排除与信任/限额/变化边界。128MiB/单CPU/无网络，仓库只读，无宿主/etc或数据卷，root双开关和隔离标记必须齐全；FSETID用于非零GID SGID夹具，SYS_CHROOT只用于私有根ldconfig -N -X读取，不执行特权夹具或写生产清单。真实固定选择器只读，完整REST/页面是协议夹具，见[程序文件范围](../../docs/41-链接器元数据与SUID-SGID审核清单核查.md)。
+
+`systemd-native.sh`同时成组执行维护候选的十三次原生状态对照与只读C时钟探针。仅唯一运行时timer/service，清理timer在六小时后且120秒测试预算内清理，不触发真实清理；唯一通知型sleep不能冒充timesyncd，真实时间服务仅只读观察，不改时钟。busctl带类型ExecStart保留argv边界，强制结构/整数/变化/截止时间不跳过。完整同步/不同步组合为标注的协议夹具，参考边界见[systemd维护说明](../../docs/40-systemd清理调度与内核同步指示核查.md)。
+
+`bash deploy/tests/systemd-native.sh` requires a disposable GitHub-hosted Ubuntu24 runner and the compiled `.tmp/baseline-native.test`. It serially creates one unique test service, verifies running/inactive/failed/exited/masked/missing/invalid states and ignored client environment redirects, and cleans up that unit. Existing auditd/rsyslog units are queried read-only; these observations do not assert event capture or log delivery. Both architectures must execute this opt-in test in CI, not merely skip it in ordinary Go tests. Do not enable mutation fixtures on a user host. See [check scope](../../docs/25-systemd服务状态核查.md).
+
+`bash deploy/tests/auditd-native.sh` uses one disposable Ubuntu24 container, drops all capabilities, disables networking and mounts the repository read-only. The real auditd 3.1.2 parser accepts or rejects private disk configuration; after valid parsing, audit-control denial prevents daemon registration. This validates configuration parsing and private log metadata, without proving daemon operation or log delivery. Duplicate/long-line inputs remain Agent errors even when the native parser accepts them. See [on-disk scope](../../docs/28-auditd磁盘配置与日志目标核查.md).
+
+`sudoers-native.sh` 在精确Ubuntu24 sudo包的隔离容器中，用原生visudo/cvtsudoers对照16组有限声明语义。工作区只读、网络关闭、capabilities为零，访问/默认ACL边界必跑；不执行提权命令，不把磁盘声明当实际授权、认证或日志交付。详见 [sudoers核查范围](../../docs/31-sudoers磁盘策略核查.md)。
+
+`systemd-native.sh` 在临时 Ubuntu24 GitHub-hosted runner 串行验证服务观察和当前 Ctrl-Alt-Del 两条管理器路径。唯一无依赖 target 与唯一运行时管理器片段完整清理并核对原 burst 值；真实特殊目标仅只读查询，不触发按键、信号或关机。范围见 [Ctrl-Alt-Del核查](../../docs/34-Ctrl-Alt-Del当前systemd策略核查.md)。
+
+PAM隔离验证同时成组覆盖core/nofile/nproc声明和实际getrlimit/普通文件与fork拒绝，含root nproc例外；只在专用无宿主/etc挂载的Ubuntu24镜像打开会话。生产候选仍为只读声明观察，范围见 [PAM会话资源限制](../../docs/35-PAM会话资源限制核查.md)。
+
+OpenSSH名称解析/横幅批次：CI的`Check native OpenSSH name resolution and banner declarations with mandatory input boundaries`以root执行`TestNativeSSHNotice`，需`ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true`和Ubuntu24精确OpenSSH9.6包。六组/十次原生比较，必须执行数值UID/GID、ACL、链接/FIFO、有限Include及变化/截止时间边界，不能跳过。仅临时主机密钥/配置、实际固定选择器只读，无监听/认证/宿主配置变更。SQLite/PostgreSQL REST保留两项完整快照和三种结果阶段，页面增加三张桌面/手机图；报告为协议夹具。范围见[核查说明](../../docs/36-OpenSSH名称解析与横幅声明核查.md)。
+
+`bash deploy/tests/ipv4-host-native.sh`依次创建九个独立Docker网络命名空间，退出或异常均清理本场景容器。Docker先设全局值，runner子进程确认目标与宿主命名空间不同后，仅以nsenter进入容器网络命名空间顺序准备局部值，避免全局写入重置和OCI映射顺序；容器/proc/sys保持只读。NET_ADMIN仅用于创建两个未启用dummy接口（含点名称）；每场景128MiB/一个CPU，容器无SYS_ADMIN、privileged或host网络、宿主/etc及数据卷。编译`.tmp/baseline-native.test`后运行，root、双开关和隔离镜像标记缺一拒绝测试角色写入。原生对照覆盖max(all,interface)、default继承、全部接口及局部/全局转发，强制角色可信性、ACL、输入上限/变化/共同截止时间不允许跳过。完整REST/页面报告是协议夹具，实际数据包强制未验证，见[IPv4主机范围](../../docs/39-IPv4主机角色与全部接口当前参考核查.md)。

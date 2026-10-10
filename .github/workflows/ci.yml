@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test ./cmd/agent ./internal/upgrade
+        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -51,7 +51,7 @@ jobs:
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
           - arch: amd64
@@ -98,8 +98,10 @@ jobs:
           node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
-      - name: Check security feed export tools
-        run: python3 -B -m unittest discover -s deploy/tests -p 'test_library_feed_tools.py' -v
+      - name: Check security feed and baseline package tools
+        run: |
+          python3 -B -m unittest discover -s deploy/tests -p 'test_*_tools.py' -v
+          node --test deploy/tests/baseline-package.test.mjs
       - name: Check deployment configuration and least-privilege boundaries
         run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
@@ -120,6 +122,9 @@ jobs:
         working-directory: server
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
+      - name: Check baseline review and mixed-system selection in the production web bundle
+        working-directory: web
+        run: node test/baseline-packages-browser.mjs
       - name: Check real SQLite maintenance and restored application
         timeout-minutes: 10
         run: |
@@ -127,10 +132,62 @@ jobs:
           bash deploy/tests/sqlite-maintenance-local.sh
         env:
           ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
-      - run: go test ./...
+      - name: Ensure native OpenSSH configuration checks are available
+        run: |
+          if ! test -x /usr/sbin/sshd; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends openssh-server
+          fi
+          # Root sshd -T also requires its privilege-separation directory.
+          # Preparing this runner directory does not start an SSH listener.
+          if ! sudo test -e /run/sshd; then
+            sudo install -d -o root -g root -m 0755 /run/sshd
+          fi
+      - run: go test -v ./...
         working-directory: agent
+        env:
+          ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
+      - name: Check native protected local identity files and redacted evidence
+        working-directory: agent
+        run: |
+          mkdir -p ../.tmp
+          go test -c -o ../.tmp/baseline-native.test ./internal/baseline
+          cd internal/baseline
+          sudo env ALINKSEC_IDENTITY_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLocalIdentity$'
+      - name: Check native fixed log metadata and ACL boundaries
+        working-directory: agent/internal/baseline
+        run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
+      - name: Check native OpenSSH name resolution and banner declarations with mandatory input boundaries
+        working-directory: agent/internal/baseline
+        run: sudo env ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeSSHNotice$'
+      - name: Check native systemd service and Ctrl-Alt-Del observations with isolated runner fixtures
+        run: bash deploy/tests/systemd-native.sh
+      - name: Check native kernel audit and isolated private watch rules
+        run: bash deploy/tests/audit-native.sh
+      - name: Check isolated auditd native configuration parsing and declared log metadata
+        run: bash deploy/tests/auditd-native.sh
+      - name: Check isolated Debian cron native file selection and metadata boundaries
+        run: bash deploy/tests/cron-native.sh
+      - name: Check isolated rsyslog native cron routing across all eight severities
+        run: bash deploy/tests/rsyslog-cron-native.sh
+      - name: Check isolated sudoers native declarations and mandatory input boundaries
+        run: bash deploy/tests/sudoers-native.sh
+      - name: Check isolated APT native installation/source declarations and mandatory input boundaries
+        run: bash deploy/tests/apt-native.sh
+      - name: Check isolated Ubuntu24 PAM password, login lockout and resource limits
+        run: |
+          cp .tmp/baseline-native.test .tmp/pam-native.test
+          bash deploy/tests/pam-password-native.sh
+      - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
+        run: bash deploy/tests/shadow-defaults-native.sh
+      - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
+        run: bash deploy/tests/bash-policy-native.sh
+      - name: Check isolated linker metadata and reviewed privileged file inventory
+        run: bash deploy/tests/program-files-native.sh
+      - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
+        run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates
-        run: go test -race ./internal/guard
+        run: go test -race ./internal/guard ./internal/baseline
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |
@@ -182,6 +239,8 @@ jobs:
           path: |
             .tmp/browser-artifacts-*
             .tmp/library-browser-artifacts
+            .tmp/baseline-browser-artifacts
+            .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
       - run: docker compose up -d --wait
@@ -307,8 +366,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "3"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")" = "45"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "7"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -339,11 +398,11 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Check Agent mTLS identity with the PostgreSQL application role
+      - name: Check Agent identity and concurrent baseline reports with the PostgreSQL application role
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:

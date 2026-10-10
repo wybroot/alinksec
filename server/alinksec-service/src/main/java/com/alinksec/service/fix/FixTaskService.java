@@ -57,14 +57,14 @@ public class FixTaskService {
      */
     @Transactional
     public long createTask(String name, List<Map<String, Object>> items, Long createdBy) {
-        if (items == null || items.isEmpty()) {
-            throw new IllegalArgumentException("请选择修复项");
+        if (items == null || items.isEmpty() || items.size() > 500) {
+            throw new IllegalArgumentException("请选择 1 至 500 项修复目标");
         }
         // 归一化输入：agentId + itemId
         record Target(String agentId, long itemId) {}
         List<Target> targets = new ArrayList<>();
         for (Map<String, Object> it : items) {
-            String agentId = String.valueOf(it.get("agentId"));
+            String agentId = it.get("agentId") instanceof String value ? value : "";
             long itemId = it.get("itemId") instanceof Number n ? n.longValue() : -1;
             if (agentId.isBlank() || itemId <= 0) {
                 throw new IllegalArgumentException("修复项格式非法（需 agentId + itemId）");
@@ -74,11 +74,17 @@ public class FixTaskService {
 
         // 基线项快照：fix_spec + check（一次查全，去重 itemId）
         List<Long> itemIds = targets.stream().map(Target::itemId).distinct().toList();
+        jdbc.queryForList("""
+                SELECT DISTINCT p.code FROM t_baseline_item i JOIN t_baseline_template t ON t.id=i.template_id
+                JOIN t_baseline_package p ON p.id=t.package_id WHERE i.id IN (%s) ORDER BY p.code
+                """.formatted(DatabaseDialect.placeholders(itemIds.size())), String.class, itemIds.toArray())
+                .forEach(code -> jdbc.update("UPDATE t_baseline_package_gate SET revision=revision+1 WHERE code=?", code));
         Map<Long, Map<String, Object>> specs = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbc.queryForList("""
-                SELECT id, code, name, CAST(fix_spec AS TEXT) AS fix_spec,
-                       CAST("check" AS TEXT) AS "check"
-                FROM t_baseline_item WHERE id IN (%s)
+                SELECT i.id, i.code, i.name, CAST(i.fix_spec AS TEXT) AS fix_spec,
+                       CAST(i."check" AS TEXT) AS "check",t.os_type,t.os_version_pattern
+                FROM t_baseline_item i JOIN t_baseline_template t ON t.id=i.template_id
+                WHERE i.enabled AND t.enabled AND i.id IN (%s)
                 """.formatted(DatabaseDialect.placeholders(itemIds.size())), itemIds.toArray())) {
             specs.put(((Number) row.get("id")).longValue(), row);
         }
@@ -89,7 +95,21 @@ public class FixTaskService {
         for (Target t : targets) {
             Map<String, Object> spec = specs.get(t.itemId());
             if (spec == null) {
-                throw new IllegalArgumentException("基线项不存在: " + t.itemId());
+                throw new IllegalArgumentException("基线项不存在、未启用或模板已撤回: " + t.itemId());
+            }
+            var host = jdbc.queryForList("SELECT os_type,os_version FROM t_agent WHERE agent_id=? AND deleted=false", t.agentId());
+            if (host.size() != 1 || !com.alinksec.service.baseline.BaselinePackageFormat.applies(
+                    ((Number) spec.get("os_type")).intValue(), (String) spec.get("os_version_pattern"), host.get(0))) {
+                throw new IllegalArgumentException("基线修复不适用于当前主机系统: " + t.agentId());
+            }
+            var evidence = jdbc.queryForList("""
+                    SELECT r.passed,i.fix_current FROM t_baseline_result r
+                    JOIN v_baseline_result_definition i ON i.result_id=r.id
+                    WHERE r.agent_id=? AND r.item_id=? ORDER BY r.task_id DESC,r.id DESC LIMIT 1
+                    """, t.agentId(), t.itemId());
+            if (evidence.isEmpty() || DatabaseDialect.readBoolean(evidence.get(0).get("passed"))
+                    || !DatabaseDialect.readBoolean(evidence.get(0).get("fix_current"))) {
+                throw new IllegalArgumentException("缺少适用的未通过核查结果，或结果定义已过期，请重新核查: " + t.itemId());
             }
             String fixSpec = (String) spec.get("fix_spec");
             if (fixSpec == null || fixSpec.isBlank() || "null".equals(fixSpec)) {
@@ -144,7 +164,7 @@ public class FixTaskService {
         }
 
         for (var e : byAgent.entrySet()) {
-            commandService.dispatch(e.getKey(), Command.newBuilder()
+            commandService.dispatchAfterCommit(e.getKey(), Command.newBuilder()
                     .setVulnFix(CmdVulnFix.newBuilder()
                             .setTaskId(String.valueOf(taskId))
                             .addAllFixes(e.getValue())),

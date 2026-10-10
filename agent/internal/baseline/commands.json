@@ -1,0 +1,24 @@
+{
+  "linux": [
+    "awk -F: '($2==\"\"){print $1}' /etc/shadow",
+    "awk -F: '($3==0 && $1!=\"root\"){print $1}' /etc/passwd",
+    "command -v auditctl >/dev/null 2>&1 && echo yes || echo no",
+    "sysctl -n net.ipv4.tcp_syncookies",
+    "sysctl -n net.ipv4.conf.all.accept_redirects",
+    "sysctl -n net.ipv4.conf.all.accept_source_route",
+    "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+    "sysctl -n net.ipv4.conf.all.rp_filter",
+    "sysctl -n net.ipv4.conf.all.log_martians",
+    "sysctl -n net.ipv4.ip_forward",
+    "command -v alinksec-agent >/dev/null 2>&1 && echo yes || echo no",
+    "stat -L -c '%f %u' /var/log/messages",
+    "sysctl -n net.ipv6.conf.all.accept_redirects",
+    "findmnt --noheadings --raw --output OPTIONS --target /tmp"
+  ],
+  "windows": [
+    "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+    "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+    "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+    "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\""
+  ]
+}

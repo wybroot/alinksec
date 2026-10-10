@@ -120,6 +120,15 @@ SQL
 done
 
 psql -X -v ON_ERROR_STOP=1 --set=app_user="$ALINKSEC_APP_DB_USER" <<'SQL'
+-- The legacy bootstrap inserts template id=1 explicitly. Advance its sequence
+-- before new reviewed templates use generated IDs; never reset an advanced one.
+-- The table lock serializes ordinary inserts with this startup repair.
+BEGIN;
+LOCK TABLE public.t_baseline_template IN ACCESS EXCLUSIVE MODE;
+SELECT setval(pg_get_serial_sequence('public.t_baseline_template', 'id'),
+  GREATEST(COALESCE((SELECT MAX(id) FROM public.t_baseline_template), 1),
+           (SELECT last_value FROM public.t_baseline_template_id_seq)), true);
+COMMIT;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM :"app_user";
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM :"app_user";

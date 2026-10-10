@@ -1,0 +1,65 @@
+{
+  "code": "ALINKSEC-UBUNTU24-SSH-NOTICE",
+  "name": "Ubuntu 24.04 SSH 名称解析与横幅声明（示例需调整）",
+  "standard": "ALinkSec OpenSSH 提示声明参考（非完整合规标准）",
+  "product": "Ubuntu24.04；openssh-server 1:9.6p1-3ubuntu13系列；固定sshd_config与issue.net；示例连接与文案需审核",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0020",
+      "ruleId": "BL-LINUX-0020",
+      "name": "指定示例连接的UseDNS名称解析依赖参考",
+      "category": "访问控制",
+      "severity": 1,
+      "check": {
+        "type": "sshd_notice",
+        "target": "/etc/ssh/sshd_config",
+        "option": "usedns",
+        "connection": {
+          "user": "root",
+          "host": "admin.example.invalid",
+          "address": "192.0.2.10",
+          "local_address": "192.0.2.20",
+          "local_port": 22
+        },
+        "operator": "eq",
+        "expected": "no",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。"
+    },
+    {
+      "code": "BL-LINUX-0043",
+      "ruleId": "BL-LINUX-0043",
+      "name": "指定示例连接的issue.net审核横幅内容",
+      "category": "剩余信息保护",
+      "severity": 1,
+      "check": {
+        "type": "sshd_notice",
+        "target": "/etc/ssh/sshd_config",
+        "option": "banner",
+        "connection": {
+          "user": "root",
+          "host": "admin.example.invalid",
+          "address": "192.0.2.10",
+          "local_address": "192.0.2.20",
+          "local_port": 22
+        },
+        "operator": "eq",
+        "expected": "file=/etc/issue.net,sha256=d0eacfbc40497e185ff4c5a6f905668a7f3d775bd1ec645658ba15b2d49839b5",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 openssh-server 1:9.6p1-3ubuntu13系列；固定/etc/ssh/sshd_config与明确示例连接，Include仅支持/etc/ssh内普通目录、末段*或?及无引号/转义的有限语法；原生解释优先值与Match。配置/root目录及所选issue.net需root:root、无ACL/链接/硬链接/组或其他写权限，配置单文件64KiB/1024行、共1MiB/64次展开/深8/目录128条。两次解析观测一致并复核输入，仍非原子快照。UseDNS=no是本项目减少名称解析依赖参考，不是通用安全要求；host为合成输入，其实际名称解析未验证。横幅仅接受固定/etc/issue.net，非空UTF-8且不超过16KiB，按审核原始字节SHA256比对，不输出原文或读取其他路径。运行实例、命令行覆盖及真实横幅交付未验证。管理员调整实际连接并审核文案摘要后生成新候选；无自动修复，不启动监听、不发送认证或改变配置；原生Match Group等仍可访问本机NSS。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 OpenSSH name resolution and banner disk review",
+    "version": "2026-10-09",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/ssh-notice-definitions.json",
+    "sha256": "f4778e497939dba55f6780591dc4da3d5fdceb5f7c1a5910ef0d4941a3af17a2"
+  }
+}

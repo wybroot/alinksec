@@ -50,7 +50,7 @@ security dashboard at `/screen` for an at-a-glance view of the environment.
 | Domain | What You Can Do |
 | --- | --- |
 | 🖥️ **Hosts & assets** | Enroll hosts with mTLS; track heartbeats, software, processes, ports, accounts and disks; inspect read-only Linux container and local Kubernetes workload inventory. |
-| 📋 **Security baselines** | Run structured checks, update check definitions without replacing the Agent, inspect noncompliant items and apply verified configuration repairs. |
+| 📋 **Security baselines** | Review versioned Linux/Windows template packages, select published checks by Agent OS, preserve task snapshots, and inspect noncompliant items before verified repairs. |
 | 🔎 **Risk discovery** | Scan for vulnerabilities, weak passwords and high-risk ports; review findings alongside the affected host's inventory. |
 | 🧩 **Package remediation** | Approve per-host fixes, schedule maintenance windows, distribute offline patches and collect execution results. |
 | 🦠 **Malware scanning** | Run quick, full or custom scans using SHA256 signatures and rules; quarantine, restore or delete detections; maintain allowlists and update signatures. |
@@ -515,6 +515,11 @@ validation reference is in English.
 | [15 · Security Libraries](docs/15-安全库同步与存储.md) | Manual imports, remote feeds, retained versions and S3 configuration |
 | [16 · Open-source Platform Integration](docs/16-开源安全平台对接指南.md) | Native MISP and export scripts, OpenCTI/vulnerability conversion and authentication |
 | [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
+| [18 · Baseline Template Review](docs/18-基线模板审核与系统适配.md) | Linux/Windows candidates, applicability, review, test, publication and task snapshots |
+| [20 · Legacy Baseline Content Review](docs/20-旧基线模板内容审核.md) | Retirement of 60 legacy rules, reviewed observations and unsupported scope |
+| [37 · Shadow Account Defaults](docs/37-Shadow新账户口令有效期与预警默认声明核查.md) | Ubuntu24 finite new-account aging declarations, isolated native comparison and explicit existing-account limits |
+| [38 · Bash Global Startup Declarations](docs/38-Bash全局启动与历史声明核查.md) | Five finite Ubuntu24 timeout, mask and history declarations with separate login/nonlogin scope |
+| [19 · Module Completion Plan](docs/19-模块完善计划.md) | One module per branch, baseline quality gates and ordered backlog |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>

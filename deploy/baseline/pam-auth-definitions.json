@@ -1,0 +1,37 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu 24.04 login PAM lockout policy review",
+    "version": "2026-10-07",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/pam-auth-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-PAM-AUTH",
+      "name": "Ubuntu 24.04 login 登录失败锁定参考核查",
+      "standard": "PAM 认证链参考策略（非完整合规）",
+      "product": "Ubuntu 24.04 Linux-PAM 1.5.3；login 明确本地unix/faillock认证链，需模块及可读普通配置",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0005",
+          "ruleId": "BL-LINUX-0005",
+          "name": "login 服务本地认证链的连续失败锁定参考",
+          "category": "身份鉴别",
+          "severity": 4,
+          "check": {
+            "type": "pam_auth",
+            "target": "/etc/pam.d/login",
+            "option": "faillock",
+            "operator": "eq",
+            "expected": "deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定 Ubuntu24.04 login 的 auth 组及明确 preauth/unix/authfail/authsucc/deny 顺序和控制；解析固定 faillock.conf 及各阶段模块覆盖，要求三个阶段计数设置一致。参考 deny 1–5、fail_interval 至少900秒、普通与root有限解锁900–86400秒、显式even_deny_root。仅只读认证配置，不证明应用调用、全部PAM服务、计数文件可写/持久、NSS身份源或运行期模块行为。未知链、额外模块/身份源、substack、任意配置/计数目录、异常或读取变化保持error。无自动修复，不尝试登录、不读取口令/哈希/计数记录。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

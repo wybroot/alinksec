@@ -42,7 +42,11 @@ public class SqliteDatabaseConfiguration {
         private static final List<String> MIGRATIONS = List.of(
                 "db/sqlite/V001__initial.sql",
                 "db/common/V002__security_libraries.sql",
-                "db/common/V003__library_schedules.sql"
+                "db/common/V003__library_schedules.sql",
+                "db/common/V004__baseline_packages.sql",
+                "db/common/V005__baseline_execution_evidence.sql",
+                "db/common/V006__retire_legacy_baseline.sql",
+                "db/common/V007__baseline_log_target.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();
