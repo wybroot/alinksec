@@ -53,6 +53,13 @@ func TestNativeIPv4Host(t *testing.T) {
 	if len(values.Interfaces) != 5 {
 		t.Fatal("all/default and all three real interfaces required", values)
 	}
+	expectedGlobal := 0
+	if os.Getenv("ALINKSEC_IPV4_HOST_SCENARIO") == "global-forward" {
+		expectedGlobal = 1
+	}
+	if values.IPForward != expectedGlobal {
+		t.Fatal("explicit global namespace fixture precondition failed", values)
+	}
 	switch os.Getenv("ALINKSEC_IPV4_HOST_SCENARIO") {
 	case "local-forward":
 		if values.IPForward != 0 || values.Interfaces["lo"].Forwarding != 1 {
