@@ -2,7 +2,7 @@
   "code": "ALINKSEC-UBUNTU24-SYSTEMD-MAINTENANCE",
   "name": "Ubuntu 24.04 systemd 清理调度与内核同步指示核查",
   "standard": "ALinkSec systemd维护当前参考（非完整合规标准）",
-  "product": "Ubuntu24.04 amd64/arm64；已加载systemd255系统管理器及本地systemctl/busctl；systemd-tmpfiles-clean.timer/service与systemd-timesyncd.service；Linux只读adjtimex",
+  "product": "Ubuntu24 amd64/arm64；本地systemd255、systemctl/busctl；tmpfiles-clean调度及timesyncd运行/只读内核同步指示",
   "osType": 1,
   "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
   "version": "1",
@@ -46,6 +46,6 @@
     "name": "ALinkSec Ubuntu24 systemd loaded maintenance and kernel clock indication reference",
     "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/systemd-maintenance-definitions.json",
-    "sha256": "f7eb704741dfa6aa07dbd8015e4132807f3b052f37b5f80ae38987ea66672554"
+    "sha256": "335b642959116e2653e3be6f226349fe2cee3c3fb442983ee337e02636974880"
   }
 }

@@ -68,6 +68,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         document = BUILDER.build(ROOT / "deploy/baseline/systemd-maintenance-definitions.json", "linux")
         self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/systemd-maintenance/linux-baseline.json").read_text()))
         self.assertEqual({"BL-LINUX-0046", "BL-LINUX-0055"}, {item["ruleId"] for item in document["items"]})
+        self.assertLessEqual(len(document["product"]), 128)
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
         for item in document["items"]:
             self.assertEqual("systemd_maintenance", item["check"]["type"])
