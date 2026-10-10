@@ -144,6 +144,14 @@ public final class BaselinePackageFormat {
                     require(option.equals("usedns") ? expected.equals("no") : expected.matches("file=/etc/issue\\.net,sha256=[a-f0-9]{64}"), "SSH提示需UseDNS=no或固定issue.net审核SHA256");
                 }
             }
+            case "linux_ipv4_host" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1, "IPv4主机检查仅支持Linux当前命名空间");
+                require(text(check, "target", 1024).equals("/proc/sys/net/ipv4") && text(check, "operator", 32).equals("eq"), "IPv4需固定查询和完整参考");
+                var references = Map.of("rp_filter", "role=non-router-symmetric,default_effective=1,interfaces_effective=1", "forwarding", "role=non-router-symmetric,ip_forward=0,all/default/interfaces_forwarding=0");
+                String option = text(check, "option", 32);
+                require(references.containsKey(option) && references.get(option).equals(text(check, "expected", 1000)), "IPv4角色及完整参考不能隐式扩展");
+            }
             case "bash_global_policy" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "Bash全局启动声明仅支持Linux Ubuntu24");

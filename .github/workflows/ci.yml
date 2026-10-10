@@ -182,6 +182,8 @@ jobs:
         run: bash deploy/tests/shadow-defaults-native.sh
       - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
         run: bash deploy/tests/bash-policy-native.sh
+      - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
+        run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates
         run: go test -race ./internal/guard ./internal/baseline
         working-directory: agent

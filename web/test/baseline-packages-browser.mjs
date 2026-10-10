@@ -29,6 +29,8 @@ let browser,page,rejectReview=true,reportStage=null,rejectCoverage=true,showErro
 const stagesByPlatform={...fixtures.platforms,ssh:fixtures.ssh,identity:fixtures.identity,pam:fixtures.pam,pamAuth:fixtures.pamAuth,systemd:fixtures.systemd,logMetadata:fixtures.logMetadata,audit:fixtures.audit,auditd:fixtures.auditd,cron:fixtures.cron,rsyslogCron:fixtures.rsyslogCron,sudoers:fixtures.sudoers,aptInstall:fixtures.aptInstall,aptSources:fixtures.aptSources}
 stagesByPlatform.ctrlAltDel=fixtures.ctrlAltDel
 stagesByPlatform.pamLimits=fixtures.pamLimits
+stagesByPlatform.ipv4Host=fixtures.ipv4Host
+assert.ok(fixtures.ipv4Host?.completed && fixtures.ipv4Host?.pass && fixtures.ipv4Host?.error,'Capture current two-item IPv4 role/reference REST candidate before browser validation')
 stagesByPlatform.bashPolicy=fixtures.bashPolicy
 assert.ok(fixtures.bashPolicy?.completed && fixtures.bashPolicy?.pass && fixtures.bashPolicy?.error,'Capture current five-item global Bash REST candidate before browser validation')
 stagesByPlatform.shadowDefaults=fixtures.shadowDefaults
@@ -499,6 +501,35 @@ try {
   await page.setViewportSize({width:390,height:844})
   await aptSourceActual.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/apt-sources-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+  await page.setViewportSize({width:1440,height:1000})
+  details[fixtures.ipv4Host.candidate.id]=structuredClone(fixtures.ipv4Host.completed)
+  await page.reload()
+  const ipv4=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 IPv4 非路由对称路由主机核查（需本机角色声明）',exact:true})})
+  await ipv4.getByRole('button',{name:'查看版本',exact:true}).click()
+  const ipv4Definitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
+  await expect(ipv4Definitions).toHaveCount(2)
+  for(const [index,item] of fixtures.ipv4Host.completed.document.items.entries()){
+    await expect(ipv4Definitions.nth(index)).toContainText('linux_ipv4_host')
+    await expect(ipv4Definitions.nth(index)).toContainText('/proc/sys/net/ipv4')
+    await expect(ipv4Definitions.nth(index)).toContainText(item.check.expected)
+  }
+  await ipv4Definitions.last().scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/ipv4-host-scope-desktop.png',fullPage:true,animations:'disabled'})
+  await dialog.locator('.el-table__expand-icon').click()
+  await expect(dialog.getByText('Interface loose overrides all strict',{exact:true})).toBeVisible()
+  const ipv4Actual=dialog.getByText(/scope=current-netns-ipv4-host.*option=rp_filter/)
+  await expect(ipv4Actual).toContainText('role=non-router-symmetric role_source=/etc/alinksec/ipv4-host-role')
+  await expect(ipv4Actual).toContainText('routing_state=unverified packet_enforcement_state=unverified persistence_state=unverified other_netns_state=unverified snapshot_state=non_atomic')
+  await expect(ipv4Actual).toContainText('all:rp=1,effective=1,fwd=0;default:rp=0,effective=1,fwd=0;eth0:rp=2,effective=2,fwd=0')
+  await expect(dialog.getByText(/scope=current-netns-ipv4-host.*option=forwarding/)).toContainText('ip_forward=0 interfaces=2')
+  await ipv4Actual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/ipv4-host-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+  await page.setViewportSize({width:390,height:844})
+  await ipv4Actual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/ipv4-host-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  writeFileSync(root+'/ipv4-host-browser-result.json',JSON.stringify({passed:true,mode,items:2,checks:['both immutable references','local role prerequisite','max(all,interface) loose-mode failure','mixed results and publication error gate','routing/packet/persistence/other namespace limits','viewer rights and desktop/mobile evidence']},null,2))
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
   await page.setViewportSize({width:1440,height:1000})
   details[fixtures.bashPolicy.candidate.id]=structuredClone(fixtures.bashPolicy.completed)

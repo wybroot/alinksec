@@ -1,0 +1,51 @@
+{
+  "code": "ALINKSEC-UBUNTU24-IPV4-HOST",
+  "name": "Ubuntu 24.04 IPv4 非路由对称路由主机核查（需本机角色声明）",
+  "standard": "ALinkSec IPv4主机参考（非完整合规标准）",
+  "product": "Ubuntu24.04 amd64/arm64；Linux IPv4 procfs；当前Agent网络命名空间；管理员明确非路由/对称路由角色；最多16现存接口",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0036",
+      "ruleId": "BL-LINUX-0036",
+      "name": "已声明对称路由主机的IPv4严格反向路径过滤当前参考",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "linux_ipv4_host",
+        "target": "/proc/sys/net/ipv4",
+        "option": "rp_filter",
+        "operator": "eq",
+        "expected": "role=non-router-symmetric,default_effective=1,interfaces_effective=1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅用于管理员确认当前Agent网络命名空间无需IPv4转发且采用对称路由的Ubuntu24主机。管理员评估路由器、容器宿主、VPN、多宿主、策略/非对称路由后，在可信root:root普通文件/etc/alinksec/ipv4-host-role中明确声明non-router-symmetric及一个换行；文件和全部父目录不得组/其他可写、含链接/文件硬链接或访问/默认ACL。角色缺失、不适用或不可信为error；声明是管理员输入，真实拓扑仍unverified。读取真实procfs的ip_forward及conf/all、default与全部现存接口的rp_filter/forwarding；包括lo、未启用接口和含点名称，最多16接口，名称限1..15 ASCII字母数字下划线短横线及后续点号。rp_filter按max(all,interface)核对每个现存接口严格模式1，max(all,default)也须1；all=1不能覆盖接口宽松模式2。forwarding要求ip_forward及all/default/所有接口都0；局部接口1仍为fail。两次完整读取、接口/路径/线程网络命名空间复核及角色稳定性共用截止时间，仍非原子；缺失/权限/未知值/超限/变化/超时为error，已知完整偏差为fail。仅证明当前参数参考，实际路由/fwmark、数据包防护、其他命名空间、IPv6、持久配置和未来接口均未验证。生产只读，不执行sysctl写入、不调整路由、不创建角色文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0038",
+      "ruleId": "BL-LINUX-0038",
+      "name": "已声明非路由主机的IPv4全部接口转发当前参考",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "linux_ipv4_host",
+        "target": "/proc/sys/net/ipv4",
+        "option": "forwarding",
+        "operator": "eq",
+        "expected": "role=non-router-symmetric,ip_forward=0,all/default/interfaces_forwarding=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅用于管理员确认当前Agent网络命名空间无需IPv4转发且采用对称路由的Ubuntu24主机。管理员评估路由器、容器宿主、VPN、多宿主、策略/非对称路由后，在可信root:root普通文件/etc/alinksec/ipv4-host-role中明确声明non-router-symmetric及一个换行；文件和全部父目录不得组/其他可写、含链接/文件硬链接或访问/默认ACL。角色缺失、不适用或不可信为error；声明是管理员输入，真实拓扑仍unverified。读取真实procfs的ip_forward及conf/all、default与全部现存接口的rp_filter/forwarding；包括lo、未启用接口和含点名称，最多16接口，名称限1..15 ASCII字母数字下划线短横线及后续点号。rp_filter按max(all,interface)核对每个现存接口严格模式1，max(all,default)也须1；all=1不能覆盖接口宽松模式2。forwarding要求ip_forward及all/default/所有接口都0；局部接口1仍为fail。两次完整读取、接口/路径/线程网络命名空间复核及角色稳定性共用截止时间，仍非原子；缺失/权限/未知值/超限/变化/超时为error，已知完整偏差为fail。仅证明当前参数参考，实际路由/fwmark、数据包防护、其他命名空间、IPv6、持久配置和未来接口均未验证。生产只读，不执行sysctl写入、不调整路由、不创建角色文件，无自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 current-network-namespace IPv4 declared host reference",
+    "version": "2026-10-10",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/ipv4-host-definitions.json",
+    "sha256": "3a09e23ca0d3761ec68c467a5c0fa192dca7aecadbc9f6748f8ded70e2c63ef5"
+  }
+}

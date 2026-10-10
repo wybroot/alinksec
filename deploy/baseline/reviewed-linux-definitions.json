@@ -1,7 +1,7 @@
 {
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-09",
+    "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json"
   },
   "platforms": {
@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "19",
+      "version": "20",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -254,11 +254,11 @@
         },
         {
           "ruleId": "BL-LINUX-0036",
-          "reason": "固定 all=1，需网络角色、接口与路由策略适用性，避免通用修复破坏已有网络。"
+          "reason": "通用包不含此项；独立Ubuntu24 IPv4主机候选需可信本机非路由/对称路由声明，核对all与全部接口/default的max严格模式；真实路由与数据包强制未验证。"
         },
         {
           "ruleId": "BL-LINUX-0038",
-          "reason": "查询本身有明确错误；非路由主机条件没有进入适用范围，需要按产品用途区分。"
+          "reason": "通用包不含此项；独立Ubuntu24 IPv4主机候选需可信本机角色声明，核对ip_forward及all/default/全部现存接口转发为0；其他命名空间和持久配置未验证。"
         },
         {
           "ruleId": "BL-LINUX-0039",
@@ -1013,13 +1013,21 @@
       },
       {
         "ruleId": "BL-LINUX-0036",
-        "name": "反向路径过滤策略",
+        "name": "已声明对称路由主机的IPv4严格反向路径过滤当前参考",
         "category": "入侵防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "固定 all=1，需网络角色、接口与路由策略适用性，避免通用修复破坏已有网络。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：固定 all=1，需网络角色、接口与路由策略适用性，避免通用修复破坏已有网络。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 IPv4主机候选需可信本机非路由/对称路由声明，核对all与全部接口/default的max严格模式；真实路由与数据包强制未验证。",
+        "scope": "Ubuntu24当前Agent网络命名空间，可信本机non-router-symmetric角色声明；全部现存接口及default按max(all,值)=1核对，最多16接口。真实路由/数据包强制/其他命名空间/持久配置未验证。",
+        "remediation": "管理员确认非路由及对称路由适用性，在可信root:root普通文件/etc/alinksec/ipv4-host-role声明non-router-symmetric及换行。未声明或不适用保持error；参数完整偏差fail，缺失/未知/超限/变化error。详见独立ipv4-host候选和docs/39；无自动修复。",
+        "check": {
+          "type": "linux_ipv4_host",
+          "target": "/proc/sys/net/ipv4",
+          "option": "rp_filter",
+          "operator": "eq",
+          "expected": "role=non-router-symmetric,default_effective=1,interfaces_effective=1",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0037",
@@ -1040,13 +1048,21 @@
       },
       {
         "ruleId": "BL-LINUX-0038",
-        "name": "IPv4 转发与主机角色",
+        "name": "已声明非路由主机的IPv4全部接口转发当前参考",
         "category": "入侵防范",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "查询本身有明确错误；非路由主机条件没有进入适用范围，需要按产品用途区分。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：查询本身有明确错误；非路由主机条件没有进入适用范围，需要按产品用途区分。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 IPv4主机候选需可信本机角色声明，核对ip_forward及all/default/全部现存接口转发为0；其他命名空间和持久配置未验证。",
+        "scope": "Ubuntu24当前Agent网络命名空间，可信本机non-router-symmetric角色声明；ip_forward及all/default/全部现存接口转发均0，最多16接口。其他命名空间/真实流量/持久配置未验证。",
+        "remediation": "管理员确认非路由及对称路由适用性，在可信root:root普通文件/etc/alinksec/ipv4-host-role声明non-router-symmetric及换行。未声明或不适用保持error；参数完整偏差fail，缺失/未知/超限/变化error。详见独立ipv4-host候选和docs/39；无自动修复。",
+        "check": {
+          "type": "linux_ipv4_host",
+          "target": "/proc/sys/net/ipv4",
+          "option": "forwarding",
+          "operator": "eq",
+          "expected": "role=non-router-symmetric,ip_forward=0,all/default/interfaces_forwarding=0",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0039",

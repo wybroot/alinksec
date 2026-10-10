@@ -109,6 +109,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkShadowAccountDefaults(cs)
 	case "bash_global_policy":
 		result = checkBashGlobalPolicy(cs)
+	case "linux_ipv4_host":
+		result = checkIPv4Host(cs)
 	case "local_identity_file", "local_accounts":
 		result = checkLocalIdentity(cs)
 	case "pam_password":
