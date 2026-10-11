@@ -81,7 +81,7 @@ function request(path, { token, method = 'GET', body, rawBody, extraHeaders = {}
 
 async function ok(path, options) {
   const response = await request(path, options)
-  assert.equal(response.status, 200, path)
+  assert.equal(response.status, 200, `${path}: ${response.body.msg}`)
   assert.equal(response.body.code, 0, `${path}: ${response.body.msg}`)
   return response.body.data
 }
@@ -1007,6 +1007,9 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   appArmor.withdrawn = await ok(`${appArmorPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(appArmor.withdrawn.status, 'withdrawn')
   // These complete reports validate transport and publication. Native PAM,
   // actual mTLS Agent/cache and isolated libdnf evidence are checked separately.
+  // This host was intentionally uncovered in the earlier starter-package test;
+  // assign its exact product version before the independent DNF candidate.
+  sql("UPDATE t_agent SET os_version='rocky 9.6' WHERE agent_id='ci-smoke-002';")
   const closingBoundaries = {
     secureTTY: 'scope=login-auth-securetty-declarations application_invocation_state=unverified identity_resolution_state=unverified module_integrity_state=unverified other_services_state=unverified terminal_delivery_state=unverified snapshot_state=non_atomic ',
     channel: 'scope=current-agent-channel server_application_acceptance_state=unverified server_persistence_state=unverified other_agents_state=unverified protection_state=unverified snapshot_state=non_atomic ',
