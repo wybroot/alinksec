@@ -1031,11 +1031,12 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     for (const outcome of ['error', 'pass', 'completed']) {
       stages.testing = await ok(`${prefix}/test`, { ...options, body: { agentIds: [agent] } })
       const taskId = Number(stages.testing.test_task_id); baselineTaskIds.push(taskId)
-      const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+      const rawChecks = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n')
+      const snapshots = rawChecks.map(value => JSON.parse(value))
       assert.deepEqual(snapshots, document.items.map(item => item.check))
       const stored = JSON.parse(sql(`SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='${agent}' AND type='baseline_check' ORDER BY id DESC LIMIT 1;`))
       const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
-      assert.ok(document.items.every(item => payload.includes(JSON.stringify(item.check))))
+      assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must preserve every complete canonical check snapshot')
       const error = outcome === 'error'; let passes = 0
       const inserts = []
       for (const item of document.items) {
