@@ -49,7 +49,7 @@ class BaselineScheduleIntegrationTest {
     }
     @AfterEach void close() { source.destroy(); }
     void agent(String id, int status, boolean deleted) {
-        jdbc.update("INSERT INTO t_agent(agent_id,host_name,os_type,os_version,status,deleted) VALUES (?,?,1,'ubuntu 24.04',?,?)", id, id, status, deleted);
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,status,deleted) VALUES (?,?,1,'ubuntu 24.04',?,?)", id, id, status, deleted);
     }
     void signature() {
         jdbc.update("INSERT INTO t_virus_db(db_version,hash_count,rule_count,sha256,size,package_key) VALUES ('schedule-fixture',1,0,?,1,'isolated-fixture')", "a".repeat(64));
