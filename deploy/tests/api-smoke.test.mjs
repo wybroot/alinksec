@@ -959,6 +959,46 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   programFiles.published = await ok(`${programPrefix}/publish`, { ...options, body: { note: 'Complete finite reference fixture; no global authorization or execution claim' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === programRecord.id))
   programFiles.withdrawn = await ok(`${programPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(programFiles.withdrawn.status, 'withdrawn')
+  // Launch declarations below are protocol fixtures; they do not authenticate
+  // maintenance mode. Native units are queried without starting sulogin.
+  const rescueDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd-rescue/linux-baseline.json', import.meta.url)))
+  rescueDocument.code = `API-${mode}-systemd-rescue`
+  const invalidRescue = structuredClone(rescueDocument); invalidRescue.items[0].check.expected = 'sulogin'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidRescue))).status, 400)
+  const rescue = { candidate: await ok('/api/baseline/packages/import', pamUpload(rescueDocument)) }; fixtures.rescue = rescue
+  const rescueRecord = { id: rescue.candidate.id, code: rescueDocument.code }; baselinePackages.push(rescueRecord)
+  const rescuePrefix = `/api/baseline/packages/${rescueRecord.id}`
+  rescue.approved = await ok(`${rescuePrefix}/review`, { ...options, body: { approved: true, note: 'Joint launch and force input reference; actual authentication unverified' } })
+  rescueRecord.template = Number(rescue.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${rescuePrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'pass', 'completed']) {
+    rescue.testing = await ok(`${rescuePrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(rescue.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, rescueDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('systemd_rescue_policy') && payload.includes(rescueDocument.items[0].check.expected))
+    const error = outcome === 'error', pass = outcome === 'pass'
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass ? 'true' : 'false'},
+        'scope=loaded-systemd-rescue-launch manager=local-system authentication_state=unverified root_account_state=unverified executable_integrity_state=unverified auxiliary_commands_state=unverified execution_namespace_state=unverified boot_paths_state=unverified persistence_state=unverified snapshot_state=non_atomic Version=255.4 SystemState=running manager_force=absent kernel_force=absent rescue:LoadState=loaded,ActiveState=inactive,SubState=dead,Type=idle,command_reference_match=true,flags_reference_match=true,unit_force=absent emergency:LoadState=loaded,ActiveState=inactive,SubState=dead,Type=idle,command_reference_match=true,flags_reference_match=true,unit_force=${pass ? 'absent' : 'true'}',
+        ${error ? "'Extra environment chain unconfirmed'" : pass ? "''" : "'Known maintenance force launch reference mismatch'"}, '${error ? 'error' : pass ? 'pass' : 'fail'}'
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    rescue[outcome] = await ok(rescuePrefix, { token: tokens.admin })
+    assert.equal(rescue[outcome].testReady, !error)
+    const items = rescue[outcome].testResults[0].items
+    assert.equal(items.length, 1); assert.equal(items[0].execution_status, error ? 'error' : pass ? 'pass' : 'fail')
+    assert.ok(!items[0].fixable && items[0].actual.includes('authentication_state=unverified') && items[0].actual.includes('boot_paths_state=unverified'))
+    if (error) assert.equal((await request(`${rescuePrefix}/publish`, { ...options, body: { note: 'Unknown launch input blocks publication' } })).status, 400)
+  }
+  rescue.published = await ok(`${rescuePrefix}/publish`, { ...options, body: { note: 'Complete failed declaration protocol fixture; authentication remains unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === rescueRecord.id))
+  rescue.withdrawn = await ok(`${rescuePrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(rescue.withdrawn.status, 'withdrawn')
   // Complete maintenance reports are protocol fixtures. Native loaded units,
   // typed argv and read-only clock observations are validated separately.
   const maintenanceDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd-maintenance/linux-baseline.json', import.meta.url)))

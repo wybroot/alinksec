@@ -73,11 +73,14 @@ func systemMaintenanceQueries(ctx context.Context, timeout int) maintenanceQueri
 			return command("/usr/bin/systemctl", args...)
 		},
 		property: func(target, iface, property string) ItemResult {
-			if !maintenanceUnitName.MatchString(target) {
+			if !(target == "" && iface == "Manager") && !maintenanceUnitName.MatchString(target) {
 				return ItemResult{Error: true, Message: "invalid fixed unit"}
 			}
 			var path strings.Builder
-			path.WriteString("/org/freedesktop/systemd1/unit/")
+			path.WriteString("/org/freedesktop/systemd1")
+			if target != "" {
+				path.WriteString("/unit/")
+			}
 			for _, c := range []byte(target) {
 				if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
 					path.WriteByte(c)

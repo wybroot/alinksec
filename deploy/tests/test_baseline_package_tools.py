@@ -54,7 +54,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         self.assertEqual(2, len(document["unsupported"]))
         self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         for row in document["items"]:
             self.assertEqual("sshd_effective", row["check"]["type"])
             self.assertEqual({"user", "host", "address", "local_address", "local_port"}, set(row["check"]["connection"]))
@@ -79,7 +79,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_systemd_maintenance_binds_loaded_units_and_independent_clock_indicator(self):
         document = BUILDER.build(ROOT / "deploy/baseline/systemd-maintenance-definitions.json", "linux")
@@ -96,7 +96,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_ipv4_host_batch_requires_role_and_complete_interface_references(self):
         document = BUILDER.build(ROOT / "deploy/baseline/ipv4-host-definitions.json", "linux")
@@ -112,7 +112,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
 
     def test_bash_batch_keeps_five_full_references_and_both_startup_contexts(self):
@@ -128,7 +128,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
 
     def test_shadow_defaults_batches_only_ordinary_new_account_declarations(self):
@@ -147,7 +147,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
 
     def test_ssh_notice_batch_pins_reviewed_banner_bytes_and_both_connection_snapshots(self):
@@ -167,7 +167,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
             self.assertNotIn("fix_spec", item)
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
 
     def test_identity_candidate_keeps_local_file_and_uid_scope_in_reviewed_definitions(self):
@@ -251,7 +251,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_ctrl_alt_del_candidate_binds_both_loaded_trigger_paths(self):
         definitions = ROOT / "deploy/baseline/ctrl-alt-del-definitions.json"
@@ -268,7 +268,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_systemd_candidate_preserves_exact_units_without_generic_coverage_expansion(self):
         definitions = ROOT / "deploy/baseline/systemd-definitions.json"
@@ -319,7 +319,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(44, sum(row["status"] == "product_candidate" for row in review))
+        self.assertEqual(45, sum(row["status"] == "product_candidate" for row in review))
 
     def test_rsyslog_cron_candidate_binds_fixed_routing_reference_and_mapping(self):
         definitions = ROOT / "deploy/baseline/rsyslog-cron-definitions.json"
@@ -336,7 +336,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_apt_install_candidate_binds_default_disk_reference_and_mapping(self):
         definitions = ROOT / "deploy/baseline/apt-definitions.json"
@@ -353,7 +353,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_apt_sources_candidate_binds_complete_declaration_reference_and_mapping(self):
         definitions = ROOT / "deploy/baseline/apt-sources-definitions.json"
@@ -370,7 +370,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
         mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
         self.assertEqual("product_candidate", mapping["status"])
         self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_sudoers_candidate_binds_explicit_declarations_and_mapping(self):
         definitions = ROOT / "deploy/baseline/sudoers-definitions.json"
@@ -388,7 +388,7 @@ class BaselinePackageToolsTest(unittest.TestCase):
             mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
             self.assertEqual("product_candidate", mapping["status"])
             self.assertEqual(item["check"], mapping["check"])
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def test_auditd_candidate_keeps_disk_declarations_separate_from_legacy_coverage(self):
         definitions = ROOT / "deploy/baseline/auditd-definitions.json"
@@ -403,8 +403,27 @@ class BaselinePackageToolsTest(unittest.TestCase):
             self.assertNotIn("cmd", item["check"])
             self.assertNotIn("fix_spec", item)
         review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
-        self.assertEqual(8, sum(row["status"] == "unsupported" for row in review))
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
         self.assertEqual(8, sum(row["status"] == "mapped" for row in review))
+
+    def test_rescue_candidate_binds_both_launches_without_authentication_claims(self):
+        definitions = ROOT / "deploy/baseline/systemd-rescue-definitions.json"
+        document = BUILDER.build(definitions, "linux")
+        self.assertEqual(document, json.loads((ROOT / "deploy/baseline/packages/systemd-rescue/linux-baseline.json").read_text()))
+        self.assertEqual(hashlib.sha256(definitions.read_bytes()).hexdigest(), document["source"]["sha256"])
+        self.assertEqual(["BL-LINUX-0059"], [item["ruleId"] for item in document["items"]])
+        item = document["items"][0]
+        self.assertEqual("systemd_rescue_policy", item["check"]["type"])
+        self.assertEqual("local-system", item["check"]["target"])
+        self.assertEqual("rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false", item["check"]["expected"])
+        self.assertIn("实际口令验证", item["remediation"])
+        self.assertIn("未验证", item["remediation"])
+        self.assertNotIn("fix_spec", item)
+        review = json.loads((ROOT / "deploy/baseline/reviewed-linux-definitions.json").read_text())["review"]["rules"]
+        mapping = next(row for row in review if row["ruleId"] == item["ruleId"])
+        self.assertEqual("product_candidate", mapping["status"])
+        self.assertEqual(item["check"], mapping["check"])
+        self.assertEqual(7, sum(row["status"] == "unsupported" for row in review))
 
     def mapping(self, xml):
         raw = xml.encode(); upstream = self.root / "xccdf.xml"; upstream.write_bytes(raw)

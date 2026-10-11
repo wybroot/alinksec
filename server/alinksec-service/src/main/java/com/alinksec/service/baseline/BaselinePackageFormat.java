@@ -152,6 +152,12 @@ public final class BaselinePackageFormat {
                 require(option.equals("linker_metadata") ? expected.equals("main+included_conf<=0644,dirs<=0755,uid=0,gid=0")
                         : option.equals("privileged_reference") && expected.matches("scope=/usr/bin\\+/usr/sbin,sha256=[a-f0-9]{64},exact=mode/uid/gid/content"), "程序文件项或审核摘要参考不能隐式扩展");
             }
+            case "systemd_rescue_policy" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "维护入口仅支持Linux Ubuntu24 systemd255");
+                require(text(check, "target", 1024).equals("local-system") && text(check, "operator", 32).equals("eq"), "维护入口需固定本地管理器和完整参考");
+                require(text(check, "expected", 1000).equals("rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false"), "维护入口启动参考不能隐式扩展");
+            }
             case "systemd_maintenance" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "systemd维护仅支持Linux Ubuntu24");

@@ -113,6 +113,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkIPv4Host(cs)
 	case "systemd_maintenance":
 		result = checkSystemdMaintenance(cs)
+	case "systemd_rescue_policy":
+		result = checkSystemdRescue(cs)
 	case "linux_program_files":
 		result = checkProgramFiles(cs)
 	case "local_identity_file", "local_accounts":

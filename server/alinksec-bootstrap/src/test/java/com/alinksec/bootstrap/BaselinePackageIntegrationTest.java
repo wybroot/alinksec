@@ -106,7 +106,7 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json", "packages/ssh-notice/linux-baseline.json", "packages/shadow-defaults/linux-baseline.json", "packages/bash-policy/linux-baseline.json", "packages/ipv4-host/linux-baseline.json", "packages/systemd-maintenance/linux-baseline.json", "packages/program-files/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json", "packages/ssh-notice/linux-baseline.json", "packages/shadow-defaults/linux-baseline.json", "packages/bash-policy/linux-baseline.json", "packages/ipv4-host/linux-baseline.json", "packages/systemd-maintenance/linux-baseline.json", "packages/program-files/linux-baseline.json", "packages/systemd-rescue/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
@@ -512,6 +512,51 @@ class BaselinePackageIntegrationTest {
         var windows = programFilesDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
         for (String field : List.of("roots", "reference_path", "connection", "cmd")) {
             var doc = programFilesDocument(); ((ObjectNode)doc.path("items").get(0).path("check")).putNull(field);
+            assertThrows(IllegalArgumentException.class, () -> imported(doc));
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
+    }
+
+    ObjectNode rescueDocument() throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/systemd-rescue/linux-baseline.json")));
+    }
+
+    @Test void rescueJointLaunchReferenceRequiresFreshEvidenceAndSeparatesAuthentication() throws Exception {
+        var doc = rescueDocument(); var pkg = imported(doc);
+        packages.review(id(pkg), true, "Review both loaded launch declarations; actual authentication unverified", 7L);
+        for (String host : List.of("windows", "rocky")) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), host));
+        long original = test(id(pkg), "ubuntu");
+        var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+        assertEquals(1, sent.size());
+        assertEquals(doc.path("items").get(0).path("check"), JsonUtils.mapper().readTree(sent.get(0).getCheck()));
+        var response = report(original, "ubuntu", false);
+        results.onResult("ubuntu", response.toBuilder().setItems(0, response.getItems(0).toBuilder().setExecutionStatus("error").setMessage("Environment chain unconfirmed")).build());
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "Incomplete maintenance input", 7L));
+        long retry = test(id(pkg), "ubuntu"); response = report(retry, "ubuntu", false);
+        String actual = "scope=loaded-systemd-rescue-launch authentication_state=unverified manager_force=absent kernel_force=absent rescue:unit_force=absent emergency:unit_force=true";
+        results.onResult("ubuntu", response.toBuilder().setItems(0, response.getItems(0).toBuilder().setExecutionStatus("fail").setActual(actual).setMessage("Known force launch reference mismatch")).build());
+        assertEquals(actual, jdbc.queryForObject("SELECT actual FROM t_baseline_result WHERE task_id=?", String.class, retry));
+        packages.publish(id(pkg), "Complete failed declaration fixture; authentication unverified", 7L);
+        var next = doc.deepCopy(); next.put("version", "2");
+        ((ObjectNode) next.path("items").get(0).path("check")).put("timeout_ms", 6000);
+        var changed = imported(next); packages.review(id(changed), true, "New immutable launch timeout", 7L);
+        assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Reuse old launch evidence", 7L));
+        long fresh = test(id(changed), "ubuntu"); results.onResult("ubuntu", report(fresh, "ubuntu", true));
+        packages.publish(id(changed), "Fresh full joint reference fixture", 7L);
+        String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0059'", String.class, original);
+        assertEquals(doc.path("items").get(0).path("check"), JsonUtils.mapper().readTree(snapshot));
+    }
+
+    @Test void rescueRejectsWeakReferencesAlternateManagersAndExtraFields() throws Exception {
+        for (var change : Map.of("target", "other.service", "operator", "contains", "expected", "sulogin", "cmd", "systemctl rescue").entrySet()) {
+            var doc = rescueDocument(); ((ObjectNode)doc.path("items").get(0).path("check")).put(change.getKey(), change.getValue());
+            assertThrows(IllegalArgumentException.class, () -> imported(doc), change.getKey());
+        }
+        var windows = rescueDocument(); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        for (String field : List.of("option", "bus", "units", "environment", "connection", "timeout_ms")) {
+            var doc = rescueDocument(); ((ObjectNode)doc.path("items").get(0).path("check")).putNull(field);
             assertThrows(IllegalArgumentException.class, () -> imported(doc));
         }
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);

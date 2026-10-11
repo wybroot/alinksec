@@ -130,12 +130,12 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "shadow_account_defaults", "bash_global_policy", "linux_ipv4_host", "systemd_maintenance", "linux_program_files", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "shadow_account_defaults", "bash_global_policy", "linux_ipv4_host", "systemd_maintenance", "systemd_rescue_policy", "linux_program_files", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
 	if s.TimeoutMs == 0 {
-		if (s.Type == "sshd_notice" || s.Type == "shadow_account_defaults" || s.Type == "bash_global_policy" || s.Type == "linux_ipv4_host" || s.Type == "systemd_maintenance" || s.Type == "linux_program_files") && seen["timeout_ms"] {
+		if (s.Type == "sshd_notice" || s.Type == "shadow_account_defaults" || s.Type == "bash_global_policy" || s.Type == "linux_ipv4_host" || s.Type == "systemd_maintenance" || s.Type == "systemd_rescue_policy" || s.Type == "linux_program_files") && seen["timeout_ms"] {
 			return nil, fmt.Errorf("检查显式超时必须为100至30000毫秒整数")
 		}
 		s.TimeoutMs = 5000
@@ -187,6 +187,16 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		for name := range seen {
 			if !allowed[name] {
 				return nil, fmt.Errorf("程序文件不允许字段 %s", name)
+			}
+		}
+	} else if s.Type == "systemd_rescue_policy" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
+		if !validRescue(&s) {
+			return nil, fmt.Errorf("维护入口需固定本地管理器及完整启动参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("维护入口不允许字段 %s", name)
 			}
 		}
 	} else if s.Type == "systemd_maintenance" {

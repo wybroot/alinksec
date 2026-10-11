@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "22",
+  "version": "23",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -331,7 +331,7 @@
     },
     {
       "ruleId": "BL-LINUX-0059",
-      "reason": "grep 计数两条不能证明生效 unit/include/override 或实际认证；需有效 systemd 单元定义验证。"
+      "reason": "通用包不含此项；独立Ubuntu24 systemd255候选联合核对已加载rescue/emergency主命令及有限非force输入声明；实际口令验证、root状态和其他启动路径未验证。"
     },
     {
       "ruleId": "BL-LINUX-0060",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "329622a1e9f6482eb50c0e8e43408bcb012c51d622d26cafad94f98e0f3241c0"
+    "sha256": "efb5211f21f26e83a7a770743ac5f56358850664da7812981a95ab2ae27be632"
   }
 }

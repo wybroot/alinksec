@@ -15,4 +15,4 @@ gcc -Wall -Wextra -Werror -O2 deploy/tests/systemd-clock-readonly.c -o .tmp/syst
 sudo env ALINKSEC_SYSTEMD_NATIVE_REQUIRED=true ALINKSEC_SYSTEMD_FIXTURES_ALLOWED=true \
   GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
   ALINKSEC_CLOCK_READONLY_PROBE="$(pwd)/.tmp/systemd-clock-readonly" \
-  .tmp/baseline-native.test -test.v -test.timeout=120s -test.run '^TestNativeSystemd(Service|CtrlAltDel|Maintenance)$'
+  .tmp/baseline-native.test -test.v -test.timeout=120s -test.run '^TestNativeSystemd(Service|CtrlAltDel|Maintenance|Rescue)$'

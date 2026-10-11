@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "22",
+      "version": "23",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -338,7 +338,7 @@
         },
         {
           "ruleId": "BL-LINUX-0059",
-          "reason": "grep 计数两条不能证明生效 unit/include/override 或实际认证；需有效 systemd 单元定义验证。"
+          "reason": "通用包不含此项；独立Ubuntu24 systemd255候选联合核对已加载rescue/emergency主命令及有限非force输入声明；实际口令验证、root状态和其他启动路径未验证。"
         },
         {
           "ruleId": "BL-LINUX-0060",
@@ -348,7 +348,7 @@
     }
   },
   "review": {
-    "date": "2026-10-05",
+    "date": "2026-10-11",
     "legacyTemplate": "DJBH2.0-LINUX",
     "sources": {
       "kernel": "https://www.kernel.org/doc/html/latest/networking/ip-sysctl.html",
@@ -1381,13 +1381,20 @@
       },
       {
         "ruleId": "BL-LINUX-0059",
-        "name": "rescue 与 emergency 有效认证",
+        "name": "rescue/emergency当前sulogin启动与非force输入声明参考",
         "category": "资源控制",
         "severity": 3,
-        "status": "unsupported",
-        "reason": "grep 计数两条不能证明生效 unit/include/override 或实际认证；需有效 systemd 单元定义验证。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：grep 计数两条不能证明生效 unit/include/override 或实际认证；需有效 systemd 单元定义验证。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "独立Ubuntu24候选联合核对systemd255当前已加载rescue/emergency主启动声明与有限force输入；其通过仅表示完整启动参考匹配，实际认证、root状态、执行完整性、其他路径及持久未验证。",
+        "scope": "仅本地系统管理器已加载systemd255的两项主启动命令和有限Environment/proc cmdline输入；额外环境链、PAM/替代根链、未知/变化/读取失败保持error，实际认证与其他执行阶段未验证，非原子。",
+        "remediation": "按独立systemd-rescue候选限定产品与启动输入链核对；环境文件、额外传递/移除链及PAM/替代根链保持error。实际认证须在可信组件与恢复需求确认后主机测试，不读取口令、不启动维护模式、无自动修复。",
+        "check": {
+          "type": "systemd_rescue_policy",
+          "target": "local-system",
+          "operator": "eq",
+          "expected": "rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false",
+          "timeout_ms": 5000
+        }
       },
       {
         "ruleId": "BL-LINUX-0060",

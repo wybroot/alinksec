@@ -1,0 +1,34 @@
+{
+  "code": "ALINKSEC-UBUNTU24-SYSTEMD-RESCUE",
+  "name": "Ubuntu 24.04 rescue/emergency 当前启动声明核查",
+  "standard": "ALinkSec维护入口启动参考（非完整合规标准）",
+  "product": "Ubuntu24 amd64/arm64；已加载systemd255、本地systemctl/busctl；sulogin-shell主命令及有限force输入参考",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0059",
+      "ruleId": "BL-LINUX-0059",
+      "name": "rescue/emergency当前sulogin启动与非force输入声明参考",
+      "category": "资源控制",
+      "severity": 3,
+      "check": {
+        "type": "systemd_rescue_policy",
+        "target": "local-system",
+        "operator": "eq",
+        "expected": "rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64已加载systemd255本地管理器，联合查询rescue.service/emergency.service：loaded、Type=idle，ExecStartEx仅/usr/lib/systemd/systemd-sulogin-shell与完整模式参数，允许默认ignore-failure或无标记。管理器/单元Environment及固定/proc/cmdline中SYSTEMD_SULOGIN_FORCE均需缺省或明确false；这是全部输入声明参考，不计算被覆盖true的最终环境。环境文件/PassEnvironment/UnsetEnvironment、PAMName或替代根链非空保持error；未知布尔、重复、引号/转义/--/initrd启动语义、缺失/别名/待重载/切换/查询失败/超限/变化/超时为error，完整已知偏差fail。两次完整查询共用100..30000ms截止时间；每查询64KiB、环境128项/单字符串4096字节、主命令8项/32argv、启动参数16KiB/1024词。报告不回显命令、环境或启动参数原文，仅匹配状态。实际口令验证、root口令状态、可执行文件完整性、辅助阶段/条件/依赖/命名空间、其他启动路径及重启持久未验证，观察非原子。此项不认证维护模式有效认证，也不读取口令字段或触发登录；管理员确认可信组件与恢复需求后主机测试，无自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 loaded systemd rescue/emergency launch reference",
+    "version": "2026-10-11",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/systemd-rescue-definitions.json",
+    "sha256": "0482c572fb64387a1270ae2101d807ba7b0c0a690776ca75cd0df62c3113fbbf"
+  }
+}
