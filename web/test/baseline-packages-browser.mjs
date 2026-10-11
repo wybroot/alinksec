@@ -33,6 +33,10 @@ stagesByPlatform.programFiles=fixtures.programFiles
 assert.ok(fixtures.programFiles?.completed && fixtures.programFiles?.pass && fixtures.programFiles?.error,'Capture current program-file REST candidate before browser validation')
 stagesByPlatform.rescue=fixtures.rescue
 stagesByPlatform.appArmor=fixtures.appArmor
+for(const key of ['secureTTY','agentRuntime','dnfSignature']){
+  stagesByPlatform[key]=fixtures[key]
+  assert.ok(fixtures[key]?.completed && fixtures[key]?.pass && fixtures[key]?.error,'Capture closing product reference: '+key)
+}
 assert.ok(fixtures.appArmor?.completed && fixtures.appArmor?.pass && fixtures.appArmor?.error,'Capture current AppArmor mode REST reference before browser validation')
 assert.ok(fixtures.rescue?.completed && fixtures.rescue?.pass && fixtures.rescue?.error,'Capture current joint rescue launch REST reference before browser validation')
 stagesByPlatform.maintenance=fixtures.maintenance
@@ -270,19 +274,58 @@ try {
   const pamDefinition=dialog.locator('pre').filter({hasText:'"option": "quality"'}).last()
   await expect(pamDefinition).toContainText('/etc/pam.d/passwd')
   await expect(pamDefinition).toContainText('enforce_for_root=1,use_authtok=1')
+  const lengthDefinition=dialog.locator('pre').filter({hasText:'"option": "minimum_length"'}).last()
+  await expect(lengthDefinition).toContainText('minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1')
+  await lengthDefinition.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/pam-length-scope-desktop.png',fullPage:true,animations:'disabled'})
   await pamDefinition.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/pam-scope-desktop.png',fullPage:true,animations:'disabled'})
   await dialog.locator('.el-table__expand-icon').click()
   await expect(dialog.getByText('PAM password quality reference mismatch',{exact:true})).toBeVisible()
   await expect(dialog.getByText(/scope=passwd-password-chain.*expected=yescrypt/)).toBeVisible()
-  const pamActual=dialog.getByText(/scope=passwd-password-chain.*minlen=8 minclass=1/)
+  const pamActual=dialog.getByText(/scope=passwd-password-chain.*minlen=8 minclass=1/).last()
   await expect(pamActual).toBeVisible()
-  await expect(pamActual).toContainText('enforce_for_root=0')
+  await expect(pamActual).toContainText('enforce_for_root=1')
+  await expect(dialog.getByText(/scope=passwd-password-chain.*minlen=8 minclass=1/).first()).toContainText('existing_password_state=unverified')
   await pamActual.scrollIntoViewIfNeeded()
   await page.screenshot({path:root+'/pam-evidence-desktop.png',fullPage:true,animations:'disabled'})
+  await page.setViewportSize({width:390,height:844})
+  await pamActual.scrollIntoViewIfNeeded()
+  await page.screenshot({path:root+'/pam-length-evidence-mobile.png',fullPage:true,animations:'disabled'})
+  await page.setViewportSize({width:1440,height:1000})
   assert.ok(!(await dialog.innerText()).includes('DO_NOT_REPORT_PAM_SECRET'))
   for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
   await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+  for(const [key,slug] of [['secureTTY','securetty'],['agentRuntime','agent-runtime'],['dnfSignature','dnf-signature']]){
+    const stages=fixtures[key]
+    details[stages.candidate.id]=structuredClone(stages.completed)
+    await page.reload()
+    const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:stages.completed.document.name,exact:true})})
+    await row.getByRole('button',{name:'查看版本',exact:true}).click()
+    const definitions=dialog.locator('.el-table').filter({has:page.getByText('检查定义',{exact:true})}).locator('pre')
+    await expect(definitions).toHaveCount(stages.completed.document.items.length)
+    for(const [index,item] of stages.completed.document.items.entries()){
+      for(const value of [item.check.type,item.check.target,item.check.expected])await expect(definitions.nth(index)).toContainText(value)
+    }
+    await definitions.last().scrollIntoViewIfNeeded()
+    await page.screenshot({path:root+'/'+slug+'-scope-desktop.png',fullPage:true,animations:'disabled'})
+    await dialog.locator('.el-table__expand-icon').click()
+    for(const item of stages.completed.testResults[0].items){
+      await expect(dialog.getByText(item.actual,{exact:true})).toBeVisible()
+      if(item.message)await expect(dialog.getByText(item.message,{exact:true})).toBeVisible()
+    }
+    const actual=dialog.getByText(stages.completed.testResults[0].items.at(-1).actual,{exact:true})
+    await expect(actual).toContainText('snapshot_state=non_atomic')
+    for(const action of ['审核通过','下发测试核查','发布为可选模板','一键修复'])await expect(dialog.getByRole('button',{name:action,exact:true})).toHaveCount(0)
+    await actual.scrollIntoViewIfNeeded()
+    await page.screenshot({path:root+'/'+slug+'-evidence-desktop.png',fullPage:true,animations:'disabled'})
+    await page.setViewportSize({width:390,height:844})
+    await actual.scrollIntoViewIfNeeded()
+    await page.screenshot({path:root+'/'+slug+'-evidence-mobile.png',fullPage:true,animations:'disabled'})
+    await dialog.getByRole('button',{name:'关闭',exact:true}).click()
+    await page.setViewportSize({width:1440,height:1000})
+    writeFileSync(root+'/'+slug+'-browser-result.json',JSON.stringify({passed:true,mode:'production bundle with captured SQLite API responses',items:stages.completed.document.items.length,checks:['complete fixed definitions','all protocol actual values and limits','known failed finding','viewer permissions','desktop and mobile']},null,2)+'\n')
+  }
   details[fixtures.pamAuth.candidate.id]=structuredClone(fixtures.pamAuth.completed)
   await page.reload()
   const pamAuth=page.getByRole('row').filter({has:page.getByRole('cell',{name:'Ubuntu 24.04 login 登录失败锁定参考核查',exact:true})})
