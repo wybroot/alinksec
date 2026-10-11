@@ -1,12 +1,19 @@
 package baseline
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestApprovedCmdOutputRejectsUnknownCommands(t *testing.T) {
-	if len(approvedCmdOutput) != 26 {
-		t.Fatalf("approved command count = %d, want 26 seeded commands", len(approvedCmdOutput))
+	want := 14
+	if runtime.GOOS == "windows" {
+		want = 4
 	}
-	if !isApprovedCmdOutput("sysctl -n net.ipv4.ip_forward") {
+	if len(approvedCmdOutput) != want {
+		t.Fatalf("approved command count = %d, want %d", len(approvedCmdOutput), want)
+	}
+	if runtime.GOOS == "linux" && !isApprovedCmdOutput("sysctl -n net.ipv4.ip_forward") {
 		t.Fatal("seeded baseline command must be approved")
 	}
 	if isApprovedCmdOutput("sysctl -n net.ipv4.ip_forward; touch /tmp/pwned") {

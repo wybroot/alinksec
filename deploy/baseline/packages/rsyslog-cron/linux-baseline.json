@@ -1,0 +1,43 @@
+{
+  "code": "ALINKSEC-UBUNTU24-RSYSLOG-CRON",
+  "name": "Ubuntu 24.04 rsyslog cron 专用日志路由核查",
+  "standard": "固定八级日志磁盘路由参考（非完整合规）",
+  "product": "Ubuntu24.04 rsyslog 8.2312.0-3ubuntu9.4 完整安装、默认配置入口、有限传统本地路由；管理员确认可信安装和入口适用性",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0048",
+      "ruleId": "BL-LINUX-0048",
+      "name": "rsyslog cron 八级专用日志磁盘路由",
+      "category": "剩余信息保护",
+      "severity": 1,
+      "check": {
+        "type": "rsyslog_cron_routing",
+        "target": "/etc/rsyslog.conf",
+        "operator": "eq",
+        "expected": "imuxsock=on,cron.emerg..debug=/var/log/cron.log",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 rsyslog 8.2312.0-3ubuntu9.4；管理员确认可信安装、默认配置入口和适用性。只解释 /etc/rsyslog.conf 及其唯一一次 /etc/rsyslog.d/*.conf 包含的有限传统本地路由，包含文件需唯一两位数字前缀并按顺序在包含位置展开。参考要求声明 imuxsock 系统输入开启，cron emerg 至 debug 八级均在丢弃前路由到 /var/log/cron.log；更广 facility 选择器也可满足此声明，不证明专用文件只含cron事件。仅 /var/log 下静态文件动作、传统级别选择器、有限厂商全局声明及通知/丢弃；其他规则集、表达式、模板、队列、输入、插件、远程/动态/命令动作、未知语法、链接/硬链接/特殊文件、非UID0或组/其他用户可写配置、ACL、读取失败/超限/期间变化为error；完整声明偏差为fail。上限32包含文件、单文件64KiB、总256KiB、4096行、目录128条目。软件包查询固定且前后确认，不继承数据库环境。生产不调用rsyslogd、不执行配置动作、不读日志、不改变服务。loaded_state和delivery_state均unverified；不证明实际实例入口、加载、cron调度器发送、输入socket、限流、队列、文件目标类型/授权/可写性/轮转/交付或父目录完整授权。无自动修复，管理员按实际业务核对后重测。"
+    }
+  ],
+  "unsupported": [
+    {
+      "ruleId": "BL-LINUX-0019",
+      "reason": "任务文件元数据由独立 Debian cron 候选提供，本候选不核查调度器任务文件。"
+    },
+    {
+      "ruleId": "BL-LINUX-0054",
+      "reason": "日志路由声明不证明恶意代码扫描任务加载、执行或成功。"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 rsyslog cron routing review",
+    "version": "2026-10-08",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/rsyslog-cron-definitions.json",
+    "sha256": "2117a7c9c4b61222980371d6f6886b03b11fbab8c2ca297c211fc8931264cdf9"
+  }
+}

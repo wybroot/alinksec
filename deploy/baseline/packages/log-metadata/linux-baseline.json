@@ -1,0 +1,70 @@
+{
+  "code": "ALINKSEC-UBUNTU24-LOG-METADATA",
+  "name": "Ubuntu 24.04 固定审计与登录日志元数据核查",
+  "standard": "固定路径元数据参考（非完整合规）",
+  "product": "Ubuntu24.04 Linux POSIX 元数据与 procfs；传统 /var/log/audit、btmp、wtmp 路径和本地 utmp 组，管理员确认路径适用性",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0023",
+      "ruleId": "BL-LINUX-0023",
+      "name": "固定审计目录元数据",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/audit",
+        "operator": "subset",
+        "perm": "0700",
+        "owner": "0",
+        "group": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    },
+    {
+      "code": "BL-LINUX-0027",
+      "ruleId": "BL-LINUX-0027",
+      "name": "固定 btmp 文件元数据",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/btmp",
+        "operator": "subset",
+        "perm": "0660",
+        "owner": "0",
+        "group": "utmp",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    },
+    {
+      "code": "BL-LINUX-0028",
+      "ruleId": "BL-LINUX-0028",
+      "name": "固定 wtmp 文件元数据",
+      "category": "安全审计",
+      "severity": 1,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/wtmp",
+        "operator": "subset",
+        "perm": "0664",
+        "owner": "0",
+        "group": "utmp",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 fixed audit and login log metadata review",
+    "version": "2026-10-07",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/log-metadata-definitions.json",
+    "sha256": "de9780c39d54b319b12d6cd6409935a4a3851004e2cf804ec42c77b9e1a5f553"
+  }
+}

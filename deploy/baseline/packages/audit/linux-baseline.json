@@ -1,0 +1,51 @@
+{
+  "code": "ALINKSEC-UBUNTU24-AUDIT",
+  "name": "Ubuntu 24.04 内核审计与身份文件 watch 核查",
+  "standard": "当前内核审计参考（非完整合规）",
+  "product": "Ubuntu24.04 Linux audit UAPI；初始用户/PID命名空间与 CAP_AUDIT_CONTROL，身份watch限定无过滤always/exit/all规则，管理员确认产品范围",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0021",
+      "ruleId": "BL-LINUX-0021",
+      "name": "内核审计当前启用状态",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "linux_audit",
+        "target": "kernel",
+        "option": "enabled",
+        "operator": "eq",
+        "expected": "enabled=1|2",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察内核当前审计启用状态及已加载规则，不证明 auditd 运行、事件生成/投递、日志完整性、重启持久规则或进程审计上下文。需初始用户/PID命名空间及 CAP_AUDIT_CONTROL；权限不足、协议/读取异常、规则变化为error。身份参考限定四个普通无链接文件、always/exit、无arch/UID等过滤且全部syscall掩码、每个路径覆盖w+a；任何抑制/目录/过滤/其他未知规则均error。无规则或明确缺少覆盖为fail。仅只读内核查询，无自动修复，不读身份内容、不改审计状态或规则。"
+    },
+    {
+      "code": "BL-LINUX-0025",
+      "ruleId": "BL-LINUX-0025",
+      "name": "当前加载的四个身份文件审计 watch 参考",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "linux_audit",
+        "target": "kernel",
+        "option": "identity_watches",
+        "operator": "eq",
+        "expected": "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察内核当前审计启用状态及已加载规则，不证明 auditd 运行、事件生成/投递、日志完整性、重启持久规则或进程审计上下文。需初始用户/PID命名空间及 CAP_AUDIT_CONTROL；权限不足、协议/读取异常、规则变化为error。身份参考限定四个普通无链接文件、always/exit、无arch/UID等过滤且全部syscall掩码、每个路径覆盖w+a；任何抑制/目录/过滤/其他未知规则均error。无规则或明确缺少覆盖为fail。仅只读内核查询，无自动修复，不读身份内容、不改审计状态或规则。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 kernel audit and loaded identity watch review",
+    "version": "2026-10-07",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/audit-definitions.json",
+    "sha256": "bd7b9398a8b755a55be481d776c25f4266a3bcd14f544d56b903015d76d15e09"
+  }
+}

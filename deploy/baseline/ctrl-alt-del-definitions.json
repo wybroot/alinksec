@@ -1,0 +1,36 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu 24.04 loaded systemd Ctrl-Alt-Del policy review",
+    "version": "2026-10-09",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/ctrl-alt-del-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-CTRL-ALT-DEL",
+      "name": "Ubuntu 24.04 Ctrl-Alt-Del 当前策略核查",
+      "standard": "systemd 当前触发设置参考（非完整合规）",
+      "product": "Ubuntu 24.04 已加载 systemd 255 系统管理器；本地总线、目标和连续按键动作属性可查询",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0060",
+          "ruleId": "BL-LINUX-0060",
+          "name": "systemd 当前 Ctrl-Alt-Del 目标屏蔽与连续按键动作",
+          "category": "资源控制",
+          "severity": 2,
+          "check": {
+            "type": "systemd_ctrl_alt_del",
+            "target": "ctrl-alt-del.target",
+            "operator": "eq",
+            "expected": "masked/inactive/dead,burst_action=none",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定 Ubuntu24.04 已加载的 systemd255 本地系统管理器；目标需 masked/inactive/dead、文件状态 masked 或 masked-runtime，且管理器 CtrlAltDelBurstAction=none。disabled、指向 reboot.target 的别名、活动目标或非 none 连续按键动作不满足；缺失/加载异常、待重载、未知或变化状态、总线/查询/超时保持error。两次串行观察共用截止时间，仅当前已加载设置；不证明重启后持久、实际键盘/桌面输入路径或真实触发行为。管理员按本机运行与恢复要求确认策略，完成主机测试后发布；无自动修复，生产不屏蔽/重载/启动目标、不发送信号或模拟按键。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

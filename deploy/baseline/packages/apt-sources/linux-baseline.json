@@ -1,0 +1,39 @@
+{
+  "code": "ALINKSEC-UBUNTU24-APT-SOURCES",
+  "name": "Ubuntu 24.04 APT 源认证声明核查",
+  "standard": "默认磁盘源认证与显式签名范围声明参考（非完整合规）",
+  "product": "Ubuntu24.04 apt/libapt-pkg6.0t64 2.8.3 完整安装、默认配置/软件源入口与有限语法；管理员确认可信安装和适用性",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0053",
+      "ruleId": "BL-LINUX-0053",
+      "name": "APT 默认磁盘源认证与显式签名范围声明",
+      "category": "恶意代码防范",
+      "severity": 1,
+      "check": {
+        "type": "apt_sources_policy",
+        "target": "/etc/apt",
+        "operator": "eq",
+        "expected": "apt/apt-get:AllowInsecureRepositories=false,AllowWeakRepositories=false,AllowDowngradeToInsecureRepositories=false;sources:Trusted!=yes,allow-insecure=false,allow-weak=false,allow-downgrade-to-insecure=false,Signed-By=explicit-keyring-files",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 apt/libapt-pkg6.0t64 2.8.3，管理员确认可信安装及默认配置入口。读取默认apt.conf.d/apt.conf和sources.list/sources.list.d的有限.list/.sources，两个前端Acquire::AllowInsecureRepositories、AllowWeakRepositories、AllowDowngradeToInsecureRepositories均须false（即使源级显式false仍要求全局false）；活动源Trusted不能yes，三种单行源allow-*绕过项不能true。每个活动URI/套件声明须显式Signed-By包含/etc/apt/keyrings或/usr/share/keyrings直接.gpg/.asc文件，可附40位指纹/!；只含指纹或缺范围为fail，不读取默认全局keyring或缓存Release继承。keyring仅核对非空/最多1MiB、UID/GID0、组其他不可写、所有用户可读、单硬链接普通文件和直接目录无ACL；不读取或验证密钥内容。至少一个活动声明；禁用Deb822段落不检查其密钥路径，但全部语法/字段仍须已支持。同URI/套件认证与Signed-By范围不一致、未知/重复选项或字段、嵌入密钥、平坦源/变量/非HTTP(S)/带凭据地址、源入口改写/额外源、未知布尔值、链接/特殊文件/ACL/不可信元数据/读取超限/超时/期间变化均error。APT2.8.3 Deb822原生未映射Allow-Insecure/Allow-Weak/Allow-Downgrade-To-Insecure，本候选明确error而非误解释。配置和源各32片段、单64KiB、合计256KiB/4096行、每目录128名称、64个URI/套件声明、16不同keyring文件，同一deadline前后确认两包版本与输入快照。仅默认磁盘声明；environment_state、command_line_state、key_identity_state、key_material_state、repository_signature_state、cached_release_state、installation_state均unverified。HTTPS不等于签名或源可信；pass不证明密钥可用、指纹匹配、官方源身份、签名算法、索引/包真实性或真实安装调用。生产不执行APT前端/apt-config/gpg、钩子/安装、不更新索引/访问网络、不读缓存Release或密钥内容，无自动修复；管理员独立确认密钥身份、真实签名验证和调用覆盖。"
+    }
+  ],
+  "unsupported": [
+    {
+      "ruleId": "BL-LINUX-0052",
+      "reason": "默认未认证安装与Force-Yes声明由独立APT安装候选提供；源声明不证明真实安装调用或完整软件源信任。"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 APT source authentication declaration review",
+    "version": "2026-10-08",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/apt-sources-definitions.json",
+    "sha256": "9ce72f48f1d62f850ba7f0add796a23c8c2309eee2fbd21114580cdefd39d2e2"
+  }
+}

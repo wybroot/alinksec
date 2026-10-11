@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec reviewed starter definitions",
+    "version": "2",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/starter-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-LINUX-BASE",
+      "name": "Linux 内核参数参考核查",
+      "standard": "ALinkSec 基础核查（非完整合规基线）",
+      "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；需 procps sysctl",
+      "osType": 1,
+      "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
+      "version": "2",
+      "items": [
+        {
+          "code": "ALINKSEC-LINUX-001",
+          "ruleId": "ALINKSEC-LINUX-001",
+          "name": "ICMP 广播回显忽略参数当前值为 1",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "remediation": "仅观察当前内核参数；不证明完整 ICMP 或网络防护策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+        },
+        {
+          "code": "ALINKSEC-LINUX-002",
+          "ruleId": "ALINKSEC-LINUX-002",
+          "name": "net.ipv4.tcp_syncookies 当前值为 1",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "remediation": "仅观察当前内核参数；不证明完整 SYN Flood 防护或重启后的持久配置。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+        },
+        {
+          "code": "ALINKSEC-LINUX-003",
+          "ruleId": "ALINKSEC-LINUX-003",
+          "name": "IPv4 all.accept_redirects 当前值为 0",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "remediation": "仅观察 all 参数；各接口、default 参数及转发状态仍需人工核对，不宣称全部接口已拒绝重定向。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+        },
+        {
+          "code": "ALINKSEC-LINUX-004",
+          "ruleId": "ALINKSEC-LINUX-004",
+          "name": "IPv4 all.accept_source_route 当前值为 0",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "remediation": "仅观察 all 参数；仍需核对实际接口、default 参数和主机网络角色。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+        }
+      ],
+      "unsupported": [
+        {
+          "ruleId": "ALINKSEC-LINUX-IP-FORWARD",
+          "reason": "IPv4 转发取决于路由、容器和业务角色；os_type/os_version 不包含该角色信息，通用候选不据此断言必须关闭。"
+        }
+      ]
+    },
+    "windows": {
+      "code": "ALINKSEC-WINDOWS-BASE",
+      "name": "Windows 基础安全核查",
+      "standard": "ALinkSec 基础核查（非完整合规基线）",
+      "product": "Windows 10/11、Windows Server 2019/2022/2025；需 NetSecurity、Defender 与 EventLog",
+      "osType": 2,
+      "osVersionPattern": "^(Microsoft )?Windows (10|11|Server (2019|2022|2025))([ .][A-Za-z0-9._ -]+)?$",
+      "version": "2",
+      "items": [
+        {
+          "code": "ALINKSEC-WINDOWS-001",
+          "ruleId": "ALINKSEC-WINDOWS-001",
+          "name": "有效策略的三个防火墙配置均已启用",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 15000
+          },
+          "remediation": "读取 ActiveStore 的 Domain、Private、Public 三个配置；缺失配置或查询失败是执行异常。不证明规则集允许的流量安全；由管理员核对业务规则，本包不自动修复。"
+        },
+        {
+          "code": "ALINKSEC-WINDOWS-002",
+          "ruleId": "ALINKSEC-WINDOWS-002",
+          "name": "Defender 实时保护已启用",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+            "operator": "eq",
+            "expected": "True",
+            "timeout_ms": 15000
+          },
+          "remediation": "只确认 Defender 的 RealTimeProtectionEnabled 当前值；缺少 Defender 或查询失败是执行异常。其他杀毒产品不据此判为合规；人工核对当前检测产品和更新策略，本包不自动修复。"
+        },
+        {
+          "code": "ALINKSEC-WINDOWS-003",
+          "ruleId": "ALINKSEC-WINDOWS-003",
+          "name": "事件日志服务运行",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+            "operator": "eq",
+            "expected": "Running",
+            "timeout_ms": 15000
+          },
+          "remediation": "只确认 EventLog 服务当前状态为 Running；不证明日志保留、审计策略、完整性或集中传输。由管理员审查日志策略，本包不自动修复。"
+        },
+        {
+          "code": "ALINKSEC-WINDOWS-004",
+          "ruleId": "ALINKSEC-WINDOWS-004",
+          "name": "用户账户控制已启用",
+          "category": "基础防护",
+          "severity": 3,
+          "check": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\"",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 15000
+          },
+          "remediation": "只确认 EnableLUA 注册表配置为 1；不证明所有 UAC 提示或重启后的生效状态。按 Microsoft 的 UAC 策略核对，本包不自动修复。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

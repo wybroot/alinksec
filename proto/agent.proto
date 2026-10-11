@@ -292,6 +292,9 @@ message BaselineItemResult {
   string actual  = 3;    // 实际检测值（取证）
   string message = 4;    // 失败原因（人读）
   uint32 duration_ms = 5;
+  // pass / fail / error. Empty identifies a legacy Agent which cannot
+  // distinguish an execution error from a noncompliant assertion.
+  string execution_status = 6;
 }
 
 message RptScanResult {

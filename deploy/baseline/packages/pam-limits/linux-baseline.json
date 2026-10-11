@@ -1,0 +1,67 @@
+{
+  "code": "ALINKSEC-UBUNTU24-PAM-LIMITS",
+  "name": "Ubuntu 24.04 PAM会话资源限制核查",
+  "standard": "login PAM资源限制声明参考（非完整合规）",
+  "product": "Ubuntu24.04 libpam-modules 1.5.3-5ubuntu5系列；固定login有限session链；默认*与显式root soft/hard声明",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0039",
+      "ruleId": "BL-LINUX-0039",
+      "name": "login PAM core软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "core",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=0,hard=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    },
+    {
+      "code": "BL-LINUX-0056",
+      "ruleId": "BL-LINUX-0056",
+      "name": "login PAM文件句柄软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "nofile",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=1024..65536,hard=1024..65536",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    },
+    {
+      "code": "BL-LINUX-0057",
+      "ruleId": "BL-LINUX-0057",
+      "name": "login PAM用户进程软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "nproc",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=1..4096,hard=1..4096",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 PAM login resource limits declaration review",
+    "version": "2026-10-09",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/pam-limits-definitions.json",
+    "sha256": "efe12442201846943f8e3e377b575dff49fb59883ec429790b03b2915e7403da"
+  }
+}

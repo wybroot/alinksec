@@ -90,7 +90,7 @@ public class VirusTaskService {
                         : mode == MODE_CUSTOM ? CmdVirusScan.Mode.CUSTOM : CmdVirusScan.Mode.QUICK);
         cmd.addAllPaths(cleanPaths);
         for (String agentId : agentIds) {
-            commandService.dispatch(agentId, Command.newBuilder().setVirusScan(cmd), createdBy);
+            commandService.dispatchAfterCommit(agentId, Command.newBuilder().setVirusScan(cmd), createdBy);
         }
         log.info("病毒扫描任务已下发: task_id={} task_no={} agents={} mode={}",
                 taskId, taskNo, agentIds.size(), mode);
@@ -115,6 +115,7 @@ public class VirusTaskService {
      * cron 可配（alinksec.virus.weekly-scan-cron），设为 "-" 可关闭。
      */
     @Scheduled(cron = "${alinksec.virus.weekly-scan-cron:0 30 2 * * MON}")
+    @Transactional
     public void weeklyQuickScan() {
         Integer dbCount = jdbc.queryForObject("SELECT count(*) FROM t_virus_db", Integer.class);
         if (dbCount == null || dbCount == 0) {
@@ -125,11 +126,10 @@ public class VirusTaskService {
         if (agents.isEmpty()) {
             return;
         }
-        try {
-            createTask("定时快扫（每周策略）", agents, MODE_QUICK, List.of(), null);
-        } catch (Exception e) {
-            log.warn("定时快扫下发失败: {}", e.getMessage());
-        }
+        // The scheduler enters this transaction through the Spring proxy.
+        // Self-invoking createTask then shares it, and failures must propagate
+        // so task rows and queued commands roll back together.
+        createTask("定时快扫（每周策略）", agents, MODE_QUICK, List.of(), null);
     }
 
 }

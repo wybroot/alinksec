@@ -25,3 +25,21 @@
   not a reason to increase concurrency. Stop validation if memory pressure rises.
 - Stop containers created for a completed check; preserve existing user services
   and data volumes.
+
+# Module development workflow
+
+- Run independent CI jobs in parallel on separate GitHub runners when GitHub
+  capacity permits. Do not apply this machine's serial validation limits across
+  independent CI runners. Keep checks that share ports, containers or state
+  ordered within one runner.
+
+- Complete one functional module on its own branch before moving to another.
+- Stay on that module's branch while completing its functionality, system
+  applicability, failure handling, security boundaries, and validation.
+- Record other modules as ordered backlog items; do not begin their
+  implementation during the active module's work.
+- Open a new pull request only after the module's implementation and required
+  validation are complete. Keep an existing pull request in draft while its
+  module is still being improved.
+- Defer merges and version releases until the user instructs proceeding after
+  the planned functionality is complete.

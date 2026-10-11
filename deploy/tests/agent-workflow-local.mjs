@@ -121,6 +121,9 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   const fixtures = join(dir, 'fixtures')
   mkdirSync(fixtures, { recursive: true })
   mkdirSync(join(dir, 'work'))
+  mkdirSync(join(dir, 'work/virus/db'), { recursive: true })
+  writeFileSync(join(dir, 'work/virus/db/manifest.json'), JSON.stringify({ db_version:'baseline-native-v1',hash_count:1,rule_count:0,sha256:'' }))
+  writeFileSync(join(dir, 'work/virus/db/hashes.txt'), 'e'.repeat(64)+' baseline-native-fixture 4\n')
   agentWorkDirs.push(`/cleanup/${label}/work`)
   copyFileSync(process.env.ALINKSEC_SMOKE_AGENT_BIN, join(fixtures, 'alinksec-agent'))
   copyFileSync(join(repo, 'deploy/tests/fixtures/agent-entry.sh'), join(fixtures, 'agent-entry.sh'))
@@ -148,6 +151,44 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   assert.equal(sql('SELECT machine_id FROM t_agent WHERE agent_id=?', id)[0].machine_id,
     hardwareId)
   return agent
+}
+async function baselineRuntimeWorkflow(agent) {
+  await command('docker',['exec',agent.container,'chown','root:root','/work'])
+  await command('docker',['exec',agent.container,'chown','-R','root:root','/work/virus'])
+  await command('docker',['exec',agent.container,'chmod','0755','/work','/work/virus','/work/virus/db'])
+  const document=JSON.parse(readFileSync(join(repo,'deploy/baseline/packages/agent-runtime/linux-baseline.json')))
+  document.code='NATIVE-AGENT-RUNTIME'
+  const form=new FormData();form.set('file',new Blob([JSON.stringify(document)],{type:'application/json'}),'baseline.json')
+  const response=await fetch(`http://${gateway}:${httpPort}/api/baseline/packages/import`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:form})
+  const imported=await response.json();assert.equal(response.status,200);assert.equal(imported.code,0,imported.msg)
+  const prefix=`/api/baseline/packages/${imported.data.id}`
+  await api(prefix+'/review',{approved:true,note:'Actual client session and already-loaded hash-only cache'})
+  async function observe(cachePass){
+    const running=await api(prefix+'/test',{agentIds:[agent.id]})
+    await until(()=>sql('SELECT status FROM t_baseline_task WHERE id=?',running.test_task_id)[0]?.status===2,'Actual Agent baseline task did not finish')
+    const detail=await api(prefix),items=detail.testResults[0].items
+    assert.equal(detail.testReady,true);assert.equal(items.length,2)
+    const channel=items.find(item=>item.code==='BL-LINUX-0049'),signature=items.find(item=>item.code==='BL-LINUX-0050')
+    assert.equal(channel.execution_status,'pass',channel.message)
+    assert.match(channel.actual,/current_session_active=true send_age_ms=\d+ receive_age_ms=\d+/)
+    assert.match(channel.actual,/server_application_acceptance_state=unverified/)
+    assert.equal(signature.execution_status,cachePass?'pass':'fail',signature.message)
+    assert.match(signature.actual,new RegExp('hash_count=1 rule_count=0 cache_reference_match='+cachePass))
+    assert.match(signature.actual,/freshness_state=unverified/)
+    for(const secret of ['baseline-native-fixture','baseline-native-v1','baseline-native-v2','e'.repeat(64)])assert.ok(!JSON.stringify(items).includes(secret))
+  }
+  await observe(true)
+  const changed=JSON.stringify({db_version:'baseline-native-v2',hash_count:1,rule_count:0,sha256:''})
+  await command('docker',['exec',agent.container,'/bin/sh','-c','printf %s "$1" > /work/virus/db/manifest.json','baseline-fixture',changed])
+  await observe(false)
+  await observe(false) // A baseline observation must never refresh the cache.
+  const before=sql('SELECT last_heartbeat FROM t_agent WHERE agent_id=?',agent.id)[0].last_heartbeat
+  await stopAgent(agent);await startAgent(agent)
+  await until(()=>sql('SELECT last_heartbeat FROM t_agent WHERE agent_id=?',agent.id)[0]?.last_heartbeat!==before,'No fresh heartbeat after cache restart')
+  await observe(true)
+  await api(prefix+'/publish',{note:'Actual Agent complete session/cache evidence'})
+  await api(prefix+'/withdraw',{note:'Disposable workflow cleanup'})
+  console.log('ok - actual Agent baseline runtime: observations=4 current_mtls_channel=true cache_match_stale_repeat_restart=true baseline_cache_reload=0 secrets_reported=0')
 }
 async function patchFile() {
   const pkgDir = join(root, 'deb')
@@ -201,6 +242,7 @@ try {
     },
     pass: text => console.log('ok - '+text),
   })
+  await baselineRuntimeWorkflow(first)
   const businessAddress = Object.values(networkInterfaces()).flat().find(a => a.family === 'IPv4' && !a.internal && a.address !== gateway)?.address
   assert.ok(businessAddress, 'An additional local IPv4 is required to check blocked business traffic')
   business = http.createServer((req, res) => res.end('business-fixture'))

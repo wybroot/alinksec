@@ -143,7 +143,7 @@ public class DashboardQueryService {
                 SELECT i.category,
                        round(100.0 * sum(CASE WHEN r.passed THEN 1 ELSE 0 END) / count(*)) AS pass_rate
                 FROM t_baseline_result r
-                JOIN t_baseline_item i ON i.id = r.item_id
+                JOIN v_baseline_result_definition i ON i.result_id = r.id
                 WHERE r.task_id = (SELECT max(id) FROM t_baseline_task WHERE status IN (2, 3))
                 GROUP BY i.category
                 ORDER BY i.category

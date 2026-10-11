@@ -1,0 +1,76 @@
+{
+  "code": "ALINKSEC-UBUNTU24-AUDITD-CONFIG",
+  "name": "Ubuntu 24.04 auditd 磁盘日志配置与目标元数据核查",
+  "standard": "磁盘日志配置参考（非完整合规）",
+  "product": "Ubuntu24.04 auditd 3.1.2；固定 /etc/audit/auditd.conf，已支持无歧义本地标量配置；日志位于 /var/log 下，元数据项需数值 log_group；管理员确认默认配置入口与产品范围",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-AUDITD-0001",
+      "ruleId": "BL-AUDITD-0001",
+      "name": "auditd 磁盘配置的本地日志写入声明",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "local_logging",
+        "operator": "eq",
+        "expected": "local_events=yes,write_logs=yes,log_format=raw|enriched",
+        "timeout_ms": 5000
+      },
+      "remediation": "只观察固定磁盘配置，含 auditd 3.1.2 已核实的默认值；不证明实例使用该配置入口、已加载、运行、捕获或交付事件。重复、长行、缺最终换行、未知字段、脚本、远程配置及无法确认形式为error。日志目标限 /var/log 下无链接普通单硬链接文件，ACL或变化为error，模式上限0640、UID0及声明数值GID偏差为fail；命名log_group不推断NSS结果。keep_logs仅声明不按最大文件大小覆盖旧日志，不证明保留期限、容量或外部轮转。生产不启动auditd、不改配置或日志、不读日志内容，无自动修复。"
+    },
+    {
+      "code": "BL-AUDITD-0002",
+      "ruleId": "BL-AUDITD-0002",
+      "name": "auditd 磁盘配置的 keep_logs 声明",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "keep_logs",
+        "operator": "eq",
+        "expected": "local_logging=1,max_log_file>=1,max_log_file_action=keep_logs",
+        "timeout_ms": 5000
+      },
+      "remediation": "本项限定磁盘本地写入声明、正数 max_log_file 与 keep_logs，不按此值推导小时/天保留期限。管理员需另行评估空间、告警、满盘处置、外部轮转与实际加载配置；不自动修改可能导致停机的日志策略。配置读取与形式不确定保持error；明确rotate/ignore等为完整不满足参考。"
+    },
+    {
+      "code": "BL-AUDITD-0003",
+      "ruleId": "BL-AUDITD-0003",
+      "name": "auditd 磁盘配置所指日志文件的元数据",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "log_file_metadata",
+        "operator": "eq",
+        "expected": "local_logging=1,regular,mode<=0640,uid=0,gid=declared_numeric_log_group",
+        "timeout_ms": 5000
+      },
+      "remediation": "从固定磁盘配置的 log_file 查元数据，不假设路径恒为audit.log，不证明运行实例实际写入该文件。日志限 /var/log 下规范路径；逐段拒绝链接、特殊文件、多硬链接、访问ACL与期间变化，不读取内容。模式不超出0640、UID0、GID等于声明数值log_group；更严格模式接受。命名root或其他NSS组无法从本地声明确认，保持error，管理员需确认范围并使用新候选流程。无chmod/chown或自动修复。"
+    }
+  ],
+  "unsupported": [
+    {
+      "ruleId": "AUDITD-RUNTIME-DELIVERY",
+      "reason": "磁盘配置与目标元数据不证明运行实例实际入口、加载状态、事件写入或交付。"
+    },
+    {
+      "ruleId": "AUDITD-RETENTION-DURATION",
+      "reason": "keep_logs声明不证明任何时间保留期限、容量、外部轮转或归档完整性。"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 auditd on-disk logging configuration review",
+    "version": "2026-10-07",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/auditd-definitions.json",
+    "sha256": "342651d960b7e6ee9c3070d1a4abbb536407e169482d50c9194a6fcf502f501b"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu24 Shadow ordinary new-account aging default declarations",
+    "version": "2026-10-09",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/shadow-defaults-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-SHADOW-DEFAULTS",
+      "name": "Ubuntu 24.04 新账户口令有效期与预警默认声明",
+      "standard": "ALinkSec Shadow新账户默认声明参考（非完整合规标准）",
+      "product": "Ubuntu24.04 amd64/arm64；passwd 1:4.13+dfsg1-4ubuntu3系列；固定login.defs；仅普通本地新账户声明，已有账户及实际调用未验证",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0003",
+          "ruleId": "BL-LINUX-0003",
+          "name": "普通本地新账户的口令有效期默认声明",
+          "category": "身份鉴别",
+          "severity": 2,
+          "check": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "max_days",
+            "operator": "eq",
+            "expected": "max_days=1..90,min_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。"
+        },
+        {
+          "code": "BL-LINUX-0004",
+          "ruleId": "BL-LINUX-0004",
+          "name": "普通本地新账户的口令到期预警默认声明",
+          "category": "身份鉴别",
+          "severity": 2,
+          "check": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "warn_days",
+            "operator": "eq",
+            "expected": "warn_days=7..14,warn_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "source": {
+    "name": "ALinkSec Ubuntu24 current AppArmor root policy mode reference",
+    "version": "2026-10-11",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/apparmor-definitions.json"
+  },
+  "platforms": {
+    "linux": {
+      "code": "ALINKSEC-UBUNTU24-APPARMOR",
+      "name": "Ubuntu 24.04 AppArmor 当前根策略模式核查",
+      "standard": "ALinkSec AppArmor运行模式参考（非完整合规标准）",
+      "product": "Ubuntu24 amd64/arm64；当前内核sysfs/securityfs AppArmor根视图；启用、全局模式及可见已加载策略模式参考",
+      "osType": 1,
+      "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+      "version": "1",
+      "items": [
+        {
+          "code": "BL-LINUX-0040",
+          "ruleId": "BL-LINUX-0040",
+          "name": "AppArmor当前根视图启用及非空全部enforce模式参考",
+          "category": "入侵防范",
+          "severity": 2,
+          "check": {
+            "type": "apparmor_runtime",
+            "target": "current-kernel",
+            "operator": "eq",
+            "expected": "enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce",
+            "timeout_ms": 5000
+          },
+          "remediation": "限定Ubuntu24 amd64/arm64当前AppArmor内核根视图：固定sysfs enabled=Y、securityfs lsm明确apparmor、全局mode=enforce、.ns_level=0且.stacked/.ns_stacked均no；profiles非空且每项模式enforce。完整已知禁用、缺少AppArmor LSM、空策略或complain/kill/unconfined为fail；kill不满足本项目精确enforce参考，Ubuntu默认unconfined策略也可fail。缺失/权限不足/未知值/嵌套或叠加/重复/不可解释名称或模式/身份错误/超限/变化/超时为error，不回退SELinux。固定路径逐级无符号链接打开，校验root属主、非组/其他可写、sysfs/securityfs身份、FD与路径复核；两次完整观测共享100..30000ms截止时间，策略列表256KiB/1024项/每行1024字节，仅有限ASCII根名称与四种模式，读取前后检查截止时间但不保证抢占同步内核调用。报告仅模式计数、清单摘要与边界，不回显策略名称。策略内容、应用绑定、实际访问控制、未加载策略、其他安全机制及重启持久未验证，观测非原子，当前namespace不证明完整主机策略覆盖。管理员确认应用和运行策略需求、按产品安全规范人工审查后主机测试；本参考不作全局安全结论，无自动修复。"
+        }
+      ],
+      "unsupported": []
+    }
+  }
+}
