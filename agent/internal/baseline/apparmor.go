@@ -60,10 +60,12 @@ func observeAppArmor(ctx context.Context, cs *CheckSpec, read func() (appArmorSn
 var appArmorLSMName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 func appArmorLSM(raw string) (bool, error) {
-	if len(raw) == 0 || len(raw) > 1024 || !strings.HasSuffix(raw, "\n") {
+	// securityfs lsm_read returns exactly strlen(lsm_names), with no newline.
+	// The bounded reader must reach EOF; line-oriented parameter rules do not apply.
+	if len(raw) == 0 || len(raw) > 1024 {
 		return false, fmt.Errorf("LSM列表格式未支持")
 	}
-	names := strings.Split(strings.TrimSuffix(raw, "\n"), ",")
+	names := strings.Split(raw, ",")
 	if len(names) > 32 {
 		return false, fmt.Errorf("LSM数量超限")
 	}

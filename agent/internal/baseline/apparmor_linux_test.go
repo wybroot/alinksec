@@ -14,7 +14,7 @@ import (
 func appArmorFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for name, raw := range map[string]string{"module/apparmor/parameters/enabled": "Y\n", "module/apparmor/parameters/mode": "enforce", "kernel/security/lsm": "capability,apparmor\n", "kernel/security/apparmor/.ns_level": "0\n", "kernel/security/apparmor/.stacked": "no\n", "kernel/security/apparmor/.ns_stacked": "no\n", "kernel/security/apparmor/profiles": "example (enforce)\n"} {
+	for name, raw := range map[string]string{"module/apparmor/parameters/enabled": "Y\n", "module/apparmor/parameters/mode": "enforce", "kernel/security/lsm": "capability,apparmor", "kernel/security/apparmor/.ns_level": "0\n", "kernel/security/apparmor/.stacked": "no\n", "kernel/security/apparmor/.ns_stacked": "no\n", "kernel/security/apparmor/profiles": "example (enforce)\n"} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)
@@ -76,7 +76,7 @@ func TestAppArmorProtectedKernelReader(t *testing.T) {
 	}
 	root := appArmorFixture(t)
 	os.WriteFile(filepath.Join(root, "module/apparmor/parameters/enabled"), []byte("N\n"), 0644)
-	os.WriteFile(filepath.Join(root, "kernel/security/lsm"), []byte("capability\n"), 0644)
+	os.WriteFile(filepath.Join(root, "kernel/security/lsm"), []byte("capability"), 0644)
 	os.RemoveAll(filepath.Join(root, "kernel/security/apparmor"))
 	s, err := readAppArmorSnapshot(context.Background(), root, false)
 	if err != nil || evaluateAppArmor(s).Error || evaluateAppArmor(s).Passed {

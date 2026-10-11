@@ -4,7 +4,7 @@
 
 生产只读固定内核接口：`/sys/module/apparmor/parameters/enabled`及`mode`，`/sys/kernel/security/lsm`，以及`/sys/kernel/security/apparmor`下的`.ns_level/.stacked/.ns_stacked/profiles`。从`/sys`逐级openat，禁止符号链接与阻塞特殊文件，校验目录/普通接口类型、数值UID/GID 0、非组/其他可写，以及sysfs/securityfs文件系统身份；保留FD并在读取后核对路径/FD身份及元数据。不能用普通磁盘伪造内核输入。AppArmor的policy魔术链接不参与观测；生产不执行aa-status、加载策略或访问用户指定路径。
 
-先核对完整Y/N启用参数及有限LSM列表。enabled=N且LSM不含AppArmor，或enabled=Y但LSM不含AppArmor，完整稳定时为不满足启用参考，mode/profiles明确not_observed；不会虚构空策略或enforce值。N但LSM含AppArmor视为不一致error。接口不存在、securityfs未挂载、读取拒绝均error，即使该主机可能已禁用，也不能借查询失败得出确定结论。
+先核对完整Y/N启用参数及有限LSM列表。securityfs的LSM接口返回无末尾换行的逗号分隔名称，必须由有界读取到达EOF；名称与重复校验不接受换行或空白。enabled=N且LSM不含AppArmor，或enabled=Y但LSM不含AppArmor，完整稳定时为不满足启用参考，mode/profiles明确not_observed；不会虚构空策略或enforce值。N但LSM含AppArmor视为不一致error。接口不存在、securityfs未挂载、读取拒绝均error，即使该主机可能已禁用，也不能借查询失败得出确定结论。
 
 启用且AppArmor存在时，要求`.ns_level=0`、`.stacked=no`和`.ns_stacked=no`，并完整读取全局模式与profiles。只有当前有限根非叠加视图受支持；嵌套、叠加、子命名空间行、别名式或无法解释的值保持error。策略列表使用有限ASCII根名称与四种模式：enforce、complain、kill、unconfined。支持名称内空格与`//`子hat，拒绝可见控制字节、转义、括号、冒号、`&`、重复名称、未知模式或不完整行。清单是内核文本形式的当前观测，不是策略内容解析器；不能证明完整主机范围或名称之外的策略身份。
 
@@ -20,4 +20,4 @@
 
 后端真实SQLite测试覆盖完整定义下发、任务快照、错误阻止发布、完整fail允许发布、新不可变timeout版本需新证据，以及Windows/Rocky与弱化定义拒绝。REST在SQLite/PostgreSQL分别保存error/pass/完整fail协议夹具；浏览器回放捕获API并使用生产构建，检查完整JSON、模式差异、七个未验证边界及viewer桌面/手机行为。协议夹具不证明真实内核或应用访问控制；最终验收须绑定本批最新提交的双架构、Windows和schema CI。
 
-语义依据Linux v6.8的[AppArmor securityfs及命名空间观测](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/apparmorfs.c)、[全局mode/enabled参数](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/lsm.c)、[label模式/名称输出](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/label.c)，及Ubuntu24的[aa-status手册](https://manpages.ubuntu.com/manpages/noble/man8/aa-status.8.html)。所引用源码用于明确接口含义，原生测试验证当前runner实际ABI；不把上游文档或本项目阈值当作发行版认证。
+语义依据Linux v6.8的[AppArmor securityfs及命名空间观测](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/apparmorfs.c)、[全局mode/enabled参数](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/lsm.c)、[label模式/名称输出](https://github.com/torvalds/linux/blob/v6.8/security/apparmor/label.c)、[securityfs LSM的EOF输出](https://github.com/torvalds/linux/blob/v6.8/security/inode.c)，及Ubuntu24的[aa-status手册](https://manpages.ubuntu.com/manpages/noble/man8/aa-status.8.html)。所引用源码用于明确接口含义，原生测试验证当前runner实际ABI；不把上游文档或本项目阈值当作发行版认证。

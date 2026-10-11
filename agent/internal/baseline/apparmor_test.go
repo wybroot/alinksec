@@ -19,7 +19,7 @@ func appArmorJSON() string {
 	return string(raw)
 }
 func goodAppArmorSnapshot() appArmorSnapshot {
-	return appArmorSnapshot{Values: map[string]string{"enabled": "Y\n", "lsm": "capability,yama,apparmor,bpf\n", "mode": "enforce", "level": "0\n", "stacked": "no\n", "ns_stacked": "no\n", "profiles": "/usr/bin/example (enforce)\nexample//child (enforce)\n"}, Identities: map[string]string{"profiles": "kernel-identity"}}
+	return appArmorSnapshot{Values: map[string]string{"enabled": "Y\n", "lsm": "capability,yama,apparmor,bpf", "mode": "enforce", "level": "0\n", "stacked": "no\n", "ns_stacked": "no\n", "profiles": "/usr/bin/example (enforce)\nexample//child (enforce)\n"}, Identities: map[string]string{"profiles": "kernel-identity"}}
 }
 
 func TestAppArmorDefinitionBoundary(t *testing.T) {
@@ -81,7 +81,7 @@ func TestAppArmorRuntimeStatesAndRedaction(t *testing.T) {
 		{"namespace", "profiles", ":child:private-secret-profile (enforce)\n", false, true},
 		{"truncated", "profiles", "private-secret-profile (enforce)", false, true},
 		{"duplicate", "profiles", "private-secret-profile (enforce)\nprivate-secret-profile (enforce)\n", false, true},
-		{"lsm_duplicate", "lsm", "apparmor,apparmor\n", false, true},
+		{"lsm_duplicate", "lsm", "apparmor,apparmor", false, true},
 		{"enabled_inconsistent", "enabled", "N\n", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestAppArmorRuntimeStatesAndRedaction(t *testing.T) {
 		})
 	}
 	for _, enabled := range []string{"Y\n", "N\n"} {
-		s := appArmorSnapshot{Values: map[string]string{"enabled": enabled, "lsm": "capability,yama\n"}}
+		s := appArmorSnapshot{Values: map[string]string{"enabled": enabled, "lsm": "capability,yama"}}
 		if r := evaluateAppArmor(s); r.Passed || r.Error || !strings.Contains(r.Actual, "profiles=not_observed") {
 			t.Fatal(r)
 		}
@@ -118,10 +118,25 @@ func TestAppArmorInventoryLimits(t *testing.T) {
 	if _, err := parseAppArmorProfiles(raw.String()); err == nil {
 		t.Fatal("profile count limit")
 	}
-	for _, raw := range []string{"", "apparmor", "apparmor,\n", "apparmor\nextra\n", "apparmor,private secret\n"} {
+	for _, raw := range []string{"", "apparmor\n", "apparmor,", "apparmor\nextra\n", "apparmor,private secret", "apparmor,apparmor", "apparmor\r", "apparmor\x00", strings.Repeat("x", 1025)} {
 		if _, err := appArmorLSM(raw); err == nil {
 			t.Fatal("LSM syntax")
 		}
+	}
+	for raw, want := range map[string]bool{"apparmor": true, "capability,apparmor": true, "capability,yama": false} {
+		if present, err := appArmorLSM(raw); err != nil || present != want {
+			t.Fatal("complete EOF-terminated LSM inventory", present, err)
+		}
+	}
+	names := make([]string, 32)
+	for i := range names {
+		names[i] = fmt.Sprintf("lsm%d", i)
+	}
+	if _, err := appArmorLSM(strings.Join(names, ",")); err != nil {
+		t.Fatal("LSM count boundary", err)
+	}
+	if _, err := appArmorLSM(strings.Join(append(names, "extra"), ",")); err == nil {
+		t.Fatal("LSM count limit")
 	}
 }
 
