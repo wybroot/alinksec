@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -35,8 +36,10 @@ func TestNativeDNFSignature(t *testing.T) {
 		if r.Error || r.Passed != wantPass {
 			t.Fatal(r)
 		}
-		raw, err := collectBaselineCommand(ctx, 5000, "/usr/bin/python3", []string{"/workspace/deploy/tests/dnf/probe.py"}, []string{"PATH=/usr/bin:/bin", "LC_ALL=C", "PYTHONDONTWRITEBYTECODE=1"})
-		if err != nil {
+		cmd := exec.CommandContext(ctx, "/usr/bin/python3", "/workspace/deploy/tests/dnf/probe.py")
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C", "PYTHONDONTWRITEBYTECODE=1"}
+		query := collectBaselineCommand(ctx, cmd, 5000)
+		if query.Error {
 			t.Fatal("independent native DNF configuration unavailable")
 		}
 		var native struct {
@@ -44,7 +47,7 @@ func TestNativeDNFSignature(t *testing.T) {
 			Reposdir []string                   `json:"reposdir"`
 			Repos    map[string]map[string]bool `json:"repos"`
 		}
-		if json.Unmarshal([]byte(raw), &native) != nil || !reflect.DeepEqual(native.Reposdir, dnfRepoDirs) {
+		if json.Unmarshal([]byte(query.Actual), &native) != nil || !reflect.DeepEqual(native.Reposdir, dnfRepoDirs) {
 			t.Fatal("native repository model outside declared scope")
 		}
 		passed := native.Main["gpgcheck"] && native.Main["repo_gpgcheck"] && native.Main["localpkg_gpgcheck"] && len(native.Repos) > 0

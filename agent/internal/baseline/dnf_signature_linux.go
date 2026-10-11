@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -78,7 +79,13 @@ func dnfBool(values map[string]string, key string, inherited bool) (bool, error)
 
 func checkDNFSignature(cs *CheckSpec) ItemResult {
 	query := func(ctx context.Context) (string, error) {
-		return collectBaselineCommand(ctx, cs.TimeoutMs, "/usr/bin/rpm", []string{"--query", "dnf", "--queryformat", "%{VERSION}"}, []string{"PATH=/usr/bin:/bin", "LC_ALL=C"})
+		cmd := exec.CommandContext(ctx, "/usr/bin/rpm", "--query", "dnf", "--queryformat", "%{VERSION}")
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C"}
+		result := collectBaselineCommand(ctx, cmd, cs.TimeoutMs)
+		if result.Error {
+			return "", fmt.Errorf("DNF installed version query unconfirmed")
+		}
+		return result.Actual, nil
 	}
 	return dnfSignatureWithin(cs, "/", query, 0, 0)
 }
