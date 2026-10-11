@@ -24,7 +24,8 @@ func TestNativeSystemdRescue(t *testing.T) {
 	}
 	stem := fmt.Sprintf("alinksec-rescue-native-%d", os.Getpid())
 	targets := [2]string{stem + ".service", stem + "-emergency.service"}
-	paths := [2]string{filepath.Join("/run/systemd/system", targets[0]), filepath.Join("/run/systemd/system", targets[1])}
+	retentionTimer := stem + "-retention.timer"
+	paths := []string{filepath.Join("/run/systemd/system", targets[0]), filepath.Join("/run/systemd/system", targets[1]), filepath.Join("/run/systemd/system", retentionTimer)}
 	for _, path := range paths {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatal("fixture must not exist")
@@ -39,6 +40,14 @@ func TestNativeSystemdRescue(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
+		// Only the future retention timer is started; neither maintenance service is.
+		if _, err := os.Lstat(paths[2]); err == nil {
+			cmd := exec.Command("/usr/bin/systemctl", "stop", retentionTimer)
+			cmd.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C"}
+			if raw, err := cmd.CombinedOutput(); err != nil {
+				t.Error("retention timer cleanup", err, string(raw))
+			}
+		}
 		for _, path := range paths {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				t.Error(err)
@@ -97,6 +106,12 @@ func TestNativeSystemdRescue(t *testing.T) {
 	write(1, body("emergency")+"UnsetEnvironment=SYSTEMD_SULOGIN_FORCE\n")
 	check("extra unset environment", false, true)
 	write(1, body("emergency"))
+	// An unreferenced inactive service can be garbage-collected and then loaded
+	// afresh by show/get-property. Retain its loaded object with a future timer
+	// so that the pending-reload case observes the old declaration. The timer
+	// expires well beyond this test process's 120-second budget and is cleaned up.
+	write(2, "[Timer]\nOnActiveSec=6h\nUnit="+targets[1]+"\n")
+	run("start", retentionTimer)
 	check("restored", true, false)
 	if err := os.WriteFile(paths[1], []byte(body("emergency")+"# pending reload\n"), 0600); err != nil {
 		t.Fatal(err)
