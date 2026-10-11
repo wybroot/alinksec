@@ -2,7 +2,10 @@ package com.alinksec.bootstrap;
 
 import com.alinksec.proto.*;
 import com.alinksec.service.command.CommandService;
+import com.alinksec.service.command.CommandRepository;
+import com.alinksec.service.command.CommandSender;
 import com.alinksec.service.config.*;
+import com.alinksec.service.download.AgentDownloadTokenService;
 import com.alinksec.service.virus.VirusTaskService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +20,8 @@ import org.springframework.scheduling.support.ScheduledMethodRunnable;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.file.Path;
 import java.sql.DriverManager;
@@ -41,7 +46,7 @@ class BaselineScheduleIntegrationTest {
         jdbc = new JdbcTemplate(source);
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
         commands = mock(CommandService.class); destinations = new ArrayList<>(); dispatched = new ArrayList<>();
-        doAnswer(call -> { destinations.add(call.getArgument(0)); dispatched.add(((Command.Builder)call.getArgument(1)).build()); return "schedule-command"; })
+        doAnswer(call -> { assertTrue(TransactionSynchronizationManager.isActualTransactionActive()); destinations.add(call.getArgument(0)); dispatched.add(((Command.Builder)call.getArgument(1)).build()); return "schedule-command"; })
                 .when(commands).dispatchAfterCommit(anyString(), any(Command.Builder.class), any());
         var factory = new ProxyFactory(new VirusTaskService(jdbc, commands, new DatabaseDialect(props))); factory.setProxyTargetClass(true);
         factory.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(source), new AnnotationTransactionAttributeSource()));
@@ -78,6 +83,31 @@ class BaselineScheduleIntegrationTest {
         doThrow(new IllegalStateException("dispatch refusal fixture")).when(commands).dispatchAfterCommit(anyString(),any(Command.Builder.class),any());
         assertThrows(IllegalStateException.class,service::weeklyQuickScan);
         assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_virus_scan_task",Integer.class));
+    }
+
+    @Test void actualCommandQueueRemainsHiddenBeforeCommitAndRollsBackWithTask() {
+        signature(); agent("online",1,false);
+        var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
+        var database = new DatabaseDialect(props);
+        var transactions = new DataSourceTransactionManager(source);
+        var sender = mock(CommandSender.class);
+        var actualCommands = new CommandService(new CommandRepository(jdbc,database),sender,
+                mock(AgentDownloadTokenService.class),props,List.of(),transactions);
+        try {
+            var actualTasks = new VirusTaskService(jdbc,actualCommands,database);
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                actualTasks.weeklyQuickScan();
+                assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_virus_scan_task",Integer.class));
+                assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_command WHERE agent_id='online' AND type='virus_scan' AND status=0",Integer.class));
+                verifyNoInteractions(sender);
+                status.setRollbackOnly();
+            });
+            assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_virus_scan_task",Integer.class));
+            assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_command",Integer.class));
+            verifyNoInteractions(sender);
+        } finally {
+            actualCommands.close();
+        }
     }
 
     @Test void actualSpringSchedulingRegistersDefaultCronAndHonorsDisableProperty() {

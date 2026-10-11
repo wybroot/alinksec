@@ -28,7 +28,7 @@ Linux-PAM 的 pam_securetty 默认允许非 root 用户，并在缺文件时可�
 
 `VirusTaskService.weeklyQuickScan` 由 `alinksec.virus.weekly-scan-cron` 注册，缺省周一 02:30（服务端时区），`-` 关闭。仅存在已发布库且主机在线、未删除时创建 QUICK 扫描并下发；不存在统一 Agent 本地 cron。审核保留 `status=unsupported` 以继续排除下发，同时标记 `disposition=out_of_scope`、`implementationBacklog=false`。这项架构处置不表示扫描引擎能力或扫描成功。
 
-定时入口自身加入事务，避免 self-call 绕过 createTask 事务；同步下发准备异常传播并回滚任务元数据，由调度框架记录失败。真实 SQLite 迁移与事务代理验证无库/无适用主机、只发在线未删除主机、QUICK/空路径、无基线得分及失败回滚；真实 Spring 调度注册验证默认表达式和 `-` 关闭。注册检查不等待周一定时触发。实际 CommandService 仍按既有提交后发送/离线队列契约处理，不宣称网络发送与数据库的分布式原子性。
+定时入口自身加入事务，避免 self-call 绕过 createTask 事务；扫描任务改用 CommandService 的提交后发送接口，任务和待发命令先共同提交，再向 Agent 暴露。同步下发准备异常传播并回滚任务元数据，由调度框架记录失败。真实 SQLite 迁移与事务代理验证无库/无适用主机、只发在线未删除主机、QUICK/空路径、事务中的下发准备、无基线得分及失败回滚；实际 CommandService 与命令表另验证提交前不调用发送器、回滚时任务和命令一起消失。真实 Spring 调度注册验证默认表达式和 `-` 关闭，注册检查不等待周一定时触发。提交后的网络发送失败仍按既有持久队列重推契约处理，不宣称网络发送与数据库的分布式原子性。
 
 ## 模块验收
 

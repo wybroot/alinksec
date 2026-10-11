@@ -90,7 +90,7 @@ public class VirusTaskService {
                         : mode == MODE_CUSTOM ? CmdVirusScan.Mode.CUSTOM : CmdVirusScan.Mode.QUICK);
         cmd.addAllPaths(cleanPaths);
         for (String agentId : agentIds) {
-            commandService.dispatch(agentId, Command.newBuilder().setVirusScan(cmd), createdBy);
+            commandService.dispatchAfterCommit(agentId, Command.newBuilder().setVirusScan(cmd), createdBy);
         }
         log.info("病毒扫描任务已下发: task_id={} task_no={} agents={} mode={}",
                 taskId, taskNo, agentIds.size(), mode);
