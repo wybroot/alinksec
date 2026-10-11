@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "24",
+  "version": "25",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -131,7 +131,7 @@
   "unsupported": [
     {
       "ruleId": "BL-LINUX-0001",
-      "reason": "仅匹配 login.defs 文本；不能据此确认实际口令长度策略，需要核对认证模块及生效范围。"
+      "reason": "通用观测包不含此项；独立Ubuntu24 passwd PAM候选v2按有限password链及pwquality覆盖独立核对最小长度、credit、root/enforcing和口令传递，实际调用与现存口令未验证。"
     },
     {
       "ruleId": "BL-LINUX-0002",
@@ -291,15 +291,15 @@
     },
     {
       "ruleId": "BL-LINUX-0049",
-      "reason": "PATH 中存在可执行文件不代表服务运行、通信成功或检测能力；重新定义观察内容。"
+      "reason": "通用观测包不含此项；独立Ubuntu24 Agent候选观察执行任务的当前实例、mTLS会话和最近60秒成功收发，不复用重连历史，服务端业务持久与防护有效性未验证。"
     },
     {
       "ruleId": "BL-LINUX-0050",
-      "reason": "旧 perm_exists 字段无效；本产品未提供可据以确认恶意代码检测能力的统一特征库文件。存在文件不能证明非空、格式有效、版本或检测能力。"
+      "reason": "通用观测包不含此项；独立Ubuntu24 Agent候选严格核对有限非空hash-only磁盘清单与当前已加载缓存的一致性，来源、新鲜度、各引擎实例及检测覆盖未验证。"
     },
     {
       "ruleId": "BL-LINUX-0051",
-      "reason": "子串可能在注释命中，未覆盖仓库级配置及其他包管理器；按产品和有效配置拆分。"
+      "reason": "通用观测包不含此项；独立Rocky9 DNF4.14候选核对固定主配置及默认三个目录内全部仓库的签名声明，实际调用、插件、密钥身份与真实验签未验证。"
     },
     {
       "ruleId": "BL-LINUX-0052",
@@ -311,7 +311,7 @@
     },
     {
       "ruleId": "BL-LINUX-0054",
-      "reason": "旧 perm_exists 字段无效；cron 文件存在不能证明有效命令、权限、调度加载或成功执行，本产品没有统一的病毒扫描 cron 任务契约。"
+      "reason": "明确架构不适用并排除主机评分：ALinkSec定时快扫由平台weekly-scan-cron调度（默认每周一02:30，-关闭），仅向有特征库且在线未删除的主机下发QUICK；不存在统一Agent本地cron契约。平台调度注册/关闭、筛选及事务失败另作流程验证，不伪造主机核查通过。"
     },
     {
       "ruleId": "BL-LINUX-0055",
@@ -327,7 +327,7 @@
     },
     {
       "ruleId": "BL-LINUX-0058",
-      "reason": "文件权限不能证明认证模块使用该文件；按产品确认适用性。"
+      "reason": "通用观测包不含此项；独立Ubuntu24 login securetty候选核对首个required/requisite模块、noconsole及非空tty1..tty6子集，实际调用、身份解析及其他入口未验证。"
     },
     {
       "ruleId": "BL-LINUX-0059",
@@ -341,8 +341,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Linux reference content review",
-    "version": "2026-10-10",
+    "version": "2026-10-11",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "ac78204096546ed6e7b5787ca16085f40ccba0b5cd41bde8eea31f6030b8ace3"
+    "sha256": "e5de0842822962083c274e19d6f618cb52cb89d5f8c683325a38dc39d4bd127f"
   }
 }

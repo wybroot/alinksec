@@ -274,6 +274,26 @@ public final class BaselinePackageFormat {
                 require(Set.of("auditd.service", "rsyslog.service").contains(text(check, "target", 1024)), "systemd 检查限定 auditd/rsyslog 系统服务");
                 require(text(check, "operator", 32).equals("eq") && text(check, "expected", 1000).equals("loaded/active/running"), "systemd 运行参考不能隐式扩展");
             }
+            case "agent_runtime" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 1 && text(check, "target", 1024).equals("current-agent") && text(check, "operator", 32).equals("eq"), "Agent检查需Linux当前实例");
+                String reference = switch (text(check, "option", 32)) {
+                    case "channel" -> "self_process=running,current_mtls_session=active,successful_send_and_receive_age<=60s";
+                    case "hash_inventory" -> "manifest=nonempty_hash_only,cache=disk_exact,inputs=trusted_stable";
+                    default -> "";
+                };
+                require(!reference.isEmpty() && text(check, "expected", 1000).equals(reference), "Agent检查需完整运行参考");
+            }
+            case "dnf_signature_policy" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1 && text(check, "target", 1024).equals("/etc/dnf/dnf.conf") && text(check, "operator", 32).equals("eq"), "DNF检查需Linux固定主配置");
+                require(text(check, "expected", 1000).equals("dnf=4.14.*,main:gpgcheck=1,repo_gpgcheck=1,localpkg_gpgcheck=1,all_repos:gpgcheck=1,repo_gpgcheck=1,nonempty_repo_set"), "DNF需完整签名声明参考");
+            }
+            case "pam_securetty" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1 && text(check, "target", 1024).equals("/etc/pam.d/login"), "securetty需Linux固定login入口");
+                require(text(check, "operator", 32).equals("eq") && text(check, "expected", 1000).equals("first_auth=required|requisite:securetty,noconsole=1,ttys=nonempty_subset(tty1..tty6)"), "securetty需完整终端限制参考");
+            }
             case "pam_limits" -> {
                 fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
                 require(os == 1, "PAM limits检查仅支持Linux");
@@ -298,9 +318,13 @@ public final class BaselinePackageFormat {
                 require(os == 1, "PAM 口令检查仅支持 Linux");
                 require(text(check, "target", 1024).equals("/etc/pam.d/passwd"), "PAM 检查限定 passwd 服务");
                 String option = text(check, "option", 32), expected = text(check, "expected", 1000);
-                require(Set.of("quality", "unix_hash").contains(option) && text(check, "operator", 32).equals("eq"), "PAM 口令检查项或运算符不支持");
-                require(expected.equals(option.equals("quality")
-                        ? "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1" : "yescrypt"), "PAM 口令参考要求不能隐式扩展");
+                require(Set.of("quality", "unix_hash", "minimum_length").contains(option) && text(check, "operator", 32).equals("eq"), "PAM 口令检查项或运算符不支持");
+                String reference = switch (option) {
+                    case "quality" -> "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1";
+                    case "minimum_length" -> "minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1";
+                    default -> "yescrypt";
+                };
+                require(expected.equals(reference), "PAM 口令参考要求不能隐式扩展");
             }
             case "local_identity_file" -> {
                 fields(check, "type", "target", "perm", "owner", "group", "operator", "timeout_ms");

@@ -33,8 +33,8 @@ func TestNativePAMPassword(t *testing.T) {
 	var document struct {
 		Items []struct{ Check json.RawMessage }
 	}
-	if err := json.Unmarshal(raw, &document); err != nil || len(document.Items) != 2 {
-		t.Fatal("shipped two-item PAM candidate required")
+	if err := json.Unmarshal(raw, &document); err != nil || len(document.Items) != 3 {
+		t.Fatal("shipped three-item PAM candidate required")
 	}
 	specs := map[string]*CheckSpec{}
 	for _, item := range document.Items {
@@ -44,8 +44,8 @@ func TestNativePAMPassword(t *testing.T) {
 		}
 		specs[spec.Option] = spec
 	}
-	if specs["quality"] == nil || specs["unix_hash"] == nil {
-		t.Fatal("both shipped PAM options required")
+	if specs["quality"] == nil || specs["unix_hash"] == nil || specs["minimum_length"] == nil {
+		t.Fatal("all shipped PAM options required")
 	}
 	configure := func(chain, policy string) {
 		t.Helper()
@@ -186,5 +186,17 @@ func TestNativePAMPassword(t *testing.T) {
 		if value := probe(strong, strong); !strings.HasPrefix(value, "rc=0 ") {
 			t.Fatal(fmt.Sprintf("native includes/continuation: %s", value))
 		}
+	})
+	t.Run("independent minimum length and native short-token rejection", func(t *testing.T) {
+		configure(pamQuality+pamWriter, "minlen=8\nminclass=0\ndcredit=0\nucredit=0\nlcredit=0\nocredit=0\nenforcing=1\nenforce_for_root\ndictcheck=0\n")
+		check("minimum_length", true, false)
+		check("quality", false, false)
+		if strings.HasPrefix(probe(short, short), "rc=0 ") {
+			t.Fatal("short token accepted")
+		}
+		if !strings.HasPrefix(probe(strong, strong), "rc=0 ") {
+			t.Fatal("valid long token rejected")
+		}
+		t.Log("Native PAM minimum length: independent_reference=true short_token_rejected=true long_token_accepted=true existing_credentials_not_reported=true")
 	})
 }

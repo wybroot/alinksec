@@ -1,0 +1,51 @@
+{
+  "code": "ALINKSEC-UBUNTU24-AGENT-RUNTIME",
+  "name": "Ubuntu 24.04 ALinkSec 当前通信与哈希库一致性核查",
+  "standard": "当前Agent有限运行证据（非完整合规）",
+  "product": "Ubuntu24 amd64/arm64；执行任务的ALinkSec实例、当前mTLS会话及root可信工作目录，有限hash-only缓存",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0049",
+      "ruleId": "BL-LINUX-0049",
+      "name": "当前Agent进程、mTLS会话及最近60秒成功收发",
+      "category": "恶意代码防范",
+      "severity": 4,
+      "check": {
+        "type": "agent_runtime",
+        "target": "current-agent",
+        "option": "channel",
+        "operator": "eq",
+        "expected": "self_process=running,current_mtls_session=active,successful_send_and_receive_age<=60s",
+        "timeout_ms": 5000
+      },
+      "remediation": "观察执行任务的同一ALinkSec实例；当前会话必须活跃且有最近60秒成功stream.Send/Recv，重连清空历史，以会话代次排除旧回调。缺少运行上下文、变化、未来/回退时间戳或读取超时为error；完整断线、未观察收发或超龄为fail。仅报告状态和收发年龄，不回显地址、凭据、证书或指令原文。服务端业务接受/持久化、其他Agent及防护有效性未验证；多次观察非原子，不能保证之后持续在线，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0050",
+      "ruleId": "BL-LINUX-0050",
+      "name": "当前Agent有限非空哈希库的可信磁盘与已加载缓存一致性",
+      "category": "恶意代码防范",
+      "severity": 4,
+      "check": {
+        "type": "agent_runtime",
+        "target": "current-agent",
+        "option": "hash_inventory",
+        "operator": "eq",
+        "expected": "manifest=nonempty_hash_only,cache=disk_exact,inputs=trusted_stable",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定当前实例的工作目录virus/db，严格核对manifest四字段、版本、计数及最多1024条唯一SHA256/名称/severity哈希，与当前已加载进程缓存的完整集合及版本/计数比较；不触发重载或更新。文件各64KiB、总1MiB，root可信祖先/目录/普通文件、无额外写权限/ACL/硬链接，描述符与缺失状态结束复核；空清单或完整缓存差异为fail。未知字段、重复/坏行、非零规则库、未确认缓存、缺失/链接/特殊输入、超限或变化为error。只输出计数及摘要，不回显特征名、版本原文、路径或情报；来源真实性、新鲜度、包摘要认证、各引擎实例和检测覆盖未验证，同步读取不可抢占、快照非原子，无自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec current Agent channel and hash cache evidence review",
+    "version": "2026-10-11",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/agent-runtime-definitions.json",
+    "sha256": "32d2a9f89de56c5ee11a8889eb554f6a047278c442c0325a0d466983d5252368"
+  }
+}

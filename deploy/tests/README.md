@@ -1,5 +1,17 @@
 # Deployment Validation
 
+Baseline closing checks add Ubuntu24 passwd minimum length, isolated login
+securetty authentication comparisons, actual Agent mTLS/cache observations and
+Rocky9 DNF declarations. `pam-password-native.sh` runs SecureTTY only inside its
+dedicated disposable PAM image; `dnf-native.sh` uses a separate CGO-free binary
+and an offline Rocky9 image. Neither fixture writes host authentication or
+repository files. The actual Agent fixture now uses Ubuntu24 and validates
+stale cache observations without reloading, then normal loading after restart.
+Race validation includes comm and virusscan. Platform weekly QUICK registration,
+disable behavior and transaction rollback have separate SQLite integration
+tests; excluded BL-LINUX-0054 never contributes a host baseline pass or score.
+See [closing boundaries](../../docs/44-基线模块收尾与认证-Agent-DNF核查.md).
+
 Release target: v0.0.2, adding Linux ARM64 to the earlier
 v0.0.1 amd64 release. Publication requires `windows-agent`,
 `build-and-test (amd64)`, `build-and-test (arm64)` and `schema` to pass on the

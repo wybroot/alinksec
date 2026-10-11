@@ -18,6 +18,7 @@ package virusscan
 import (
 	"archive/zip"
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // HashEntry 单条哈希情报
@@ -79,9 +81,10 @@ func LocalVersion(workDir string) string {
 }
 
 var (
-	dbMu     sync.Mutex
-	dbCached *SigDB
-	dbPath   string
+	dbMu         sync.Mutex
+	dbCached     *SigDB
+	dbPath       string
+	dbGeneration uint64
 )
 
 // LoadDB 加载特征库到内存（进程内单例：特征库更新后调 ReloadDB 失效重载）
@@ -91,6 +94,7 @@ func LoadDB(workDir string) *SigDB {
 	if dbCached == nil || dbPath != DBDir(workDir) {
 		dbPath = DBDir(workDir)
 		dbCached = parseDB(dbPath)
+		dbGeneration++
 	}
 	return dbCached
 }
@@ -101,7 +105,38 @@ func ReloadDB(workDir string) *SigDB {
 	defer dbMu.Unlock()
 	dbPath = DBDir(workDir)
 	dbCached = parseDB(dbPath)
+	dbGeneration++
 	return dbCached
+}
+
+// Observe the already loaded immutable cache, without loading or reloading
+// files. Another work directory or an oversized inventory remains unknown.
+func CachedHashSnapshot(ctx context.Context, workDir string, limit int) (string, int, int, map[string]HashEntry, uint64, bool) {
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for !dbMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return "", 0, 0, nil, 0, false
+		case <-tick.C:
+		}
+	}
+	defer dbMu.Unlock()
+	if ctx.Err() != nil {
+		return "", 0, 0, nil, 0, false
+	}
+	if dbCached == nil || dbPath != DBDir(workDir) || limit < 1 || len(dbCached.hashes) > limit {
+		return "", 0, 0, nil, 0, false
+	}
+	entries := make(map[string]HashEntry, len(dbCached.hashes))
+	for key, value := range dbCached.hashes {
+		entries[key] = value
+	}
+	rules := dbCached.RuleCount
+	if len(dbCached.rules) > rules {
+		rules = len(dbCached.rules)
+	}
+	return dbCached.Version, dbCached.HashCount, rules, entries, dbGeneration, true
 }
 
 // parseDB 解析 hashes.txt + manifest.json（损坏时返回空库，不报错：断网沿用旧库语义）

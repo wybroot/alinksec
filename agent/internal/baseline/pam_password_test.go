@@ -7,10 +7,13 @@ import (
 )
 
 func TestPAMPasswordDefinitionRequiresFixedServiceAndReference(t *testing.T) {
-	for _, option := range []string{"quality", "unix_hash"} {
+	for _, option := range []string{"quality", "unix_hash", "minimum_length"} {
 		expected := pamQualityReference
 		if option == "unix_hash" {
 			expected = "yescrypt"
+		}
+		if option == "minimum_length" {
+			expected = pamLengthReference
 		}
 		doc := map[string]any{"type": "pam_password", "target": "/etc/pam.d/passwd", "option": option, "operator": "eq", "expected": expected}
 		raw, _ := json.Marshal(doc)

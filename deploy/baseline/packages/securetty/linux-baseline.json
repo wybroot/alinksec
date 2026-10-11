@@ -1,0 +1,34 @@
+{
+  "code": "ALINKSEC-UBUNTU24-PAM-SECURETTY",
+  "name": "Ubuntu 24.04 login securetty 终端限制声明核查",
+  "standard": "login 本地终端声明参考（非完整合规）",
+  "product": "Ubuntu24 Linux-PAM1.5.3；login首个securetty及本地unix/deny/permit auth链，固定/etc/securetty",
+  "osType": 1,
+  "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0058",
+      "ruleId": "BL-LINUX-0058",
+      "name": "login 首个强制securetty、noconsole及非空有限终端清单",
+      "category": "资源控制",
+      "severity": 3,
+      "check": {
+        "type": "pam_securetty",
+        "target": "/etc/pam.d/login",
+        "operator": "eq",
+        "expected": "first_auth=required|requisite:securetty,noconsole=1,ttys=nonempty_subset(tty1..tty6)",
+        "timeout_ms": 5000
+      },
+      "remediation": "只解释login auth首个required/requisite pam_securetty及随后本地unix/deny/permit链，要求noconsole关闭内核console例外，/etc/securetty为非空tty1..tty6子集。按原始字节比较终端声明，不把注释、空行、CRLF或空白重写为有效终端。缺模块、optional/sufficient控制、缺noconsole、完整空清单或其他已知终端为fail；未知链/参数、重复/超长行、缺文件、链接/特殊文件、非root属主/属组、额外写权限、ACL、硬链接、超限或变化为error。文件缺失时原生模块可能允许root，禁止据缺失推断安全。仅报告数量、固定标记和摘要，实际调用、NSS身份、模块完整性、其他服务、终端参数仍未验证；不认证、读口令或自动改PAM。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Ubuntu24 login securetty declaration review",
+    "version": "2026-10-11",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/securetty-definitions.json",
+    "sha256": "1185f71f89537734f3ca29b8bb839c22fe62b8497e2a84aefcbe1b9836bd97d4"
+  }
+}

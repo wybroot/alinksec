@@ -50,6 +50,10 @@ func evidence(value string, limit int) string {
 
 // Run 执行全部检查项（串行执行：避免命令型检查并发放大主机负载）
 func Run(taskID string, specs []*pb.BaselineCheckSpec, log *slog.Logger) *pb.RptBaselineResult {
+	return RunWithRuntime(taskID, specs, log, nil)
+}
+
+func RunWithRuntime(taskID string, specs []*pb.BaselineCheckSpec, log *slog.Logger, rt *AgentRuntime) *pb.RptBaselineResult {
 	result := &pb.RptBaselineResult{TaskId: taskID}
 	if len(specs) > MaxChecks {
 		log.Warn("基线检查项超过上限，拒绝执行", "items", len(specs))
@@ -60,7 +64,7 @@ func Run(taskID string, specs []*pb.BaselineCheckSpec, log *slog.Logger) *pb.Rpt
 		start := time.Now()
 		r := ItemResult{ItemID: spec.GetItemId(), Error: true, Message: "基线任务超过 20 分钟执行预算"}
 		if time.Now().Before(deadline) {
-			r = checkOne(spec)
+			r = checkOneWithRuntime(spec, rt)
 		}
 		r.DurationMs = uint32(time.Since(start).Milliseconds())
 		r.Actual, r.Message = evidence(r.Actual, 2048), evidence(r.Message, 1024)
@@ -87,6 +91,9 @@ func Run(taskID string, specs []*pb.BaselineCheckSpec, log *slog.Logger) *pb.Rpt
 
 // checkOne 单项检查入口：解析失败按“检查异常”落库（passed=false，不中断整体）
 func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
+	return checkOneWithRuntime(spec, nil)
+}
+func checkOneWithRuntime(spec *pb.BaselineCheckSpec, rt *AgentRuntime) ItemResult {
 	cs, err := ParseCheck(spec.GetCheck())
 	if err != nil {
 		return ItemResult{ItemID: spec.GetItemId(), Error: true, Actual: spec.GetCheck(), Message: err.Error()}
@@ -125,6 +132,12 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkPAMPassword(cs)
 	case "pam_auth":
 		result = checkPAMAuth(cs)
+	case "pam_securetty":
+		result = checkPAMSecureTTY(cs)
+	case "agent_runtime":
+		result = checkAgentRuntime(cs, rt)
+	case "dnf_signature_policy":
+		result = checkDNFSignature(cs)
 	case "pam_limits":
 		result = checkPAMLimits(cs)
 	case "systemd_service":

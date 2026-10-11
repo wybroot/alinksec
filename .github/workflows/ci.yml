@@ -180,6 +180,10 @@ jobs:
         run: |
           cp .tmp/baseline-native.test .tmp/pam-native.test
           bash deploy/tests/pam-password-native.sh
+      - name: Check isolated Rocky9 DNF signature declarations against native configuration
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
+          bash deploy/tests/dnf-native.sh
       - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
         run: bash deploy/tests/shadow-defaults-native.sh
       - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
@@ -188,8 +192,8 @@ jobs:
         run: bash deploy/tests/program-files-native.sh
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
-      - name: Check concurrent guard policy updates
-        run: go test -race ./internal/guard ./internal/baseline
+      - name: Check concurrent guard policy updates and Agent baseline runtime observations
+        run: go test -race ./internal/guard ./internal/baseline ./internal/comm ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |

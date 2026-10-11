@@ -46,11 +46,13 @@ type Client struct {
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
-	collectTrigger chan []string
-	pendingReports chan *pb.Report
-	lastCollectAt  time.Time
-	reportMu       sync.Mutex
-	channelActive  bool
+	collectTrigger              chan []string
+	pendingReports              chan *pb.Report
+	lastCollectAt               time.Time
+	reportMu                    sync.Mutex
+	channelActive               bool
+	channelSession              uint64
+	channelSend, channelReceive time.Time
 
 	// 基线核查单飞：同一时刻仅允许一个核查任务执行（串行执行避免检测命令并发放大负载）
 	baselineBusy atomic.Bool
@@ -273,13 +275,14 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 	}
 	c.setChannelActive(true)
 	defer c.setChannelActive(false)
+	generation := c.channelObservation().Session
 
 	sendCh := make(chan *pb.Report, 256)
 	sendErr := make(chan error, 1)
 	go func() {
 		defer close(sendCh)
 		// 发送协程：唯一写 stream 的地方
-		sendErr <- c.sendLoop(sctx, stream, sendCh)
+		sendErr <- c.sendLoop(sctx, stream, sendCh, generation)
 	}()
 
 	c.log.Info("主通道已建立", "agent_id", c.state.AgentID)
@@ -299,6 +302,7 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				recvErr <- err
 				return
 			}
+			c.noteChannelActivity(generation, false)
 			if acks := c.handleCommand(cmd, sendCh, sctx); len(acks) > 0 {
 				for _, a := range acks {
 					select {
@@ -327,7 +331,7 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 }
 
 // sendLoop 发送协程：心跳定时、离线队列补传、sendCh 消费
-func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelClient, sendCh <-chan *pb.Report) error {
+func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelClient, sendCh <-chan *pb.Report, generation uint64) error {
 	ticker := time.NewTicker(c.cfg.HeartbeatInterval)
 	defer ticker.Stop()
 	drained := false
@@ -336,14 +340,14 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := stream.Send(c.buildHeartbeat()); err != nil {
+			if err := c.sendReport(stream, c.buildHeartbeat(), generation); err != nil {
 				return fmt.Errorf("发送心跳: %w", err)
 			}
 		case r, ok := <-sendCh:
 			if !ok {
 				return nil
 			}
-			if err := c.sendReport(stream, r); err != nil {
+			if err := c.sendReport(stream, r, generation); err != nil {
 				// 业务上报失败 → 进离线队列等待补传（心跳/ACK 丢弃，靠协议重推机制补偿）
 				if !isTransient(r) {
 					if qerr := c.queue.Push(r); qerr != nil {
@@ -354,7 +358,7 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 			}
 		case r := <-c.pendingReports:
 			// 资产快照等采集产物：优先于离线队列补传直接发出，失败同样入离线队列
-			if err := c.sendReport(stream, r); err != nil {
+			if err := c.sendReport(stream, r, generation); err != nil {
 				if qerr := c.queue.Push(r); qerr != nil {
 					c.log.Error("离线队列写入失败", "err", qerr)
 				}
@@ -363,7 +367,7 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		default:
 			// 发送空闲且尚未补传 → 限速补传离线队列
 			if !drained {
-				if err := c.drainQueue(stream); err != nil {
+				if err := c.drainQueue(stream, generation); err != nil {
 					return err
 				}
 				drained = true
@@ -374,12 +378,16 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 }
 
 // sendReport 发送单条 Report
-func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report) error {
-	return stream.Send(r)
+func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report, generation uint64) error {
+	err := stream.Send(r)
+	if err == nil {
+		c.noteChannelActivity(generation, true)
+	}
+	return err
 }
 
 // drainQueue 补传离线队列（限速：DrainRatePerSec；未发出条目重新入队）
-func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient) error {
+func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uint64) error {
 	reports, err := c.queue.PopAll()
 	if err != nil {
 		c.log.Error("读取离线队列失败", "err", err)
@@ -391,7 +399,7 @@ func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient) error {
 	interval := time.Second / time.Duration(c.cfg.DrainRatePerSec)
 	sent := 0
 	for i, r := range reports {
-		if err := stream.Send(r); err != nil {
+		if err := c.sendReport(stream, r, generation); err != nil {
 			break
 		}
 		sent = i + 1
@@ -638,7 +646,7 @@ func (c *Client) executeBaselineCheck(bc *pb.CmdBaselineCheck, received *pb.RptA
 	go func() {
 		defer c.baselineBusy.Store(false)
 		start := time.Now()
-		result := baseline.Run(bc.GetTaskId(), bc.GetItems(), c.log)
+		result := baseline.RunWithRuntime(bc.GetTaskId(), bc.GetItems(), c.log, c.baselineRuntime())
 		failed := 0
 		for _, it := range result.GetItems() {
 			if !it.GetPassed() {
@@ -889,6 +897,10 @@ func (c *Client) setChannelActive(active bool) {
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	c.channelActive = active
+	if active {
+		c.channelSession++
+		c.channelSend, c.channelReceive = time.Time{}, time.Time{}
+	}
 	if active {
 		return
 	}

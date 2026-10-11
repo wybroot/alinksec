@@ -5,8 +5,24 @@
   "product": "Ubuntu 24.04 Linux-PAM 1.5.3/libpwquality 1.4.5；passwd 本地 unix 链，需模块及可读普通配置",
   "osType": 1,
   "osVersionPattern": "^ubuntu 24\\.04(\\.[0-9]+)?$",
-  "version": "1",
+  "version": "2",
   "items": [
+    {
+      "code": "BL-LINUX-0001",
+      "ruleId": "BL-LINUX-0001",
+      "name": "passwd 服务强制最小口令长度及已检查口令传递",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "pam_password",
+        "target": "/etc/pam.d/passwd",
+        "operator": "eq",
+        "timeout_ms": 5000,
+        "option": "minimum_length",
+        "expected": "minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+      },
+      "remediation": "限定Ubuntu24 Linux-PAM1.5.3/libpwquality1.4.5的passwd password本地quality/unix/deny/permit链，独立核对minlen>=8、全部credit<=0、enforcing、显式enforce_for_root及use_authtok；不把login.defs当成PAM长度策略。按默认、排序drop-in、主文件和模块参数覆盖解释。已知长度或强制标记不满足为fail；未知链、缺失/链接/非普通输入、非root属主/属组、额外写权限、ACL、硬链接、超限或变化为error。读取串行有界、非原子，同步系统调用不可抢占。实际应用调用、现存口令、模块完整性及其他入口仍未验证；不读取口令/哈希，不认证或改口令，无自动修复。"
+    },
     {
       "code": "BL-LINUX-0002",
       "ruleId": "BL-LINUX-0002",
@@ -44,8 +60,8 @@
   "schemaVersion": 1,
   "source": {
     "name": "ALinkSec Ubuntu 24.04 passwd PAM policy review",
-    "version": "2026-10-05",
+    "version": "2026-10-11",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/pam-definitions.json",
-    "sha256": "c54df9ee336135fef1bcc074acb58ed03c74c98d3e735ddb3f9c38af6ef6cd21"
+    "sha256": "09b873d7c4b5ba07b0e0ec815bd4b29060b5a746121f47e068f55b26d52d1064"
   }
 }

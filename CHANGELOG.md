@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 补齐基线模块认证、当前Agent和Rocky9 DNF参考：passwd独立最小长度、login securetty首模块/终端子集、当前mTLS成功收发、非空hash-only清单与已加载缓存、DNF默认全部仓库签名声明。未知输入保持error，实际认证/检测/签名等边界明确，生产只读、无自动修复。旧60项为59有限实现及0054平台架构排除，通用review v25仍8项/52排除；平台定时QUICK入口加入事务和异常回滚。范围及模块验收见[基线收尾](docs/44-基线模块收尾与认证-Agent-DNF核查.md)。
+
 - 增加Ubuntu24 AppArmor当前根视图模式候选，核对内核启用/LSM、全局及非空全部enforce清单；读取、身份、嵌套或叠加、未知与变化保持error，不回显策略名称。内容、应用绑定、实际访问控制和完整主机覆盖未验证，无自动修复。范围及原生/流程验证见[AppArmor模式核查](docs/43-AppArmor当前根策略模式核查.md)。
 
 - 增加Ubuntu24 systemd255 rescue/emergency联合启动声明候选，核对已加载typed主命令、有限管理器/单元环境与内核非force输入；额外链/未知/变化保持error，不回显原始输入。实际维护认证、root状态和其他启动路径明确未验证，生产只读、无自动修复。范围及原生/流程验证见[维护启动核查](docs/42-rescue-emergency当前启动声明核查.md)。

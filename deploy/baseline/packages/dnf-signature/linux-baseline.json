@@ -1,0 +1,34 @@
+{
+  "code": "ALINKSEC-ROCKY9-DNF-SIGNATURE",
+  "name": "Rocky 9 DNF4 软件包与仓库元数据签名声明核查",
+  "standard": "DNF4默认磁盘配置声明参考（非完整合规）",
+  "product": "Rocky9 amd64/arm64；DNF4.14系列及libdnf0.69默认三个repo目录，固定主配置和有限INI继承",
+  "osType": 1,
+  "osVersionPattern": "^rocky 9(\\.[0-9]+)?$",
+  "version": "1",
+  "items": [
+    {
+      "code": "BL-LINUX-0051",
+      "ruleId": "BL-LINUX-0051",
+      "name": "DNF 主配置及全部仓库的软件包/元数据签名声明参考",
+      "category": "恶意代码防范",
+      "severity": 3,
+      "check": {
+        "type": "dnf_signature_policy",
+        "target": "/etc/dnf/dnf.conf",
+        "operator": "eq",
+        "expected": "dnf=4.14.*,main:gpgcheck=1,repo_gpgcheck=1,localpkg_gpgcheck=1,all_repos:gpgcheck=1,repo_gpgcheck=1,nonempty_repo_set",
+        "timeout_ms": 5000
+      },
+      "remediation": "只读DNF4.14默认磁盘声明：固定/etc/dnf/dnf.conf及/etc/yum.repos.d、/etc/yum/repos.d、/etc/distro.repos.d所有直接.repo，包括禁用仓库与主配置内仓库。要求主配置gpgcheck/repo_gpgcheck/localpkg_gpgcheck为真，非空全部仓库继承或覆盖的gpgcheck/repo_gpgcheck为真。每文件64KiB、最多32.repo/64仓库/128目录项，总输入1MiB，root可信元数据、无链接/额外写权限/ACL/硬链接，最后复核版本与文件。已知布尔偏差/空仓库为fail；未知版本、include/续行、重复、变量签名值、非默认reposdir、读取失败或变化为error。实际调用/命令行覆盖、插件、密钥身份、真实签名验证及其他包工具未验证，非原子且同步读取不可抢占；不下载元数据、安装包或自动改签名配置。严格元数据参考可能不适用于当前仓库发布方式，需管理员审核。"
+    }
+  ],
+  "unsupported": [],
+  "schemaVersion": 1,
+  "source": {
+    "name": "ALinkSec Rocky9 DNF4 disk signature declaration review",
+    "version": "2026-10-11",
+    "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/dnf-signature-definitions.json",
+    "sha256": "faa6b224c0fdc5ac8307d24ef6183824a8d0dcad05314438ce7ce1437559cf09"
+  }
+}

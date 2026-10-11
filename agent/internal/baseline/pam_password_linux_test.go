@@ -43,6 +43,9 @@ func pamSpec(option string) *CheckSpec {
 	if option == "unix_hash" {
 		expected = "yescrypt"
 	}
+	if option == "minimum_length" {
+		expected = pamLengthReference
+	}
 	return &CheckSpec{Type: "pam_password", Target: "/etc/pam.d/passwd", Option: option, Operator: "eq", Expected: expected, TimeoutMs: 1000}
 }
 func pamResult(t *testing.T, paths pamPaths, option string) ItemResult {
@@ -180,5 +183,22 @@ func TestPAMPasswordRejectsUnsafeInputsChangesAndBrokenOptions(t *testing.T) {
 	os.Mkdir(paths.quality+".d", 0700)
 	if r2.stable() == nil {
 		t.Fatal("created absent drop-in directory accepted")
+	}
+}
+
+func TestPAMMinimumLengthSeparatesLengthFromClassPolicy(t *testing.T) {
+	paths := pamFixture(t)
+	pamWrite(t, paths.quality, "minlen=8\nminclass=0\ndcredit=0\nucredit=0\nlcredit=0\nocredit=0\nenforcing=1\nenforce_for_root\n")
+	if r := pamResult(t, paths, "minimum_length"); r.Error || !r.Passed || !strings.Contains(r.Actual, "existing_password_state=unverified") {
+		t.Fatalf("length reference: %+v", r)
+	}
+	if r := pamResult(t, paths, "quality"); r.Error || r.Passed {
+		t.Fatalf("independent class reference: %+v", r)
+	}
+	for _, override := range []string{"minlen=7\n", "ucredit=1\n", "enforcing=0\n"} {
+		pamWrite(t, paths.quality, pamPolicy+override)
+		if r := pamResult(t, paths, "minimum_length"); r.Error || r.Passed {
+			t.Fatalf("length mismatch: %+v", r)
+		}
 	}
 }

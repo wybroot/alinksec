@@ -413,12 +413,34 @@ func pamQualitySettings(r *pamRead, paths pamPaths, args []string) (map[string]i
 	return settings, nil
 }
 
-func checkPAMPassword(cs *CheckSpec) ItemResult { return pamPasswordWithin(cs, systemPAMPaths()) }
+func checkPAMPassword(cs *CheckSpec) ItemResult {
+	return pamPasswordWithIdentity(cs, systemPAMPaths(), 0, 0)
+}
 func pamPasswordWithin(cs *CheckSpec, paths pamPaths) ItemResult {
+	return pamPasswordWithIdentity(cs, paths, uint32(os.Geteuid()), uint32(os.Getegid()))
+}
+func pamPasswordWithIdentity(cs *CheckSpec, paths pamPaths, uid, gid uint32) ItemResult {
 	r := newPAMRead(cs.TimeoutMs)
 	defer r.close()
 	prefix := "scope=passwd-password-chain service=/etc/pam.d/passwd "
-	failure := func(err error) ItemResult { return ItemResult{Error: true, Actual: prefix, Message: err.Error()} }
+	if cs.Option == "minimum_length" {
+		prefix += "application_invocation_state=unverified existing_password_state=unverified other_services_state=unverified module_integrity_state=unverified snapshot_state=non_atomic "
+		for _, parent := range []string{filepath.Dir(paths.directory), filepath.Dir(paths.quality)} {
+			if _, exists := r.inputs[parent]; exists {
+				continue
+			}
+			if _, err := r.open(parent, true); err != nil {
+				return ItemResult{Error: true, Actual: prefix, Message: "PAM长度输入父目录无法确认"}
+			}
+		}
+	}
+	failure := func(err error) ItemResult {
+		message := err.Error()
+		if cs.Option == "minimum_length" {
+			message = "PAM长度配置链、可信输入或读取稳定性无法确认"
+		}
+		return ItemResult{Error: true, Actual: prefix, Message: message}
+	}
 	if _, err := r.open(paths.directory, true); err != nil {
 		return failure(err)
 	}
@@ -450,6 +472,13 @@ func pamPasswordWithin(cs *CheckSpec, paths pamPaths) ItemResult {
 	if err := r.stable(); err != nil {
 		return failure(err)
 	}
+	if cs.Option == "minimum_length" {
+		for _, input := range r.inputs {
+			if trustedDiskInput(input, uid, gid) != nil {
+				return failure(fmt.Errorf("PAM长度输入属主、写权限、链接或ACL无法确认"))
+			}
+		}
+	}
 	actual += fmt.Sprintf(" inputs=%d", len(r.inputs))
 	if cs.Option == "unix_hash" {
 		if algorithm == "unspecified" {
@@ -466,6 +495,10 @@ func pamPasswordWithin(cs *CheckSpec, paths pamPaths) ItemResult {
 	}
 	actual += fmt.Sprintf(" minlen=%d minclass=%d dcredit=%d ucredit=%d lcredit=%d ocredit=%d enforcing=%d enforce_for_root=%d", settings["minlen"], settings["minclass"], settings["dcredit"], settings["ucredit"], settings["lcredit"], settings["ocredit"], settings["enforcing"], settings["enforce_for_root"])
 	passed := bound && settings["minlen"] >= 12 && settings["minclass"] >= 3 && settings["dcredit"] <= 0 && settings["ucredit"] <= 0 && settings["lcredit"] <= 0 && settings["ocredit"] <= 0 && settings["enforcing"] == 1 && settings["enforce_for_root"] == 1
+	if cs.Option == "minimum_length" {
+		passed = bound && settings["minlen"] >= 8 && settings["dcredit"] <= 0 && settings["ucredit"] <= 0 && settings["lcredit"] <= 0 && settings["ocredit"] <= 0 && settings["enforcing"] == 1 && settings["enforce_for_root"] == 1
+		actual += " length_reference=8"
+	}
 	result := ItemResult{Passed: passed, Actual: actual}
 	if !passed {
 		result.Message = "质量长度、字符类别、credit、强制执行或口令传递不满足明确参考"

@@ -106,14 +106,14 @@ class BaselinePackageIntegrationTest {
     @Test void checkedInCandidatesKeepUnsupportedRulesAndExcludeUnknownVersions() throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
-        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json", "packages/ssh-notice/linux-baseline.json", "packages/shadow-defaults/linux-baseline.json", "packages/bash-policy/linux-baseline.json", "packages/ipv4-host/linux-baseline.json", "packages/systemd-maintenance/linux-baseline.json", "packages/program-files/linux-baseline.json", "packages/systemd-rescue/linux-baseline.json", "packages/apparmor/linux-baseline.json")) {
+        for (String path : List.of("packages/linux-baseline.json", "packages/windows-baseline.json", "packages/reviewed/linux-baseline.json", "packages/ssh/linux-baseline.json", "packages/identity/linux-baseline.json", "packages/pam/linux-baseline.json", "packages/pam-auth/linux-baseline.json", "packages/systemd/linux-baseline.json", "packages/log-metadata/linux-baseline.json", "packages/audit/linux-baseline.json", "packages/auditd/linux-baseline.json", "packages/cron/linux-baseline.json", "packages/rsyslog-cron/linux-baseline.json", "packages/sudoers/linux-baseline.json", "packages/apt/linux-baseline.json", "packages/apt-sources/linux-baseline.json", "packages/ctrl-alt-del/linux-baseline.json", "packages/pam-limits/linux-baseline.json", "packages/ssh-notice/linux-baseline.json", "packages/shadow-defaults/linux-baseline.json", "packages/bash-policy/linux-baseline.json", "packages/ipv4-host/linux-baseline.json", "packages/systemd-maintenance/linux-baseline.json", "packages/program-files/linux-baseline.json", "packages/systemd-rescue/linux-baseline.json", "packages/apparmor/linux-baseline.json", "packages/securetty/linux-baseline.json", "packages/agent-runtime/linux-baseline.json", "packages/dnf-signature/linux-baseline.json")) {
             try (var input = java.nio.file.Files.newInputStream(repo.resolve("deploy/baseline").resolve(path))) {
                 var doc = BaselinePackageFormat.read(input).document();
                 int os = doc.path("osType").intValue(); String pattern = doc.path("osVersionPattern").asText();
                 for (String version : List.of("", "unknown", "Other OS 999"))
                     assertFalse(BaselinePackageFormat.applies(os, pattern, Map.of("os_type", os, "os_version", version)));
                 assertTrue(BaselinePackageFormat.applies(os, pattern, Map.of("os_type", os,
-                        "os_version", os == 1 ? "ubuntu 24.04" : "Microsoft Windows Server 2022 Standard 21H2")));
+                        "os_version", os == 1 ? (path.contains("dnf-signature") ? "rocky 9.4" : "ubuntu 24.04") : "Microsoft Windows Server 2022 Standard 21H2")));
                 if (path.contains("reviewed")) {
                     assertEquals(8, doc.path("items").size()); assertEquals(52, doc.path("unsupported").size());
                     var pkg = imported((ObjectNode) doc); packages.review(id(pkg), true, "Review narrow scope", 7L);
@@ -521,6 +521,59 @@ class BaselinePackageIntegrationTest {
         Path repo = Path.of("").toAbsolutePath();
         while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
         return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/apparmor/linux-baseline.json")));
+    }
+
+    ObjectNode closingDocument(String product) throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(java.nio.file.Files.readString(repo.resolve("deploy/baseline/packages/" + product + "/linux-baseline.json")));
+    }
+
+    @Test void closingCandidatesPreserveCurrentReferencesAndRequireFreshCompleteEvidence() throws Exception {
+        for (String product : List.of("securetty", "agent-runtime", "dnf-signature")) {
+            var doc = closingDocument(product); var pkg = imported(doc);
+            String host = product.equals("dnf-signature") ? "rocky" : "ubuntu";
+            String other = host.equals("rocky") ? "ubuntu" : "rocky";
+            packages.review(id(pkg), true, "Finite declared or current-instance evidence with explicit boundaries", 7L);
+            for (String rejected : List.of("windows", other)) assertThrows(IllegalArgumentException.class, () -> test(id(pkg), rejected));
+            long original = test(id(pkg), host);
+            var sent = dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
+            assertEquals(doc.path("items").size(), sent.size());
+            for (int i=0; i<sent.size(); i++) assertEquals(doc.path("items").get(i).path("check"), JsonUtils.mapper().readTree(sent.get(i).getCheck()));
+            var response = report(original, host, true);
+            results.onResult(host, response.toBuilder().setItems(0, response.getItems(0).toBuilder().setPassed(false).setExecutionStatus("error").setMessage("Unknown or unreadable current evidence")).build());
+            assertThrows(IllegalArgumentException.class, () -> packages.publish(id(pkg), "One incomplete item blocks the whole version", 7L));
+            long retry = test(id(pkg), host); response = report(retry, host, true);
+            String actual = "scope=" + product + " effective_invocation_state=unverified snapshot_state=non_atomic reference_match=false";
+            results.onResult(host, response.toBuilder().setItems(0, response.getItems(0).toBuilder().setPassed(false).setExecutionStatus("fail").setActual(actual).setMessage("Complete known reference mismatch")).build());
+            assertEquals(actual, jdbc.queryForObject("SELECT actual FROM t_baseline_result WHERE task_id=? ORDER BY item_id LIMIT 1", String.class, retry));
+            packages.publish(id(pkg), "Complete finding retained; no assertion of full host compliance", 7L);
+            var next = doc.deepCopy(); next.put("version", "2"); ((ObjectNode)next.path("items").get(0).path("check")).put("timeout_ms", 6000);
+            var changed = imported(next); packages.review(id(changed), true, "New immutable observation version", 7L);
+            assertThrows(IllegalArgumentException.class, () -> packages.publish(id(changed), "Old evidence cannot authorize new version", 7L));
+            long fresh = test(id(changed), host); results.onResult(host, report(fresh, host, true)); packages.publish(id(changed), "Fresh complete fixture", 7L);
+            for (var item : doc.path("items")) {
+                String snapshot = jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code=?", String.class, original, item.path("code").asText());
+                assertEquals(item.path("check"), JsonUtils.mapper().readTree(snapshot));
+            }
+        }
+    }
+
+    @Test void closingCandidatesRejectAlternateContextsExecutionFieldsAndWeakReferences() throws Exception {
+        for (String product : List.of("securetty", "agent-runtime", "dnf-signature")) {
+            for (int index=0; index<closingDocument(product).path("items").size(); index++) {
+                for (String field : List.of("cmd", "connection", "root", "path", "pid", "namespace", "timeout_ms")) {
+                    var doc = closingDocument(product); ((ObjectNode)doc.path("items").get(index).path("check")).putNull(field);
+                    assertThrows(IllegalArgumentException.class, () -> imported(doc));
+                }
+                for (var change : Map.of("target", "other", "operator", "contains", "expected", "enabled").entrySet()) {
+                    var doc = closingDocument(product); ((ObjectNode)doc.path("items").get(index).path("check")).put(change.getKey(), change.getValue());
+                    assertThrows(IllegalArgumentException.class, () -> imported(doc));
+                }
+            }
+            var windows = closingDocument(product); windows.put("osType", 2); assertThrows(IllegalArgumentException.class, () -> imported(windows));
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class)); verifyNoInteractions(commands);
     }
 
     @Test void appArmorRuntimeReferenceNeedsFreshEvidenceAndPreservesUnverifiedAccess() throws Exception {
@@ -973,12 +1026,12 @@ class BaselinePackageIntegrationTest {
         assertThrows(IllegalArgumentException.class,()->test(id(pkg),"windows"));
         assertThrows(IllegalArgumentException.class,()->test(id(pkg),"rocky"));
         long task=test(id(pkg),"ubuntu");var sent=dispatched.get(dispatched.size()-1).getBaselineCheck().getItemsList();
-        assertEquals(2,sent.size());
+        assertEquals(3,sent.size());
         for(int i=0;i<sent.size();i++)assertEquals(doc.path("items").get(i).path("check"),JsonUtils.mapper().readTree(sent.get(i).getCheck()));
         String snapshot=jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0002'",String.class,task);
         assertTrue(snapshot.contains("enforce_for_root=1"));
         results.onResult("ubuntu",report(task,"ubuntu",false));packages.publish(id(pkg),"Complete protocol fixture; findings retained",7L);
-        var next=doc.deepCopy();next.put("version","2");var changed=imported(next);
+        var next=doc.deepCopy();next.put("version","3");var changed=imported(next);
         assertThrows(IllegalArgumentException.class,()->packages.publish(id(changed),"Reuse previous evidence",7L));
         assertEquals(snapshot,jdbc.queryForObject("SELECT CAST(\"check\" AS TEXT) FROM t_baseline_task_item WHERE task_id=? AND code='BL-LINUX-0002'",String.class,task));
     }

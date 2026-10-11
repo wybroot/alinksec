@@ -23,7 +23,7 @@ static int conversation(int count, const struct pam_message **messages,
     *out = responses; return PAM_SUCCESS;
 }
 int main(int argc, char **argv) {
-    if (argc != 2 || (strcmp(argv[1],"root") && strcmp(argv[1],"alinksec-pam-test"))) return 2;
+    if ((argc != 2 && argc != 3) || (strcmp(argv[1],"root") && strcmp(argv[1],"alinksec-pam-test"))) return 2;
     char *password=NULL; size_t size=0;
     ssize_t length=getline(&password,&size,stdin);
     if (length<1 || length>512) return 2;
@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     struct input input={argv[1],password}; struct pam_conv conv={conversation,&input};
     pam_handle_t *handle=NULL;
     int rc=pam_start("login",input.user,&conv,&handle);
+    if (rc==PAM_SUCCESS && argc==3) rc=pam_set_item(handle,PAM_TTY,argv[2]);
     if (rc==PAM_SUCCESS) rc=pam_authenticate(handle,0);
     if (handle) pam_end(handle,rc);
     // No prompts, credentials or tally contents leave this disposable process.

@@ -541,16 +541,19 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     assert.ok(rawChecks.every(check => payload.includes(check)), 'Dispatched protobuf must retain selected PAM service and full reference')
     const option = mode === 'sqlite' ? `json_extract(i."check", '$.option')` : `CAST(i."check" AS JSONB)->>'option'`
     const hash = `${option}='unix_hash'`
+    const length = `${option}='minimum_length'`
+    const compliant = `(${hash} OR ${length})`
+    const pamUnverified = 'application_invocation_state=unverified existing_password_state=unverified other_services_state=unverified module_integrity_state=unverified snapshot_state=non_atomic '
     sql(`BEGIN;
       INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
-      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : hash},
+      SELECT e.task_id,e.agent_id,e.item_id,${outcome === 'error' ? 'false' : compliant},
         CASE WHEN ${hash} THEN 'scope=passwd-password-chain service=/etc/pam.d/passwd stack=local-unix-deny-permit quality_present=true unix_use_authtok=true algorithm=yescrypt inputs=4 expected=yescrypt'
-        ELSE 'scope=passwd-password-chain service=/etc/pam.d/passwd stack=local-unix-deny-permit quality_present=true unix_use_authtok=true algorithm=yescrypt inputs=4 minlen=8 minclass=1 dcredit=0 ucredit=0 lcredit=0 ocredit=0 enforcing=1 enforce_for_root=0' END,
-        ${outcome === 'error' ? "'PAM chain is unconfirmed'" : `CASE WHEN ${hash} THEN '' ELSE 'PAM password quality reference mismatch' END`},
-        ${outcome === 'error' ? "'error'" : `CASE WHEN ${hash} THEN 'pass' ELSE 'fail' END`}
+        ELSE 'scope=passwd-password-chain ${pamUnverified}service=/etc/pam.d/passwd stack=local-unix-deny-permit quality_present=true unix_use_authtok=true algorithm=yescrypt inputs=4 minlen=8 minclass=1 dcredit=0 ucredit=0 lcredit=0 ocredit=0 enforcing=1 enforce_for_root=1' END,
+        ${outcome === 'error' ? "'PAM chain is unconfirmed'" : `CASE WHEN ${compliant} THEN '' ELSE 'PAM password quality reference mismatch' END`},
+        ${outcome === 'error' ? "'error'" : `CASE WHEN ${compliant} THEN 'pass' ELSE 'fail' END`}
       FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId};
       INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
-      VALUES (${taskId},'ci-smoke-001',2,${outcome === 'error' ? 0 : 1},${outcome === 'error' ? 2 : 1},${outcome === 'error' ? 0 : 50},${outcome === 'error' ? 2 : 0});
+      VALUES (${taskId},'ci-smoke-001',3,${outcome === 'error' ? 0 : 2},${outcome === 'error' ? 3 : 1},${outcome === 'error' ? 0 : 66.67},${outcome === 'error' ? 3 : 0});
       UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
     if (outcome === 'error') {
       pam.error = await ok(pamPrefix, { token: tokens.admin }); assert.equal(pam.error.testReady, false)
@@ -558,13 +561,15 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
     } else {
       pam.completed = await ok(pamPrefix, { token: tokens.admin }); assert.equal(pam.completed.testReady, true)
       const items = pam.completed.testResults[0].items
-      assert.equal(items.filter(item => item.execution_status === 'pass').length, 1)
+      assert.equal(items.filter(item => item.execution_status === 'pass').length, 2)
       assert.equal(items.filter(item => item.execution_status === 'fail').length, 1)
       assert.ok(items.every(item => !item.fixable && item.actual.includes('service=/etc/pam.d/passwd')))
+      assert.equal(items.find(item => item.code === 'BL-LINUX-0001').execution_status, 'pass')
+      assert.equal(items.find(item => item.code === 'BL-LINUX-0002').execution_status, 'fail')
       assert.ok(!JSON.stringify(pam.completed).includes('DO_NOT_REPORT_PAM_SECRET'))
     }
   }
-  pam.published = await ok(`${pamPrefix}/publish`, { ...options, body: { note: 'Protocol fixture: declared hash selection passes, quality reference fails; no production credentials changed' } })
+  pam.published = await ok(`${pamPrefix}/publish`, { ...options, body: { note: 'Protocol fixture: length and hash pass independently while class policy fails' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === pamRecord.id))
   pam.withdrawn = await ok(`${pamPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pam.withdrawn.status, 'withdrawn')
   const logDocument = JSON.parse(readFileSync(new URL('../baseline/packages/log-metadata/linux-baseline.json', import.meta.url)))
@@ -1000,6 +1005,66 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   appArmor.published = await ok(`${appArmorPrefix}/publish`, { ...options, body: { note: 'Complete failed mode protocol fixture; actual access unverified' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === appArmorRecord.id))
   appArmor.withdrawn = await ok(`${appArmorPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(appArmor.withdrawn.status, 'withdrawn')
+  // These complete reports validate transport and publication. Native PAM,
+  // actual mTLS Agent/cache and isolated libdnf evidence are checked separately.
+  const closingBoundaries = {
+    secureTTY: 'scope=login-auth-securetty-declarations application_invocation_state=unverified identity_resolution_state=unverified module_integrity_state=unverified other_services_state=unverified terminal_delivery_state=unverified snapshot_state=non_atomic ',
+    channel: 'scope=current-agent-channel server_application_acceptance_state=unverified server_persistence_state=unverified other_agents_state=unverified protection_state=unverified snapshot_state=non_atomic ',
+    signature: 'scope=current-agent-signature-cache-vs-disk source_authenticity_state=unverified freshness_state=unverified detection_coverage_state=unverified engine_instance_state=unverified package_digest_state=unverified snapshot_state=non_atomic ',
+    dnfSignature: 'scope=dnf4-default-disk-signature-declarations effective_invocation_state=unverified key_identity_state=unverified actual_signature_verification_state=unverified plugins_state=unverified other_package_tools_state=unverified snapshot_state=non_atomic ',
+  }
+  for (const [key, product, agent, rejected] of [
+    ['secureTTY', 'securetty', 'ci-smoke-001', 'ci-smoke-002'],
+    ['agentRuntime', 'agent-runtime', 'ci-smoke-001', 'ci-smoke-002'],
+    ['dnfSignature', 'dnf-signature', 'ci-smoke-002', 'ci-smoke-001'],
+  ]) {
+    const document = JSON.parse(readFileSync(new URL(`../baseline/packages/${product}/linux-baseline.json`, import.meta.url)))
+    document.code = `API-${mode}-${product}`
+    const invalid = structuredClone(document); invalid.items[0].check.expected = 'weak-reference'
+    assert.equal((await request('/api/baseline/packages/import', pamUpload(invalid))).status, 400)
+    const stages = { candidate: await ok('/api/baseline/packages/import', pamUpload(document)) }; fixtures[key] = stages
+    const record = { id: stages.candidate.id, code: document.code }; baselinePackages.push(record)
+    const prefix = `/api/baseline/packages/${record.id}`
+    stages.approved = await ok(`${prefix}/review`, { ...options, body: { approved: true, note: 'Bounded product reference and explicit unverified behavior' } })
+    record.template = Number(stages.approved.template_id)
+    for (const id of ['ci-smoke-windows', rejected]) assert.equal((await request(`${prefix}/test`, { ...options, body: { agentIds: [id] } })).status, 400)
+    for (const outcome of ['error', 'pass', 'completed']) {
+      stages.testing = await ok(`${prefix}/test`, { ...options, body: { agentIds: [agent] } })
+      const taskId = Number(stages.testing.test_task_id); baselineTaskIds.push(taskId)
+      const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+      assert.deepEqual(snapshots, document.items.map(item => item.check))
+      const stored = JSON.parse(sql(`SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='${agent}' AND type='baseline_check' ORDER BY id DESC LIMIT 1;`))
+      const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+      assert.ok(document.items.every(item => payload.includes(JSON.stringify(item.check))))
+      const error = outcome === 'error'; let passes = 0
+      const inserts = []
+      for (const item of document.items) {
+        const channel = item.check.option === 'channel', pass = !error && (outcome === 'pass' || channel)
+        passes += Number(pass)
+        const boundary = closingBoundaries[channel ? 'channel' : key === 'agentRuntime' ? 'signature' : key]
+        const observation = key === 'secureTTY' ? `securetty_present=true control=required noconsole=true tty_count=1 allowed_subset=${pass} tty_sha256=${'a'.repeat(64)}`
+          : channel ? 'self_process=running current_session_active=true send_age_ms=10 receive_age_ms=10'
+          : key === 'agentRuntime' ? `hash_count=1 rule_count=0 cache_reference_match=${pass} version_sha256=${'a'.repeat(64)} inventory_sha256=${'b'.repeat(64)} hashes_file_sha256=${'c'.repeat(64)}`
+          : `dnf_version=4.14.0 main_gpgcheck=true main_repo_gpgcheck=true localpkg_gpgcheck=true repo_count=1 mismatched_repos=${pass ? 0 : 1} inventory_sha256=${'a'.repeat(64)}`
+        const actual = boundary + (error ? '' : observation)
+        const message = error ? 'Unknown or unreadable product evidence' : pass ? '' : key === 'secureTTY' ? 'Terminal subset differs from reference' : key === 'agentRuntime' ? 'Current cache differs from disk reference' : 'Repository signature declaration differs from reference'
+        inserts.push(`INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+          SELECT e.task_id,e.agent_id,e.item_id,${pass},'${actual}','${message}','${error ? 'error' : pass ? 'pass' : 'fail'}'
+          FROM t_baseline_task_expected e JOIN t_baseline_task_item i ON i.task_id=e.task_id AND i.item_id=e.item_id WHERE e.task_id=${taskId} AND i.code='${item.code}';`)
+      }
+      const total = document.items.length
+      sql(`BEGIN; ${inserts.join('\n')}
+        INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count) VALUES (${taskId},'${agent}',${total},${passes},${total - passes},${passes * 100 / total},${error ? total : 0});
+        UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+      stages[outcome] = await ok(prefix, { token: tokens.admin }); assert.equal(stages[outcome].testReady, !error)
+      assert.equal(stages[outcome].testResults[0].items.length, total)
+      assert.ok(stages[outcome].testResults[0].items.every(item => !item.fixable && item.actual.includes('snapshot_state=non_atomic')))
+      if (error) assert.equal((await request(`${prefix}/publish`, { ...options, body: { note: 'Missing evidence blocks publication' } })).status, 400)
+    }
+    stages.published = await ok(`${prefix}/publish`, { ...options, body: { note: 'Complete product reference findings retained; protocol fixture' } })
+    fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === record.id))
+    stages.withdrawn = await ok(`${prefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(stages.withdrawn.status, 'withdrawn')
+  }
   // Launch declarations below are protocol fixtures; they do not authenticate
   // maintenance mode. Native units are queried without starting sulogin.
   const rescueDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd-rescue/linux-baseline.json', import.meta.url)))

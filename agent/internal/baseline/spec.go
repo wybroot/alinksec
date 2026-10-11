@@ -130,12 +130,12 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 		return nil, fmt.Errorf("check JSON 含尾随内容")
 	}
 	switch s.Type {
-	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "shadow_account_defaults", "bash_global_policy", "linux_ipv4_host", "systemd_maintenance", "systemd_rescue_policy", "apparmor_runtime", "linux_program_files", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
+	case "file_content", "file_line", "file_perm", "cmd_output", "sshd_effective", "sshd_notice", "shadow_account_defaults", "bash_global_policy", "linux_ipv4_host", "systemd_maintenance", "systemd_rescue_policy", "apparmor_runtime", "linux_program_files", "local_identity_file", "local_accounts", "pam_password", "pam_auth", "pam_securetty", "agent_runtime", "dnf_signature_policy", "pam_limits", "systemd_service", "systemd_ctrl_alt_del", "linux_log_metadata", "linux_audit", "auditd_config", "debian_cron_metadata", "rsyslog_cron_routing", "sudoers_policy", "apt_install_policy", "apt_sources_policy":
 	default:
 		return nil, fmt.Errorf("不支持的检查类型: %q", s.Type)
 	}
 	if s.TimeoutMs == 0 {
-		if (s.Type == "sshd_notice" || s.Type == "shadow_account_defaults" || s.Type == "bash_global_policy" || s.Type == "linux_ipv4_host" || s.Type == "systemd_maintenance" || s.Type == "systemd_rescue_policy" || s.Type == "apparmor_runtime" || s.Type == "linux_program_files") && seen["timeout_ms"] {
+		if (s.Type == "sshd_notice" || s.Type == "shadow_account_defaults" || s.Type == "bash_global_policy" || s.Type == "linux_ipv4_host" || s.Type == "systemd_maintenance" || s.Type == "systemd_rescue_policy" || s.Type == "apparmor_runtime" || s.Type == "linux_program_files" || s.Type == "pam_securetty" || s.Type == "agent_runtime" || s.Type == "dnf_signature_policy" || s.Type == "pam_password" && s.Option == "minimum_length") && seen["timeout_ms"] {
 			return nil, fmt.Errorf("检查显式超时必须为100至30000毫秒整数")
 		}
 		s.TimeoutMs = 5000
@@ -361,11 +361,49 @@ func ParseCheck(checkJSON string) (*CheckSpec, error) {
 				return nil, fmt.Errorf("PAM 认证检查不允许字段 %s", name)
 			}
 		}
+	} else if s.Type == "agent_runtime" {
+		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}
+		expected := ""
+		if s.Option == "channel" {
+			expected = agentChannelReference
+		}
+		if s.Option == "hash_inventory" {
+			expected = agentSignatureReference
+		}
+		if s.Target != "current-agent" || s.Operator != "eq" || expected == "" || s.Expected != expected {
+			return nil, fmt.Errorf("Agent检查需当前实例与完整通信或哈希清单参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("Agent检查不允许字段 %s", name)
+			}
+		}
+	} else if s.Type == "dnf_signature_policy" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
+		if s.Target != "/etc/dnf/dnf.conf" || s.Operator != "eq" || s.Expected != dnfSignatureReference {
+			return nil, fmt.Errorf("DNF检查需固定输入与完整签名声明参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("DNF检查不允许字段 %s", name)
+			}
+		}
+	} else if s.Type == "pam_securetty" {
+		allowed := map[string]bool{"type": true, "target": true, "operator": true, "expected": true, "timeout_ms": true}
+		if s.Target != "/etc/pam.d/login" || s.Operator != "eq" || s.Expected != pamSecureTTYReference {
+			return nil, fmt.Errorf("securetty检查需固定login入口和完整终端限制参考")
+		}
+		for name := range seen {
+			if !allowed[name] {
+				return nil, fmt.Errorf("securetty不允许字段 %s", name)
+			}
+		}
 	} else if s.Type == "pam_password" {
 		allowed := map[string]bool{"type": true, "target": true, "option": true, "operator": true, "expected": true, "timeout_ms": true}
 		if s.Target != "/etc/pam.d/passwd" || s.Operator != "eq" ||
-			(s.Option != "quality" && s.Option != "unix_hash") ||
+			(s.Option != "quality" && s.Option != "unix_hash" && s.Option != "minimum_length") ||
 			(s.Option == "quality" && s.Expected != pamQualityReference) ||
+			(s.Option == "minimum_length" && s.Expected != pamLengthReference) ||
 			(s.Option == "unix_hash" && s.Expected != "yescrypt") {
 			return nil, fmt.Errorf("PAM 口令检查仅支持 passwd 服务的明确质量参考或 yescrypt 选择")
 		}
