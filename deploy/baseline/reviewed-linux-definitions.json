@@ -12,7 +12,7 @@
       "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
       "osType": 1,
       "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-      "version": "23",
+      "version": "24",
       "items": [
         {
           "code": "BL-LINUX-0030",
@@ -266,7 +266,7 @@
         },
         {
           "ruleId": "BL-LINUX-0040",
-          "reason": "shell OR 链把无法查询与禁用混在一起；按实际机制拆分、保留错误与适用性。"
+          "reason": "通用包不含此项；独立Ubuntu24 AppArmor候选仅核对当前根视图启用、全局及已加载策略模式；实际访问控制/应用绑定/策略内容/其他机制未验证。"
         },
         {
           "ruleId": "BL-LINUX-0041",
@@ -1084,13 +1084,21 @@
       },
       {
         "ruleId": "BL-LINUX-0040",
-        "name": "SELinux 或 AppArmor 运行策略",
+        "name": "AppArmor当前根视图启用及非空全部enforce模式参考",
         "category": "入侵防范",
         "severity": 2,
-        "status": "unsupported",
-        "reason": "shell OR 链把无法查询与禁用混在一起；按实际机制拆分、保留错误与适用性。",
-        "scope": "旧实现不足以确认该策略；需按产品、版本和实际生效链单独实现并验证。",
-        "remediation": "未支持：shell OR 链把无法查询与禁用混在一起；按实际机制拆分、保留错误与适用性。 应按实际产品策略人工核对；禁止使用旧自动修复定义。"
+        "status": "product_candidate",
+        "reason": "通用包不含此项；独立Ubuntu24 AppArmor候选仅核对当前根视图启用、全局及已加载策略模式；实际访问控制/应用绑定/策略内容/其他机制未验证。",
+        "scope": "Ubuntu24 amd64/arm64当前sysfs/securityfs AppArmor根非叠加视图，完整启用、全局enforce及非空可见清单全部enforce；读取、未知、身份、视图或变化异常为error，不回退SELinux。",
+        "remediation": "管理员确认当前AppArmor视图及应用策略需求，人工审查内容与绑定并完成主机测试；本项目精确模式参考不证明实际访问控制或完整主机覆盖，无自动修复。详见apparmor候选及docs43。",
+        "check": {
+          "type": "apparmor_runtime",
+          "target": "current-kernel",
+          "operator": "eq",
+          "expected": "enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce",
+          "timeout_ms": 5000
+        },
+        "candidate": "packages/apparmor/linux-baseline.json"
       },
       {
         "ruleId": "BL-LINUX-0041",

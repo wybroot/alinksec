@@ -115,6 +115,8 @@ func checkOne(spec *pb.BaselineCheckSpec) ItemResult {
 		result = checkSystemdMaintenance(cs)
 	case "systemd_rescue_policy":
 		result = checkSystemdRescue(cs)
+	case "apparmor_runtime":
+		result = checkAppArmor(cs)
 	case "linux_program_files":
 		result = checkProgramFiles(cs)
 	case "local_identity_file", "local_accounts":

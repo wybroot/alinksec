@@ -416,6 +416,8 @@ Build `.tmp/pam-native.test` from `agent/internal/baseline` with `go test -c`, t
 
 `systemd-native.sh`同时成组执行维护候选的十三次原生状态对照与只读C时钟探针。仅唯一运行时timer/service，清理timer在六小时后且120秒测试预算内清理，不触发真实清理；唯一通知型sleep不能冒充timesyncd，真实时间服务仅只读观察，不改时钟。busctl带类型ExecStart保留argv边界，强制结构/整数/变化/截止时间不跳过。完整同步/不同步组合为标注的协议夹具，参考边界见[systemd维护说明](../../docs/40-systemd清理调度与内核同步指示核查.md)。
 
+`bash deploy/tests/apparmor-native.sh`仅允许root及显式授权的一次性GitHub-hosted Ubuntu24 runner。双架构各执行7次真实内核观察，并与aa-status JSON完整模式清单独立对照；仅加载、替换及移除唯一无attachment策略，验证enforce/complain/kill/unconfined，不启动应用或改变既有策略/全局模式。缺少受支持根视图必须失败，五组定义/状态/限额/变化/受保护读取边界在原生步骤内强制执行。REST/browser完整报告另标注协议夹具，实际访问控制未验证，见[AppArmor范围](../../docs/43-AppArmor当前根策略模式核查.md)。
+
 该脚本也执行rescue/emergency联合启动参考：唯一运行时单元仅写入/加载/查询，从不start；覆盖真实ExecStartEx argv/扩展标记、unit force、额外环境链与待重载，独立systemctl对照。内核和管理器force/未知/限额/变化/截止时间为mandatory逻辑测试，不更改这些真实输入或认证。真实固定选择器只读保留item ID；完整REST/生产页面是协议夹具，实际认证仍unverified，见[维护启动范围](../../docs/42-rescue-emergency当前启动声明核查.md)。
 
 `bash deploy/tests/systemd-native.sh` requires a disposable GitHub-hosted Ubuntu24 runner and the compiled `.tmp/baseline-native.test`. It serially creates one unique test service, verifies running/inactive/failed/exited/masked/missing/invalid states and ignored client environment redirects, and cleans up that unit. Existing auditd/rsyslog units are queried read-only; these observations do not assert event capture or log delivery. Both architectures must execute this opt-in test in CI, not merely skip it in ordinary Go tests. Do not enable mutation fixtures on a user host. See [check scope](../../docs/25-systemd服务状态核查.md).

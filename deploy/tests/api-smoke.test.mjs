@@ -959,6 +959,47 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   programFiles.published = await ok(`${programPrefix}/publish`, { ...options, body: { note: 'Complete finite reference fixture; no global authorization or execution claim' } })
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === programRecord.id))
   programFiles.withdrawn = await ok(`${programPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(programFiles.withdrawn.status, 'withdrawn')
+  // Runtime mode reports are protocol fixtures; native kernel profiles are
+  // observed separately, without attaching policies to applications.
+  const appArmorDocument = JSON.parse(readFileSync(new URL('../baseline/packages/apparmor/linux-baseline.json', import.meta.url)))
+  appArmorDocument.code = `API-${mode}-apparmor`
+  const invalidAppArmor = structuredClone(appArmorDocument); invalidAppArmor.items[0].check.expected = 'enforce'
+  assert.equal((await request('/api/baseline/packages/import', pamUpload(invalidAppArmor))).status, 400)
+  const appArmor = { candidate: await ok('/api/baseline/packages/import', pamUpload(appArmorDocument)) }; fixtures.appArmor = appArmor
+  const appArmorRecord = { id: appArmor.candidate.id, code: appArmorDocument.code }; baselinePackages.push(appArmorRecord)
+  const appArmorPrefix = `/api/baseline/packages/${appArmorRecord.id}`
+  appArmor.approved = await ok(`${appArmorPrefix}/review`, { ...options, body: { approved: true, note: 'Root policy mode reference; content and effective access unverified' } })
+  appArmorRecord.template = Number(appArmor.approved.template_id)
+  for (const agent of ['ci-smoke-windows', 'ci-smoke-002']) assert.equal((await request(`${appArmorPrefix}/test`, { ...options, body: { agentIds: [agent] } })).status, 400)
+  for (const outcome of ['error', 'pass', 'completed']) {
+    appArmor.testing = await ok(`${appArmorPrefix}/test`, { ...options, body: { agentIds: ['ci-smoke-001'] } })
+    const taskId = Number(appArmor.testing.test_task_id); baselineTaskIds.push(taskId)
+    const snapshots = sql(`SELECT CAST("check" AS TEXT) FROM t_baseline_task_item WHERE task_id=${taskId} ORDER BY code;`).split('\n').map(value => JSON.parse(value))
+    assert.deepEqual(snapshots, appArmorDocument.items.map(item => item.check))
+    const stored = JSON.parse(sql("SELECT CAST(payload AS TEXT) FROM t_command WHERE agent_id='ci-smoke-001' AND type='baseline_check' ORDER BY id DESC LIMIT 1;"))
+    const payload = Buffer.from(stored.command_b64, 'base64').toString('utf8')
+    assert.ok(payload.includes('apparmor_runtime') && payload.includes(appArmorDocument.items[0].check.expected))
+    const error = outcome === 'error', pass = outcome === 'pass'
+    const boundary = 'scope=current-apparmor-root-view policy_content_state=unverified application_attachment_state=unverified effective_access_state=unverified unloaded_profiles_state=unverified other_security_mechanisms_state=unverified host_policy_coverage_state=unverified persistence_state=unverified snapshot_state=non_atomic '
+    const actual = boundary + (error ? '' : `enabled=Y lsm_apparmor=true view_level=0 stacked=no ns_stacked=no global_mode=enforce profiles=2 enforce=${pass ? 2 : 1} complain=${pass ? 0 : 1} kill=0 unconfined=0 inventory_sha256=${'a'.repeat(64)}`)
+    sql(`BEGIN;
+      INSERT INTO t_baseline_result(task_id,agent_id,item_id,passed,actual,message,execution_status)
+      SELECT e.task_id,e.agent_id,e.item_id,${pass ? 'true' : 'false'}, '${actual}',
+        ${error ? "'Unsupported or unreadable AppArmor view'" : pass ? "''" : "'Loaded complain mode differs from reference'"}, '${error ? 'error' : pass ? 'pass' : 'fail'}'
+      FROM t_baseline_task_expected e WHERE e.task_id=${taskId};
+      INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,error_count)
+      VALUES (${taskId},'ci-smoke-001',1,${pass ? 1 : 0},${pass ? 0 : 1},${pass ? 100 : 0},${error ? 1 : 0});
+      UPDATE t_baseline_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=${taskId}; COMMIT;`)
+    appArmor[outcome] = await ok(appArmorPrefix, { token: tokens.admin })
+    assert.equal(appArmor[outcome].testReady, !error)
+    const items = appArmor[outcome].testResults[0].items
+    assert.equal(items.length, 1); assert.equal(items[0].execution_status, error ? 'error' : pass ? 'pass' : 'fail')
+    assert.ok(!items[0].fixable && items[0].actual.includes('effective_access_state=unverified') && items[0].actual.includes('application_attachment_state=unverified'))
+    if (error) assert.equal((await request(`${appArmorPrefix}/publish`, { ...options, body: { note: 'Unreadable policy view blocks publication' } })).status, 400)
+  }
+  appArmor.published = await ok(`${appArmorPrefix}/publish`, { ...options, body: { note: 'Complete failed mode protocol fixture; actual access unverified' } })
+  fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === appArmorRecord.id))
+  appArmor.withdrawn = await ok(`${appArmorPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(appArmor.withdrawn.status, 'withdrawn')
   // Launch declarations below are protocol fixtures; they do not authenticate
   // maintenance mode. Native units are queried without starting sulogin.
   const rescueDocument = JSON.parse(readFileSync(new URL('../baseline/packages/systemd-rescue/linux-baseline.json', import.meta.url)))

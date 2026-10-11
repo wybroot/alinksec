@@ -152,6 +152,12 @@ public final class BaselinePackageFormat {
                 require(option.equals("linker_metadata") ? expected.equals("main+included_conf<=0644,dirs<=0755,uid=0,gid=0")
                         : option.equals("privileged_reference") && expected.matches("scope=/usr/bin\\+/usr/sbin,sha256=[a-f0-9]{64},exact=mode/uid/gid/content"), "程序文件项或审核摘要参考不能隐式扩展");
             }
+            case "apparmor_runtime" -> {
+                fields(check, "type", "target", "operator", "expected", "timeout_ms");
+                require(os == 1, "AppArmor运行检查仅支持Linux Ubuntu24");
+                require(text(check, "target", 1024).equals("current-kernel") && text(check, "operator", 32).equals("eq"), "AppArmor需固定当前内核和完整参考");
+                require(text(check, "expected", 1000).equals("enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce"), "AppArmor运行模式参考不能隐式扩展");
+            }
             case "systemd_rescue_policy" -> {
                 fields(check, "type", "target", "operator", "expected", "timeout_ms");
                 require(os == 1, "维护入口仅支持Linux Ubuntu24 systemd255");

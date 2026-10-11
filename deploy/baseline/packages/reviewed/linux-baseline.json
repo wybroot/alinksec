@@ -5,7 +5,7 @@
   "product": "Ubuntu 22.04/24.04、Debian 12/13、RHEL/Rocky 9；GNU stat、procps、util-linux、IPv6、messages 日志",
   "osType": 1,
   "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?|(rocky|rhel|redhat) 9(\\.[0-9]+)?)$",
-  "version": "23",
+  "version": "24",
   "items": [
     {
       "code": "BL-LINUX-0030",
@@ -259,7 +259,7 @@
     },
     {
       "ruleId": "BL-LINUX-0040",
-      "reason": "shell OR 链把无法查询与禁用混在一起；按实际机制拆分、保留错误与适用性。"
+      "reason": "通用包不含此项；独立Ubuntu24 AppArmor候选仅核对当前根视图启用、全局及已加载策略模式；实际访问控制/应用绑定/策略内容/其他机制未验证。"
     },
     {
       "ruleId": "BL-LINUX-0041",
@@ -343,6 +343,6 @@
     "name": "ALinkSec Linux reference content review",
     "version": "2026-10-10",
     "url": "https://github.com/wybroot/alinksec/blob/baseline-template-review/deploy/baseline/reviewed-linux-definitions.json",
-    "sha256": "efb5211f21f26e83a7a770743ac5f56358850664da7812981a95ab2ae27be632"
+    "sha256": "ac78204096546ed6e7b5787ca16085f40ccba0b5cd41bde8eea31f6030b8ace3"
   }
 }

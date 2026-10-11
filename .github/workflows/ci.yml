@@ -162,6 +162,8 @@ jobs:
         run: sudo env ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeSSHNotice$'
       - name: Check native systemd service and Ctrl-Alt-Del observations with isolated runner fixtures
         run: bash deploy/tests/systemd-native.sh
+      - name: Check native AppArmor root modes and isolated unattached profile transitions
+        run: bash deploy/tests/apparmor-native.sh
       - name: Check native kernel audit and isolated private watch rules
         run: bash deploy/tests/audit-native.sh
       - name: Check isolated auditd native configuration parsing and declared log metadata
