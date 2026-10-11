@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alinksec/alinksec-agent/internal/packageversion"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/securehttp"
 )
@@ -84,7 +85,7 @@ func fixPackage(f *pb.FixItem, workDir string, log *slog.Logger) *pb.FixResultIt
 
 	// 5. 版本复核（msu 无直接查询手段，标记 installed 由平台侧重扫验证）
 	if got := queryPkgVersion(p.PkgName); got != "" {
-		if p.RepoType != "msu" && got != p.TargetVersion {
+		if p.RepoType != "msu" && !packageVersionMatches(p.RepoType, got, p.TargetVersion) {
 			addLog("复核版本不符: 期望 %s 实际 %s", p.TargetVersion, got)
 			item.Success, item.Verified, item.Log = false, false, joinLog(lines)
 			return item
@@ -98,6 +99,15 @@ func fixPackage(f *pb.FixItem, workDir string, log *slog.Logger) *pb.FixResultIt
 	item.Success, item.Log = true, joinLog(lines)
 	log.Info("软件包修复完成", "pkg", p.PkgName, "version", p.TargetVersion, "reboot", reboot)
 	return item
+}
+
+func packageVersionMatches(repoType, actual, target string) bool {
+	if repoType != "rpm" {
+		return actual == target
+	}
+	a, errA := packageversion.RPMIdentity(actual)
+	b, errB := packageversion.RPMIdentity(target)
+	return errA == nil && errB == nil && a == b
 }
 
 func parsePkgPayload(payload string) (*PkgPayload, error) {

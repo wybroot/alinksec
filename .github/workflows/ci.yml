@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline
+        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -184,6 +184,16 @@ jobs:
         run: |
           (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
           bash deploy/tests/dnf-native.sh
+      - name: Compare full package versions with native RPM and DPKG ordering
+        run: python3 -B deploy/tests/package-version-native.py
+      - name: Retain native package version comparisons
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-version-native-${{ matrix.arch }}
+          path: .tmp/package-version-native.tsv
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
         run: bash deploy/tests/shadow-defaults-native.sh
       - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries

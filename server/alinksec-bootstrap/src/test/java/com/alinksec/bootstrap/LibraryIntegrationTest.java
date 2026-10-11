@@ -415,6 +415,38 @@ class LibraryIntegrationTest {
         ((com.fasterxml.jackson.databind.node.ObjectNode) cve.path("configurations").get(0).path("nodes").get(0)).put("operator", "AND");
         assertTrue(NvdAdapter.normalize(cve, List.of(product)).path("affected").isEmpty());
     }
+
+    @Test void fullPackageOrderingKeepsEpochAndVendorRevisionAndDoesNotInventFixes() {
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('native-version-agent','fixture',1,'fixture-distro','native-version-machine')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('native-version-agent','deb-fixture','1.0-1ubuntu2','dpkg')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('native-version-agent','rpm-fixture','2:1.0-1','rpm')");
+        catalog.cves("manual", List.of(
+                JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}"),
+                JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}")));
+        new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("native-version-agent", 0);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='native-version-agent'", Integer.class));
+        assertEquals("deb-fixture", jdbc.queryForObject("SELECT software FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
+        assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
+        var malformed = JsonUtils.read("{\"cve_id\":\"CVE-2026-12347\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"vrange\":\"<1.0^git1\"}]}");
+        assertThrows(IllegalArgumentException.class, () -> catalog.cves("invalid-native", List.of(malformed)));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='invalid-native'", Integer.class));
+    }
+
+    @Test void nvdUpstreamMappingDoesNotBecomeAComparableDistributionPackageRule() {
+        var cve = JsonUtils.read("{\"id\":\"CVE-2026-12345\",\"configurations\":[{\"nodes\":[{\"operator\":\"OR\",\"cpeMatch\":[{\"vulnerable\":true,\"criteria\":\"cpe:2.3:a:fixture:app:*:*:*:*:*:*:*:*\",\"versionEndExcluding\":\"2.0\"}]}]}]}");
+        var product = new LibraryProperties.Product();
+        product.setCpePrefix("cpe:2.3:a:fixture:app:"); product.setName("fixture-app");
+        product.setOs("ubuntu 24.04"); product.setAssetSource("dpkg");
+        var document = NvdAdapter.normalize(cve, List.of(product));
+        assertEquals("upstream", document.path("affected").get(0).path("version_scheme").asText());
+        catalog.cves("nvd-fixture", List.of(document));
+        assertEquals(1, ((Number) sync.status().get("managedCveCount")).intValue());
+        assertEquals(0, ((Number) sync.status().get("matchableCveCount")).intValue());
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('nvd-package-agent','fixture',1,'ubuntu 24.04','nvd-package-machine')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('nvd-package-agent','fixture-app','1.0-1ubuntu1','dpkg')");
+        new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("nvd-package-agent", 0);
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='nvd-package-agent'", Integer.class));
+    }
     @Test void boundedDownloaderRejectsOversizeAndCredentialRedirects() throws Exception {
         var body = new AtomicReference<>("a".repeat(2000)); var source = endpoint("hashes", body);
         props.setMaxDownloadBytes(1024);

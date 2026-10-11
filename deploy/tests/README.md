@@ -1,5 +1,13 @@
 # Deployment Validation
 
+`package-version-native.py` runs after the isolated DNF check on each Linux CI
+runner. It uses host DPKG and the existing offline Rocky9 image's native RPM
+library to produce every ordered pair from a fixed corpus, then checks the Java
+production comparator against those independent results. The RPM container is
+read-only, network-disabled and limited to 96 MiB; it installs no packages.
+Both architecture-specific comparison artifacts are retained. Scope and the
+remaining vulnerability-module work are in [the version milestone](../../docs/45-RPM-DPKG完整版本比较与epoch保留.md).
+
 Baseline closing checks add Ubuntu24 passwd minimum length, isolated login
 securetty authentication comparisons, actual Agent mTLS/cache observations and
 Rocky9 DNF declarations. `pam-password-native.sh` runs SecureTTY only inside its

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/alinksec/alinksec-agent/internal/packageversion"
 	"github.com/shirou/gopsutil/v3/disk"
 )
 
@@ -24,8 +25,8 @@ func freeDiskMB() (float64, error) {
 // queryPkgVersion 查询已安装版本（rpm 优先，回退 dpkg；未安装返回空）
 func queryPkgVersion(pkg string) string {
 	if _, err := exec.LookPath("rpm"); err == nil {
-		if out, err := exec.Command("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", pkg).Output(); err == nil {
-			return strings.TrimSpace(string(out))
+		if out, err := exec.Command("rpm", "-q", "--qf", "%{EPOCHNUM}\x1f%{VERSION}\x1f%{RELEASE}\n", "--", pkg).Output(); err == nil {
+			return rpmInstalledVersion(string(out))
 		}
 		return ""
 	}
@@ -36,6 +37,19 @@ func queryPkgVersion(pkg string) string {
 		}
 	}
 	return ""
+}
+
+func rpmInstalledVersion(out string) string {
+	out = strings.TrimSuffix(out, "\n")
+	fields := strings.Split(out, "\x1f")
+	if len(fields) != 3 || strings.ContainsAny(out, "\r\n") {
+		return ""
+	}
+	version, err := packageversion.RPM(fields[0], fields[1], fields[2])
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // installPatch Linux 安装：单包文件直装（依赖走客户现有源，不污染 repo 配置）：

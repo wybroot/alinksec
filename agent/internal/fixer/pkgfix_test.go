@@ -19,6 +19,24 @@ func TestParsePkgPayloadRequiresChecksum(t *testing.T) {
 	}
 }
 
+func TestPackageVerificationRetainsEpochAndRelease(t *testing.T) {
+	for _, tc := range []struct {
+		actual, target string
+		match          bool
+	}{
+		{"0:3.0.7-27.el9", "3.0.7-27.el9", true},
+		{"0001:3.0.7-27.el9", "1:3.0.7-27.el9", true},
+		{"1:3.0.7-27.el9", "3.0.7-27.el9", false},
+		{"1:3.0.7-27.el9", "1:3.0.7-28.el9", false},
+		{"1:3.0.7-27.el9", "1:3.0.7", false},
+		{"", "", false},
+	} {
+		if got := packageVersionMatches("rpm", tc.actual, tc.target); got != tc.match {
+			t.Fatalf("package identity match=%v want=%v", got, tc.match)
+		}
+	}
+}
+
 func TestParsePkgPayloadAcceptsCompletePackageMetadata(t *testing.T) {
 	pkg, err := parsePkgPayload(`{"repo_type":"deb","pkg_name":"openssl","target_version":"3.0.0","download_url":"https://console.example.test/package","sha256":"abc123"}`)
 	if err != nil {

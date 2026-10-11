@@ -109,7 +109,16 @@ public class VulnMatchService {
         return agents.size();
     }
 
-    /* ==================== 版本比较器（rpm 宽松风格） ==================== */
+    /* ==================== 来源对应的完整软件包版本与旧上游规则 ==================== */
+
+    static boolean versionInRange(String version, String vrange, String source) {
+        if (!Set.of("rpm", "dpkg").contains(source)) return versionInRange(version, vrange);
+        try {
+            return PackageVersions.inRange(source, version, vrange);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
 
     /**
      * 判断版本是否落在 vrange 内。支持：*（全匹配）、<x、<=x、>x、>=x、=x、x。
@@ -149,17 +158,21 @@ public class VulnMatchService {
         if (!expectedOs.isBlank() && !"*".equals(expectedOs) && !expectedOs.equalsIgnoreCase(os)) return false;
         String expectedSource = rule.path("source").asText("");
         if (!expectedSource.isBlank() && !expectedSource.equals(source)) return false;
+        String scheme = rule.path("version_scheme").asText("");
+        if (!scheme.isEmpty()) {
+            if (!Set.of("rpm", "dpkg", "upstream").contains(scheme)) return false;
+            if ("upstream".equals(scheme) ? Set.of("rpm", "dpkg").contains(source) : !scheme.equals(source)) return false;
+        }
         if (rule.has("ranges")) {
-            for (JsonNode range : rule.path("ranges")) if (!versionInRange(version, range.asText())) return false;
+            for (JsonNode range : rule.path("ranges")) if (!versionInRange(version, range.asText(), source)) return false;
             return !rule.path("ranges").isEmpty();
         }
-        return versionInRange(version, rule.path("vrange").asText("*"));
+        return versionInRange(version, rule.path("vrange").asText("*"), source);
     }
 
-    /** Only an exclusive upper bound can suggest a fixed version; inclusive bounds remain vulnerable. */
+    /** A vulnerable-range boundary does not establish a vendor-confirmed fixed package. */
     static String rangeFixedVersion(String vrange) {
-        String range = vrange == null ? "" : vrange.trim();
-        return range.startsWith("<") && !range.startsWith("<=") ? range.substring(1).trim() : null;
+        return null;
     }
 
     /**

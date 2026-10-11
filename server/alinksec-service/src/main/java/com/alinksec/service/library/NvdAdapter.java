@@ -39,7 +39,8 @@ public final class NvdAdapter {
                             if (!cpe.startsWith(product.getCpePrefix())) continue;
                             ObjectNode rule = JsonUtils.mapper().createObjectNode();
                             rule.put("name", product.getName()); rule.put("match", "exact");
-                            rule.put("os", product.getOs()); rule.put("source", product.getAssetSource());
+                             rule.put("os", product.getOs()); rule.put("source", product.getAssetSource());
+                             rule.put("version_scheme", "upstream");
                             ArrayNode ranges = rule.putArray("ranges");
                             for (String key : List.of("versionStartIncluding", "versionStartExcluding", "versionEndIncluding", "versionEndExcluding")) {
                                 if (match.hasNonNull(key)) {

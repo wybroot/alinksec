@@ -64,10 +64,29 @@ class VulnMatchServiceTest {
     }
 
     @Test
-    void rangeFixedVersion_extract() {
-        assertEquals("1.1.1n", VulnMatchService.rangeFixedVersion("<1.1.1n"));
+    void rangeBoundaryDoesNotInventAConfirmedVendorFix() {
+        assertNull(VulnMatchService.rangeFixedVersion("<1.1.1n"));
         assertNull(VulnMatchService.rangeFixedVersion("<=9.8p1"));
         assertNull(VulnMatchService.rangeFixedVersion("*"));
         assertNull(VulnMatchService.rangeFixedVersion(""));
+    }
+
+    @Test void packageRulesUseSourceSpecificOrderingWithoutMalformedFallback() {
+        var rpm = com.alinksec.common.util.JsonUtils.read("{\"name\":\"openssl\",\"match\":\"exact\",\"source\":\"rpm\",\"ranges\":[\"<1:3.0.7-27.el9_4.1\"]}");
+        assertTrue(VulnMatchService.ruleMatches(rpm, "openssl", "1:3.0.7-27.el9_4", "rocky 9.4", "rpm"));
+        assertFalse(VulnMatchService.ruleMatches(rpm, "openssl", "2:1.0-1", "rocky 9.4", "rpm"));
+        assertFalse(VulnMatchService.ruleMatches(rpm, "openssl", "malformed version", "rocky 9.4", "rpm"));
+        var dpkg = com.alinksec.common.util.JsonUtils.read("{\"name\":\"fixture\",\"source\":\"dpkg\",\"vrange\":\"<1.0-1ubuntu10\"}");
+        assertTrue(VulnMatchService.ruleMatches(dpkg, "fixture", "1.0-1ubuntu2", "ubuntu 24.04", "dpkg"));
+        assertFalse(VulnMatchService.ruleMatches(dpkg, "fixture", "1:0.1-1", "ubuntu 24.04", "dpkg"));
+    }
+
+    @Test void explicitUpstreamRangesCannotBeAppliedToDistributionPackageVersions() {
+        var rule = com.alinksec.common.util.JsonUtils.read("{\"name\":\"fixture\",\"source\":\"dpkg\",\"version_scheme\":\"upstream\",\"vrange\":\"<9.0\"}");
+        assertFalse(VulnMatchService.ruleMatches(rule, "fixture", "1.0-1ubuntu1", "ubuntu 24.04", "dpkg"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) rule).put("version_scheme", "dpkg");
+        assertTrue(VulnMatchService.ruleMatches(rule, "fixture", "1.0-1ubuntu1", "ubuntu 24.04", "dpkg"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) rule).put("version_scheme", "unknown");
+        assertFalse(VulnMatchService.ruleMatches(rule, "fixture", "1.0-1ubuntu1", "ubuntu 24.04", "dpkg"));
     }
 }

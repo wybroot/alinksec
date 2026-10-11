@@ -139,7 +139,7 @@ public class LibraryCatalog {
                 jdbc.update("""
                         INSERT INTO t_security_cve(source_id,cve_id,document,matchable) VALUES (?,?,?,?)
                         ON CONFLICT(source_id,cve_id) DO UPDATE SET document=EXCLUDED.document,matchable=EXCLUDED.matchable
-                        """, source, id, JsonUtils.write(document), document.path("affected").isEmpty() ? 0 : 1);
+                        """, source, id, JsonUtils.write(document), hasComparableRules(document) ? 1 : 0);
                 // Manual corrections win over remotely supplied rules/metadata.
                 String effective = jdbc.queryForObject("""
                         SELECT document FROM t_security_cve WHERE cve_id=?
@@ -197,16 +197,41 @@ public class LibraryCatalog {
             String name = rule.path("name").asText("");
             if (!rule.isObject() || !rule.path("name").isTextual() || name.isBlank() || name.length() > 255
                     || rule.has("vrange") == rule.has("ranges")) throw new IllegalArgumentException("漏洞缺少软件及唯一版本条件");
-            for (String field : List.of("os", "source", "fixed_version", "match")) {
+            for (String field : List.of("os", "source", "fixed_version", "match", "version_scheme")) {
                 if (rule.has(field) && (!rule.path(field).isTextual() || rule.path(field).asText().length() > 255)) throw new IllegalArgumentException("漏洞规则字段类型非法");
             }
             if (rule.has("match") && !Set.of("exact", "contains").contains(rule.path("match").asText())) throw new IllegalArgumentException("软件名匹配方式非法");
+            if (rule.has("version_scheme") && (!Set.of("rpm", "dpkg", "upstream").contains(rule.path("version_scheme").asText())
+                    || (!"upstream".equals(rule.path("version_scheme").asText())
+                    && !rule.path("version_scheme").asText().equals(rule.path("source").asText())))) throw new IllegalArgumentException("版本比较语义与软件来源不一致");
             if (rule.has("vrange") && (!rule.path("vrange").isTextual()
-                    || !rule.path("vrange").asText().matches("(?:\\*|(?:>=|<=|>|<|=)?[A-Za-z0-9][A-Za-z0-9._:+~%-]{0,254})"))) throw new IllegalArgumentException("漏洞版本条件非法");
+                    || !rule.path("vrange").asText().matches("(?:\\*|(?:>=|<=|>|<|=)?[A-Za-z0-9][A-Za-z0-9._:+~%^-]{0,254})"))) throw new IllegalArgumentException("漏洞版本条件非法");
             if (rule.has("ranges") && (!rule.path("ranges").isArray() || rule.path("ranges").isEmpty() || rule.path("ranges").size() > 8)) throw new IllegalArgumentException("漏洞版本范围非法");
             if (rule.has("ranges")) for (JsonNode range : rule.path("ranges")) {
-                if (!range.isTextual() || !range.asText().matches("(?:>=|<=|>|<|=)[A-Za-z0-9][A-Za-z0-9._:+~%-]{0,254}")) throw new IllegalArgumentException("漏洞版本范围非法");
+                if (!range.isTextual() || !range.asText().matches("(?:>=|<=|>|<|=)[A-Za-z0-9][A-Za-z0-9._:+~%^-]{0,254}")) throw new IllegalArgumentException("漏洞版本范围非法");
+            }
+            String source = rule.path("source").asText("");
+            if (Set.of("rpm", "dpkg").contains(source) && !"upstream".equals(rule.path("version_scheme").asText())) {
+                if (rule.has("ranges")) {
+                    for (JsonNode range : rule.path("ranges")) validatePackageBound(source, range.asText());
+                } else validatePackageBound(source, rule.path("vrange").asText());
+                String fixed = rule.path("fixed_version").asText("");
+                if (!fixed.isEmpty()) com.alinksec.service.scan.PackageVersions.compare(source, fixed, fixed);
             }
         }
+    }
+
+    private static void validatePackageBound(String source, String range) {
+        if ("*".equals(range)) return;
+        String bound = range.replaceFirst("^(?:>=|<=|>|<|=)", "");
+        com.alinksec.service.scan.PackageVersions.compare(source, bound, bound);
+    }
+
+    private static boolean hasComparableRules(JsonNode document) {
+        for (JsonNode rule : document.path("affected")) {
+            if (!("upstream".equals(rule.path("version_scheme").asText())
+                    && Set.of("rpm", "dpkg").contains(rule.path("source").asText()))) return true;
+        }
+        return false;
     }
 }
