@@ -105,13 +105,14 @@ execFileSync(process.execPath, ['--test', '--test-concurrency=1',
 
 const agentId = `ci-image-${randomUUID()}`
 const migrations = database(db => {
-  db.prepare(`INSERT INTO t_agent(agent_id, hostname, os_type, status, isolation_status)
-    VALUES (?, 'image-persistent-host', 1, 2, 2)`).run(agentId)
-  db.prepare(`INSERT INTO t_asset_software(agent_id, name, version)
-    VALUES (?, 'image-persistent-software', '1.0')`).run(agentId)
+  db.prepare(`INSERT INTO t_agent(agent_id, hostname, os_type, status, isolation_status,
+    distro_id,distro_version,software_inventory_source,software_collection_status,software_succeeded_at)
+    VALUES (?, 'image-persistent-host', 1, 2, 2,'ubuntu','24.04','dpkg','complete',CURRENT_TIMESTAMP)`).run(agentId)
+  db.prepare(`INSERT INTO t_asset_software(agent_id, name, version,source,architecture)
+    VALUES (?, 'image-persistent-software', '1.0','dpkg','all')`).run(agentId)
   return db.prepare('SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()
 })
-assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007'])
+assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007', '008'])
 execFileSync('docker', ['restart', '--timeout', '15', containerId], { timeout: 30_000, stdio: 'pipe' })
 // Docker may allocate new ephemeral host ports when the same container restarts.
 const ports = JSON.parse(execFileSync('docker', ['inspect', '--format',
@@ -127,9 +128,16 @@ const host = await request(`/api/hosts/${agentId}`, { token })
 assert.equal(host.hostname, 'image-persistent-host')
 assert.equal(host.status, 2)
 assert.equal(host.isolation_status, 2)
+assert.equal(host.software_collection_status, 'complete')
+assert.equal(host.distro_id, 'ubuntu')
+assert.equal(host.distro_version, '24.04')
+assert.equal(host.software_inventory_source, 'dpkg')
+assert.ok(host.software_succeeded_at)
 const software = await request(`/api/hosts/${agentId}/software`, { token })
 assert.equal(software.length, 1)
 assert.equal(software[0].name, 'image-persistent-software')
+assert.equal(software[0].source, 'dpkg')
+assert.equal(software[0].architecture, 'all')
 assert.deepEqual(database(db => db.prepare(
   'SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()), migrations)
 assert.equal(await checkTls(), fingerprint)
