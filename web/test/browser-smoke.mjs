@@ -17,6 +17,8 @@ const malicious = '<img src="xss-fixture" onerror="window.__xss=1">'
 const artifacts = resolve(process.env.ALINKSEC_SMOKE_BROWSER_ARTIFACTS || `.tmp/browser-artifacts-${Date.now()}`)
 mkdirSync(artifacts, { recursive: true })
 const errors = []
+const expectedNetworkErrors = []
+let legacyRejectionStarted = false
 let browser, page
 try {
   database.exec('BEGIN')
@@ -43,7 +45,13 @@ try {
   const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } })
   page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (legacyRejectionStarted && expectedNetworkErrors.length === 0
+      && message.location().url.endsWith('/api/fix/tasks/package')
+      && /^Failed to load resource:.*\b400\b/.test(message.text())) expectedNetworkErrors.push(message.text())
+    else errors.push(message.text())
+  })
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('admin')
   await page.getByPlaceholder('密码', { exact: true }).fill(process.env.ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD)
@@ -107,18 +115,49 @@ try {
   await expect(firstVuln).toContainText('2.0')
   await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()
   await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
+  const packageResponse = response => response.url().endsWith('/api/fix/tasks/package') && response.request().method() === 'POST'
+  legacyRejectionStarted = true
+  const rejected = page.waitForResponse(packageResponse)
+  await page.getByRole('button', { name: '提交审批', exact: true }).click()
+  const rejectedResponse = await rejected
+  assert.equal(rejectedResponse.status(), 400)
+  const rejection = await rejectedResponse.json()
+  assert.notEqual(rejection.code, 0, 'Legacy inventory must block repair creation')
+  assert.match(rejection.msg, /软件清单采集失败或完整性未知/)
+  await expect(page.locator('.el-dialog').filter({ hasText: '一键修复' })).toBeVisible()
+  await expect(page.locator('.el-message').filter({ hasText: rejection.msg })).toBeVisible()
+  assert.equal(database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='Browser CI'").get().n, 0)
+  await page.screenshot({ path: `${artifacts}/vulnerability-legacy-rejected.png`, fullPage: true })
+  console.log('ok - real browser/API rejects legacy inventory without creating a repair task')
+  database.exec('BEGIN')
+  const completeInventory = database.prepare(`UPDATE t_agent SET distro_id='ubuntu', distro_version='24.04',
+    software_inventory_source='dpkg', software_collection_status='complete', software_identity_error='',
+    software_succeeded_at=CURRENT_TIMESTAMP WHERE agent_id=?`)
+  const installedPackage = database.prepare(`INSERT INTO t_asset_software(agent_id,name,version,source,architecture)
+    VALUES(?,?,'1.0','dpkg','all')`)
+  for (const [index, item] of items.entries()) {
+    completeInventory.run(item.agentId)
+    installedPackage.run(item.agentId, index === 2 ? 'browser-libcurl' : 'browser-openssl')
+  }
+  database.exec('COMMIT')
   let submitted = page.waitForRequest(request => request.url().endsWith('/api/fix/tasks/package') && request.method() === 'POST')
+  let response = page.waitForResponse(packageResponse)
   await page.getByRole('button', { name: '提交审批', exact: true }).click()
   const singleRequest = await submitted
   assert.deepEqual(singleRequest.postDataJSON().items.sort((a, b) => a.findingId - b.findingId), items.slice(0, 2))
+  const singleResult = await (await response).json()
+  assert.equal(singleResult.code, 0, singleResult.msg)
   await expect(page.locator('.el-dialog').filter({ hasText: '一键修复' })).not.toBeVisible()
   await page.locator('.el-table__header-wrapper .el-checkbox').first().click()
   await page.getByRole('button', { name: /批量修复/ }).click()
   await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
   submitted = page.waitForRequest(request => request.url().endsWith('/api/fix/tasks/package') && request.method() === 'POST')
+  response = page.waitForResponse(packageResponse)
   await page.getByRole('button', { name: '提交审批', exact: true }).click()
   const batchRequest = await submitted
   assert.deepEqual(batchRequest.postDataJSON().items.sort((a, b) => a.findingId - b.findingId), items)
+  const batchResult = await (await response).json()
+  assert.equal(batchResult.code, 0, batchResult.msg)
   await expect.poll(() => database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='Browser CI' AND status=0").get().n).toBe(2)
   console.log('ok - browser single/batch repair submits the correct pending findings and renders versions/rate')
 
@@ -194,7 +233,7 @@ try {
   await page.screenshot({ path: `${artifacts}/console-after-screen.png`, fullPage: true })
   console.log('ok - return from screen restores the console theme and navigation')
   assert.deepEqual(errors, [], 'Browser console or page errors')
-  writeFileSync(`${artifacts}/result.json`, JSON.stringify({ passed: true, errors }, null, 2))
+  writeFileSync(`${artifacts}/result.json`, JSON.stringify({ passed: true, errors, expectedNetworkErrors }, null, 2))
   console.log(`Browser artifacts: ${artifacts}`)
 } catch (error) {
   if (page) {
