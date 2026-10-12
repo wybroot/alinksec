@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { chromium, expect } from '@playwright/test'
 
 const web = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const dist = resolve(web, 'dist'), artifacts = resolve(web, '../.tmp/software-inventory-browser')
+const dist = resolve(process.env.SOFTWARE_INVENTORY_DIST || resolve(web, 'dist'))
+const artifacts = resolve(process.env.SOFTWARE_INVENTORY_ARTIFACTS || resolve(web, '../.tmp/software-inventory-browser'))
 assert.ok(existsSync(resolve(dist, 'index.html')), 'Build the production web bundle first')
 mkdirSync(artifacts, { recursive: true })
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' }
@@ -77,10 +78,12 @@ try {
     scenarios.push(status)
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  assert.ok(await page.evaluate(() => document.querySelector('.el-drawer').getBoundingClientRect().width <= innerWidth), 'Drawer exceeds mobile width')
+  await expect.poll(() => page.evaluate(() => document.querySelector('.el-drawer').getBoundingClientRect().width - innerWidth),
+    { message: 'Drawer exceeds mobile width after layout settles' }).toBeLessThanOrEqual(0)
+  const mobileBounds = await page.evaluate(() => ({ drawerWidth: document.querySelector('.el-drawer').getBoundingClientRect().width, viewportWidth: innerWidth }))
   await page.screenshot({ path: artifacts + '/empty-mobile.png', fullPage: true, animations: 'disabled' })
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
-  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, errors, unexpected }, null, 2) + '\n')
+  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, mobileBounds, errors, unexpected }, null, 2) + '\n')
   console.log(`Passed software inventory display: ${scenarios.join(', ')} and mobile drawer bounds`)
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }
