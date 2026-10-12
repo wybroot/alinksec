@@ -18,6 +18,7 @@ import com.alinksec.proto.RptAssetSnapshot;
 import com.alinksec.proto.RptHeartbeat;
 import com.alinksec.proto.RptFixResult;
 import com.alinksec.proto.SoftwareInfo;
+import com.alinksec.proto.SoftwareInventory;
 import com.alinksec.service.agent.AgentEntity;
 import com.alinksec.service.cert.CertService;
 import com.alinksec.service.command.CommandRepository;
@@ -196,6 +197,8 @@ class AgentChannelSecurityIntegrationTest {
         heartbeat(firstStream, first.getAgentId());
         heartbeat(secondStream, second.getAgentId());
         String pkg = "grpc-patch-" + UUID.randomUUID();
+        asset(firstStream, first.getAgentId(), pkg);
+        asset(secondStream, second.getAgentId(), pkg);
         String cveId = "CVE-test-" + UUID.randomUUID().toString().substring(0, 20);
         jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES (?,3,?)", cveId,
                 JsonUtils.write(List.of(Map.of("name", pkg, "vrange", "<2.0"))));
@@ -272,7 +275,10 @@ class AgentChannelSecurityIntegrationTest {
 
     private void asset(Stream stream, String agentId, String pkg) throws Exception {
         stream.requests.onNext(report(agentId).setAsset(RptAssetSnapshot.newBuilder()
-                .addCollected("software").addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0"))).build());
+                .addCollected("software")
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04"))
+                .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0").setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agentId);
     }
 

@@ -1,6 +1,8 @@
 package com.alinksec.service.asset;
 
 import com.alinksec.proto.RptAssetSnapshot;
+import com.alinksec.proto.SoftwareInventory;
+import com.alinksec.service.scan.PackageVersions;
 import com.alinksec.service.scan.VulnMatchService;
 import com.alinksec.service.alert.SecurityEventService;
 import com.alinksec.proto.RptSecurityEvent;
@@ -40,7 +42,9 @@ public class AssetService {
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
         Set<String> collected = new HashSet<>(snapshot.getCollectedList());
         boolean legacyFullSnapshot = collected.isEmpty();
-        if (legacyFullSnapshot || collected.contains("software")) {
+        boolean replaceSoftware = (legacyFullSnapshot || collected.contains("software"))
+                && recordSoftwareAttempt(agentId, snapshot);
+        if (replaceSoftware) {
             jdbc.update("DELETE FROM t_asset_software WHERE agent_id = ?", agentId);
         }
         if (legacyFullSnapshot || collected.contains("ports")) {
@@ -56,14 +60,14 @@ public class AssetService {
             jdbc.update("DELETE FROM t_asset_container WHERE agent_id = ?", agentId);
         }
 
-        if (legacyFullSnapshot || collected.contains("software")) {
+        if (replaceSoftware) {
             for (var sw : snapshot.getSoftwareList()) {
                 jdbc.update("""
-                        INSERT INTO t_asset_software (agent_id, name, version, vendor, install_time, source)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO t_asset_software (agent_id, name, version, vendor, install_time, source, architecture)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, agentId, sw.getName(), sw.getVersion(), sw.getVendor(),
                         sw.getInstallTime() > 0 ? Timestamp.from(Instant.ofEpochMilli(sw.getInstallTime())) : null,
-                        sw.getSource());
+                        sw.getSource(), sw.getArchitecture());
             }
         }
         if (legacyFullSnapshot || collected.contains("ports")) {
@@ -113,12 +117,81 @@ public class AssetService {
         }
         log.info("资产快照已更新: agent={} software={} ports={} accounts={} containers={}",
                 agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());
-        // 快照触发漏洞比对（比对失败不影响快照落库——同一事务内异常会整体回滚，
-        // 故捕获后仅告警；比对下一轮快照会重做）
+        // Only a replaced software inventory should initiate a new comparison.
+        // A database error can still roll back the surrounding transaction.
+        if (!replaceSoftware) return;
         try {
             vulnMatchService.matchAgent(agentId, 0L);
         } catch (Exception e) {
-            log.warn("快照后漏洞比对失败（快照已落库）: agent={} err={}", agentId, e.getMessage());
+            log.warn("快照后漏洞比对失败: agent={} err={}", agentId, e.getMessage());
         }
+    }
+
+    private boolean recordSoftwareAttempt(String agentId, RptAssetSnapshot snapshot) {
+        if (!snapshot.hasSoftwareInventory()) {
+            jdbc.update("""
+                    UPDATE t_agent SET software_collection_status='legacy', software_collection_error='',
+                      software_attempted_at=CURRENT_TIMESTAMP, distro_id='', distro_version='',
+                      software_inventory_source='', software_identity_error='legacy_inventory', software_succeeded_at=NULL
+                    WHERE agent_id=?
+                    """, agentId);
+            return true;
+        }
+        var inventory = snapshot.getSoftwareInventory();
+        boolean complete = inventory.getStatus() == SoftwareInventory.Status.COMPLETE;
+        String error = bounded(inventory.getError(), 128);
+        if (complete && !validSoftware(snapshot)) {
+            complete = false;
+            error = "invalid_software_inventory";
+        }
+        if (!complete) {
+            jdbc.update("""
+                    UPDATE t_agent SET software_collection_status=?, software_collection_error=?,
+                      software_attempted_at=CURRENT_TIMESTAMP WHERE agent_id=?
+                    """, inventory.getStatus() == SoftwareInventory.Status.UNSUPPORTED ? "unsupported" : "failed",
+                    error.isBlank() ? "incomplete_software_inventory" : error, agentId);
+            return false;
+        }
+        String distroId = inventory.getDistroId(), distroVersion = inventory.getDistroVersion();
+        String identityError = bounded(inventory.getIdentityError(), 128);
+        if ((!distroId.isEmpty() && !distroId.matches("[a-z0-9][a-z0-9_.-]{0,63}"))
+                || (!distroVersion.isEmpty() && !distroVersion.matches("[A-Za-z0-9][A-Za-z0-9._+-]{0,127}"))) {
+            distroId = "";
+            distroVersion = "";
+            identityError = "distribution_identity_invalid";
+        }
+        if (!"registry".equals(inventory.getSource()) && (distroId.isEmpty() || distroVersion.isEmpty()) && identityError.isEmpty()) {
+            identityError = "distribution_identity_incomplete";
+        }
+        jdbc.update("""
+                UPDATE t_agent SET software_collection_status='complete', software_collection_error='',
+                  software_attempted_at=CURRENT_TIMESTAMP, software_succeeded_at=CURRENT_TIMESTAMP,
+                  distro_id=?, distro_version=?, software_inventory_source=?, software_identity_error=?
+                WHERE agent_id=?
+                """, distroId, distroVersion, inventory.getSource(), identityError, agentId);
+        return true;
+    }
+
+    private static boolean validSoftware(RptAssetSnapshot snapshot) {
+        String source = snapshot.getSoftwareInventory().getSource();
+        if (!Set.of("rpm", "dpkg", "mixed", "registry").contains(source) || snapshot.getSoftwareCount() > 100000) return false;
+        Set<String> identities = new HashSet<>();
+        for (var sw : snapshot.getSoftwareList()) {
+            if (sw.getName().isBlank() || sw.getName().length() > 255 || sw.getVersion().length() > 255
+                    || sw.getVendor().length() > 255 || sw.getArchitecture().length() > 64
+                    || !Set.of("rpm", "dpkg", "registry").contains(sw.getSource())
+                    || (!source.equals(sw.getSource()) && !(source.equals("mixed") && Set.of("rpm", "dpkg").contains(sw.getSource())))
+                    || !identities.add(sw.getSource() + "\u0000" + sw.getName() + "\u0000" + sw.getArchitecture() + "\u0000" + sw.getVersion())) return false;
+            if (Set.of("rpm", "dpkg").contains(sw.getSource())) {
+                if (!sw.getArchitecture().matches("[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}")) return false;
+                try { PackageVersions.compare(sw.getSource(), sw.getVersion(), sw.getVersion()); }
+                catch (IllegalArgumentException e) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private static String bounded(String value, int limit) {
+        return value.length() <= limit ? value : value.substring(0, limit);
     }
 }

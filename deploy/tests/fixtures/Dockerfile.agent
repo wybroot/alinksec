@@ -2,4 +2,10 @@ FROM eclipse-temurin:21-jre-noble
 RUN apt-get update \
     && apt-get install -y --no-install-recommends iptables iproute2 curl netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /tmp/alinksec-initial/DEBIAN /tmp/alinksec-initial/usr/share/alinksec-smoke \
+    && printf 'Package: alinksec-smoke-package\nVersion: 1.0\nArchitecture: all\nMaintainer: CI <ci@example.test>\nDescription: disposable validation fixture\n' > /tmp/alinksec-initial/DEBIAN/control \
+    && printf '1.0\n' > /tmp/alinksec-initial/usr/share/alinksec-smoke/version \
+    && dpkg-deb --build --root-owner-group /tmp/alinksec-initial /tmp/alinksec-initial.deb \
+    && dpkg -i /tmp/alinksec-initial.deb \
+    && rm -rf /tmp/alinksec-initial /tmp/alinksec-initial.deb
 ENTRYPOINT ["/bin/sh", "/fixtures/agent-entry.sh"]

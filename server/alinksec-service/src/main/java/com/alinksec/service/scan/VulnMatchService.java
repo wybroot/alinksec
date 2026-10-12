@@ -37,11 +37,14 @@ public class VulnMatchService {
     /** 单机比对。taskId=0 表示资产快照触发的自动比对。 */
     @Transactional
     public void matchAgent(String agentId, long taskId) {
-        List<Map<String, Object>> software = jdbc.queryForList(
-                "SELECT name, version, source FROM t_asset_software WHERE agent_id = ?", agentId);
-        if (software.isEmpty()) {
+        var collectionStates = jdbc.queryForList("SELECT software_collection_status FROM t_agent WHERE agent_id=?", agentId);
+        if (!collectionStates.isEmpty() && Set.of("failed", "unsupported").contains(
+                String.valueOf(collectionStates.get(0).get("software_collection_status")))) {
+            log.info("跳过不完整的软件资产比对: agent={}", agentId);
             return;
         }
+        List<Map<String, Object>> software = jdbc.queryForList(
+                "SELECT name, version, source FROM t_asset_software WHERE agent_id = ?", agentId);
 
         String pendingRepair = """
                 EXISTS (SELECT 1 FROM t_fix_record r JOIN t_fix_task t ON t.id = r.task_id
@@ -59,6 +62,7 @@ public class VulnMatchService {
         // 未处置记录先清后插（快照全量替换语义）
         jdbc.update("DELETE FROM t_vuln_finding AS f WHERE agent_id = ? AND status IN (0, 1) AND NOT "
                 + pendingRepair, agentId);
+        if (software.isEmpty()) return;
 
         var hosts = jdbc.queryForList("SELECT os_version FROM t_agent WHERE agent_id=?", agentId);
         String os = hosts.isEmpty() ? "" : String.valueOf(hosts.get(0).get("os_version"));

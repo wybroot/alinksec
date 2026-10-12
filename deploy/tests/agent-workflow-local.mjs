@@ -150,6 +150,15 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     'Actual Agent did not establish mTLS channel')
   assert.equal(sql('SELECT machine_id FROM t_agent WHERE agent_id=?', id)[0].machine_id,
     hardwareId)
+  await api(`/api/hosts/${id}/collect`, {})
+  await until(() => sql('SELECT software_collection_status FROM t_agent WHERE agent_id=?', id)[0]?.software_collection_status === 'complete',
+    'Actual Agent did not report a complete software inventory')
+  const inventory = await api(`/api/hosts/${id}`)
+  assert.equal(inventory.distro_id, 'ubuntu')
+  assert.equal(inventory.distro_version, '24.04')
+  assert.equal(inventory.software_inventory_source, 'dpkg')
+  const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
+  assert.deepEqual(initial, [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
 }
 async function baselineRuntimeWorkflow(agent) {

@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline ./internal/packageversion ./internal/fixer
+        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -118,6 +118,9 @@ jobs:
       - name: Check library schedules and history in the production web bundle
         working-directory: web
         run: node test/libraries-browser.mjs
+      - name: Check software inventory identity and incomplete collection in the production web bundle
+        working-directory: web
+        run: node test/software-inventory-browser.mjs
       - run: mvn -B package
         working-directory: server
       - name: Check local SQLite validation workflow
@@ -186,6 +189,16 @@ jobs:
           bash deploy/tests/dnf-native.sh
       - name: Compare full package versions with native RPM and DPKG ordering
         run: python3 -B deploy/tests/package-version-native.py
+      - name: Check native DPKG and RPM inventory identities
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/software-native.test ./internal/collector)
+          ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true .tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+          docker run --rm --read-only --network=none --memory=128m --memory-swap=128m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+            --env ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true --env GOMEMLIMIT=64MiB \
+            alinksec-dnf-native-validation:latest \
+            /workspace/.tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
       - name: Retain native package version comparisons
         uses: actions/upload-artifact@v4
         with:
@@ -255,6 +268,7 @@ jobs:
           path: |
             .tmp/browser-artifacts-*
             .tmp/library-browser-artifacts
+            .tmp/software-inventory-browser
             .tmp/baseline-browser-artifacts
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
@@ -382,7 +396,7 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "7"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "8"
           test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"

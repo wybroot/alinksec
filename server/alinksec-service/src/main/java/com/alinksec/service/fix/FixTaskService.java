@@ -241,7 +241,7 @@ public class FixTaskService {
             if (f.get("fixed_version") == null || String.valueOf(f.get("fixed_version")).isBlank()) {
                 throw new IllegalArgumentException("漏洞 " + f.get("cve_id") + " 无修复版本信息，需人工处理");
             }
-            resolveTargets.add(Map.of(
+            Map<String, Object> target = new LinkedHashMap<>(Map.of(
                     "agent_id", agentId,
                     "os_type", f.get("os_type"),
                     "os_version", f.get("os_version") == null ? "" : f.get("os_version"),
@@ -249,6 +249,9 @@ public class FixTaskService {
                     "target_version", f.get("fixed_version"),
                     "cve_id", f.get("cve_id"),
                     "finding_id", fid));
+            target.put("inventory", currentPackageIdentity(agentId, String.valueOf(f.get("software")),
+                    String.valueOf(f.get("installed_version"))));
+            resolveTargets.add(target);
         }
         PatchRepoService.Resolved resolved = patchRepo.resolveForAgents(resolveTargets);
         if (!resolved.missing().isEmpty()) {
@@ -261,14 +264,20 @@ public class FixTaskService {
         List<Map<String, Object>> targetRows = new ArrayList<>();
         for (Map<String, Object> t : resolveTargets) {
             Map<String, Object> patch = resolved.hits().get(t.get("agent_id") + ":" + t.get("finding_id"));
-            Map<String, Object> payload = Map.of(
+            String source = String.valueOf(((Map<?, ?>) t.get("inventory")).get("source"));
+            String expectedType = switch (source) { case "rpm" -> "rpm"; case "dpkg" -> "deb"; default -> "msu"; };
+            if (!expectedType.equals(patch.get("repo_type"))) {
+                throw new IllegalArgumentException("补丁类型与当前软件包来源不一致: " + t.get("pkg_name"));
+            }
+            Map<String, Object> payload = new LinkedHashMap<>(Map.of(
                     "repo_type", patch.get("repo_type"),
                     "pkg_name", t.get("pkg_name"),
                     "target_version", t.get("target_version"),
                     "download_url", patchRepo.downloadUrl(String.valueOf(t.get("agent_id")), patch),
                     "sha256", patch.get("sha256"),
                     "cve_id", t.get("cve_id"),
-                    "finding_id", String.valueOf(t.get("finding_id")));
+                    "finding_id", String.valueOf(t.get("finding_id"))));
+            payload.put("inventory", t.get("inventory"));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("finding_id")))
@@ -353,15 +362,17 @@ public class FixTaskService {
         Map<String, List<FixItem>> byAgent = new LinkedHashMap<>();
         for (Map<String, Object> t : targets) {
             Map<String, Object> payload = JsonUtils.read((String) t.get("fix_payload"), Map.class);
+            if (payload == null || !(payload.get("inventory") instanceof Map<?, ?> identity)
+                    || !identity.equals(currentPackageIdentity(String.valueOf(t.get("agent_id")),
+                    String.valueOf(payload.get("pkg_name")), String.valueOf(identity.get("installed_version"))))) {
+                throw new IllegalArgumentException("软件资产身份已变化或缺少完整采集证据，请重新采集并创建修复任务");
+            }
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("ref_id")))
                             .setType(FixItem.FixType.PACKAGE)
                             .setPayload((String) t.get("fix_payload"))
                             .build());
-            if (payload != null) {
-                // payload 仅用于构造，无需额外处理
-            }
         }
         jdbc.update("UPDATE t_fix_task SET status = 1, started_at = CURRENT_TIMESTAMP, dispatched_at = CURRENT_TIMESTAMP "
                 + "WHERE id = ? AND dispatched_at IS NULL", taskId);
@@ -372,6 +383,37 @@ public class FixTaskService {
                             .addAllFixes(e.getValue())), null);
         }
         log.info("软件包修复任务已派发: task_id={} agents={}", taskId, byAgent.size());
+    }
+
+    private Map<String, Object> currentPackageIdentity(String agentId, String name, String installedVersion) {
+        var hosts = jdbc.queryForList("""
+                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error
+                FROM t_agent WHERE agent_id=? AND deleted=false
+                """, agentId);
+        if (hosts.size() != 1 || !"complete".equals(hosts.get(0).get("software_collection_status"))) {
+            throw new IllegalArgumentException("软件清单采集失败或完整性未知，请先重新采集: " + agentId);
+        }
+        var host = hosts.get(0);
+        var packages = jdbc.queryForList("SELECT version,source,architecture FROM t_asset_software WHERE agent_id=? AND name=?",
+                agentId, name);
+        if (packages.size() != 1 || !installedVersion.equals(packages.get(0).get("version"))) {
+            throw new IllegalArgumentException("软件包已变化、存在多个架构或多个安装版本，需人工处理: " + name);
+        }
+        var pkg = packages.get(0);
+        String source = String.valueOf(pkg.get("source")), architecture = String.valueOf(pkg.get("architecture"));
+        String distroId = String.valueOf(host.get("distro_id")), distroVersion = String.valueOf(host.get("distro_version"));
+        int osType = ((Number) host.get("os_type")).intValue();
+        if ((osType != 1 && osType != 2) || (osType == 2 && !"registry".equals(source))) {
+            throw new IllegalArgumentException("软件包来源与主机系统身份不一致，需人工处理: " + name);
+        }
+        boolean linux = osType == 1;
+        if (linux && (!java.util.Set.of("rpm", "dpkg").contains(source) || architecture.isBlank()
+                || distroId.isBlank() || distroVersion.isBlank() || !"".equals(host.get("software_identity_error")))) {
+            throw new IllegalArgumentException("缺少发行版、包来源或包架构身份，需人工处理: " + name);
+        }
+        return Map.of("source", source, "architecture", architecture, "distro_id", distroId,
+                "distro_version", distroVersion, "installed_version", installedVersion,
+                "os_type", osType, "os_version", host.get("os_version") == null ? "" : host.get("os_version"));
     }
 
     private static OffsetDateTime parseTime(String s) {

@@ -30,6 +30,6 @@ class AssetServiceTest {
         verify(jdbc, never()).update(contains("t_asset_port"), any(Object[].class));
         verify(jdbc, never()).update(contains("t_asset_account"), any(Object[].class));
         verify(jdbc, never()).update(contains("t_asset_container"), any(Object[].class));
-        verify(vulnMatchService).matchAgent("agent-1", 0L);
+        verify(vulnMatchService, never()).matchAgent("agent-1", 0L);
     }
 }
