@@ -163,8 +163,8 @@
         <el-descriptions-item v-if="detailRow.blocked" label="修复限制">{{ detailRow.blocked }} 项缺少当前身份或修复版本证据，请重新采集、扫描或人工处理</el-descriptions-item>
         <el-descriptions-item label="修复方式">{{ detailRow.fixType === 'config' ? '配置类' : '软件包类' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detailRow.status === 'fixed' ? '已修复' : detailRow.status === 'fixing' ? '修复中' : '待修复' }}</el-descriptions-item>
-        <el-descriptions-item label="影响主机（{{ detailRow.hosts }} 台）">
-          <el-tag v-for="h in detailRow.hostList" :key="h" size="small" effect="plain" style="margin:2px">{{ h }}</el-tag>
+        <el-descriptions-item :label="`影响主机（${detailRow.hosts} 台）`">
+          <div><el-tag v-for="h in detailRow.hostList" :key="h" size="small" effect="plain" style="margin:2px">{{ h }}</el-tag></div>
         </el-descriptions-item>
       </el-descriptions>
     </template>

@@ -113,9 +113,13 @@ try {
   await page.screenshot({ path: artifacts + '/vulnerability-scope-desktop.png', fullPage: true, animations: 'disabled' })
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
   await legacy.getByRole('button', { name: '详情', exact: true }).click()
-  await expect(page.locator('.el-dialog:visible').filter({ hasText: '匹配时身份' })).toContainText('请重新采集、扫描或人工处理')
+  const legacyDialog = page.locator('.el-dialog:visible').filter({ hasText: '匹配时身份' })
+  await expect(legacyDialog).toContainText('请重新采集、扫描或人工处理')
+  await expect(legacyDialog).toContainText('影响主机（1 台）')
+  await expect(legacyDialog.locator('.el-tag')).toHaveText(['scope-a'])
+  await expect(legacyDialog).not.toContainText('{{')
   await page.screenshot({ path: artifacts + '/vulnerability-legacy-detail.png', fullPage: true, animations: 'disabled' })
-  const scopeScenarios = ['distribution-release-architecture-version-separated', 'agents-counted-once', 'stale-excluded', 'legacy-blocked', 'multiarch-blocked', 'dialog-identity']
+  const scopeScenarios = ['distribution-release-architecture-version-separated', 'agents-counted-once', 'stale-excluded', 'legacy-blocked', 'multiarch-blocked', 'dialog-identity', 'detail-host-count-and-list']
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
   writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, mobileBounds, errors, unexpected }, null, 2) + '\n')
