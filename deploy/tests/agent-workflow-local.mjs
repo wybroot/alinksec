@@ -158,7 +158,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   assert.equal(inventory.distro_version, '24.04')
   assert.equal(inventory.software_inventory_source, 'dpkg')
   const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
-  assert.deepEqual(initial, [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
+  assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
 }
 async function baselineRuntimeWorkflow(agent) {
