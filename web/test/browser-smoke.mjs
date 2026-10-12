@@ -113,19 +113,20 @@ try {
   await importPatch('browser-libcurl', '3.0')
   const firstVuln = page.locator('.el-table__body tr').filter({ hasText: 'CVE-2099-1001' })
   await expect(firstVuln).toContainText('2.0')
-  await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()
-  await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
+  await expect(firstVuln).toContainText('历史结果，请重新扫描')
+  assert.equal(await firstVuln.getByRole('button', { name: '一键修复', exact: true }).count(), 0)
   const packageResponse = response => response.url().endsWith('/api/fix/tasks/package') && response.request().method() === 'POST'
   legacyRejectionStarted = true
-  const rejected = page.waitForResponse(packageResponse)
-  await page.getByRole('button', { name: '提交审批', exact: true }).click()
-  const rejectedResponse = await rejected
-  assert.equal(rejectedResponse.status(), 400)
-  const rejection = await rejectedResponse.json()
+  const rejected = await page.evaluate(async items => {
+    const response = await fetch('/api/fix/tasks/package', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('alinksec_token')}` },
+      body: JSON.stringify({ items, approver: 'Browser CI' }) })
+    return { status: response.status, body: await response.json() }
+  }, items.slice(0, 2))
+  assert.equal(rejected.status, 400)
+  const rejection = rejected.body
   assert.notEqual(rejection.code, 0, 'Legacy inventory must block repair creation')
   assert.match(rejection.msg, /软件清单采集失败或完整性未知/)
-  await expect(page.locator('.el-dialog').filter({ hasText: '一键修复' })).toBeVisible()
-  await expect(page.locator('.el-message').filter({ hasText: rejection.msg })).toBeVisible()
   assert.equal(database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='Browser CI'").get().n, 0)
   await page.screenshot({ path: `${artifacts}/vulnerability-legacy-rejected.png`, fullPage: true })
   console.log('ok - real browser/API rejects legacy inventory without creating a repair task')
@@ -135,11 +136,19 @@ try {
     software_succeeded_at=CURRENT_TIMESTAMP WHERE agent_id=?`)
   const installedPackage = database.prepare(`INSERT INTO t_asset_software(agent_id,name,version,source,architecture)
     VALUES(?,?,'1.0','dpkg','all')`)
+  const matchedIdentity = database.prepare(`UPDATE t_vuln_finding SET identity_status='complete',source='dpkg',architecture='all',
+    distro_id='ubuntu',distro_version='24.04',os_type=1,os_version=COALESCE((SELECT os_version FROM t_agent a WHERE a.agent_id=t_vuln_finding.agent_id),'')
+    WHERE id=? AND agent_id=?`)
   for (const [index, item] of items.entries()) {
     completeInventory.run(item.agentId)
     installedPackage.run(item.agentId, index === 2 ? 'browser-libcurl' : 'browser-openssl')
+    matchedIdentity.run(item.findingId, item.agentId)
   }
   database.exec('COMMIT')
+  await page.reload()
+  await expect(firstVuln).toContainText('ubuntu 24.04')
+  await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()
+  await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
   let submitted = page.waitForRequest(request => request.url().endsWith('/api/fix/tasks/package') && request.method() === 'POST')
   let response = page.waitForResponse(packageResponse)
   await page.getByRole('button', { name: '提交审批', exact: true }).click()

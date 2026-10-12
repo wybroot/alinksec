@@ -26,6 +26,14 @@
             <el-table-column label="软件 / 版本" width="180">
               <template #default="{ row }">{{ row.pkg }}<br /><span class="mono" style="color:#94a3b8;font-size:11px">{{ row.cur }} → {{ row.target }}</span></template>
             </el-table-column>
+            <el-table-column label="匹配时身份" min-width="180">
+              <template #default="{ row }">
+                <span>{{ row.distroId ? `${row.distroId} ${row.distroVersion}` : row.osVersion || '发行版未知' }}</span><br />
+                <span class="mono" style="font-size:11px;color:#64748b">{{ row.source || '来源未知' }} · {{ row.architecture || '架构未知' }}</span><br />
+                <span v-if="row.identityStatus !== 'complete'" style="font-size:11px;color:#b45309">历史结果，请重新扫描</span>
+                <span v-else-if="row.blocked" style="font-size:11px;color:#b45309">{{ row.blocked }} 项需重新采集/扫描或人工处理</span>
+              </template>
+            </el-table-column>
             <el-table-column label="级别" width="80">
               <template #default="{ row }"><el-tag size="small" :type="sevType(row.sev)" :effect="row.sev === 'critical' ? 'dark' : 'light'">{{ sevLabel(row.sev) }}</el-tag></template>
             </el-table-column>
@@ -39,7 +47,7 @@
             </el-table-column>
             <el-table-column label="操作" width="110" fixed="right">
               <template #default="{ row }">
-                <el-button v-if="row.status === 'todo'" link :type="row.fixType === 'config' ? 'success' : 'warning'" size="small" @click="openFix(row)">一键修复</el-button>
+                <el-button v-if="row.status === 'todo' && row.findings.length" link :type="row.fixType === 'config' ? 'success' : 'warning'" size="small" @click="openFix(row)">一键修复</el-button>
                 <el-button v-else link size="small" @click="detailRow = row; detailDlg = true">详情</el-button>
               </template>
             </el-table-column>
@@ -112,6 +120,8 @@
         title="软件包类修复：需审批并限定维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
       <el-form label-width="96px" style="margin-top:16px">
         <el-form-item label="影响范围">{{ fixRow.hosts }} 台主机</el-form-item>
+        <el-form-item v-if="fixRow.identityStatus" label="匹配时身份">{{ fixRow.distroId }} {{ fixRow.distroVersion }} · {{ fixRow.source || '未知' }} · {{ fixRow.architecture || '架构未知' }}</el-form-item>
+        <el-alert v-if="fixRow.blocked" type="warning" :closable="false" :title="`${fixRow.blocked} 项缺少当前身份或修复版本证据，仅提交符合条件的检测项`" />
         <template v-if="fixRow.fixType === 'config'">
           <el-form-item label="修复步骤">
             <div class="mono" style="font-size:12px;color:#475569;line-height:1.9">
@@ -149,6 +159,8 @@
           <span class="mono">{{ detailRow.pkg }} {{ detailRow.cur }} → {{ detailRow.target }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="级别 / CVSS">{{ sevLabel(detailRow.sev) }} · {{ detailRow.cvss }}</el-descriptions-item>
+        <el-descriptions-item label="匹配时身份">{{ detailRow.distroId }} {{ detailRow.distroVersion }} · {{ detailRow.source || '来源未知' }} · {{ detailRow.architecture || '架构未知' }}</el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.blocked" label="修复限制">{{ detailRow.blocked }} 项缺少当前身份或修复版本证据，请重新采集、扫描或人工处理</el-descriptions-item>
         <el-descriptions-item label="修复方式">{{ detailRow.fixType === 'config' ? '配置类' : '软件包类' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detailRow.status === 'fixed' ? '已修复' : detailRow.status === 'fixing' ? '修复中' : '待修复' }}</el-descriptions-item>
         <el-descriptions-item label="影响主机（{{ detailRow.hosts }} 台）">
@@ -250,9 +262,10 @@ const openBatchFix = () => {
     cve: `${rows.length} 项漏洞批量修复`,
     desc: rows.map(r => r.cve).join('、'),
     fixType: 'pkg',
-    hosts: rows.reduce((n, r) => n + r.hosts, 0),
+    hosts: new Set(rows.flatMap(r => r.findings.map(f => f.agentId))).size,
+    blocked: rows.reduce((n, r) => n + r.blocked, 0),
     target: '按漏洞库 fixed_version 逐项升级',
-    findings: rows.flatMap(r => r.findings),
+    findings: [...new Map(rows.flatMap(r => r.findings).map(f => [`${f.agentId}:${f.findingId}`, f])).values()],
   }
   fixDlg.value = true
 }

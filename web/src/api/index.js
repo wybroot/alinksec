@@ -480,10 +480,24 @@ export async function importPatch(formData) {
 /* ---------------- 漏洞 ---------------- */
 
 export async function fetchVulns() {
-  const data = await get('/api/vuln/findings?page=1&size=200')
+  const size = 200
+  const first = await get(`/api/vuln/findings?page=1&size=${size}`)
+  const list = [...(first?.list || [])]
+  for (let page = 2; list.length < Number(first?.total || 0); page += 1) {
+    const next = await get(`/api/vuln/findings?page=${page}&size=${size}`)
+    if (!next?.list?.length) break
+    list.push(...next.list)
+  }
   const grouped = new Map()
-  for (const f of data?.list || []) {
-    const key = `${f.cve_id}\0${f.software}\0${f.fixed_version || ''}`
+  const agentsByGroup = new Map()
+  const seen = new Set()
+  for (const f of list) {
+    const id = `${f.agent_id}\0${f.id}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    const key = JSON.stringify([f.cve_id, f.software, f.installed_version || '', f.fixed_version || '',
+      f.source || '', f.architecture || '', f.distro_id || '', f.distro_version || '', f.os_type || 0,
+      f.os_version || '', f.identity_status || 'legacy'])
     if (!grouped.has(key)) {
       grouped.set(key, {
         cve: f.cve_id,
@@ -494,19 +508,33 @@ export async function fetchVulns() {
         sev: sev(f.severity),
         cvss: f.cvss ?? '-',
         fixType: 'pkg',
+        source: f.source || '',
+        architecture: f.architecture || '',
+        distroId: f.distro_id || '',
+        distroVersion: f.distro_version || '',
+        osVersion: f.os_version || '',
+        identityStatus: f.identity_status || 'legacy',
+        blocked: 0,
         hosts: 0,
         hostList: [],
         findings: [],
         status: f.status >= 3 ? 'fixed' : 'todo',
       })
+      agentsByGroup.set(key, new Set())
     }
     const g = grouped.get(key)
-    g.hosts += 1
-    if (!g.hostList.includes(f.hostname || f.agent_id)) g.hostList.push(f.hostname || f.agent_id)
-    if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version) {
+    const agents = agentsByGroup.get(key)
+    if (!agents.has(f.agent_id)) {
+      agents.add(f.agent_id)
+      g.hosts = agents.size
+      const label = f.hostname || f.agent_id
+      g.hostList.push(g.hostList.includes(label) ? `${label} (${f.agent_id})` : label)
+    }
+    if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version
+        && f.identity_status === 'complete' && (f.identity_current === true || Number(f.identity_current) === 1)) {
       g.findings.push({ agentId: f.agent_id, findingId: Number(f.id) })
       g.status = 'todo'
-    }
+    } else if (Number(f.status) <= 1) g.blocked += 1
   }
   return [...grouped.values()]
 }

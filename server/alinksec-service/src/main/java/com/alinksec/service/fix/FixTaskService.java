@@ -219,6 +219,8 @@ public class FixTaskService {
         Map<Long, Map<String, Object>> findings = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbc.queryForList("""
                 SELECT f.id, f.agent_id, f.cve_id, f.software, f.installed_version, f.fixed_version, f.status,
+                       f.source,f.architecture,f.distro_id,f.distro_version,f.identity_status,
+                       f.os_type AS finding_os_type,f.os_version AS finding_os_version,
                        a.os_type, a.os_version
                 FROM t_vuln_finding f JOIN t_agent a ON a.agent_id = f.agent_id AND a.deleted = false
                 WHERE f.id IN (%s)
@@ -249,8 +251,9 @@ public class FixTaskService {
                     "target_version", f.get("fixed_version"),
                     "cve_id", f.get("cve_id"),
                     "finding_id", fid));
-            target.put("inventory", currentPackageIdentity(agentId, String.valueOf(f.get("software")),
-                    String.valueOf(f.get("installed_version"))));
+            var identity = currentPackageIdentity(agentId, String.valueOf(f.get("software")), String.valueOf(f.get("installed_version")));
+            verifyFindingIdentity(f, identity);
+            target.put("inventory", identity);
             resolveTargets.add(target);
         }
         PatchRepoService.Resolved resolved = patchRepo.resolveForAgents(resolveTargets);
@@ -367,6 +370,18 @@ public class FixTaskService {
                     String.valueOf(payload.get("pkg_name")), String.valueOf(identity.get("installed_version"))))) {
                 throw new IllegalArgumentException("软件资产身份已变化或缺少完整采集证据，请重新采集并创建修复任务");
             }
+            var findings = jdbc.queryForList("""
+                    SELECT source,architecture,distro_id,distro_version,identity_status,installed_version,
+                           os_type AS finding_os_type,os_version AS finding_os_version,status,software,cve_id,fixed_version
+                    FROM t_vuln_finding WHERE id=? AND agent_id=?
+                    """, Long.parseLong(String.valueOf(t.get("ref_id"))), t.get("agent_id"));
+            if (findings.size() != 1 || ((Number) findings.get(0).get("status")).intValue() > 1
+                    || !payload.get("pkg_name").equals(findings.get(0).get("software"))
+                    || !payload.get("cve_id").equals(findings.get(0).get("cve_id"))
+                    || !payload.get("target_version").equals(findings.get(0).get("fixed_version"))) {
+                throw new IllegalArgumentException("漏洞结果或修复目标已变化，请重新扫描并创建修复任务");
+            }
+            verifyFindingIdentity(findings.get(0), (Map<?, ?>) payload.get("inventory"));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("ref_id")))
@@ -414,6 +429,22 @@ public class FixTaskService {
         return Map.of("source", source, "architecture", architecture, "distro_id", distroId,
                 "distro_version", distroVersion, "installed_version", installedVersion,
                 "os_type", osType, "os_version", host.get("os_version") == null ? "" : host.get("os_version"));
+    }
+
+    private static void verifyFindingIdentity(Map<String, Object> finding, Map<?, ?> inventory) {
+        if (!"complete".equals(finding.get("identity_status"))) {
+            throw new IllegalArgumentException("漏洞记录缺少匹配时的软件身份，请重新扫描后创建修复任务");
+        }
+        for (String field : List.of("source", "architecture", "distro_id", "distro_version", "installed_version")) {
+            if (!java.util.Objects.equals(finding.get(field), inventory.get(field))) {
+                throw new IllegalArgumentException("漏洞记录与当前软件资产身份不一致，请重新扫描后创建修复任务");
+            }
+        }
+        if (!(finding.get("finding_os_type") instanceof Number osType)
+                || !(inventory.get("os_type") instanceof Number currentType) || osType.intValue() != currentType.intValue()
+                || !java.util.Objects.equals(finding.get("finding_os_version"), inventory.get("os_version"))) {
+            throw new IllegalArgumentException("漏洞记录与当前系统身份不一致，请重新扫描后创建修复任务");
+        }
     }
 
     private static OffsetDateTime parseTime(String s) {

@@ -54,11 +54,20 @@ public class VulnQueryService {
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT f.id, f.task_id, f.agent_id, a.hostname, f.cve_id, c.title, f.software,
                        f.installed_version, f.fixed_version, f.severity, c.cvss,
-                       f.status, f.created_at
+                       f.status,f.created_at,f.source,f.architecture,f.distro_id,f.distro_version,
+                       f.os_type,f.os_version,f.identity_status,a.software_collection_status,
+                       CASE WHEN f.identity_status='complete' AND a.deleted=false
+                         AND a.software_collection_status='complete' AND a.os_type=f.os_type
+                         AND COALESCE(a.os_version,'')=f.os_version AND a.distro_id=f.distro_id AND a.distro_version=f.distro_version
+                         AND (f.source='registry' OR a.software_identity_error='')
+                         AND (SELECT count(*) FROM t_asset_software s WHERE s.agent_id=f.agent_id AND s.name=f.software)=1
+                         AND EXISTS (SELECT 1 FROM t_asset_software s WHERE s.agent_id=f.agent_id AND s.name=f.software
+                           AND s.version=f.installed_version AND s.source=f.source AND s.architecture=f.architecture)
+                         THEN 1 ELSE 0 END AS identity_current
                 FROM t_vuln_finding f
                 LEFT JOIN t_agent a ON a.agent_id = f.agent_id
                 LEFT JOIN t_cve_db c ON c.cve_id = f.cve_id""" + cond
-                + " ORDER BY f.severity DESC, f.created_at DESC LIMIT ? OFFSET ?",
+                 + " ORDER BY f.severity DESC, f.created_at DESC, f.id DESC LIMIT ? OFFSET ?",
                 pageArgs.toArray());
 
         Map<String, Object> result = new HashMap<>();
@@ -148,9 +157,10 @@ public class VulnQueryService {
                 GROUP BY severity ORDER BY severity
                 """));
         result.put("topSoftware", jdbc.queryForList("""
-                SELECT software, count(DISTINCT agent_id) AS hosts, count(*) AS findings
+                SELECT software,source,architecture,distro_id,distro_version,os_type,os_version,
+                       count(DISTINCT agent_id) AS hosts, count(*) AS findings
                 FROM t_vuln_finding WHERE status IN (0,1)
-                GROUP BY software ORDER BY findings DESC LIMIT 10
+                GROUP BY software,source,architecture,distro_id,distro_version,os_type,os_version ORDER BY findings DESC LIMIT 10
                 """));
         result.put("weakpwd", jdbc.queryForObject(
                 "SELECT count(*) FROM t_weakpwd_finding WHERE status IN (0,1)", Long.class));

@@ -11,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -20,7 +22,7 @@ import java.util.Set;
  *   1. Agent 资产快照落库后自动比对（task_id=0，快照触发）
  *   2. 漏洞扫描任务创建时比对（task_id=任务 id）
  *
- * 状态保留：已忽略(2)/已修复(3) 的 (agent,cve,software) 组合不重复插入；
+ * 状态保留：已忽略(2)/已修复(3) 仅保留同一安装版本、发行版和包架构的决定；
  * 新一轮比对前清除该 agent 未处置(0/1)记录后重插，但保留待审批/执行修复引用的记录。
  */
 @Service
@@ -37,14 +39,18 @@ public class VulnMatchService {
     /** 单机比对。taskId=0 表示资产快照触发的自动比对。 */
     @Transactional
     public void matchAgent(String agentId, long taskId) {
-        var collectionStates = jdbc.queryForList("SELECT software_collection_status FROM t_agent WHERE agent_id=?", agentId);
-        if (!collectionStates.isEmpty() && Set.of("failed", "unsupported").contains(
-                String.valueOf(collectionStates.get(0).get("software_collection_status")))) {
+        var hosts = jdbc.queryForList("""
+                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error
+                FROM t_agent WHERE agent_id=? AND deleted=false
+                """, agentId);
+        if (hosts.size() != 1) return;
+        var host = hosts.get(0);
+        if (Set.of("failed", "unsupported").contains(text(host, "software_collection_status"))) {
             log.info("跳过不完整的软件资产比对: agent={}", agentId);
             return;
         }
         List<Map<String, Object>> software = jdbc.queryForList(
-                "SELECT name, version, source FROM t_asset_software WHERE agent_id = ?", agentId);
+                "SELECT name,version,source,architecture FROM t_asset_software WHERE agent_id = ? ORDER BY name,source,architecture,version", agentId);
 
         String pendingRepair = """
                 EXISTS (SELECT 1 FROM t_fix_record r JOIN t_fix_task t ON t.id = r.task_id
@@ -54,9 +60,10 @@ public class VulnMatchService {
         // 保留修复引用的 finding ID，重连时的资产扫描不能让结果失去回写目标。
         Set<String> dismissed = new HashSet<>();
         jdbc.query("""
-                        SELECT cve_id, software FROM t_vuln_finding f
+                         SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,identity_status FROM t_vuln_finding f
                         WHERE agent_id = ? AND (status IN (2, 3) OR %s)
-                        """.formatted(pendingRepair), (rs, i) -> dismissed.add(rs.getString(1) + "|" + rs.getString(2)),
+                         """.formatted(pendingRepair), (rs, i) -> dismissed.add(findingKey(rs.getString(1), rs.getString(2), rs.getString(3),
+                         rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8), rs.getString(9), rs.getString(10))),
                 agentId);
 
         // 未处置记录先清后插（快照全量替换语义）
@@ -64,8 +71,11 @@ public class VulnMatchService {
                 + pendingRepair, agentId);
         if (software.isEmpty()) return;
 
-        var hosts = jdbc.queryForList("SELECT os_version FROM t_agent WHERE agent_id=?", agentId);
-        String os = hosts.isEmpty() ? "" : String.valueOf(hosts.get(0).get("os_version"));
+        String os = text(host, "os_version"), distroId = text(host, "distro_id"), distroVersion = text(host, "distro_version");
+        int osType = ((Number) host.get("os_type")).intValue();
+        boolean complete = "complete".equals(text(host, "software_collection_status"));
+        boolean nativeIdentity = complete && osType == 1 && text(host, "software_identity_error").isEmpty()
+                && VulnerabilityScope.distributionId(distroId) && VulnerabilityScope.distributionVersion(distroVersion);
         int[] inserted = {0};
         // Metadata-only NVD entries are excluded, and candidate rows are consumed one at a time.
         jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE CAST(affected AS TEXT) <> '[]'",
@@ -73,6 +83,7 @@ public class VulnMatchService {
             String cveId = cve.getString("cve_id");
             int severity = cve.getInt("severity");
             Object cvss = cve.getObject("cvss");
+            Map<String, Candidate> candidates = new LinkedHashMap<>();
             for (JsonNode rule : JsonUtils.read(cve.getString("affected"))) {
                 String cveName = rule.path("name").asText("");
                 String vrange = rule.path("vrange").asText("*");
@@ -82,18 +93,29 @@ public class VulnMatchService {
                 for (Map<String, Object> sw : software) {
                     String swName = String.valueOf(sw.get("name"));
                     String swVersion = String.valueOf(sw.get("version") == null ? "" : sw.get("version"));
-                    if (!ruleMatches(rule, swName, swVersion, os, String.valueOf(sw.getOrDefault("source", "")))) continue;
+                    String source = text(sw, "source"), architecture = text(sw, "architecture");
+                    boolean identityKnown = VulnerabilityScope.nativeSource(source) ? nativeIdentity : complete;
+                    if (!ruleMatches(rule, swName, swVersion, os, source, distroId, distroVersion, architecture, identityKnown)) continue;
                     String fixed = rule.has("fixed_version") ? rule.path("fixed_version").asText("") : rangeFixedVersion(vrange);
-                    if (dismissed.contains(cveId + "|" + swName)) {
+                    String identityStatus = identityKnown ? "complete" : "legacy";
+                    String key = findingKey(cveId, swName, swVersion, source, architecture, distroId, distroVersion, osType, os, identityStatus);
+                    if (dismissed.contains(key)) {
                         continue;
                     }
-                    jdbc.update("""
-                            INSERT INTO t_vuln_finding
-                              (task_id, agent_id, cve_id, software, installed_version, fixed_version, severity, cvss)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            """, taskId, agentId, cveId, swName, swVersion, fixed, severity, cvss);
-                    inserted[0]++;
+                    candidates.merge(key, new Candidate(swName, swVersion, source, architecture, identityStatus, fixed),
+                            (left, right) -> new Candidate(left.name(), left.version(), left.source(), left.architecture(),
+                                    left.status(), Objects.equals(left.fixed(), right.fixed()) ? left.fixed() : null));
                 }
+            }
+            for (Candidate candidate : candidates.values()) {
+                jdbc.update("""
+                            INSERT INTO t_vuln_finding
+                               (task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,cvss,
+                                source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                             """, taskId, agentId, cveId, candidate.name(), candidate.version(), candidate.fixed(), severity, cvss,
+                             candidate.source(), candidate.architecture(), distroId, distroVersion, osType, os, candidate.status());
+                inserted[0]++;
             }
         });
         log.info("漏洞比对完成: agent={} task={} software={} findings={}", agentId, taskId, software.size(), inserted[0]);
@@ -154,8 +176,24 @@ public class VulnMatchService {
     }
 
     static boolean ruleMatches(JsonNode rule, String name, String version, String os, String source) {
+        return ruleMatches(rule, name, version, os, source, "", "", "", false);
+    }
+
+    static boolean ruleMatches(JsonNode rule, String name, String version, String os, String source,
+                               String distroId, String distroVersion, String architecture, boolean identityKnown) {
         String expected = rule.path("name").asText("");
         if (expected.isBlank()) return false;
+        if (VulnerabilityScope.nativeSource(source)) {
+            if (!identityKnown || !VulnerabilityScope.nativeRule(rule) || !name.equals(expected)
+                    || !VulnerabilityScope.distributionId(distroId) || !VulnerabilityScope.distributionVersion(distroVersion)
+                    || !VulnerabilityScope.architecture(architecture)) return false;
+        }
+        for (var field : Map.of("distro_id", distroId, "distro_version", distroVersion, "architecture", architecture).entrySet()) {
+            if (!rule.has(field.getKey())) continue;
+            String constraint = rule.path(field.getKey()).asText("");
+            if (!identityKnown || field.getValue().isEmpty() || ("*".equals(constraint)
+                    ? !"architecture".equals(field.getKey()) : !constraint.equals(field.getValue()))) return false;
+        }
         boolean exact = "exact".equals(rule.path("match").asText("legacy"));
         if (exact ? !name.equalsIgnoreCase(expected) : !name.toLowerCase(java.util.Locale.ROOT).contains(expected.toLowerCase(java.util.Locale.ROOT))) return false;
         String expectedOs = rule.path("os").asText("");
@@ -172,6 +210,17 @@ public class VulnMatchService {
             return !rule.path("ranges").isEmpty();
         }
         return versionInRange(version, rule.path("vrange").asText("*"), source);
+    }
+
+    private static String text(Map<String, Object> row, String field) {
+        return row.get(field) == null ? "" : String.valueOf(row.get(field));
+    }
+
+    private record Candidate(String name, String version, String source, String architecture, String status, String fixed) {}
+
+    private static String findingKey(String cve, String name, String version, String source, String architecture,
+                                     String distroId, String distroVersion, int osType, String osVersion, String status) {
+        return JsonUtils.write(java.util.Arrays.asList(cve, name, version, source, architecture, distroId, distroVersion, osType, osVersion, status));
     }
 
     /** A vulnerable-range boundary does not establish a vendor-confirmed fixed package. */

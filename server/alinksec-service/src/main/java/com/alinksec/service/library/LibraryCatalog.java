@@ -2,6 +2,7 @@ package com.alinksec.service.library;
 
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.service.config.DatabaseDialect;
+import com.alinksec.service.scan.VulnerabilityScope;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -197,10 +198,15 @@ public class LibraryCatalog {
             String name = rule.path("name").asText("");
             if (!rule.isObject() || !rule.path("name").isTextual() || name.isBlank() || name.length() > 255
                     || rule.has("vrange") == rule.has("ranges")) throw new IllegalArgumentException("漏洞缺少软件及唯一版本条件");
-            for (String field : List.of("os", "source", "fixed_version", "match", "version_scheme")) {
+            for (String field : List.of("os", "source", "fixed_version", "match", "version_scheme", "distro_id", "distro_version", "architecture")) {
                 if (rule.has(field) && (!rule.path(field).isTextual() || rule.path(field).asText().length() > 255)) throw new IllegalArgumentException("漏洞规则字段类型非法");
             }
             if (rule.has("match") && !Set.of("exact", "contains").contains(rule.path("match").asText())) throw new IllegalArgumentException("软件名匹配方式非法");
+            if (rule.has("distro_id") && !VulnerabilityScope.distributionId(rule.path("distro_id").asText())) throw new IllegalArgumentException("发行版 ID 必须明确且格式有效");
+            if (rule.has("distro_version") && !VulnerabilityScope.distributionVersion(rule.path("distro_version").asText())) throw new IllegalArgumentException("发行版版本必须明确且格式有效");
+            if (rule.has("architecture") && !"*".equals(rule.path("architecture").asText())
+                    && !VulnerabilityScope.architecture(rule.path("architecture").asText())) throw new IllegalArgumentException("包架构必须明确或显式声明通配");
+            if (VulnerabilityScope.nativeSource(rule.path("source").asText()) && "contains".equals(rule.path("match").asText())) throw new IllegalArgumentException("原生软件包规则必须精确匹配包名");
             if (rule.has("version_scheme") && (!Set.of("rpm", "dpkg", "upstream").contains(rule.path("version_scheme").asText())
                     || (!"upstream".equals(rule.path("version_scheme").asText())
                     && !rule.path("version_scheme").asText().equals(rule.path("source").asText())))) throw new IllegalArgumentException("版本比较语义与软件来源不一致");
@@ -229,8 +235,9 @@ public class LibraryCatalog {
 
     private static boolean hasComparableRules(JsonNode document) {
         for (JsonNode rule : document.path("affected")) {
-            if (!("upstream".equals(rule.path("version_scheme").asText())
-                    && Set.of("rpm", "dpkg").contains(rule.path("source").asText()))) return true;
+            if (VulnerabilityScope.nativeSource(rule.path("source").asText())) {
+                if (VulnerabilityScope.nativeRule(rule)) return true;
+            } else return true;
         }
         return false;
     }

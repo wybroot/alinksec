@@ -201,7 +201,8 @@ class AgentChannelSecurityIntegrationTest {
         asset(secondStream, second.getAgentId(), pkg);
         String cveId = "CVE-test-" + UUID.randomUUID().toString().substring(0, 20);
         jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES (?,3,?)", cveId,
-                JsonUtils.write(List.of(Map.of("name", pkg, "vrange", "<2.0"))));
+                JsonUtils.write(List.of(Map.of("name", pkg, "vrange", "<2.0", "source", "dpkg", "version_scheme", "dpkg",
+                        "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "match", "exact"))));
         cveIds.add(cveId);
         long firstFinding = finding(first.getAgentId(), pkg, cveId);
         long secondFinding = finding(second.getAgentId(), pkg, cveId);
@@ -284,9 +285,11 @@ class AgentChannelSecurityIntegrationTest {
 
     private long finding(String agentId, String pkg, String cveId) {
         return jdbc.queryForObject("""
-                INSERT INTO t_vuln_finding(task_id, agent_id, cve_id, software, installed_version, fixed_version, severity)
-                VALUES (0, ?, ?, ?, '1.0', '2.0', 3) RETURNING id
-                """, Long.class, agentId, cveId, pkg);
+                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,
+                    source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
+                SELECT 0,agent_id,?,?,'1.0','2.0',3,'dpkg','amd64',distro_id,distro_version,os_type,COALESCE(os_version,''),'complete'
+                FROM t_agent WHERE agent_id=? RETURNING id
+                """, Long.class, cveId, pkg, agentId);
     }
 
     private void fixResult(Stream stream, String agentId, long taskId, long findingId, boolean success) {

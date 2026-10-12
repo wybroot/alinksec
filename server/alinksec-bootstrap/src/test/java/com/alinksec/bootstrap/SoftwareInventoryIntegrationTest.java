@@ -10,6 +10,7 @@ import com.alinksec.service.config.DatabaseDialect;
 import com.alinksec.service.fix.FixTaskService;
 import com.alinksec.service.fix.PatchRepoService;
 import com.alinksec.service.query.HostQueryService;
+import com.alinksec.service.query.VulnQueryService;
 import com.alinksec.service.scan.VulnMatchService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,8 +67,10 @@ class SoftwareInventoryIntegrationTest {
     private void replace(RptAssetSnapshot snapshot) { transaction.executeWithoutResult(status -> assets.replaceSnapshot("inventory-host", snapshot)); }
     private long finding() {
         return jdbc.queryForObject("""
-                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity)
-                VALUES (0,'inventory-host','CVE-inventory-fixture','inventory-fixture','1.0','2.0',3) RETURNING id
+                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,
+                    source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
+                VALUES (0,'inventory-host','CVE-inventory-fixture','inventory-fixture','1.0','2.0',3,
+                    'dpkg','amd64','ubuntu','24.04',1,'Ubuntu 24.04','complete') RETURNING id
                 """, Long.class);
     }
     private Map<String, Object> create(long id) {
@@ -182,5 +185,97 @@ class SoftwareInventoryIntegrationTest {
         assertEquals("ubuntu", identity.path("distro_id").asText());
         assertEquals("dispatched", approve(task).get("state"));
         verify(commands).dispatch(eq("inventory-host"), any(Command.Builder.class), isNull());
+    }
+
+    private Map<String, Object> scopedRule(String architecture, String fixed) {
+        return Map.of("name", "inventory-fixture", "match", "exact", "source", "dpkg", "version_scheme", "dpkg",
+                "distro_id", "ubuntu", "distro_version", "24.04", "architecture", architecture, "vrange", "<2.0", "fixed_version", fixed);
+    }
+    private void rules(Map<String, Object>... rules) {
+        jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES ('CVE-2026-45678',3,?)", JsonUtils.write(List.of(rules)));
+    }
+
+    @Test void scopedDecisionsDoNotHideOtherArchitecturesOrLaterInstalledVersions() {
+        rules(scopedRule("*", "2.0"));
+        replace(complete(pkg("amd64", "1.0"), pkg("i386", "1.0")));
+        var first = jdbc.queryForList("SELECT * FROM t_vuln_finding ORDER BY architecture");
+        assertEquals(2, first.size());
+        assertEquals("amd64", first.get(0).get("architecture"));
+        assertEquals("ubuntu", first.get(0).get("distro_id"));
+        assertEquals("complete", first.get(0).get("identity_status"));
+        jdbc.update("UPDATE t_vuln_finding SET status=2 WHERE architecture='amd64'");
+        replace(complete(pkg("amd64", "1.0"), pkg("i386", "1.0")));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE status=0 AND architecture='i386'", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE architecture='amd64'", Integer.class));
+        replace(complete(pkg("amd64", "1.1")));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE status=0 AND installed_version='1.1'", Integer.class));
+    }
+
+    @Test void historicalUnknownDecisionDoesNotSuppressACompleteIdentity() {
+        replace(complete(pkg("amd64", "1.0")));
+        long old = finding();
+        jdbc.update("UPDATE t_vuln_finding SET cve_id='CVE-2026-45678',status=2,source='',architecture='',distro_id='',distro_version='',identity_status='legacy' WHERE id=?", old);
+        rules(scopedRule("amd64", "2.0"));
+        matcher.matchAgent("inventory-host", 1);
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE status=0 AND identity_status='complete'", Integer.class));
+        jdbc.update("UPDATE t_vuln_finding SET installed_version=NULL WHERE id=?", old);
+        assertDoesNotThrow(() -> matcher.matchAgent("inventory-host", 2));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+    }
+
+    @Test void nativeRulesRequireTheDeclaredDistributionReleaseAndArchitecture() {
+        rules(scopedRule("amd64", "2.0"));
+        replace(complete(pkg("i386", "1.0")));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+        replace(complete(pkg("amd64", "1.0")));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+        for (var scope : List.of(List.of("debian", "24.04"), List.of("ubuntu", "22.04"))) {
+            replace(complete(pkg("amd64", "1.0")).toBuilder().setSoftwareInventory(SoftwareInventory.newBuilder()
+                    .setStatus(SoftwareInventory.Status.COMPLETE).setSource("dpkg").setDistroId(scope.get(0)).setDistroVersion(scope.get(1))).build());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+        }
+    }
+
+    @Test void overlappingRulesEmitOneFindingAndConflictingFixDeclarationsBlockAutomation() {
+        rules(scopedRule("*", "2.0"), scopedRule("amd64", "2.1"));
+        replace(complete(pkg("amd64", "1.0")));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+        assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding", String.class));
+    }
+
+    @Test void queryKeepsOriginalFindingIdentityAndRepairRejectsCurrentIdentityDrift() {
+        replace(complete(pkg("amd64", "1.0")));
+        long id = finding();
+        var api = new VulnQueryService(jdbc);
+        var before = (List<Map<String, Object>>) api.findings(null, null, null, null, 1, 20).get("list");
+        assertEquals(1, ((Number) before.get(0).get("identity_current")).intValue());
+        jdbc.update("UPDATE t_agent SET distro_id='debian',distro_version='12' WHERE agent_id='inventory-host'");
+        var after = (List<Map<String, Object>>) api.findings(null, null, null, null, 1, 20).get("list");
+        assertEquals("ubuntu", after.get(0).get("distro_id"));
+        assertEquals(0, ((Number) after.get(0).get("identity_current")).intValue());
+        assertThrows(IllegalArgumentException.class, () -> create(id));
+        verifyNoInteractions(patches, commands);
+    }
+
+    @Test void completeInventoryCannotRetroactivelySupplyHistoricalFindingIdentity() {
+        replace(complete(pkg("amd64", "1.0")));
+        long id = finding();
+        jdbc.update("UPDATE t_vuln_finding SET identity_status='legacy',source='',architecture='',distro_id='',distro_version='' WHERE id=?", id);
+        assertThrows(IllegalArgumentException.class, () -> create(id));
+        verifyNoInteractions(patches, commands);
+    }
+
+    @Test void approvalRechecksFindingIdentityAndTargetEvenWhenInventoryIsUnchanged() {
+        replace(complete(pkg("amd64", "1.0")));
+        long id = finding(); cover(id);
+        long task = ((Number) create(id).get("taskId")).longValue();
+        jdbc.update("UPDATE t_vuln_finding SET architecture='i386' WHERE id=?", id);
+        assertThrows(IllegalArgumentException.class, () -> approve(task));
+        jdbc.update("UPDATE t_vuln_finding SET architecture='amd64',fixed_version='2.1' WHERE id=?", id);
+        assertThrows(IllegalArgumentException.class, () -> approve(task));
+        assertEquals(0, jdbc.queryForObject("SELECT approved FROM t_fix_task WHERE id=?", Integer.class, task));
+        assertNull(jdbc.queryForObject("SELECT dispatched_at FROM t_fix_task WHERE id=?", String.class, task));
+        verifyNoInteractions(commands);
     }
 }

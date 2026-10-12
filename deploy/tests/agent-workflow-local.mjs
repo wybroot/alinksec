@@ -279,9 +279,18 @@ try {
   await stopAgent(first)
   const second = await makeAgent('second')
   await patchFile()
-  const findings = [first, second].map(agent => ({ agentId: agent.id, findingId: sql(`
-    INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity)
-    VALUES (0,?,'CVE-2099-0001','alinksec-smoke-package','1.0','2.0',3) RETURNING id`, agent.id)[0].id }))
+  sql(`INSERT INTO t_cve_db(cve_id,severity,affected) VALUES ('CVE-2099-0001',3,?) RETURNING cve_id`, JSON.stringify([
+    { name: 'alinksec-smoke-package', match: 'exact', source: 'dpkg', version_scheme: 'dpkg',
+      distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: '<2.0', fixed_version: '2.0' },
+  ]))
+  await api('/api/vuln/tasks', { agentIds: [first.id, second.id], includeVuln: true, includeWeakPassword: false, includePortService: false })
+  const findings = [first, second].map(agent => {
+    const rows = sql("SELECT id,source,architecture,distro_id,distro_version,identity_status FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)
+    assert.equal(rows.length, 1)
+    assert.deepEqual({ ...rows[0], id: undefined }, { id: undefined, source: 'dpkg', architecture: 'all', distro_id: 'ubuntu', distro_version: '24.04', identity_status: 'complete' })
+    return { agentId: agent.id, findingId: rows[0].id }
+  })
+  console.log('ok - scoped server matching preserves actual Agent package identity in both findings')
   const task = await api('/api/fix/tasks/package', { items: findings, approver: 'CI', name: 'Actual Agent repair' })
   assert.equal(task.pendingApprove, true)
   await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'CI' })

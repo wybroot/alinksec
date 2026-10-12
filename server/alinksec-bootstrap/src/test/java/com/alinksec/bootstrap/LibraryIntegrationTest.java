@@ -389,9 +389,10 @@ class LibraryIntegrationTest {
     }
     @Test void importedRulesProduceFindingsOnlyForTheApplicableAssetAndPreserveVendorFix() {
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('library-agent','fixture',1,'vendor-os','library-machine')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('library-agent','fixture-app','1.5','dpkg')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('library-agent','fixture-app-helper','1.5','dpkg')");
-        var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
+        jdbc.update("UPDATE t_agent SET software_collection_status='complete',distro_id='ubuntu',distro_version='24.04' WHERE agent_id='library-agent'");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('library-agent','fixture-app','1.5','dpkg','amd64')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('library-agent','fixture-app-helper','1.5','dpkg','amd64')");
+        var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
         var metadata = JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":4,\"affected\":[]}");
         catalog.cves("manual", List.of(rule, metadata));
         var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc);
@@ -418,11 +419,12 @@ class LibraryIntegrationTest {
 
     @Test void fullPackageOrderingKeepsEpochAndVendorRevisionAndDoesNotInventFixes() {
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('native-version-agent','fixture',1,'fixture-distro','native-version-machine')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('native-version-agent','deb-fixture','1.0-1ubuntu2','dpkg')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('native-version-agent','rpm-fixture','2:1.0-1','rpm')");
+        jdbc.update("UPDATE t_agent SET software_collection_status='complete',distro_id='ubuntu',distro_version='24.04' WHERE agent_id='native-version-agent'");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','deb-fixture','1.0-1ubuntu2','dpkg','amd64')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','rpm-fixture','2:1.0-1','rpm','x86_64')");
         catalog.cves("manual", List.of(
-                JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}"),
-                JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}")));
+                JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}"),
+                JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"x86_64\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}")));
         new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("native-version-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='native-version-agent'", Integer.class));
         assertEquals("deb-fixture", jdbc.queryForObject("SELECT software FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
@@ -446,6 +448,17 @@ class LibraryIntegrationTest {
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('nvd-package-agent','fixture-app','1.0-1ubuntu1','dpkg')");
         new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("nvd-package-agent", 0);
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='nvd-package-agent'", Integer.class));
+    }
+    @Test void incompleteNativeScopeRemainsMetadataAndInvalidDeclaredScopesRejectTheWholeBatch() {
+        var unscoped = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"vrange\":\"<2.0\"}]}");
+        catalog.cves("manual", List.of(unscoped));
+        assertEquals(0, jdbc.queryForObject("SELECT matchable FROM t_security_cve WHERE cve_id='CVE-2026-12345'", Integer.class));
+        for (var invalidField : Map.of("distro_id", "*", "distro_version", "24.*", "architecture", "amd64,i386").entrySet()) {
+            var invalid = unscoped.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0)).put(invalidField.getKey(), invalidField.getValue());
+            assertThrows(IllegalArgumentException.class, () -> catalog.cves("bad-scope", List.of(unscoped, invalid)));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='bad-scope'", Integer.class));
+        }
     }
     @Test void boundedDownloaderRejectsOversizeAndCredentialRedirects() throws Exception {
         var body = new AtomicReference<>("a".repeat(2000)); var source = endpoint("hashes", body);

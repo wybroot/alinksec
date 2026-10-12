@@ -23,7 +23,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 let browser
 const errors = [], unexpected = [], scenarios = []
 const host = { agent_id: 'inventory-host', hostname: 'inventory-host', os_type: 1, os_version: 'Ubuntu 24.04', arch: 'arm64', status: 1 }
-let inventory, software
+let inventory, software, findings = []
 try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
@@ -41,6 +41,9 @@ try {
     else if (path === '/api/hosts/inventory-host/software') data = software
     else if (/^\/api\/hosts\/inventory-host\/(ports|processes|accounts|containers)$/.test(path)) data = []
     else if (path === '/api/metrics/query_range') data = []
+    else if (path === '/api/vuln/findings') data = { list: findings, total: findings.length }
+    else if (path === '/api/vuln/stats') data = { bySeverity: [], total: findings.length, pending: findings.length, fixed: 0 }
+    else if (path === '/api/vuln/weakpwds' || path === '/api/vuln/ports') data = { list: [], total: 0 }
     else { unexpected.push(path); return route.fulfill({ status: 500, json: { code: 500, msg: 'Unexpected request' } }) }
     return route.fulfill({ json: { code: 0, data } })
   })
@@ -82,8 +85,40 @@ try {
     { message: 'Drawer exceeds mobile width after layout settles' }).toBeLessThanOrEqual(0)
   const mobileBounds = await page.evaluate(() => ({ drawerWidth: document.querySelector('.el-drawer').getBoundingClientRect().width, viewportWidth: innerWidth }))
   await page.screenshot({ path: artifacts + '/empty-mobile.png', fullPage: true, animations: 'disabled' })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const base = { id: 1, agent_id: 'scope-a', hostname: 'scope-a', cve_id: 'CVE-2026-45678', software: 'scope-fixture',
+    installed_version: '1.0', fixed_version: '2.0', severity: 3, status: 0, source: 'dpkg', architecture: 'amd64',
+    distro_id: 'ubuntu', distro_version: '24.04', os_type: 1, os_version: 'Ubuntu 24.04', identity_status: 'complete', identity_current: 1 }
+  findings = [base, { ...base, id: 2 }, { ...base, id: 3, agent_id: 'scope-b', hostname: 'scope-b' },
+    { ...base, id: 4, architecture: 'i386', identity_current: 0 }, { ...base, id: 5, distro_id: 'debian' },
+    { ...base, id: 6, distro_version: '22.04' }, { ...base, id: 7, installed_version: '1.1' },
+    { ...base, id: 8, identity_status: 'legacy', identity_current: 0, source: '', architecture: '', distro_id: '', distro_version: '' },
+    { ...base, id: 9, agent_id: 'scope-stale', hostname: 'scope-stale', identity_current: 0 }]
+  await page.goto(`http://127.0.0.1:${server.address().port}/vuln`)
+  const rows = page.locator('.el-table__body tr')
+  await expect(rows).toHaveCount(6)
+  const current = rows.filter({ hasText: 'ubuntu 24.04' }).filter({ hasText: 'dpkg · amd64' }).filter({ hasText: '1.0 → 2.0' })
+  await expect(current).toHaveCount(1)
+  await expect(current).toContainText('3 台')
+  await expect(current).toContainText('1 项需重新采集/扫描或人工处理')
+  const legacy = rows.filter({ hasText: '历史结果，请重新扫描' })
+  await expect(legacy).toHaveCount(1)
+  await expect(legacy.getByRole('button', { name: '一键修复', exact: true })).toHaveCount(0)
+  const multiarch = rows.filter({ hasText: 'dpkg · i386' })
+  await expect(multiarch.getByRole('button', { name: '一键修复', exact: true })).toHaveCount(0)
+  await current.getByRole('button', { name: '一键修复', exact: true }).click()
+  const dialog = page.locator('.el-dialog').filter({ hasText: '一键修复' })
+  await expect(dialog).toContainText('ubuntu 24.04 · dpkg · amd64')
+  await expect(dialog).toContainText('仅提交符合条件的检测项')
+  await page.screenshot({ path: artifacts + '/vulnerability-scope-desktop.png', fullPage: true, animations: 'disabled' })
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await legacy.getByRole('button', { name: '详情', exact: true }).click()
+  await expect(page.locator('.el-dialog:visible').filter({ hasText: '匹配时身份' })).toContainText('请重新采集、扫描或人工处理')
+  await page.screenshot({ path: artifacts + '/vulnerability-legacy-detail.png', fullPage: true, animations: 'disabled' })
+  const scopeScenarios = ['distribution-release-architecture-version-separated', 'agents-counted-once', 'stale-excluded', 'legacy-blocked', 'multiarch-blocked', 'dialog-identity']
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
-  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, mobileBounds, errors, unexpected }, null, 2) + '\n')
+  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, mobileBounds, errors, unexpected }, null, 2) + '\n')
   console.log(`Passed software inventory display: ${scenarios.join(', ')} and mobile drawer bounds`)
+  console.log(`Passed vulnerability scope display: ${scopeScenarios.join(', ')}`)
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }
