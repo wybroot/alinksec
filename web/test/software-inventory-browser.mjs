@@ -116,13 +116,22 @@ try {
   const legacyDialog = page.locator('.el-dialog:visible').filter({ hasText: '匹配时身份' })
   await expect(legacyDialog).toContainText('请重新采集、扫描或人工处理')
   await expect(legacyDialog).toContainText('影响主机（1 台）')
-  await expect(legacyDialog.locator('.el-tag')).toHaveText(['scope-a'])
+  const hostTag = legacyDialog.locator('.el-tag')
+  await expect(hostTag).toHaveText(['scope-a'])
+  await expect(hostTag).toBeVisible()
+  await expect(hostTag).toHaveCSS('opacity', '1')
+  await expect(hostTag).toHaveCSS('transform', 'none')
+  const detailHostTag = await hostTag.evaluate(tag => {
+    const style = getComputedStyle(tag), bounds = tag.getBoundingClientRect()
+    return { text: tag.textContent, opacity: style.opacity, transform: style.transform, width: bounds.width, height: bounds.height }
+  })
+  assert.ok(detailHostTag.width > 0 && detailHostTag.height > 0)
   await expect(legacyDialog).not.toContainText('{{')
   await page.screenshot({ path: artifacts + '/vulnerability-legacy-detail.png', fullPage: true, animations: 'disabled' })
   const scopeScenarios = ['distribution-release-architecture-version-separated', 'agents-counted-once', 'stale-excluded', 'legacy-blocked', 'multiarch-blocked', 'dialog-identity', 'detail-host-count-and-list']
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
-  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, mobileBounds, errors, unexpected }, null, 2) + '\n')
+  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, mobileBounds, detailHostTag, errors, unexpected }, null, 2) + '\n')
   console.log(`Passed software inventory display: ${scenarios.join(', ')} and mobile drawer bounds`)
   console.log(`Passed vulnerability scope display: ${scopeScenarios.join(', ')}`)
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }
