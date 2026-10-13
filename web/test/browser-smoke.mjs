@@ -118,18 +118,19 @@ try {
   await expect(firstVuln).toContainText('历史结果，请重新扫描')
   assert.equal(await firstVuln.getByRole('button', { name: '一键修复', exact: true }).count(), 0)
   const packageResponse = response => response.url().endsWith('/api/fix/tasks/package') && response.request().method() === 'POST'
+  const tasksBeforeLegacyRejection = database.prepare('SELECT count(*) AS n FROM t_fix_task').get().n
   legacyRejectionStarted = true
   const rejected = await page.evaluate(async items => {
     const response = await fetch('/api/fix/tasks/package', { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('alinksec_token')}` },
-      body: JSON.stringify({ items, approver: 'Browser CI' }) })
+      body: JSON.stringify({ items, approver: 'admin' }) })
     return { status: response.status, body: await response.json() }
   }, items.slice(0, 2))
   assert.equal(rejected.status, 400)
   const rejection = rejected.body
   assert.notEqual(rejection.code, 0, 'Legacy inventory must block repair creation')
   assert.match(rejection.msg, /软件清单采集失败或完整性未知/)
-  assert.equal(database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='Browser CI'").get().n, 0)
+  assert.equal(database.prepare('SELECT count(*) AS n FROM t_fix_task').get().n, tasksBeforeLegacyRejection)
   await page.screenshot({ path: `${artifacts}/vulnerability-legacy-rejected.png`, fullPage: true })
   console.log('ok - real browser/API rejects legacy inventory without creating a repair task')
   database.exec('BEGIN')
