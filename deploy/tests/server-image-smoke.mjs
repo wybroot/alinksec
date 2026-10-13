@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { debFixture } from './native-patch-fixture.mjs'
 import { execFileSync } from 'node:child_process'
 import { randomUUID, X509Certificate } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -103,6 +104,15 @@ console.log('ok - server image boots with SQLite and a CA-verified gRPC TLS endp
 execFileSync(process.execPath, ['--test', '--test-concurrency=1',
   fileURLToPath(new URL('./api-smoke.test.mjs', import.meta.url))], { stdio: 'inherit', timeout: 90_000 })
 
+const patchForm = new FormData()
+patchForm.set('file', new Blob([debFixture('image-patch-fixture', '2:2.0~rc1-3ubuntu1', 'amd64')]), 'fixture.deb')
+for (const [field, value] of Object.entries({ osType: '1', pkgName: 'image-patch-fixture', targetVersion: '2:2.0~rc1-3ubuntu1', repoType: 'deb', distroId: 'ubuntu', distroVersion: '24.04', architecture: 'amd64' })) patchForm.set(field,value)
+const patchResponse = await fetch(new URL('/api/fix/patches',baseUrl), { method:'POST', headers:{Authorization:`Bearer ${token}`}, body:patchForm, signal:AbortSignal.timeout(15000) })
+assert.equal(patchResponse.status,200); const patchResult = await patchResponse.json(); assert.equal(patchResult.code,0,patchResult.msg)
+const imagePatch = patchResult.data
+assert.equal(imagePatch.metadata_status,'validated'); assert.equal(imagePatch.version_identity,'2:2.0~rc1-3ubuntu1')
+assert.equal(JSON.parse(imagePatch.metadata).architecture,'amd64')
+console.log('ok - production root server image reads actual native DEB headers through a restricted non-root parser')
 const agentId = `ci-image-${randomUUID()}`
 const migrations = database(db => {
   db.prepare(`INSERT INTO t_agent(agent_id, hostname, os_type, status, isolation_status,
@@ -112,7 +122,7 @@ const migrations = database(db => {
     VALUES (?, 'image-persistent-software', '1.0','dpkg','all')`).run(agentId)
   return db.prepare('SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()
 })
-assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011'])
+assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012'])
 execFileSync('docker', ['restart', '--timeout', '15', containerId], { timeout: 30_000, stdio: 'pipe' })
 // Docker may allocate new ephemeral host ports when the same container restarts.
 const ports = JSON.parse(execFileSync('docker', ['inspect', '--format',
@@ -142,4 +152,6 @@ assert.equal(software[0].architecture, 'all')
 assert.deepEqual(database(db => db.prepare(
   'SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()), migrations)
 assert.equal(await checkTls(), fingerprint)
+const storedPatch = database(db => db.prepare('SELECT filename,sha256,metadata_status,target_version FROM t_patch_package WHERE id=?').get(imagePatch.id))
+assert.deepEqual({ ...storedPatch }, { filename:imagePatch.filename,sha256:imagePatch.sha256,metadata_status:'validated',target_version:'2:2.0~rc1-3ubuntu1' })
 console.log('ok - container restart preserves assets, isolation, JWT, certificates and migration history')

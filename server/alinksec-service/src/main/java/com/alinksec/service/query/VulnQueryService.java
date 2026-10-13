@@ -74,6 +74,12 @@ public class VulnQueryService {
                  + " ORDER BY f.severity DESC, f.created_at DESC, f.id DESC LIMIT ? OFFSET ?",
                 pageArgs.toArray());
 
+        for (var row : list) {
+            var target = new HashMap<>(row);
+            target.put("pkg_name", row.get("software"));
+            target.put("target_version", row.get("fixed_version"));
+            row.put("repair_reviewed", com.alinksec.service.fix.PatchRepoService.reviewedPatch(jdbc, target) == null ? 0 : 1);
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);

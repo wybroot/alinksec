@@ -122,8 +122,9 @@
         <el-form-item label="影响范围">{{ fixRow.hosts }} 台主机</el-form-item>
         <el-form-item v-if="fixRow.identityStatus" label="匹配时身份">{{ fixRow.distroId }} {{ fixRow.distroVersion }} · {{ fixRow.source || '未知' }} · {{ fixRow.architecture || '架构未知' }}</el-form-item>
         <el-form-item v-if="fixRow.ruleSourceId" label="规则依据"><VulnerabilityEvidence :snapshot="fixRow.ruleEvidence" :source-id="fixRow.ruleSourceId" :digest="fixRow.ruleDigest" :status="fixRow.evidenceStatus" /></el-form-item>
+        <el-alert v-if="fixRow.repairUnreviewed" type="warning" :closable="false" :title="`${fixRow.repairUnreviewed} 项缺少对应当前规则与包范围的补丁人工复核，请先到基线核查的离线补丁仓库复核`" />
         <el-alert v-if="fixRow.executionUnsupported" type="warning" :closable="false" :title="`${fixRow.executionUnsupported} 项未声明受支持的执行校验能力，请更新支持该系统的 Agent 或人工处理`" />
-        <el-alert v-if="fixRow.blocked" type="warning" :closable="false" :title="`${fixRow.blocked} 项缺少当前身份、执行能力、规则依据或修复版本证据，仅提交符合条件的检测项`" />
+        <el-alert v-if="fixRow.blocked" type="warning" :closable="false" :title="`${fixRow.blocked} 项缺少当前身份、执行能力、规则依据、修复版本或补丁复核证据，仅提交符合条件的检测项`" />
         <template v-if="fixRow.fixType === 'config'">
           <el-form-item label="修复步骤">
             <div class="mono" style="font-size:12px;color:#475569;line-height:1.9">
@@ -163,8 +164,9 @@
         <el-descriptions-item label="级别 / CVSS">{{ sevLabel(detailRow.sev) }} · {{ detailRow.cvss }}</el-descriptions-item>
         <el-descriptions-item label="匹配时身份">{{ detailRow.distroId }} {{ detailRow.distroVersion }} · {{ detailRow.source || '来源未知' }} · {{ detailRow.architecture || '架构未知' }}</el-descriptions-item>
         <el-descriptions-item label="规则依据"><VulnerabilityEvidence :snapshot="detailRow.ruleEvidence" :source-id="detailRow.ruleSourceId" :digest="detailRow.ruleDigest" :status="detailRow.evidenceStatus" /></el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.repairUnreviewed" label="补丁复核">{{ detailRow.repairUnreviewed }} 项缺少对应当前规则与包范围的补丁人工复核</el-descriptions-item>
         <el-descriptions-item v-if="detailRow.executionUnsupported" label="执行限制">{{ detailRow.executionUnsupported }} 项未声明受支持的执行校验能力，请更新支持该系统的 Agent 或人工处理</el-descriptions-item>
-        <el-descriptions-item v-if="detailRow.blocked" label="修复限制">{{ detailRow.blocked }} 项缺少当前身份、执行能力、规则依据或修复版本证据，请重新采集、扫描或人工处理</el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.blocked" label="修复限制">{{ detailRow.blocked }} 项缺少当前身份、执行能力、规则依据、修复版本或补丁复核证据，请重新采集、扫描或人工处理</el-descriptions-item>
         <el-descriptions-item label="修复方式">{{ detailRow.fixType === 'config' ? '配置类' : '软件包类' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detailRow.status === 'fixed' ? '已修复' : detailRow.status === 'fixing' ? '修复中' : '待修复' }}</el-descriptions-item>
         <el-descriptions-item :label="`影响主机（${detailRow.hosts} 台）`">
@@ -269,6 +271,7 @@ const openBatchFix = () => {
     fixType: 'pkg',
     hosts: new Set(rows.flatMap(r => r.findings.map(f => f.agentId))).size,
     blocked: rows.reduce((n, r) => n + r.blocked, 0),
+    repairUnreviewed: rows.reduce((n, r) => n + (r.repairUnreviewed || 0), 0),
     executionUnsupported: rows.reduce((n, r) => n + (r.executionUnsupported || 0), 0),
     target: '按漏洞库 fixed_version 逐项升级',
     findings: [...new Map(rows.flatMap(r => r.findings).map(f => [`${f.agentId}:${f.findingId}`, f])).values()],

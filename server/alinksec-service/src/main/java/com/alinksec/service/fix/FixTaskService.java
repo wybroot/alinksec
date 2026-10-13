@@ -255,6 +255,10 @@ public class FixTaskService {
             var identity = currentPackageIdentity(agentId, String.valueOf(f.get("software")), String.valueOf(f.get("installed_version")));
             verifyFindingIdentity(f, identity);
             verifyFindingEvidence(f);
+            if (com.alinksec.service.scan.PackageVersions.compare(String.valueOf(identity.get("source")),
+                    String.valueOf(f.get("fixed_version")), String.valueOf(f.get("installed_version"))) <= 0) {
+                throw new IllegalArgumentException("修复目标必须是更高的完整原生版本，同版本重装或降级请人工处理");
+            }
             target.put("inventory", identity);
             target.put("rule_source_id", f.get("rule_source_id"));
             target.put("rule_digest", f.get("rule_digest"));
@@ -280,11 +284,12 @@ public class FixTaskService {
                     "repo_type", patch.get("repo_type"),
                     "pkg_name", t.get("pkg_name"),
                     "target_version", t.get("target_version"),
-                    "download_url", patchRepo.downloadUrl(String.valueOf(t.get("agent_id")), patch),
+                    "download_url", "",
                     "sha256", patch.get("sha256"),
                     "cve_id", t.get("cve_id"),
                     "finding_id", String.valueOf(t.get("finding_id"))));
             payload.put("inventory", t.get("inventory"));
+            payload.put("patch_review", patchRepo.pin(patch, t));
             payload.put("rule_source_id", t.get("rule_source_id"));
             payload.put("rule_digest", t.get("rule_digest"));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
@@ -392,11 +397,15 @@ public class FixTaskService {
             }
             verifyFindingIdentity(findings.get(0), (Map<?, ?>) payload.get("inventory"));
             verifyFindingEvidence(findings.get(0));
+            var target = new LinkedHashMap<>(payload);
+            target.put("agent_id", t.get("agent_id"));
+            var patch = patchRepo.verifyPin(payload.get("patch_review") instanceof Map<?, ?> pin ? pin : null, target);
+            payload.put("download_url", patchRepo.downloadUrl(String.valueOf(t.get("agent_id")), patch));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("ref_id")))
                             .setType(FixItem.FixType.PACKAGE)
-                            .setPayload((String) t.get("fix_payload"))
+                            .setPayload(JsonUtils.write(payload))
                             .build());
         }
         jdbc.update("UPDATE t_fix_task SET status = 1, started_at = CURRENT_TIMESTAMP, dispatched_at = CURRENT_TIMESTAMP "

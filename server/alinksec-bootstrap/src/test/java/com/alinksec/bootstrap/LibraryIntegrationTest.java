@@ -566,8 +566,8 @@ class LibraryIntegrationTest {
     }
     @Test void patchArtifactsAndDownloadUrlsPreserveDebianVersionCharacters() throws Exception {
         var patches = new com.alinksec.service.fix.PatchRepoService(jdbc, platform, mock(AgentDownloadTokenService.class), files);
-        byte[] bytes = "harmless package fixture".getBytes(StandardCharsets.UTF_8);
-        var imported = patches.importPackage(new ByteArrayInputStream(bytes), "fixture_1.0~deb12+security_amd64.deb", 1, "", "fixture", "1.0", "deb", null);
+        byte[] bytes = NativePatchFixture.deb(root, "fixture", "1.0~deb12+security", "amd64");
+        var imported = patches.importPackage(new ByteArrayInputStream(bytes), "fixture_1.0~deb12+security_amd64.deb", 1, "", "fixture", "1.0~deb12+security", "deb", "debian", "12", "amd64", 1L);
         String key = (String) imported.get("filename");
         try (var input = patches.downloadPackage(key).resource().getInputStream()) { assertArrayEquals(bytes, input.readAllBytes()); }
         String url = patches.downloadUrl("agent", imported);

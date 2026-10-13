@@ -152,6 +152,7 @@ class AgentChannelSecurityIntegrationTest {
             jdbc.update("DELETE FROM t_fix_task WHERE id = ?", id);
         }
         for (Long id : patchIds) {
+            jdbc.update("DELETE FROM t_patch_review WHERE patch_id=?", id);
             jdbc.update("DELETE FROM t_patch_package WHERE id = ?", id);
         }
         for (String agentId : agentIds) {
@@ -215,9 +216,10 @@ class AgentChannelSecurityIntegrationTest {
                 Map.of("agentId", second.getAgentId(), "findingId", secondFinding));
         assertThrows(IllegalArgumentException.class,
                 () -> fixTasks.createPackageTask("missing patch", items, "test", null, null, null));
-        Map<String, Object> patch = patches.importPackage(new ByteArrayInputStream(new byte[]{1, 2, 3}),
-                "patch.deb", 1, "", pkg, "2.0", "deb", null);
+        Map<String, Object> patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")),
+                "patch.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
         patchIds.add(((Number) patch.get("id")).longValue());
+        review(patch, cveId);
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("duplicate", List.of(
                 items.get(0), items.get(0)), "test", null, null, null));
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("foreign finding", List.of(
@@ -279,6 +281,13 @@ class AgentChannelSecurityIntegrationTest {
                 () -> fixTasks.createPackageTask("already fixed", items, "test", null, null, null));
     }
 
+    private void review(Map<String, Object> patch, String cve) throws Exception {
+        long id = ((Number) patch.get("id")).longValue();
+        var ctx = patches.reviewContext(id, cve);
+        patches.review(id, cve, String.valueOf(((Map<?, ?>) ctx.get("cve")).get("rule_digest")), String.valueOf(ctx.get("patchDigest")),
+                "Disposable gRPC fixture manual confirmation", true, 1L);
+    }
+
     private void asset(Stream stream, String agentId, String pkg) throws Exception {
         stream.requests.onNext(report(agentId).setAsset(RptAssetSnapshot.newBuilder()
                 .addCollected("software")
@@ -298,8 +307,9 @@ class AgentChannelSecurityIntegrationTest {
                         "distro_version", "24.04", "architecture", "amd64", "vrange", "<2.0", "fixed_version", "2.0",
                         "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Unverified result fixture."))))))));
         long finding = finding(agent.getAgentId(), pkg, cve);
-        var patch = patches.importPackage(new ByteArrayInputStream(new byte[]{1, 2, 3}), "unverified.deb", 1, "", pkg, "2.0", "deb", null);
+        var patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")), "unverified.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
         patchIds.add(((Number) patch.get("id")).longValue());
+        review(patch, cve);
         long task = ((Number) fixTasks.createPackageTask("unverified result", List.of(Map.of("agentId", agent.getAgentId(), "findingId", finding)), "test", null, null, null).get("taskId")).longValue();
         fixTaskIds.add(task); assertEquals("dispatched", fixTasks.approve(task, "test").get("state")); stream.nextCommand();
         stream.requests.onNext(report(agent.getAgentId()).setFixResult(RptFixResult.newBuilder().setTaskId(String.valueOf(task))

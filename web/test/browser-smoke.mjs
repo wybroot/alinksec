@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { debFixture } from '../../deploy/tests/native-patch-fixture.mjs'
 import { createHash, X509Certificate } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -100,17 +101,18 @@ try {
   await page.goto('/vuln')
   await expect(page.locator('.chip').filter({ hasText: '修复率' })).toContainText('25%')
   async function importPatch(pkgName, targetVersion) {
-    const result = await page.evaluate(async ({ pkgName, targetVersion }) => {
+    const result = await page.evaluate(async ({ pkgName, targetVersion, bytes }) => {
       const token = localStorage.getItem('alinksec_token')
       const form = new FormData()
-      form.set('file', new Blob(['browser fixture']), 'patch.deb')
-      for (const [name, value] of Object.entries({ osType: '1', pkgName, targetVersion, repoType: 'deb' })) form.set(name, value)
+      form.set('file', new Blob([Uint8Array.from(atob(bytes), c => c.charCodeAt(0))]), 'patch.deb')
+      for (const [name, value] of Object.entries({ osType: '1', pkgName, targetVersion, repoType: 'deb', distroId: 'ubuntu', distroVersion: '24.04', architecture: 'all' })) form.set(name, value)
       return (await fetch('/api/fix/patches', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })).json()
-    }, { pkgName, targetVersion })
+    }, { pkgName, targetVersion, bytes: debFixture(pkgName, targetVersion).toString('base64') })
     assert.equal(result.code, 0, result.msg)
+    return result.data
   }
-  await importPatch('browser-openssl', '2.0')
-  await importPatch('browser-libcurl', '3.0')
+  const opensslPatch = await importPatch('browser-openssl', '2.0')
+  const curlPatch = await importPatch('browser-libcurl', '3.0')
   const firstVuln = page.locator('.el-table__body tr').filter({ hasText: 'CVE-2099-1001' })
   await expect(firstVuln).toContainText('2.0')
   await expect(firstVuln).toContainText('历史结果，请重新扫描')
@@ -160,6 +162,30 @@ try {
     const snapshot = JSON.parse(finding.rule_evidence); assert.equal(snapshot.import.verification, 'imported_declaration'); assert.ok(snapshot.import.imported_by > 0)
   }
   console.log('ok - real browser/API imports authenticated rule provenance and scans fresh findings without backfilling legacy evidence')
+  await page.reload()
+  assert.equal(await firstVuln.getByRole('button', { name: '一键修复', exact: true }).count(), 0, 'Unreviewed package cannot enable repair')
+  await page.goto('/baseline')
+  await page.getByRole('button', { name: '离线补丁仓库', exact: true }).click()
+  const repository = page.getByRole('dialog').filter({ hasText: '离线补丁仓库' })
+  for (const [patch, cve] of [[opensslPatch, 'CVE-2099-1001'], [curlPatch, 'CVE-2099-1002']]) {
+    const row = repository.locator('.el-table__body tr').filter({ hasText: patch.pkg_name })
+    await expect(row).toContainText('包头已核验'); await expect(row).toContainText('0 条未撤销人工复核')
+    await row.getByRole('button', { name: '查看并复核' }).click()
+    const dialog = page.getByRole('dialog').filter({ hasText: '补丁适用性与修复目标复核' })
+    await dialog.getByPlaceholder('CVE-2026-12345', { exact: true }).fill(cve)
+    await dialog.getByRole('button', { name: '查看当前依据' }).click()
+    await expect(dialog).toContainText(patch.sha256)
+    await expect(dialog).toContainText('平台未认证厂商声明')
+    await dialog.getByPlaceholder('填写发行版适用性、二进制包修复目标及来源依据，至少 10 字').fill('Disposable browser manual confirmation of exact distribution, package and current declared CVE target')
+    await dialog.getByRole('checkbox').check()
+    await page.screenshot({ path: `${artifacts}/patch-review-${patch.pkg_name}.png`, fullPage: true })
+    await dialog.getByRole('button', { name: '确认人工复核' }).click()
+    await expect(dialog).toBeHidden(); await expect(row).toContainText('1 条未撤销人工复核')
+    const audit = database.prepare('SELECT reviewed_by,patch_sha256,rule_digest,notes FROM t_patch_review WHERE patch_id=?').get(patch.id)
+    assert.ok(audit.reviewed_by > 0); assert.equal(audit.patch_sha256, patch.sha256); assert.match(audit.rule_digest, /^[a-f0-9]{64}$/)
+  }
+  console.log('ok - actual browser displays unreviewed native packages, explicit manual applicability confirmation and authenticated immutable review evidence')
+  await page.goto('/vuln')
   await page.reload()
   await expect(firstVuln).toContainText('ubuntu 24.04')
   await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()

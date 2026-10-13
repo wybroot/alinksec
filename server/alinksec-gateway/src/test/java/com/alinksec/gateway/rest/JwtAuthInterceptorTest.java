@@ -72,6 +72,20 @@ class JwtAuthInterceptorTest {
         }
     }
 
+    @Test void patchImportReviewAndRevocationRequireAnAuthenticatedWriter() throws Exception {
+        for (String path : new String[]{"/api/fix/patches", "/api/fix/patches/1/reviews", "/api/fix/patches/1/reviews/review/revoke"}) {
+            for (String role : new String[]{"admin", "operator", "viewer"}) {
+                var req = request(role); req.setMethod("POST"); req.setRequestURI(path);
+                var response = new MockHttpServletResponse();
+                assertEquals(!"viewer".equals(role), interceptor().preHandle(req,response,new Object()));
+                if ("viewer".equals(role)) assertEquals(403,response.getStatus());
+                else assertEquals(7L,req.getAttribute("uid"));
+            }
+            var anonymous = new MockHttpServletRequest("POST", path); var response = new MockHttpServletResponse();
+            assertFalse(interceptor().preHandle(anonymous,response,new Object())); assertEquals(401,response.getStatus());
+        }
+    }
+
     private static JwtAuthInterceptor interceptor() {
         JwtSecretHolder secret = mock(JwtSecretHolder.class);
         when(secret.secret()).thenReturn("test-signing-secret");

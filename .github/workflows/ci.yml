@@ -124,7 +124,10 @@ jobs:
       - name: Check rule provenance, backport declarations and unsafe historical references in the production web bundle
         working-directory: web
         run: node test/vulnerability-provenance-browser.mjs
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux
       - run: mvn -B package
+        env:
+          ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
         working-directory: server
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
@@ -380,7 +383,7 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client rpm dpkg util-linux
       - run: psql -v ON_ERROR_STOP=1 -h localhost -U alinksec -d alinksec -f deploy/sql/001_init.sql
         env:
           PGPASSWORD: alinksec-test
@@ -410,8 +413,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "11"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "12"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "51"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

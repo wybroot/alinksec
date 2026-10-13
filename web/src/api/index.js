@@ -523,6 +523,7 @@ export async function fetchVulns() {
         ruleEvidence: readRuleEvidence(f.rule_evidence),
         blocked: 0,
         executionUnsupported: 0,
+        repairUnreviewed: 0,
         hosts: 0,
         hostList: [],
         findings: [],
@@ -541,10 +542,12 @@ export async function fetchVulns() {
     if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version
         && f.identity_status === 'complete' && (f.identity_current === true || Number(f.identity_current) === 1)
         && f.evidence_status === 'declared' && (f.rule_current === true || Number(f.rule_current) === 1)
-        && (f.execution_supported === true || Number(f.execution_supported) === 1)) {
+        && (f.execution_supported === true || Number(f.execution_supported) === 1)
+        && (f.repair_reviewed === true || Number(f.repair_reviewed) === 1)) {
       g.findings.push({ agentId: f.agent_id, findingId: Number(f.id) })
       g.status = 'todo'
     } else if (Number(f.status) <= 1) g.blocked += 1
+    if (Number(f.status) <= 1 && !(f.repair_reviewed === true || Number(f.repair_reviewed) === 1)) g.repairUnreviewed += 1
     if (Number(f.status) <= 1 && !(f.execution_supported === true || Number(f.execution_supported) === 1)) g.executionUnsupported += 1
   }
   return [...grouped.values()]
@@ -784,3 +787,7 @@ export async function fetchAlerts() {
 export async function handleAlert(id, remark) {
   return post(`/api/alerts/${id}/handle`, { remark })
 }
+
+export const fetchPatchReviewContext = (id, cveId) => get(`/api/fix/patches/${id}/review-context?cveId=${encodeURIComponent(cveId)}`)
+export const reviewPatch = (id, body) => post(`/api/fix/patches/${id}/reviews`, body)
+export const revokePatchReview = (id, reviewId, note) => post(`/api/fix/patches/${id}/reviews/${encodeURIComponent(reviewId)}/revoke`, { note })

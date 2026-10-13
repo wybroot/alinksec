@@ -100,10 +100,34 @@ public class FixController {
                                                        @RequestParam String pkgName,
                                                        @RequestParam String targetVersion,
                                                        @RequestParam(required = false) String repoType,
+                                                       @RequestParam String distroId,
+                                                       @RequestParam String distroVersion,
+                                                       @RequestParam String architecture,
                                                        HttpServletRequest request) throws Exception {
         Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
         return ApiResult.ok(patchRepo.importPackage(file.getInputStream(), file.getOriginalFilename(), osType,
-                osVersion, pkgName, targetVersion, repoType, uid));
+                osVersion, pkgName, targetVersion, repoType, distroId, distroVersion, architecture, uid));
+    }
+
+    @GetMapping("/patches/{id}/review-context")
+    public ApiResult<Map<String, Object>> reviewContext(@PathVariable long id, @RequestParam String cveId) {
+        return ApiResult.ok(patchRepo.reviewContext(id, cveId));
+    }
+
+    @PostMapping("/patches/{id}/reviews")
+    public ApiResult<Map<String, Object>> reviewPatch(@PathVariable long id, @RequestBody Map<String, Object> body,
+                                                       HttpServletRequest request) throws java.io.IOException {
+        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        return ApiResult.ok(patchRepo.review(id, (String) body.get("cveId"), (String) body.get("ruleDigest"),
+                (String) body.get("patchDigest"), (String) body.get("notes"), Boolean.TRUE.equals(body.get("acknowledged")), uid));
+    }
+
+    @PostMapping("/patches/{id}/reviews/{reviewId}/revoke")
+    public ApiResult<Void> revokeReview(@PathVariable long id, @PathVariable String reviewId,
+                                       @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        patchRepo.revoke(id, reviewId, uid, (String) body.get("note"));
+        return ApiResult.ok();
     }
 
     @GetMapping("/patches/download")

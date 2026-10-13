@@ -87,6 +87,8 @@ class SoftwareInventoryIntegrationTest {
     private void cover(long finding) {
         when(patches.resolveForAgents(anyList())).thenReturn(new PatchRepoService.Resolved(
                 Map.of("inventory-host:" + finding, Map.of("repo_type", "deb", "sha256", "a".repeat(64))), List.of()));
+        when(patches.pin(anyMap(), anyMap())).thenReturn(Map.of("patch_id", "1", "review_id", "fixture"));
+        when(patches.verifyPin(anyMap(), anyMap())).thenReturn(Map.of("repo_type", "deb", "sha256", "a".repeat(64)));
         when(patches.downloadUrl(anyString(), anyMap())).thenReturn("https://fixture.invalid/patch");
     }
 
