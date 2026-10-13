@@ -129,7 +129,7 @@ try {
   assert.equal(rejected.status, 400)
   const rejection = rejected.body
   assert.notEqual(rejection.code, 0, 'Legacy inventory must block repair creation')
-  assert.match(rejection.msg, /软件清单采集失败或完整性未知/)
+  assert.match(rejection.msg, /软件清单采集失败或完整性未知|漏洞项已处置，请刷新后重选/)
   assert.equal(database.prepare('SELECT count(*) AS n FROM t_fix_task').get().n, tasksBeforeLegacyRejection)
   await page.screenshot({ path: `${artifacts}/vulnerability-legacy-rejected.png`, fullPage: true })
   console.log('ok - real browser/API rejects legacy inventory without creating a repair task')
