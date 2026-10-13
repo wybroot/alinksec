@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/packageversion"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -62,14 +63,14 @@ func installPatch(p *PkgPayload, tmpFile string, addLog func(string, ...any)) (r
 			installer = "dnf"
 		}
 		addLog("执行: %s install -y %s", installer, filepathBase(tmpFile))
-		out, e := exec.Command(installer, "install", "-y", tmpFile).CombinedOutput()
+		out, e := packageCommand(false, 15*time.Minute, installer, "install", "-y", tmpFile)
 		if e != nil {
 			return false, fmt.Errorf("%s: %s", e, tailOutput(out))
 		}
 		return false, nil
 	case "deb":
 		addLog("执行: apt-get install -y %s", filepathBase(tmpFile))
-		out, e := exec.Command("apt-get", "install", "-y", tmpFile).CombinedOutput()
+		out, e := packageCommand(false, 15*time.Minute, "apt-get", "install", "-y", tmpFile)
 		if e != nil {
 			return false, fmt.Errorf("apt-get: %s", tailOutput(out))
 		}

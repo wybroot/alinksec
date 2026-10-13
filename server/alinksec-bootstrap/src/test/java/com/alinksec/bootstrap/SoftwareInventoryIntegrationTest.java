@@ -64,7 +64,7 @@ class SoftwareInventoryIntegrationTest {
     private RptAssetSnapshot complete(SoftwareInfo... packages) {
         return RptAssetSnapshot.newBuilder().addCollected("software")
                 .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
-                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04"))
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(1))
                 .addAllSoftware(List.of(packages)).build();
     }
     private void replace(RptAssetSnapshot snapshot) { transaction.executeWithoutResult(status -> assets.replaceSnapshot("inventory-host", snapshot)); }
@@ -190,8 +190,41 @@ class SoftwareInventoryIntegrationTest {
         var identity = JsonUtils.read(targets.get(0).path("fix_payload").asText()).path("inventory");
         assertEquals("amd64", identity.path("architecture").asText());
         assertEquals("ubuntu", identity.path("distro_id").asText());
+        assertEquals(1, identity.path("contract").asInt());
         assertEquals("dispatched", approve(task).get("state"));
         verify(commands).dispatch(eq("inventory-host"), any(Command.Builder.class), isNull());
+    }
+
+    @Test void oldAndUnknownExecutionContractsRetainInventoryButBlockCreationAndApproval() {
+        replace(complete(pkg("amd64", "1.0")));
+        long id = finding(); cover(id);
+        long task = ((Number) create(id).get("taskId")).longValue();
+        for (int contract : List.of(0, 2)) {
+            replace(complete(pkg("amd64", "1.0")).toBuilder().setSoftwareInventory(
+                    complete().getSoftwareInventory().toBuilder().setPackageRepairContract(contract)).build());
+            assertEquals(1, query.software("inventory-host", null, 1, 20).size());
+            assertEquals(0, ((Number) query.detail("inventory-host").get("package_repair_contract")).intValue());
+            var rows = (List<Map<String, Object>>) new VulnQueryService(jdbc).findings(null, null, null, null, 1, 20).get("list");
+            assertTrue(rows.stream().allMatch(r -> ((Number) r.get("execution_supported")).intValue() == 0));
+            assertThrows(IllegalArgumentException.class, () -> create(id));
+            assertThrows(IllegalArgumentException.class, () -> approve(task));
+            assertEquals(0, jdbc.queryForObject("SELECT approved FROM t_fix_task WHERE id=?", Integer.class, task));
+        }
+        verifyNoInteractions(commands);
+    }
+
+    @Test void registryInventoryCannotClaimNativePackageRepairSupport() {
+        jdbc.update("UPDATE t_agent SET os_type=2,os_version='Windows' WHERE agent_id='inventory-host'");
+        replace(RptAssetSnapshot.newBuilder().addCollected("software")
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                        .setSource("registry").setDistroId("windows").setDistroVersion("10").setPackageRepairContract(1))
+                .addSoftware(SoftwareInfo.newBuilder().setName("inventory-fixture").setVersion("1.0")
+                        .setSource("registry").setArchitecture("x86_64")).build());
+        assertEquals("complete", query.detail("inventory-host").get("software_collection_status"));
+        assertEquals(1, query.software("inventory-host", null, 1, 20).size());
+        assertEquals(0, ((Number) query.detail("inventory-host").get("package_repair_contract")).intValue());
+        assertThrows(IllegalArgumentException.class, () -> create(finding()));
+        verifyNoInteractions(patches, commands);
     }
 
     private Map<String, Object> scopedRule(String architecture, String fixed) {

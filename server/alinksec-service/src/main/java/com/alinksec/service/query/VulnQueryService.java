@@ -57,6 +57,7 @@ public class VulnQueryService {
                        f.status,f.created_at,f.source,f.architecture,f.distro_id,f.distro_version,
                         f.os_type,f.os_version,f.identity_status,a.software_collection_status,
                         f.rule_source_id,f.rule_digest,f.rule_evidence,f.evidence_status,
+                        CASE WHEN a.os_type=1 AND a.package_repair_contract=1 THEN 1 ELSE 0 END AS execution_supported,
                         CASE WHEN f.evidence_status='declared' AND f.rule_digest<>''
                           AND f.rule_digest=c.rule_digest AND f.rule_source_id=c.rule_source_id THEN 1 ELSE 0 END AS rule_current,
                        CASE WHEN f.identity_status='complete' AND a.deleted=false

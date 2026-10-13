@@ -247,6 +247,7 @@ message SoftwareInventory {
   string distro_version = 4;      // os-release VERSION_ID, unknown when absent
   string source = 5;              // rpm / dpkg / mixed / registry
   string identity_error = 6;      // distribution identity unavailable/invalid
+  uint32 package_repair_contract = 7; // 1: native identity, binary metadata and post-install verification; absent means unsupported
 }
 
 message ContainerInfo {

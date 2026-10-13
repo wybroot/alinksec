@@ -153,6 +153,7 @@ jobs:
         working-directory: agent
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
+          ALINKSEC_PACKAGE_REPAIR_NATIVE_REQUIRED: 'true'
       - name: Check native protected local identity files and redacted evidence
         working-directory: agent
         run: |
@@ -202,6 +203,15 @@ jobs:
             --env ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true --env GOMEMLIMIT=64MiB \
             alinksec-dnf-native-validation:latest \
             /workspace/.tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+      - name: Check bounded native RPM headers without executing package scripts
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/package-repair-native.test ./internal/fixer)
+          docker build -f deploy/tests/fixtures/Dockerfile.package-repair -t alinksec-package-repair-validation:latest .
+          docker run --rm --network=none --memory=192m --memory-swap=256m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" --env GOMEMLIMIT=96MiB \
+            --env ALINKSEC_RPM_REPAIR_NATIVE_REQUIRED=true alinksec-package-repair-validation:latest \
+            /workspace/.tmp/package-repair-native.test -test.v -test.run '^TestNativeRPMPackageMetadataIsReadWithoutRunningPackageScripts$'
       - name: Retain native package version comparisons
         uses: actions/upload-artifact@v4
         with:
@@ -400,7 +410,7 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "10"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "11"
           test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"

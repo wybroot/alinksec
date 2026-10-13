@@ -88,7 +88,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const base = { id: 1, agent_id: 'scope-a', hostname: 'scope-a', cve_id: 'CVE-2026-45678', software: 'scope-fixture',
     installed_version: '1.0', fixed_version: '2.0', severity: 3, status: 0, source: 'dpkg', architecture: 'amd64',
-    distro_id: 'ubuntu', distro_version: '24.04', os_type: 1, os_version: 'Ubuntu 24.04', identity_status: 'complete', identity_current: 1,
+    distro_id: 'ubuntu', distro_version: '24.04', os_type: 1, os_version: 'Ubuntu 24.04', identity_status: 'complete', identity_current: 1, execution_supported: 1,
     rule_source_id: 'manual', rule_digest: 'a'.repeat(64), evidence_status: 'declared', rule_current: 1 }
   findings = [base, { ...base, id: 2 }, { ...base, id: 3, agent_id: 'scope-b', hostname: 'scope-b' },
     { ...base, id: 4, architecture: 'i386', identity_current: 0 }, { ...base, id: 5, distro_id: 'debian' },

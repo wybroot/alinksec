@@ -132,7 +132,8 @@ public class AssetService {
             jdbc.update("""
                     UPDATE t_agent SET software_collection_status='legacy', software_collection_error='',
                       software_attempted_at=CURRENT_TIMESTAMP, distro_id='', distro_version='',
-                      software_inventory_source='', software_identity_error='legacy_inventory', software_succeeded_at=NULL
+                      software_inventory_source='', software_identity_error='legacy_inventory', software_succeeded_at=NULL,
+                      package_repair_contract=0
                     WHERE agent_id=?
                     """, agentId);
             return true;
@@ -166,9 +167,10 @@ public class AssetService {
         jdbc.update("""
                 UPDATE t_agent SET software_collection_status='complete', software_collection_error='',
                   software_attempted_at=CURRENT_TIMESTAMP, software_succeeded_at=CURRENT_TIMESTAMP,
-                  distro_id=?, distro_version=?, software_inventory_source=?, software_identity_error=?
+                  distro_id=?, distro_version=?, software_inventory_source=?, software_identity_error=?, package_repair_contract=?
                 WHERE agent_id=?
-                """, distroId, distroVersion, inventory.getSource(), identityError, agentId);
+                """, distroId, distroVersion, inventory.getSource(), identityError,
+                inventory.getPackageRepairContract() == 1 && !"registry".equals(inventory.getSource()) ? 1 : 0, agentId);
         return true;
     }
 

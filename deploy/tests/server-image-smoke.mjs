@@ -106,13 +106,13 @@ execFileSync(process.execPath, ['--test', '--test-concurrency=1',
 const agentId = `ci-image-${randomUUID()}`
 const migrations = database(db => {
   db.prepare(`INSERT INTO t_agent(agent_id, hostname, os_type, status, isolation_status,
-    distro_id,distro_version,software_inventory_source,software_collection_status,software_succeeded_at)
-    VALUES (?, 'image-persistent-host', 1, 2, 2,'ubuntu','24.04','dpkg','complete',CURRENT_TIMESTAMP)`).run(agentId)
+    distro_id,distro_version,software_inventory_source,software_collection_status,software_succeeded_at,package_repair_contract)
+    VALUES (?, 'image-persistent-host', 1, 2, 2,'ubuntu','24.04','dpkg','complete',CURRENT_TIMESTAMP,1)`).run(agentId)
   db.prepare(`INSERT INTO t_asset_software(agent_id, name, version,source,architecture)
     VALUES (?, 'image-persistent-software', '1.0','dpkg','all')`).run(agentId)
   return db.prepare('SELECT version, checksum, applied_at FROM t_schema_migration ORDER BY version').all()
 })
-assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010'])
+assert.deepEqual(migrations.map(migration => migration.version), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011'])
 execFileSync('docker', ['restart', '--timeout', '15', containerId], { timeout: 30_000, stdio: 'pipe' })
 // Docker may allocate new ephemeral host ports when the same container restarts.
 const ports = JSON.parse(execFileSync('docker', ['inspect', '--format',
@@ -132,6 +132,7 @@ assert.equal(host.software_collection_status, 'complete')
 assert.equal(host.distro_id, 'ubuntu')
 assert.equal(host.distro_version, '24.04')
 assert.equal(host.software_inventory_source, 'dpkg')
+  assert.equal(host.package_repair_contract, 1)
 assert.ok(host.software_succeeded_at)
 const software = await request(`/api/hosts/${agentId}/software`, { token })
 assert.equal(software.length, 1)

@@ -133,7 +133,7 @@ try {
   database.exec('BEGIN')
   const completeInventory = database.prepare(`UPDATE t_agent SET distro_id='ubuntu', distro_version='24.04',
     software_inventory_source='dpkg', software_collection_status='complete', software_identity_error='',
-    software_succeeded_at=CURRENT_TIMESTAMP WHERE agent_id=?`)
+    software_succeeded_at=CURRENT_TIMESTAMP,package_repair_contract=1 WHERE agent_id=?`)
   const installedPackage = database.prepare(`INSERT INTO t_asset_software(agent_id,name,version,source,architecture)
     VALUES(?,?,'1.0','dpkg','all')`)
   for (const [index, item] of items.entries()) {

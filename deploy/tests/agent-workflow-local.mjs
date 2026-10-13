@@ -157,6 +157,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   assert.equal(inventory.distro_id, 'ubuntu')
   assert.equal(inventory.distro_version, '24.04')
   assert.equal(inventory.software_inventory_source, 'dpkg')
+  assert.equal(inventory.package_repair_contract, 1)
   const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
   assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
@@ -199,12 +200,12 @@ async function baselineRuntimeWorkflow(agent) {
   await api(prefix+'/withdraw',{note:'Disposable workflow cleanup'})
   console.log('ok - actual Agent baseline runtime: observations=4 current_mtls_channel=true cache_match_stale_repeat_restart=true baseline_cache_reload=0 secrets_reported=0')
 }
-async function patchFile() {
+async function patchFile(binaryVersion = '2.0') {
   const pkgDir = join(root, 'deb')
   mkdirSync(join(pkgDir, 'DEBIAN'), { recursive: true })
   mkdirSync(join(pkgDir, 'usr/share/alinksec-smoke'), { recursive: true })
-  writeFileSync(join(pkgDir, 'DEBIAN/control'), 'Package: alinksec-smoke-package\nVersion: 2.0\nArchitecture: all\nMaintainer: CI <ci@example.test>\nDescription: disposable validation fixture\n')
-  writeFileSync(join(pkgDir, 'usr/share/alinksec-smoke/version'), '2.0\n')
+  writeFileSync(join(pkgDir, 'DEBIAN/control'), `Package: alinksec-smoke-package\nVersion: ${binaryVersion}\nArchitecture: all\nMaintainer: CI <ci@example.test>\nDescription: disposable validation fixture\n`)
+  writeFileSync(join(pkgDir, 'usr/share/alinksec-smoke/version'), binaryVersion + '\n')
   const file = join(root, 'fixture.deb')
   await command('dpkg-deb', ['--build', '--root-owner-group', pkgDir, file])
   const form = new FormData()
@@ -302,6 +303,18 @@ try {
   })
   console.log('ok - scoped server matching preserves actual Agent package identity in both findings')
   console.log('ok - authenticated CVE import and actual matching retain declared rule provenance in both Agent findings')
+  await patchFile('3.0')
+  const rejected = await api('/api/fix/tasks/package', { items: [findings[1]], approver: 'CI', name: 'Incorrect actual binary version' })
+  await api(`/api/fix/tasks/${rejected.taskId}/approve`, { operator: 'CI' })
+  await until(() => sql('SELECT status FROM t_fix_record WHERE task_id=?', rejected.taskId)[0]?.status !== 0,
+    'Agent did not reject mismatched binary metadata', 60_000)
+  const rejection = sql('SELECT status,log FROM t_fix_record WHERE task_id=?', rejected.taskId)[0]
+  assert.equal(rejection.status, 3, rejection.log); assert.ok(rejection.log.includes('补丁内部包名、完整版本、来源或包架构不匹配'), rejection.log)
+  assert.equal(sql('SELECT status FROM t_fix_task WHERE id=?', rejected.taskId)[0].status, 3)
+  assert.equal(sql('SELECT status FROM t_vuln_finding WHERE id=?', findings[1].findingId)[0].status, 0)
+  assert.equal(await command('docker', ['exec', second.container, 'dpkg-query', '-W', '-f=${Version}', 'alinksec-smoke-package']), '1.0')
+  console.log('ok - actual Agent rejects a checksum-valid DEB whose internal version differs from approval without changing installation or fixing the finding')
+  await patchFile()
   const task = await api('/api/fix/tasks/package', { items: findings, approver: 'CI', name: 'Actual Agent repair' })
   assert.equal(task.pendingApprove, true)
   await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'CI' })
@@ -310,6 +323,8 @@ try {
       'Agent did not return package result', 60_000)
     const record = sql('SELECT status,log FROM t_fix_record WHERE task_id=? AND agent_id=?', task.taskId, agent.id)[0]
     assert.equal(record.status, 1, record.log)
+    assert.ok(record.log.includes('安装前身份与二进制元数据复核通过'), record.log)
+    assert.ok(record.log.includes('安装后身份与完整版本复核通过'), record.log)
     assert.equal(await command('docker', ['exec', agent.container, 'dpkg-query', '-W', '-f=${Version}', 'alinksec-smoke-package']), '2.0')
   }
   await fixed(second)
@@ -320,6 +335,7 @@ try {
   assert.ok(findings.every(item => sql('SELECT status FROM t_vuln_finding WHERE id=?', item.findingId)[0].status === 3))
   assert.equal(new X509Certificate(readFileSync(join(root, 'data/certs/server.crt'))).checkHost('ci.alinksec.test'), 'ci.alinksec.test')
   console.log('ok - two actual Agents serially install CA-verified packages and complete approved findings')
+  console.log('ok - actual Agent contract 1 checks installed identity and binary metadata before installation and full identity afterward')
   await stopAgent(first)
   const oldCA = new X509Certificate(readFileSync(join(root, 'data/certs/ca.crt'))).fingerprint256
   await stopServer()

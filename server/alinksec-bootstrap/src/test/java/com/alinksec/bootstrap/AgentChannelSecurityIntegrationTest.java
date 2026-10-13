@@ -247,6 +247,7 @@ class AgentChannelSecurityIntegrationTest {
                 .stream().map(f -> f.getRefId()).toList());
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("download?filename="));
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("token="));
+        assertEquals(1, JsonUtils.read(firstCommand.getVulnFix().getFixes(0).getPayload()).path("inventory").path("contract").asInt());
         assertFalse(firstCommand.getVulnFix().getFixes(0).getPayload().equals(
                 secondCommand.getVulnFix().getFixes(0).getPayload()));
         asset(secondStream, second.getAgentId(), pkg);
@@ -282,9 +283,35 @@ class AgentChannelSecurityIntegrationTest {
         stream.requests.onNext(report(agentId).setAsset(RptAssetSnapshot.newBuilder()
                 .addCollected("software")
                 .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
-                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04"))
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(1))
                 .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0").setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agentId);
+    }
+
+    @Test void unverifiedPackageSuccessRemainsUnfixedAndCannotBeReplacedByALaterResult() throws Exception {
+        var agent = enroll(); var stream = connect(agent); heartbeat(stream, agent.getAgentId());
+        String pkg = "grpc-unverified-" + UUID.randomUUID(); asset(stream, agent.getAgentId(), pkg);
+        String cve = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        cveIds.add(cve);
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cve, "severity", 3, "affected", List.of(
+                Map.of("name", pkg, "match", "exact", "source", "dpkg", "version_scheme", "dpkg", "distro_id", "ubuntu",
+                        "distro_version", "24.04", "architecture", "amd64", "vrange", "<2.0", "fixed_version", "2.0",
+                        "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Unverified result fixture."))))))));
+        long finding = finding(agent.getAgentId(), pkg, cve);
+        var patch = patches.importPackage(new ByteArrayInputStream(new byte[]{1, 2, 3}), "unverified.deb", 1, "", pkg, "2.0", "deb", null);
+        patchIds.add(((Number) patch.get("id")).longValue());
+        long task = ((Number) fixTasks.createPackageTask("unverified result", List.of(Map.of("agentId", agent.getAgentId(), "findingId", finding)), "test", null, null, null).get("taskId")).longValue();
+        fixTaskIds.add(task); assertEquals("dispatched", fixTasks.approve(task, "test").get("state")); stream.nextCommand();
+        stream.requests.onNext(report(agent.getAgentId()).setFixResult(RptFixResult.newBuilder().setTaskId(String.valueOf(task))
+                .addResults(FixResultItem.newBuilder().setRefId(String.valueOf(finding)).setSuccess(true).setVerified(false).setLog("post-install query unavailable"))).build());
+        heartbeat(stream, agent.getAgentId());
+        assertEquals(0, findingStatus(finding)); assertEquals(3, fixStatus(task));
+        assertEquals(3, jdbc.queryForObject("SELECT status FROM t_fix_record WHERE task_id=?", Integer.class, task));
+        String stored = jdbc.queryForObject("SELECT log FROM t_fix_record WHERE task_id=?", String.class, task);
+        assertTrue(stored.contains("不标记漏洞已修复"));
+        fixResult(stream, agent.getAgentId(), task, finding, true); heartbeat(stream, agent.getAgentId());
+        assertEquals(0, findingStatus(finding));
+        assertEquals(stored, jdbc.queryForObject("SELECT log FROM t_fix_record WHERE task_id=?", String.class, task));
     }
 
     @Test void fullNativeVersionsAndDeclaredTargetsLongerThan64CharactersSurviveRealStorage() throws Exception {
@@ -294,7 +321,7 @@ class AgentChannelSecurityIntegrationTest {
         cveIds.add(cve);
         stream.requests.onNext(report(agent.getAgentId()).setAsset(RptAssetSnapshot.newBuilder().addCollected("software")
                 .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
-                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04"))
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(1))
                 .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion(installed).setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agent.getAgentId());
         var rule = Map.of("name", pkg, "vrange", "<" + fixed, "source", "dpkg", "version_scheme", "dpkg",

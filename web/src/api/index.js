@@ -522,6 +522,7 @@ export async function fetchVulns() {
         evidenceStatus: f.evidence_status || 'legacy',
         ruleEvidence: readRuleEvidence(f.rule_evidence),
         blocked: 0,
+        executionUnsupported: 0,
         hosts: 0,
         hostList: [],
         findings: [],
@@ -539,10 +540,12 @@ export async function fetchVulns() {
     }
     if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version
         && f.identity_status === 'complete' && (f.identity_current === true || Number(f.identity_current) === 1)
-        && f.evidence_status === 'declared' && (f.rule_current === true || Number(f.rule_current) === 1)) {
+        && f.evidence_status === 'declared' && (f.rule_current === true || Number(f.rule_current) === 1)
+        && (f.execution_supported === true || Number(f.execution_supported) === 1)) {
       g.findings.push({ agentId: f.agent_id, findingId: Number(f.id) })
       g.status = 'todo'
     } else if (Number(f.status) <= 1) g.blocked += 1
+    if (Number(f.status) <= 1 && !(f.execution_supported === true || Number(f.execution_supported) === 1)) g.executionUnsupported += 1
   }
   return [...grouped.values()]
 }

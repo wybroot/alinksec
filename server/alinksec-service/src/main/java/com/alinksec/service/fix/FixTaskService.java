@@ -424,7 +424,7 @@ public class FixTaskService {
 
     private Map<String, Object> currentPackageIdentity(String agentId, String name, String installedVersion) {
         var hosts = jdbc.queryForList("""
-                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error
+                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error,package_repair_contract
                 FROM t_agent WHERE agent_id=? AND deleted=false
                 """, agentId);
         if (hosts.size() != 1 || !"complete".equals(hosts.get(0).get("software_collection_status"))) {
@@ -440,15 +440,14 @@ public class FixTaskService {
         String source = String.valueOf(pkg.get("source")), architecture = String.valueOf(pkg.get("architecture"));
         String distroId = String.valueOf(host.get("distro_id")), distroVersion = String.valueOf(host.get("distro_version"));
         int osType = ((Number) host.get("os_type")).intValue();
-        if ((osType != 1 && osType != 2) || (osType == 2 && !"registry".equals(source))) {
-            throw new IllegalArgumentException("软件包来源与主机系统身份不一致，需人工处理: " + name);
+        if (osType != 1 || ((Number) host.get("package_repair_contract")).intValue() != 1) {
+            throw new IllegalArgumentException("该 Agent 未声明受支持的软件包执行校验能力，请更新支持该系统的 Agent 或人工处理");
         }
-        boolean linux = osType == 1;
-        if (linux && (!java.util.Set.of("rpm", "dpkg").contains(source) || architecture.isBlank()
-                || distroId.isBlank() || distroVersion.isBlank() || !"".equals(host.get("software_identity_error")))) {
+        if (!java.util.Set.of("rpm", "dpkg").contains(source) || architecture.isBlank()
+                || distroId.isBlank() || distroVersion.isBlank() || !"".equals(host.get("software_identity_error"))) {
             throw new IllegalArgumentException("缺少发行版、包来源或包架构身份，需人工处理: " + name);
         }
-        return Map.of("source", source, "architecture", architecture, "distro_id", distroId,
+        return Map.of("contract", 1, "source", source, "architecture", architecture, "distro_id", distroId,
                 "distro_version", distroVersion, "installed_version", installedVersion,
                 "os_type", osType, "os_version", host.get("os_version") == null ? "" : host.get("os_version"));
     }
