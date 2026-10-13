@@ -7,6 +7,7 @@ import com.alinksec.service.library.LibrarySyncService;
 import com.alinksec.service.library.LibrarySchedule;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 
 @RestController
@@ -20,6 +21,11 @@ public class LibraryController {
         this.sync = sync; this.catalog = catalog; this.props = props; this.schedules = schedules;
     }
     @GetMapping public ApiResult<Map<String, Object>> status() { return ApiResult.ok(sync.status()); }
+    @GetMapping("/cves")
+    public ApiResult<?> cves(@RequestParam(required=false) String keyword, @RequestParam(defaultValue="1") int page,
+                           @RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(catalog.cveRules(keyword, Math.max(1, page), Math.max(1, Math.min(size, 100))));
+    }
     @PostMapping("/sources/{id}/sync")
     public ApiResult<Map<String, Object>> synchronize(@PathVariable String id) {
         return ApiResult.ok(Map.of("accepted", sync.trigger(id)));
@@ -34,10 +40,11 @@ public class LibraryController {
     @GetMapping("/sources/{id}/runs")
     public ApiResult<?> runs(@PathVariable String id) { return ApiResult.ok(sync.history(id)); }
     @PostMapping("/cves/import")
-    public ApiResult<Map<String, Object>> importCves(@RequestParam("file") MultipartFile file) throws Exception {
+    public ApiResult<Map<String, Object>> importCves(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws Exception {
         if (file.getSize() > props.getMaxDownloadBytes()) throw new IllegalArgumentException("漏洞文件超过大小上限");
         var documents = sync.readCves(file.getInputStream());
-        int count = catalog.cves("manual", documents);
+        Long actor = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        int count = catalog.cves("manual", documents, actor);
         sync.recheckAssets();
         return ApiResult.ok(Map.of("imported", count));
     }

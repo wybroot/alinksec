@@ -60,10 +60,11 @@ public class VulnMatchService {
         // 保留修复引用的 finding ID，重连时的资产扫描不能让结果失去回写目标。
         Set<String> dismissed = new HashSet<>();
         jdbc.query("""
-                         SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,identity_status FROM t_vuln_finding f
+                         SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status FROM t_vuln_finding f
                         WHERE agent_id = ? AND (status IN (2, 3) OR %s)
-                         """.formatted(pendingRepair), (rs, i) -> dismissed.add(findingKey(rs.getString(1), rs.getString(2), rs.getString(3),
-                         rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8), rs.getString(9), rs.getString(10))),
+                          """.formatted(pendingRepair), (rs, i) -> dismissed.add(decisionKey(findingKey(rs.getString(1), rs.getString(2), rs.getString(3),
+                          rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8), rs.getString(9), rs.getString(10)),
+                          rs.getString(11), rs.getString(12), rs.getString(13))),
                 agentId);
 
         // 未处置记录先清后插（快照全量替换语义）
@@ -78,13 +79,16 @@ public class VulnMatchService {
                 && VulnerabilityScope.distributionId(distroId) && VulnerabilityScope.distributionVersion(distroVersion);
         int[] inserted = {0};
         // Metadata-only NVD entries are excluded, and candidate rows are consumed one at a time.
-        jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE CAST(affected AS TEXT) <> '[]'",
+        jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected,rule_source_id,rule_digest,provenance FROM t_cve_db WHERE CAST(affected AS TEXT) <> '[]'",
                 (org.springframework.jdbc.core.RowCallbackHandler) cve -> {
             String cveId = cve.getString("cve_id");
             int severity = cve.getInt("severity");
             Object cvss = cve.getObject("cvss");
+            JsonNode rules = JsonUtils.read(cve.getString("affected"));
+            String ruleSource = cve.getString("rule_source_id"), ruleDigest = cve.getString("rule_digest");
+            boolean recorded = !ruleSource.isEmpty() && ruleDigest.equals(VulnerabilityEvidence.ruleDigest(ruleSource, cveId, rules));
             Map<String, Candidate> candidates = new LinkedHashMap<>();
-            for (JsonNode rule : JsonUtils.read(cve.getString("affected"))) {
+            for (JsonNode rule : rules) {
                 String cveName = rule.path("name").asText("");
                 String vrange = rule.path("vrange").asText("*");
                 if (cveName.isEmpty()) {
@@ -94,27 +98,34 @@ public class VulnMatchService {
                     String swName = String.valueOf(sw.get("name"));
                     String swVersion = String.valueOf(sw.get("version") == null ? "" : sw.get("version"));
                     String source = text(sw, "source"), architecture = text(sw, "architecture");
+                    if (VulnerabilityScope.nativeSource(source) && !recorded) continue;
                     boolean identityKnown = VulnerabilityScope.nativeSource(source) ? nativeIdentity : complete;
                     if (!ruleMatches(rule, swName, swVersion, os, source, distroId, distroVersion, architecture, identityKnown)) continue;
                     String fixed = rule.has("fixed_version") ? rule.path("fixed_version").asText("") : rangeFixedVersion(vrange);
                     String identityStatus = identityKnown ? "complete" : "legacy";
                     String key = findingKey(cveId, swName, swVersion, source, architecture, distroId, distroVersion, osType, os, identityStatus);
-                    if (dismissed.contains(key)) {
-                        continue;
-                    }
-                    candidates.merge(key, new Candidate(swName, swVersion, source, architecture, identityStatus, fixed),
-                            (left, right) -> new Candidate(left.name(), left.version(), left.source(), left.architecture(),
-                                    left.status(), Objects.equals(left.fixed(), right.fixed()) ? left.fixed() : null));
+                    boolean excluded = "not_affected".equals(rule.path("evidence").path("assessment").asText());
+                    candidates.merge(key, new Candidate(swName, swVersion, source, architecture, identityStatus, fixed,
+                            !excluded, excluded, false, List.of(rule)), VulnMatchService::merge);
                 }
             }
             for (Candidate candidate : candidates.values()) {
+                if (!candidate.affected()) continue;
+                String evidenceStatus = candidate.excluded() || candidate.fixConflict() ? "conflicting" : recorded
+                        && candidate.rules().stream().allMatch(r -> r.path("evidence").isObject()) ? "declared" : "legacy";
+                String key = findingKey(cveId, candidate.name(), candidate.version(), candidate.source(), candidate.architecture(),
+                        distroId, distroVersion, osType, os, candidate.status());
+                if (dismissed.contains(decisionKey(key, ruleSource, ruleDigest, evidenceStatus))) continue;
+                String snapshot = JsonUtils.write(Map.of("import", JsonUtils.read(cve.getString("provenance")), "rules", candidate.rules()));
                 jdbc.update("""
                             INSERT INTO t_vuln_finding
                                (task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,cvss,
-                                source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                             """, taskId, agentId, cveId, candidate.name(), candidate.version(), candidate.fixed(), severity, cvss,
-                             candidate.source(), candidate.architecture(), distroId, distroVersion, osType, os, candidate.status());
+                                 source,architecture,distro_id,distro_version,os_type,os_version,identity_status,
+                                 rule_source_id,rule_digest,rule_evidence,evidence_status)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                              """, taskId, agentId, cveId, candidate.name(), candidate.version(), candidate.excluded() || candidate.fixConflict() ? null : candidate.fixed(), severity, cvss,
+                              candidate.source(), candidate.architecture(), distroId, distroVersion, osType, os, candidate.status(),
+                              ruleSource, ruleDigest, snapshot, evidenceStatus);
                 inserted[0]++;
             }
         });
@@ -182,7 +193,7 @@ public class VulnMatchService {
     static boolean ruleMatches(JsonNode rule, String name, String version, String os, String source,
                                String distroId, String distroVersion, String architecture, boolean identityKnown) {
         String expected = rule.path("name").asText("");
-        if (expected.isBlank()) return false;
+        if (expected.isBlank() || !VulnerabilityEvidence.comparable(rule)) return false;
         if (VulnerabilityScope.nativeSource(source)) {
             if (!identityKnown || !VulnerabilityScope.nativeRule(rule) || !name.equals(expected)
                     || !VulnerabilityScope.distributionId(distroId) || !VulnerabilityScope.distributionVersion(distroVersion)
@@ -216,7 +227,23 @@ public class VulnMatchService {
         return row.get(field) == null ? "" : String.valueOf(row.get(field));
     }
 
-    private record Candidate(String name, String version, String source, String architecture, String status, String fixed) {}
+    private record Candidate(String name, String version, String source, String architecture, String status, String fixed,
+                             boolean affected, boolean excluded, boolean fixConflict, List<JsonNode> rules) {}
+
+    private static Candidate merge(Candidate left, Candidate right) {
+        var rules = new java.util.ArrayList<>(left.rules()); rules.addAll(right.rules());
+        String fixed = !left.affected() ? right.fixed() : !right.affected() ? left.fixed()
+                : Objects.equals(left.fixed(), right.fixed()) ? left.fixed() : null;
+        return new Candidate(left.name(), left.version(), left.source(), left.architecture(), left.status(), fixed,
+                left.affected() || right.affected(), left.excluded() || right.excluded(), left.fixConflict() || right.fixConflict()
+                || rules.stream().filter(r -> !"not_affected".equals(r.path("evidence").path("assessment").asText()))
+                .map(r -> r.path("fixed_version").asText("")).filter(v -> !v.isBlank()).distinct().limit(2).count() > 1,
+                List.copyOf(rules));
+    }
+
+    private static String decisionKey(String identity, String source, String digest, String evidenceStatus) {
+        return JsonUtils.write(List.of(identity, source, digest, evidenceStatus));
+    }
 
     private static String findingKey(String cve, String name, String version, String source, String architecture,
                                      String distroId, String distroVersion, int osType, String osVersion, String status) {

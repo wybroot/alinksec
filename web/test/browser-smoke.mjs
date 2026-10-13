@@ -136,15 +136,30 @@ try {
     software_succeeded_at=CURRENT_TIMESTAMP WHERE agent_id=?`)
   const installedPackage = database.prepare(`INSERT INTO t_asset_software(agent_id,name,version,source,architecture)
     VALUES(?,?,'1.0','dpkg','all')`)
-  const matchedIdentity = database.prepare(`UPDATE t_vuln_finding SET identity_status='complete',source='dpkg',architecture='all',
-    distro_id='ubuntu',distro_version='24.04',os_type=1,os_version=COALESCE((SELECT os_version FROM t_agent a WHERE a.agent_id=t_vuln_finding.agent_id),'')
-    WHERE id=? AND agent_id=?`)
   for (const [index, item] of items.entries()) {
     completeInventory.run(item.agentId)
     installedPackage.run(item.agentId, index === 2 ? 'browser-libcurl' : 'browser-openssl')
-    matchedIdentity.run(item.findingId, item.agentId)
   }
   database.exec('COMMIT')
+  const declarations = [['CVE-2099-1001', 'browser-openssl', '2.0'], ['CVE-2099-1002', 'browser-libcurl', '3.0']].map(([cve_id, name, fixed_version]) => ({
+    cve_id, severity: 4, affected: [{ name, match: 'exact', source: 'dpkg', version_scheme: 'dpkg', distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: `<${fixed_version}`, fixed_version,
+      evidence: { basis: 'manual_analysis', assessment: 'affected', package_scope: 'binary', notes: 'Disposable browser repair fixture declaration.' } }],
+  }))
+  const imported = await page.evaluate(async declarations => {
+    const form = new FormData(); form.set('file', new Blob([JSON.stringify(declarations)]), 'browser-declarations.json')
+    const response = await fetch('/api/libraries/cves/import', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('alinksec_token')}` }, body: form })
+    return { status: response.status, body: await response.json() }
+  }, declarations)
+  assert.equal(imported.status, 200); assert.equal(imported.body.code, 0, imported.body.msg)
+  for (const [index, item] of items.entries()) {
+    const cve = index === 2 ? 'CVE-2099-1002' : 'CVE-2099-1001'
+    await expect.poll(() => database.prepare("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id=? AND evidence_status='declared'").get(item.agentId, cve).n).toBe(1)
+    const finding = database.prepare("SELECT id,rule_source_id,rule_digest,rule_evidence FROM t_vuln_finding WHERE agent_id=? AND cve_id=? AND evidence_status='declared'").get(item.agentId, cve)
+    item.findingId = finding.id
+    assert.equal(finding.rule_source_id, 'manual'); assert.match(finding.rule_digest, /^[a-f0-9]{64}$/)
+    const snapshot = JSON.parse(finding.rule_evidence); assert.equal(snapshot.import.verification, 'imported_declaration'); assert.ok(snapshot.import.imported_by > 0)
+  }
+  console.log('ok - real browser/API imports authenticated rule provenance and scans fresh findings without backfilling legacy evidence')
   await page.reload()
   await expect(firstVuln).toContainText('ubuntu 24.04')
   await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()

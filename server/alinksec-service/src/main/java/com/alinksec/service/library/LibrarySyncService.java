@@ -258,6 +258,7 @@ public class LibrarySyncService {
         String effective = "SELECT cve_id,matchable,ROW_NUMBER() OVER(PARTITION BY cve_id ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id) AS priority FROM t_security_cve";
         var counts = jdbc.queryForMap("SELECT count(*) AS total,COALESCE(SUM(matchable),0) AS matchable FROM (" + effective + ") v WHERE priority=1");
         result.put("managedCveCount", counts.get("total")); result.put("matchableCveCount", counts.get("matchable"));
+        result.put("unattributedCveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_source_id='' OR rule_digest=''", Long.class));
         result.put("manualSignature", jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='manual'", Integer.class));
         return result;
     }

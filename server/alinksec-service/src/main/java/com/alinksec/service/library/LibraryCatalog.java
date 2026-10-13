@@ -3,6 +3,7 @@ package com.alinksec.service.library;
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.service.config.DatabaseDialect;
 import com.alinksec.service.scan.VulnerabilityScope;
+import com.alinksec.service.scan.VulnerabilityEvidence;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -129,6 +130,10 @@ public class LibraryCatalog {
         } finally { Files.deleteIfExists(hashes); Files.deleteIfExists(rules); Files.deleteIfExists(zip); }
     }
     public synchronized int cves(String source, List<JsonNode> documents) {
+        return cves(source, documents, null);
+    }
+    public synchronized int cves(String source, List<JsonNode> documents, Long actor) {
+        if (source == null || !source.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException("规则导入来源非法");
         if (documents.size() > props.getMaxCvesPerImport()) throw new IllegalArgumentException("漏洞数据超过单次导入上限");
         for (JsonNode document : documents) validateCve(document);
         return transaction.execute(status -> {
@@ -137,25 +142,36 @@ public class LibraryCatalog {
                 for (JsonNode rule : document.path("affected")) {
                     if (!rule.has("match")) ((com.fasterxml.jackson.databind.node.ObjectNode) rule).put("match", "exact");
                 }
+                String serialized = JsonUtils.write(document);
+                Map<String, Object> provenance = new LinkedHashMap<>();
+                provenance.put("source_id", source);
+                provenance.put("ingestion", "manual".equals(source) ? "manual_import" : "configured_import");
+                provenance.put("document_sha256", VulnerabilityEvidence.sha256(serialized));
+                provenance.put("recorded_at", Instant.now().toString());
+                provenance.put("imported_by", actor);
+                provenance.put("verification", "imported_declaration");
                 jdbc.update("""
-                        INSERT INTO t_security_cve(source_id,cve_id,document,matchable) VALUES (?,?,?,?)
-                        ON CONFLICT(source_id,cve_id) DO UPDATE SET document=EXCLUDED.document,matchable=EXCLUDED.matchable
-                        """, source, id, JsonUtils.write(document), hasComparableRules(document) ? 1 : 0);
+                        INSERT INTO t_security_cve(source_id,cve_id,document,matchable,provenance) VALUES (?,?,?,?,?)
+                        ON CONFLICT(source_id,cve_id) DO UPDATE SET document=EXCLUDED.document,matchable=EXCLUDED.matchable,provenance=EXCLUDED.provenance
+                        """, source, id, serialized, hasComparableRules(document) ? 1 : 0, JsonUtils.write(provenance));
                 // Manual corrections win over remotely supplied rules/metadata.
-                String effective = jdbc.queryForObject("""
-                        SELECT document FROM t_security_cve WHERE cve_id=?
+                var effective = jdbc.queryForMap("""
+                        SELECT source_id,document,provenance FROM t_security_cve WHERE cve_id=?
                         ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id LIMIT 1
-                        """, String.class, id);
-                JsonNode cve = JsonUtils.read(effective);
+                        """, id);
+                JsonNode cve = JsonUtils.read((String) effective.get("document"));
+                String effectiveSource = (String) effective.get("source_id");
                 jdbc.update("""
-                        INSERT INTO t_cve_db(cve_id,title,severity,cvss,affected,description,published_at)
-                        VALUES (?,?,?,?,?,?,?) ON CONFLICT(cve_id) DO UPDATE SET title=EXCLUDED.title,
+                        INSERT INTO t_cve_db(cve_id,title,severity,cvss,affected,description,published_at,rule_source_id,rule_digest,provenance)
+                        VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(cve_id) DO UPDATE SET title=EXCLUDED.title,
                         severity=EXCLUDED.severity,cvss=EXCLUDED.cvss,affected=EXCLUDED.affected,
-                        description=EXCLUDED.description,published_at=EXCLUDED.published_at,imported_at=CURRENT_TIMESTAMP
+                        description=EXCLUDED.description,published_at=EXCLUDED.published_at,imported_at=CURRENT_TIMESTAMP,
+                        rule_source_id=EXCLUDED.rule_source_id,rule_digest=EXCLUDED.rule_digest,provenance=EXCLUDED.provenance
                         """, id, cve.path("title").asText(id), cve.path("severity").asInt(),
                         cve.hasNonNull("cvss") ? cve.path("cvss").asDouble() : null,
                         JsonUtils.write(cve.path("affected")), cve.path("description").asText(""),
-                        cve.hasNonNull("published_at") ? database.timestamp(Instant.parse(cve.path("published_at").asText())) : null);
+                        cve.hasNonNull("published_at") ? database.timestamp(Instant.parse(cve.path("published_at").asText())) : null,
+                        effectiveSource, VulnerabilityEvidence.ruleDigest(effectiveSource, id, cve.path("affected")), effective.get("provenance"));
             }
             return documents.size();
         });
@@ -181,6 +197,7 @@ public class LibraryCatalog {
         return removed;
     }
     public static void validateCve(JsonNode document) {
+        if (document.has("provenance")) throw new IllegalArgumentException("导入来源和真实性记录由平台生成");
         String id = document.path("cve_id").asText("");
         int severity = document.path("severity").asInt(0);
         if (!document.isObject() || !document.path("cve_id").isTextual() || !document.path("severity").isIntegralNumber()
@@ -195,6 +212,7 @@ public class LibraryCatalog {
             catch (java.time.DateTimeException e) { throw new IllegalArgumentException("漏洞发布时间必须是带时区的 ISO 日期"); }
         }
         for (JsonNode rule : document.path("affected")) {
+            VulnerabilityEvidence.validate(rule);
             String name = rule.path("name").asText("");
             if (!rule.isObject() || !rule.path("name").isTextual() || name.isBlank() || name.length() > 255
                     || rule.has("vrange") == rule.has("ranges")) throw new IllegalArgumentException("漏洞缺少软件及唯一版本条件");
@@ -236,9 +254,32 @@ public class LibraryCatalog {
     private static boolean hasComparableRules(JsonNode document) {
         for (JsonNode rule : document.path("affected")) {
             if (VulnerabilityScope.nativeSource(rule.path("source").asText())) {
-                if (VulnerabilityScope.nativeRule(rule)) return true;
-            } else return true;
+                if (VulnerabilityScope.nativeRule(rule) && VulnerabilityEvidence.comparable(rule)) return true;
+            } else if (VulnerabilityEvidence.comparable(rule)) return true;
         }
         return false;
+    }
+
+    public Map<String, Object> cveRules(String keyword, int page, int size) {
+        String where = keyword == null || keyword.isBlank() ? "" : " WHERE LOWER(cve_id) LIKE LOWER(?) OR LOWER(title) LIKE LOWER(?)";
+        var args = new ArrayList<Object>();
+        if (!where.isEmpty()) { args.add("%" + keyword.trim() + "%"); args.add(args.get(0)); }
+        Long total = jdbc.queryForObject("SELECT count(*) FROM t_cve_db" + where, Long.class, args.toArray());
+        var pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add((page - 1) * size);
+        var rows = jdbc.queryForList("SELECT cve_id,title,rule_source_id,rule_digest,provenance,CAST(affected AS TEXT) AS affected FROM t_cve_db"
+                + where + " ORDER BY cve_id LIMIT ? OFFSET ?", pageArgs.toArray());
+        for (var row : rows) {
+            row.put("provenance", JsonUtils.read((String) row.get("provenance")));
+            JsonNode affected = JsonUtils.read((String) row.get("affected"));
+            row.put("affected", affected);
+            boolean declared = !String.valueOf(row.get("rule_source_id")).isEmpty()
+                    && row.get("rule_digest").equals(VulnerabilityEvidence.ruleDigest(String.valueOf(row.get("rule_source_id")), String.valueOf(row.get("cve_id")), affected));
+            boolean supported = false;
+            if (declared) for (var rule : affected) {
+                if (rule.path("evidence").isObject() && VulnerabilityEvidence.comparable(rule)) { supported = true; break; }
+            }
+            row.put("evaluation", supported ? "declared" : "metadata_only");
+        }
+        return Map.of("list", rows, "total", total == null ? 0 : total);
     }
 }

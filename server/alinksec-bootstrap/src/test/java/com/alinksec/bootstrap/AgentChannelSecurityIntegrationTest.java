@@ -87,6 +87,8 @@ class AgentChannelSecurityIntegrationTest {
     @Autowired ConnectionRegistry connections;
     @Autowired PolicyStoreService policy;
     @Autowired FixTaskService fixTasks;
+    @Autowired com.alinksec.service.library.LibraryCatalog library;
+    @Autowired com.alinksec.service.scan.VulnMatchService matcher;
     @Autowired PatchRepoService patches;
     @Autowired ProtectRuleService rules;
 
@@ -163,6 +165,7 @@ class AgentChannelSecurityIntegrationTest {
         }
         for (String cveId : cveIds) {
             jdbc.update("DELETE FROM t_cve_db WHERE cve_id = ?", cveId);
+            jdbc.update("DELETE FROM t_security_cve WHERE cve_id = ?", cveId);
         }
         for (String reportId : reportIds) {
             jdbc.update("DELETE FROM t_report_dedup WHERE report_id = ?", reportId);
@@ -199,10 +202,11 @@ class AgentChannelSecurityIntegrationTest {
         String pkg = "grpc-patch-" + UUID.randomUUID();
         asset(firstStream, first.getAgentId(), pkg);
         asset(secondStream, second.getAgentId(), pkg);
-        String cveId = "CVE-test-" + UUID.randomUUID().toString().substring(0, 20);
-        jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES (?,3,?)", cveId,
-                JsonUtils.write(List.of(Map.of("name", pkg, "vrange", "<2.0", "source", "dpkg", "version_scheme", "dpkg",
-                        "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "match", "exact"))));
+        String cveId = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cveId, "severity", 3, "affected",
+                List.of(Map.of("name", pkg, "vrange", "<2.0", "source", "dpkg", "version_scheme", "dpkg",
+                        "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "match", "exact", "fixed_version", "2.0",
+                        "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Disposable gRPC package fixture declaration."))))))));
         cveIds.add(cveId);
         long firstFinding = finding(first.getAgentId(), pkg, cveId);
         long secondFinding = finding(second.getAgentId(), pkg, cveId);
@@ -283,13 +287,29 @@ class AgentChannelSecurityIntegrationTest {
         heartbeat(stream, agentId);
     }
 
+    @Test void fullNativeVersionsAndDeclaredTargetsLongerThan64CharactersSurviveRealStorage() throws Exception {
+        var agent = enroll(); var stream = connect(agent); heartbeat(stream, agent.getAgentId());
+        String pkg = "grpc-long-version-" + UUID.randomUUID(), installed = "1.0+git" + "a".repeat(80) + "-1", fixed = "2.0+git" + "b".repeat(80) + "-1";
+        String cve = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        cveIds.add(cve);
+        stream.requests.onNext(report(agent.getAgentId()).setAsset(RptAssetSnapshot.newBuilder().addCollected("software")
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04"))
+                .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion(installed).setSource("dpkg").setArchitecture("amd64"))).build());
+        heartbeat(stream, agent.getAgentId());
+        var rule = Map.of("name", pkg, "vrange", "<" + fixed, "source", "dpkg", "version_scheme", "dpkg",
+                "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "fixed_version", fixed,
+                "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Disposable long-version declaration."));
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cve, "severity", 3, "affected", List.of(rule))))));
+        matcher.matchAgent(agent.getAgentId(), 0);
+        var finding = jdbc.queryForMap("SELECT installed_version,fixed_version,evidence_status FROM t_vuln_finding WHERE agent_id=? AND cve_id=?", agent.getAgentId(), cve);
+        assertEquals(installed, finding.get("installed_version")); assertEquals(fixed, finding.get("fixed_version"));
+        assertEquals("declared", finding.get("evidence_status"));
+    }
+
     private long finding(String agentId, String pkg, String cveId) {
-        return jdbc.queryForObject("""
-                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,
-                    source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
-                SELECT 0,agent_id,?,?,'1.0','2.0',3,'dpkg','amd64',distro_id,distro_version,os_type,COALESCE(os_version,''),'complete'
-                FROM t_agent WHERE agent_id=? RETURNING id
-                """, Long.class, cveId, pkg, agentId);
+        matcher.matchAgent(agentId, 0);
+        return jdbc.queryForObject("SELECT id FROM t_vuln_finding WHERE agent_id=? AND software=? AND cve_id=?", Long.class, agentId, pkg, cveId);
     }
 
     private void fixResult(Stream stream, String agentId, long taskId, long findingId, boolean success) {

@@ -53,9 +53,12 @@ public class VulnQueryService {
         pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT f.id, f.task_id, f.agent_id, a.hostname, f.cve_id, c.title, f.software,
-                       f.installed_version, f.fixed_version, f.severity, c.cvss,
+                       f.installed_version, f.fixed_version, f.severity, f.cvss,
                        f.status,f.created_at,f.source,f.architecture,f.distro_id,f.distro_version,
-                       f.os_type,f.os_version,f.identity_status,a.software_collection_status,
+                        f.os_type,f.os_version,f.identity_status,a.software_collection_status,
+                        f.rule_source_id,f.rule_digest,f.rule_evidence,f.evidence_status,
+                        CASE WHEN f.evidence_status='declared' AND f.rule_digest<>''
+                          AND f.rule_digest=c.rule_digest AND f.rule_source_id=c.rule_source_id THEN 1 ELSE 0 END AS rule_current,
                        CASE WHEN f.identity_status='complete' AND a.deleted=false
                          AND a.software_collection_status='complete' AND a.os_type=f.os_type
                          AND COALESCE(a.os_version,'')=f.os_version AND a.distro_id=f.distro_id AND a.distro_version=f.distro_version

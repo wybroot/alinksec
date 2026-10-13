@@ -110,7 +110,23 @@ class VulnMatchServiceTest {
 
     private static com.fasterxml.jackson.databind.JsonNode scoped(String json, String source) {
         var rule = (com.fasterxml.jackson.databind.node.ObjectNode) com.alinksec.common.util.JsonUtils.read(json);
+        rule.putObject("evidence").put("basis", "manual_analysis").put("assessment", "affected").put("package_scope", "binary")
+                .put("notes", "Disposable test declaration; not authenticated vendor evidence.");
         return rule.put("version_scheme", source).put("distro_id", "ubuntu").put("distro_version", "24.04").put("architecture", "amd64");
+    }
+    @Test void nativeMatchingRequiresBinaryPackageEvidenceAndCannotPromoteUpstreamOrUnknownClaims() {
+        var rule = (com.fasterxml.jackson.databind.node.ObjectNode) scoped("{\"name\":\"fixture\",\"source\":\"dpkg\",\"vrange\":\"<2.0\"}", "dpkg");
+        var evidence = (com.fasterxml.jackson.databind.node.ObjectNode) rule.path("evidence");
+        assertTrue(matches(rule, "fixture", "1.0", "Ubuntu", "dpkg"));
+        evidence.put("package_scope", "source");
+        assertFalse(matches(rule, "fixture", "1.0", "Ubuntu", "dpkg"));
+        evidence.put("package_scope", "binary").put("assessment", "unknown");
+        assertFalse(matches(rule, "fixture", "1.0", "Ubuntu", "dpkg"));
+        evidence.put("assessment", "affected").put("basis", "upstream").put("package_scope", "upstream")
+                .put("publisher", "NVD").put("advisory_id", "CVE-2026-12345").put("url", "https://nvd.nist.gov/vuln/detail/CVE-2026-12345");
+        assertFalse(matches(rule, "fixture", "1.0", "Ubuntu", "dpkg"));
+        rule.remove("evidence");
+        assertFalse(matches(rule, "fixture", "1.0", "Ubuntu", "dpkg"));
     }
     private static boolean matches(com.fasterxml.jackson.databind.JsonNode rule, String name, String version, String os, String source) {
         return VulnMatchService.ruleMatches(rule, name, version, os, source, "ubuntu", "24.04", "amd64", true);

@@ -279,18 +279,29 @@ try {
   await stopAgent(first)
   const second = await makeAgent('second')
   await patchFile()
-  sql(`INSERT INTO t_cve_db(cve_id,severity,affected) VALUES ('CVE-2099-0001',3,?) RETURNING cve_id`, JSON.stringify([
+  const declarations = [{ cve_id: 'CVE-2099-0001', severity: 3, affected: [
     { name: 'alinksec-smoke-package', match: 'exact', source: 'dpkg', version_scheme: 'dpkg',
-      distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: '<2.0', fixed_version: '2.0' },
-  ]))
+      distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: '<2.0', fixed_version: '2.0',
+      evidence: { basis: 'manual_analysis', assessment: 'affected', package_scope: 'binary', notes: 'Disposable actual-Agent repair fixture declaration; not authenticated vendor evidence.' } },
+  ] }]
+  const cveForm = new FormData(); cveForm.set('file', new Blob([JSON.stringify(declarations)]), 'declarations.json')
+  const imported = await fetch(`http://${gateway}:${httpPort}/api/libraries/cves/import`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: cveForm })
+  assert.equal(imported.status, 200)
+  const importResult = await imported.json(); assert.equal(importResult.code, 0, importResult.msg)
+  await until(() => [first, second].every(agent => sql("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)[0].n === 1), 'Imported declaration did not produce both Agent findings')
   await api('/api/vuln/tasks', { agentIds: [first.id, second.id], includeVuln: true, includeWeakPassword: false, includePortService: false })
   const findings = [first, second].map(agent => {
-    const rows = sql("SELECT id,source,architecture,distro_id,distro_version,identity_status FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)
+    const rows = sql("SELECT id,source,architecture,distro_id,distro_version,identity_status,rule_source_id,rule_digest,evidence_status,rule_evidence FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)
     assert.equal(rows.length, 1)
-    assert.deepEqual({ ...rows[0], id: undefined }, { id: undefined, source: 'dpkg', architecture: 'all', distro_id: 'ubuntu', distro_version: '24.04', identity_status: 'complete' })
+    const { id, rule_source_id, rule_digest, evidence_status, rule_evidence, ...identity } = rows[0]
+    assert.deepEqual({ ...identity }, { source: 'dpkg', architecture: 'all', distro_id: 'ubuntu', distro_version: '24.04', identity_status: 'complete' })
+    assert.equal(rule_source_id, 'manual'); assert.match(rule_digest, /^[a-f0-9]{64}$/); assert.equal(evidence_status, 'declared')
+    const snapshot = JSON.parse(rule_evidence); assert.equal(snapshot.import.source_id, 'manual'); assert.ok(snapshot.import.imported_by > 0)
+    assert.equal(snapshot.import.verification, 'imported_declaration'); assert.equal(snapshot.rules[0].evidence.basis, 'manual_analysis')
     return { agentId: agent.id, findingId: rows[0].id }
   })
   console.log('ok - scoped server matching preserves actual Agent package identity in both findings')
+  console.log('ok - authenticated CVE import and actual matching retain declared rule provenance in both Agent findings')
   const task = await api('/api/fix/tasks/package', { items: findings, approver: 'CI', name: 'Actual Agent repair' })
   assert.equal(task.pendingApprove, true)
   await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'CI' })

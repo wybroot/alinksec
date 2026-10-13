@@ -220,7 +220,8 @@ public class FixTaskService {
         for (Map<String, Object> row : jdbc.queryForList("""
                 SELECT f.id, f.agent_id, f.cve_id, f.software, f.installed_version, f.fixed_version, f.status,
                        f.source,f.architecture,f.distro_id,f.distro_version,f.identity_status,
-                       f.os_type AS finding_os_type,f.os_version AS finding_os_version,
+                        f.os_type AS finding_os_type,f.os_version AS finding_os_version,
+                        f.rule_source_id,f.rule_digest,f.evidence_status,
                        a.os_type, a.os_version
                 FROM t_vuln_finding f JOIN t_agent a ON a.agent_id = f.agent_id AND a.deleted = false
                 WHERE f.id IN (%s)
@@ -253,7 +254,10 @@ public class FixTaskService {
                     "finding_id", fid));
             var identity = currentPackageIdentity(agentId, String.valueOf(f.get("software")), String.valueOf(f.get("installed_version")));
             verifyFindingIdentity(f, identity);
+            verifyFindingEvidence(f);
             target.put("inventory", identity);
+            target.put("rule_source_id", f.get("rule_source_id"));
+            target.put("rule_digest", f.get("rule_digest"));
             resolveTargets.add(target);
         }
         PatchRepoService.Resolved resolved = patchRepo.resolveForAgents(resolveTargets);
@@ -281,6 +285,8 @@ public class FixTaskService {
                     "cve_id", t.get("cve_id"),
                     "finding_id", String.valueOf(t.get("finding_id"))));
             payload.put("inventory", t.get("inventory"));
+            payload.put("rule_source_id", t.get("rule_source_id"));
+            payload.put("rule_digest", t.get("rule_digest"));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("finding_id")))
@@ -372,16 +378,20 @@ public class FixTaskService {
             }
             var findings = jdbc.queryForList("""
                     SELECT source,architecture,distro_id,distro_version,identity_status,installed_version,
-                           os_type AS finding_os_type,os_version AS finding_os_version,status,software,cve_id,fixed_version
+                            os_type AS finding_os_type,os_version AS finding_os_version,status,software,cve_id,fixed_version,
+                            rule_source_id,rule_digest,evidence_status
                     FROM t_vuln_finding WHERE id=? AND agent_id=?
                     """, Long.parseLong(String.valueOf(t.get("ref_id"))), t.get("agent_id"));
             if (findings.size() != 1 || ((Number) findings.get(0).get("status")).intValue() > 1
                     || !payload.get("pkg_name").equals(findings.get(0).get("software"))
                     || !payload.get("cve_id").equals(findings.get(0).get("cve_id"))
-                    || !payload.get("target_version").equals(findings.get(0).get("fixed_version"))) {
+                    || !payload.get("target_version").equals(findings.get(0).get("fixed_version"))
+                    || !java.util.Objects.equals(payload.get("rule_source_id"), findings.get(0).get("rule_source_id"))
+                    || !java.util.Objects.equals(payload.get("rule_digest"), findings.get(0).get("rule_digest"))) {
                 throw new IllegalArgumentException("漏洞结果或修复目标已变化，请重新扫描并创建修复任务");
             }
             verifyFindingIdentity(findings.get(0), (Map<?, ?>) payload.get("inventory"));
+            verifyFindingEvidence(findings.get(0));
             byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
                     .add(FixItem.newBuilder()
                             .setRefId(String.valueOf(t.get("ref_id")))
@@ -398,6 +408,18 @@ public class FixTaskService {
                             .addAllFixes(e.getValue())), null);
         }
         log.info("软件包修复任务已派发: task_id={} agents={}", taskId, byAgent.size());
+    }
+
+    private void verifyFindingEvidence(Map<String, Object> finding) {
+        var rules = jdbc.queryForList("SELECT rule_source_id,rule_digest,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE cve_id=?", finding.get("cve_id"));
+        if (!"declared".equals(finding.get("evidence_status")) || rules.size() != 1
+                || !java.util.Objects.equals(finding.get("rule_source_id"), rules.get(0).get("rule_source_id"))
+                || !java.util.Objects.equals(finding.get("rule_digest"), rules.get(0).get("rule_digest"))
+                || !String.valueOf(finding.get("rule_digest")).matches("[a-f0-9]{64}")
+                || !finding.get("rule_digest").equals(com.alinksec.service.scan.VulnerabilityEvidence.ruleDigest(
+                String.valueOf(rules.get(0).get("rule_source_id")), String.valueOf(finding.get("cve_id")), JsonUtils.read((String) rules.get(0).get("affected"))))) {
+            throw new IllegalArgumentException("漏洞规则依据缺失、冲突或已变化，请重新扫描并人工核对来源");
+        }
     }
 
     private Map<String, Object> currentPackageIdentity(String agentId, String name, String installedVersion) {

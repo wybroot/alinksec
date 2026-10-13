@@ -394,7 +394,7 @@ class LibraryIntegrationTest {
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('library-agent','fixture-app-helper','1.5','dpkg','amd64')");
         var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
         var metadata = JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":4,\"affected\":[]}");
-        catalog.cves("manual", List.of(rule, metadata));
+        catalog.cves("manual", List.of(packageEvidence(rule), metadata));
         var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc);
         matcher.matchAgent("library-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent'", Integer.class));
@@ -423,8 +423,8 @@ class LibraryIntegrationTest {
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','deb-fixture','1.0-1ubuntu2','dpkg','amd64')");
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','rpm-fixture','2:1.0-1','rpm','x86_64')");
         catalog.cves("manual", List.of(
-                JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}"),
-                JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"x86_64\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}")));
+                packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}")),
+                packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"x86_64\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}"))));
         new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("native-version-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='native-version-agent'", Integer.class));
         assertEquals("deb-fixture", jdbc.queryForObject("SELECT software FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
@@ -466,6 +466,61 @@ class LibraryIntegrationTest {
         assertThrows(IOException.class, () -> new FeedDownload(files, props).fetch(source.getUrl(), Map.of(), null));
         assertThrows(IllegalArgumentException.class, () -> new FeedDownload(files, props).fetch("http://example.com/feed", Map.of(), null));
         try (var paths = Files.list(root.resolve("work/tmp"))) { assertEquals(0, paths.count()); }
+    }
+    private com.fasterxml.jackson.databind.JsonNode packageEvidence(com.fasterxml.jackson.databind.JsonNode document) {
+        for (var rule : document.path("affected")) {
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rule).putObject("evidence").put("basis", "manual_analysis")
+                    .put("assessment", "affected").put("package_scope", "binary").put("notes", "Disposable package analysis declaration.");
+        }
+        return document;
+    }
+    private com.fasterxml.jackson.databind.JsonNode provenanceFixture() {
+        return packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"vrange\":\"<2.0\"}]}"));
+    }
+    @Test void recordsActualSourceAuthenticatedActorAndDocumentDigestWithoutTrustingClientProvenance() {
+        var document = provenanceFixture(); ((com.fasterxml.jackson.databind.node.ObjectNode) document).put("source_id", "forged");
+        catalog.cves("manual", List.of(document), 77L);
+        var record = jdbc.queryForMap("SELECT document,provenance FROM t_security_cve WHERE source_id='manual'");
+        var provenance = JsonUtils.read((String) record.get("provenance"));
+        assertEquals("manual", provenance.path("source_id").asText()); assertEquals(77, provenance.path("imported_by").asInt());
+        assertEquals("imported_declaration", provenance.path("verification").asText());
+        assertEquals(com.alinksec.service.scan.VulnerabilityEvidence.sha256((String) record.get("document")), provenance.path("document_sha256").asText());
+        var rows = (List<Map<String, Object>>) catalog.cveRules("12345", 1, 20).get("list");
+        assertEquals("manual", rows.get(0).get("rule_source_id"));
+        var forged = document.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) forged).putObject("provenance").put("verification", "verified");
+        assertThrows(IllegalArgumentException.class, () -> catalog.cves("forged", List.of(forged)));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='forged'", Integer.class));
+    }
+    @Test void missingNativeEvidenceSourcePackagesAndUnknownAssertionsRemainMetadata() {
+        for (String scope : List.of("missing", "source", "unknown")) {
+            var document = provenanceFixture(); var rule = (com.fasterxml.jackson.databind.node.ObjectNode) document.path("affected").get(0);
+            if ("missing".equals(scope)) rule.remove("evidence");
+            else ((com.fasterxml.jackson.databind.node.ObjectNode) rule.path("evidence")).put("source".equals(scope) ? "package_scope" : "assessment", scope);
+            catalog.cves("manual", List.of(document));
+            assertEquals(0, jdbc.queryForObject("SELECT matchable FROM t_security_cve WHERE source_id='manual'", Integer.class));
+        }
+    }
+    @Test void invalidOrSelfAuthenticatedEvidenceRejectsTheWholeBatch() {
+        for (var invalid : Map.of("url", "javascript:alert(1)", "sha256", "bad", "verified", "true", "notes", "").entrySet()) {
+            var valid = provenanceFixture(); var changed = valid.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("affected").get(0).path("evidence")).put(invalid.getKey(), invalid.getValue());
+            assertThrows(IllegalArgumentException.class, () -> catalog.cves("bad-proof", List.of(valid, changed)));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='bad-proof'", Integer.class));
+        }
+    }
+    @Test void configuredCveFeedKeepsItsActualOriginAndFailedEvidencePreservesThePreviousRules() throws Exception {
+        var body = new AtomicReference<>(JsonUtils.write(List.of(provenanceFixture())));
+        var source = endpoint("cve-json", body); sync.sync(source);
+        var before = jdbc.queryForMap("SELECT rule_digest,provenance FROM t_cve_db WHERE cve_id='CVE-2026-12345'");
+        var provenance = JsonUtils.read((String) before.get("provenance"));
+        assertEquals("provider", provenance.path("source_id").asText());
+        assertEquals("configured_import", provenance.path("ingestion").asText());
+        var invalid = provenanceFixture(); ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0).path("evidence")).put("url", "https://user:secret@fixture.invalid/feed");
+        // The shared fixture has a fixed ETag: request the changed body instead of its 304 response.
+        jdbc.update("UPDATE t_security_feed_state SET etag='',last_modified='' WHERE source_id='provider'");
+        body.set(JsonUtils.write(List.of(invalid))); sync.sync(source);
+        assertEquals(before, jdbc.queryForMap("SELECT rule_digest,provenance FROM t_cve_db WHERE cve_id='CVE-2026-12345'"));
+        assertEquals("failed", jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'", String.class));
     }
     @Test void retentionPreservesLatestVersionsPendingCommandsAndActiveDownloads() throws Exception {
         for (char c : new char[]{'a','b','c','d'}) catalog.signatures("remote", hashes(String.valueOf(c).repeat(64), "Remote"), false, null);

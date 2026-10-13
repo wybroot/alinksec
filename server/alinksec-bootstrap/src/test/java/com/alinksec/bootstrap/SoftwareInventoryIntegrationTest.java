@@ -12,6 +12,7 @@ import com.alinksec.service.fix.PatchRepoService;
 import com.alinksec.service.query.HostQueryService;
 import com.alinksec.service.query.VulnQueryService;
 import com.alinksec.service.scan.VulnMatchService;
+import com.alinksec.service.library.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -38,6 +39,7 @@ class SoftwareInventoryIntegrationTest {
     PatchRepoService patches;
     CommandService commands;
     TransactionTemplate transaction;
+    LibraryCatalog catalog;
 
     @BeforeEach void setup() throws Exception {
         dataSource = new SingleConnectionDataSource(DriverManager.getConnection("jdbc:sqlite:" + root.resolve("db.sqlite")), true);
@@ -51,6 +53,7 @@ class SoftwareInventoryIntegrationTest {
         commands = mock(CommandService.class);
         patches = mock(PatchRepoService.class);
         var properties = new AlinkSecProperties(); properties.getDatabase().setType("sqlite");
+        catalog = new LibraryCatalog(jdbc, new LibraryProperties(), mock(LibraryFiles.class), new DatabaseDialect(properties), new DataSourceTransactionManager(dataSource));
         fixes = new FixTaskService(jdbc, commands, patches, new DatabaseDialect(properties));
     }
     @AfterEach void cleanup() { dataSource.destroy(); }
@@ -66,12 +69,16 @@ class SoftwareInventoryIntegrationTest {
     }
     private void replace(RptAssetSnapshot snapshot) { transaction.executeWithoutResult(status -> assets.replaceSnapshot("inventory-host", snapshot)); }
     private long finding() {
+        catalog.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", "CVE-2026-45679", "severity", 3, "affected", List.of(scopedRule("amd64", "2.0")))))), 1L);
+        var proof = jdbc.queryForMap("SELECT provenance,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE cve_id='CVE-2026-45679'");
+        String snapshot = JsonUtils.write(Map.of("import", JsonUtils.read((String) proof.get("provenance")), "rules", JsonUtils.read((String) proof.get("affected"))));
         return jdbc.queryForObject("""
                 INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,
-                    source,architecture,distro_id,distro_version,os_type,os_version,identity_status)
-                VALUES (0,'inventory-host','CVE-inventory-fixture','inventory-fixture','1.0','2.0',3,
-                    'dpkg','amd64','ubuntu','24.04',1,'Ubuntu 24.04','complete') RETURNING id
-                """, Long.class);
+                    source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status,rule_evidence)
+                SELECT 0,'inventory-host',cve_id,'inventory-fixture','1.0','2.0',3,
+                    'dpkg','amd64','ubuntu','24.04',1,'Ubuntu 24.04','complete',rule_source_id,rule_digest,'declared',?
+                FROM t_cve_db WHERE cve_id='CVE-2026-45679' RETURNING id
+                """, Long.class, snapshot);
     }
     private Map<String, Object> create(long id) {
         return transaction.execute(status -> fixes.createPackageTask("inventory repair", List.of(Map.of("agentId", "inventory-host", "findingId", id)), "reviewer", null, null, null));
@@ -189,10 +196,11 @@ class SoftwareInventoryIntegrationTest {
 
     private Map<String, Object> scopedRule(String architecture, String fixed) {
         return Map.of("name", "inventory-fixture", "match", "exact", "source", "dpkg", "version_scheme", "dpkg",
-                "distro_id", "ubuntu", "distro_version", "24.04", "architecture", architecture, "vrange", "<2.0", "fixed_version", fixed);
+                "distro_id", "ubuntu", "distro_version", "24.04", "architecture", architecture, "vrange", "<2.0", "fixed_version", fixed,
+                "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Disposable binary package analysis declaration."));
     }
     private void rules(Map<String, Object>... rules) {
-        jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES ('CVE-2026-45678',3,?)", JsonUtils.write(List.of(rules)));
+        catalog.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", "CVE-2026-45678", "severity", 3, "affected", List.of(rules))))), 1L);
     }
 
     @Test void scopedDecisionsDoNotHideOtherArchitecturesOrLaterInstalledVersions() {
@@ -215,6 +223,7 @@ class SoftwareInventoryIntegrationTest {
         replace(complete(pkg("amd64", "1.0")));
         long old = finding();
         jdbc.update("UPDATE t_vuln_finding SET cve_id='CVE-2026-45678',status=2,source='',architecture='',distro_id='',distro_version='',identity_status='legacy' WHERE id=?", old);
+        jdbc.update("DELETE FROM t_cve_db WHERE cve_id='CVE-2026-45679'");
         rules(scopedRule("amd64", "2.0"));
         matcher.matchAgent("inventory-host", 1);
         assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
@@ -238,10 +247,14 @@ class SoftwareInventoryIntegrationTest {
     }
 
     @Test void overlappingRulesEmitOneFindingAndConflictingFixDeclarationsBlockAutomation() {
-        rules(scopedRule("*", "2.0"), scopedRule("amd64", "2.1"));
-        replace(complete(pkg("amd64", "1.0")));
-        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
-        assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding", String.class));
+        for (var declarations : List.of(List.of("2.0", "2.1"), List.of("2.0", "", "2.1"), List.of("", "2.0", "2.1"))) {
+            rules(declarations.stream().map(v -> scopedRule("amd64", v)).toArray(Map[]::new));
+            replace(complete(pkg("amd64", "1.0")));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding", Integer.class));
+            assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding", String.class));
+            assertEquals("conflicting", jdbc.queryForObject("SELECT evidence_status FROM t_vuln_finding", String.class));
+            assertEquals(declarations.size(), JsonUtils.read(jdbc.queryForObject("SELECT rule_evidence FROM t_vuln_finding", String.class)).path("rules").size());
+        }
     }
 
     @Test void queryKeepsOriginalFindingIdentityAndRepairRejectsCurrentIdentityDrift() {
@@ -277,5 +290,73 @@ class SoftwareInventoryIntegrationTest {
         assertEquals(0, jdbc.queryForObject("SELECT approved FROM t_fix_task WHERE id=?", Integer.class, task));
         assertNull(jdbc.queryForObject("SELECT dispatched_at FROM t_fix_task WHERE id=?", String.class, task));
         verifyNoInteractions(commands);
+    }
+
+    @Test void backportDeclarationsUseFullPackageVersionsAndRetainTheOriginalCitation() {
+        var vulnerable = new java.util.LinkedHashMap<>(scopedRule("amd64", "1.0-1ubuntu2"));
+        vulnerable.put("vrange", "<1.0-1ubuntu2");
+        var reference = Map.of("basis", "vendor_advisory", "assessment", "affected", "package_scope", "binary",
+                "publisher", "Fixture publisher", "advisory_id", "FIXTURE-BACKPORT-1", "url", "https://fixture.invalid/advisories/backport-1",
+                "notes", "Fixture declaration of a revision backport while the upstream base remains 1.0.");
+        vulnerable.put("evidence", reference);
+        var protectedVersion = new java.util.LinkedHashMap<>(vulnerable); protectedVersion.put("vrange", ">=1.0-1ubuntu2"); protectedVersion.put("fixed_version", "");
+        var unaffected = new java.util.LinkedHashMap<>(reference); unaffected.put("assessment", "not_affected"); protectedVersion.put("evidence", unaffected);
+        rules(vulnerable, protectedVersion);
+        replace(complete(pkg("amd64", "1.0-1ubuntu1")));
+        var found = jdbc.queryForMap("SELECT * FROM t_vuln_finding WHERE cve_id='CVE-2026-45678'");
+        assertEquals("declared", found.get("evidence_status"));
+        var snapshot = JsonUtils.read((String) found.get("rule_evidence"));
+        assertEquals("manual", snapshot.path("import").path("source_id").asText());
+        assertEquals(1, snapshot.path("import").path("imported_by").asInt());
+        assertEquals("FIXTURE-BACKPORT-1", snapshot.path("rules").get(0).path("evidence").path("advisory_id").asText());
+        replace(complete(pkg("amd64", "1.0-1ubuntu2")));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE cve_id='CVE-2026-45678'", Integer.class));
+    }
+
+    @Test void contradictoryAffectedAndUnaffectedDeclarationsCannotProvideAnAutomaticFix() {
+        var excluded = new java.util.LinkedHashMap<>(scopedRule("amd64", ""));
+        excluded.put("evidence", Map.of("basis", "manual_analysis", "assessment", "not_affected", "package_scope", "binary", "notes", "Conflicting fixture declaration."));
+        rules(scopedRule("amd64", "2.0"), excluded);
+        replace(complete(pkg("amd64", "1.0")));
+        var row = jdbc.queryForMap("SELECT * FROM t_vuln_finding WHERE cve_id='CVE-2026-45678'");
+        assertEquals("conflicting", row.get("evidence_status")); assertNull(row.get("fixed_version"));
+        assertEquals(2, JsonUtils.read((String) row.get("rule_evidence")).path("rules").size());
+        assertThrows(IllegalArgumentException.class, () -> create(((Number) row.get("id")).longValue()));
+        verifyNoInteractions(patches, commands);
+    }
+
+    @Test void changedRuleEvidenceBlocksCreationAndApprovalWithoutChangingInventoryOrOverwritingTheSnapshot() {
+        replace(complete(pkg("amd64", "1.0"))); long id = finding(); cover(id);
+        long task = ((Number) create(id).get("taskId")).longValue();
+        var before = jdbc.queryForMap("SELECT rule_digest,rule_evidence FROM t_vuln_finding WHERE id=?", id);
+        var changed = new java.util.LinkedHashMap<>(scopedRule("amd64", "2.0"));
+        changed.put("evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Corrected declaration requiring a new scan."));
+        catalog.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", "CVE-2026-45679", "severity", 3, "affected", List.of(changed))))), 2L);
+        assertEquals(before, jdbc.queryForMap("SELECT rule_digest,rule_evidence FROM t_vuln_finding WHERE id=?", id));
+        var rows = (List<Map<String, Object>>) new VulnQueryService(jdbc).findings(null, null, null, null, 1, 20).get("list");
+        assertEquals(0, ((Number) rows.get(0).get("rule_current")).intValue());
+        assertThrows(IllegalArgumentException.class, () -> create(id));
+        assertThrows(IllegalArgumentException.class, () -> approve(task));
+        assertEquals(0, jdbc.queryForObject("SELECT approved FROM t_fix_task WHERE id=?", Integer.class, task));
+        assertNull(jdbc.queryForObject("SELECT dispatched_at FROM t_fix_task WHERE id=?", String.class, task));
+        verifyNoInteractions(commands);
+    }
+
+    @Test void changedEvidenceDoesNotReuseAnOldIgnoredDecisionForTheSameInstallation() {
+        rules(scopedRule("amd64", "2.0")); replace(complete(pkg("amd64", "1.0")));
+        jdbc.update("UPDATE t_vuln_finding SET status=2 WHERE cve_id='CVE-2026-45678'");
+        var changed = new java.util.LinkedHashMap<>(scopedRule("amd64", "2.0"));
+        changed.put("evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "New evidence declaration."));
+        rules(changed); matcher.matchAgent("inventory-host", 3);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE status=2", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE status=0", Integer.class));
+    }
+
+    @Test void currentRulesCannotRetroactivelySupplyHistoricalFindingProvenance() {
+        replace(complete(pkg("amd64", "1.0"))); long id = finding();
+        jdbc.update("UPDATE t_vuln_finding SET evidence_status='legacy',rule_source_id='',rule_digest='',rule_evidence='{}' WHERE id=?", id);
+        assertThrows(IllegalArgumentException.class, () -> create(id));
+        assertEquals("", jdbc.queryForObject("SELECT rule_digest FROM t_vuln_finding WHERE id=?", String.class, id));
+        verifyNoInteractions(patches, commands);
     }
 }

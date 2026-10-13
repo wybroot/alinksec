@@ -6,6 +6,8 @@
  * 适配层把服务端字段映射为页面组件所需结构（页面无需感知后端模型）。
  * ===================================================================== */
 
+import { readRuleEvidence } from '../utils/vulnerabilityEvidence.js'
+
 const TOKEN_KEY = 'alinksec_token'
 const USER_KEY = 'alinksec_user'
 
@@ -45,6 +47,7 @@ const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(
 const del = (path) => request(path, { method: 'DELETE' })
 
 export const fetchLibraries = () => get('/api/libraries')
+export const fetchLibraryCves = ({ keyword = '', page = 1, size = 20 } = {}) => get(`/api/libraries/cves?${new URLSearchParams({ keyword, page, size })}`)
 export const synchronizeLibrary = (id) => post(`/api/libraries/sources/${encodeURIComponent(id)}/sync`, {})
 export const updateLibrarySchedule = (id, plan) => put(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`, plan)
 export const resetLibrarySchedule = (id) => del(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`)
@@ -497,7 +500,7 @@ export async function fetchVulns() {
     seen.add(id)
     const key = JSON.stringify([f.cve_id, f.software, f.installed_version || '', f.fixed_version || '',
       f.source || '', f.architecture || '', f.distro_id || '', f.distro_version || '', f.os_type || 0,
-      f.os_version || '', f.identity_status || 'legacy'])
+      f.os_version || '', f.identity_status || 'legacy', f.rule_source_id || '', f.rule_digest || '', f.evidence_status || 'legacy'])
     if (!grouped.has(key)) {
       grouped.set(key, {
         cve: f.cve_id,
@@ -514,6 +517,10 @@ export async function fetchVulns() {
         distroVersion: f.distro_version || '',
         osVersion: f.os_version || '',
         identityStatus: f.identity_status || 'legacy',
+        ruleSourceId: f.rule_source_id || '',
+        ruleDigest: f.rule_digest || '',
+        evidenceStatus: f.evidence_status || 'legacy',
+        ruleEvidence: readRuleEvidence(f.rule_evidence),
         blocked: 0,
         hosts: 0,
         hostList: [],
@@ -531,7 +538,8 @@ export async function fetchVulns() {
       g.hostList.push(g.hostList.includes(label) ? `${label} (${f.agent_id})` : label)
     }
     if (Number(f.status) <= 1 && f.id && f.agent_id && f.fixed_version
-        && f.identity_status === 'complete' && (f.identity_current === true || Number(f.identity_current) === 1)) {
+        && f.identity_status === 'complete' && (f.identity_current === true || Number(f.identity_current) === 1)
+        && f.evidence_status === 'declared' && (f.rule_current === true || Number(f.rule_current) === 1)) {
       g.findings.push({ agentId: f.agent_id, findingId: Number(f.id) })
       g.status = 'todo'
     } else if (Number(f.status) <= 1) g.blocked += 1
