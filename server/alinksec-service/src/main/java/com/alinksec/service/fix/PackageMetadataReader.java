@@ -32,16 +32,23 @@ public class PackageMetadataReader {
             directory = Files.createTempDirectory("alinksec-patch-reader-");
             Path input = directory.resolve("package." + type);
             Files.copy(file, input);
-            Files.setPosixFilePermissions(input, PosixFilePermissions.fromString("r--r--r--"));
+            Files.setPosixFilePermissions(input, PosixFilePermissions.fromString("r--------"));
             Path temporary = Files.createDirectory(directory.resolve("tmp"));
             Files.setPosixFilePermissions(temporary, PosixFilePermissions.fromString("rwx------"));
             // A root application must not parse untrusted packages as root. Non-root applications
             // keep their existing UID; every parser has cleared credentials and no_new_privs.
             if (rootProcess()) {
+                // The parser can traverse the private directory and read the root-owned input,
+                // without making the uploaded bytes readable to other local users.
+                Files.setAttribute(directory, "unix:gid", 65534);
+                Files.setAttribute(input, "unix:gid", 65534);
+                Files.setPosixFilePermissions(input, PosixFilePermissions.fromString("r--r-----"));
                 Files.setAttribute(temporary, "unix:uid", 65534);
                 Files.setAttribute(temporary, "unix:gid", 65534);
+                Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x--x---"));
+            } else {
+                Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
             }
-            Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-xr-xr-x"));
             List<String> arguments = "deb".equals(type)
                     ? List.of("/usr/bin/dpkg-deb", "--show", "--showformat=${Package}\u001f${Version}\u001f${Architecture}\n", input.toString())
                     : List.of("/usr/bin/rpm", "-qp", "--nosignature", "--qf", "%{NAME}\u001f%{EPOCHNUM}\u001f%{VERSION}\u001f%{RELEASE}\u001f%{ARCH}\n", "--", input.toString());
