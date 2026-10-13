@@ -231,6 +231,7 @@
         <el-form-item label="CVE 编号"><el-input v-model="patchReview.cveId" placeholder="CVE-2026-12345" /><el-button @click="loadPatchReviewContext">查看当前依据</el-button></el-form-item>
       </el-form>
       <template v-if="patchReview.context">
+        <p>正在复核：{{ patchReview.context.cve.cve_id }}</p>
         <p class="mono" style="overflow-wrap:anywhere">补丁 SHA256：{{ patchReview.context.patch.sha256 }}</p>
         <p>规则来源：{{ patchReview.context.cve.rule_source_id }}</p>
         <p class="mono" style="overflow-wrap:anywhere">规则指纹：{{ patchReview.context.cve.rule_digest }}</p>
@@ -249,7 +250,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
@@ -416,6 +417,7 @@ async function submitPatchImport() {
 }
 
 const patchReview = reactive({ visible: false, loading: false, patch: null, cveId: '', context: null, notes: '', acknowledged: false })
+watch(() => patchReview.cveId, () => { patchReview.context = null; patchReview.acknowledged = false })
 function openPatchReview(row) { Object.assign(patchReview, { visible: true, patch: row, cveId: '', context: null, notes: '', acknowledged: false }) }
 function formatReviewEvidence(cve) {
   try { return JSON.stringify({ provenance: JSON.parse(cve.provenance), affected: JSON.parse(cve.affected) }, null, 2) }
@@ -423,7 +425,11 @@ function formatReviewEvidence(cve) {
 }
 async function loadPatchReviewContext() {
   patchReview.context = null; patchReview.acknowledged = false
-  try { patchReview.context = await fetchPatchReviewContext(patchReview.patch.id, patchReview.cveId.trim()) }
+  const id = patchReview.patch.id, cveId = patchReview.cveId.trim()
+  try {
+    const context = await fetchPatchReviewContext(id, cveId)
+    if (patchReview.patch?.id === id && patchReview.cveId.trim() === cveId) patchReview.context = context
+  }
   catch (e) { msg(e.message || '当前复核依据不可用', 'error') }
 }
 async function submitPatchReview() {
