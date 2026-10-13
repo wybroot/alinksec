@@ -242,7 +242,7 @@ try {
   await taskRow.getByRole('button', { name: '取消', exact: true }).click()
   const prompt = page.getByRole('dialog').filter({ hasText: '取消软件包修复' })
   await prompt.locator('input').fill('Cancel disposable offline browser repair')
-  await prompt.getByRole('button', { name: '确定', exact: true }).click()
+  await prompt.getByRole('button', { name: /^(确定|OK)$/, exact: true }).click()
   await expect.poll(() => database.prepare('SELECT status FROM t_fix_task WHERE id=?').get(batchResult.data.taskId).status).toBe(4)
   await expect(taskRow).toContainText('已取消')
   assert.equal(database.prepare('SELECT count(*) AS n FROM t_agent_download_token WHERE fix_task_id=?').get(batchResult.data.taskId).n, 0)
