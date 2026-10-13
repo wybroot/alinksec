@@ -12,6 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class VulnMatchServiceTest {
 
+    @Test void ruleFingerprintSurvivesDatabaseKeyOrderingButDetectsNestedEvidenceChanges() {
+        var original = com.alinksec.common.util.JsonUtils.read("[{\"name\":\"fixture\",\"evidence\":{\"notes\":\"Original analysis\",\"assessment\":\"affected\"},\"ranges\":[\">=1.0\",\"<2.0\"]}]");
+        var reordered = com.alinksec.common.util.JsonUtils.read("[{\"ranges\":[\">=1.0\",\"<2.0\"],\"evidence\":{\"assessment\":\"affected\",\"notes\":\"Original analysis\"},\"name\":\"fixture\"}]");
+        assertEquals(VulnerabilityEvidence.ruleDigest("manual", "CVE-2099-1234", original),
+                VulnerabilityEvidence.ruleDigest("manual", "CVE-2099-1234", reordered));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) reordered.get(0).path("evidence")).put("notes", "Changed analysis");
+        org.junit.jupiter.api.Assertions.assertNotEquals(VulnerabilityEvidence.ruleDigest("manual", "CVE-2099-1234", original),
+                VulnerabilityEvidence.ruleDigest("manual", "CVE-2099-1234", reordered));
+    }
+
     @Test
     void compareVersions_semver_numeric() {
         assertTrue(VulnMatchService.compareVersions("6.7.9", "6.7.10") < 0);

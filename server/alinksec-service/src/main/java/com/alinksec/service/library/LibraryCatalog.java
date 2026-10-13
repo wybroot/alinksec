@@ -142,7 +142,7 @@ public class LibraryCatalog {
                 for (JsonNode rule : document.path("affected")) {
                     if (!rule.has("match")) ((com.fasterxml.jackson.databind.node.ObjectNode) rule).put("match", "exact");
                 }
-                String serialized = JsonUtils.write(document);
+                String serialized = VulnerabilityEvidence.canonicalJson(document);
                 Map<String, Object> provenance = new LinkedHashMap<>();
                 provenance.put("source_id", source);
                 provenance.put("ingestion", "manual".equals(source) ? "manual_import" : "configured_import");
