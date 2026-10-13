@@ -38,13 +38,17 @@ public class FixTaskService {
     private final CommandService commandService;
     private final PatchRepoService patchRepo;
     private final DatabaseDialect database;
+    private final PackageRepairValidation validation;
+    private final org.springframework.transaction.support.TransactionTemplate transaction;
 
     public FixTaskService(JdbcTemplate jdbc, CommandService commandService, PatchRepoService patchRepo,
-                          DatabaseDialect database) {
+                          DatabaseDialect database, org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.patchRepo = patchRepo;
         this.database = database;
+        this.validation = new PackageRepairValidation(jdbc,patchRepo);
+        this.transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
     /**
@@ -178,12 +182,12 @@ public class FixTaskService {
     /** 任务超时兜底：执行中超 30 分钟 → 部分失败（已收结果保留） */
     @Scheduled(fixedDelay = 120_000, initialDelay = 150_000)
     public void sweepTimeout() {
-        int rows = jdbc.update("""
-                UPDATE t_fix_task SET status = 3, finished_at = CURRENT_TIMESTAMP
-                WHERE status = 1 AND created_at < ?
-                """, database.timestampBefore(Duration.ofMinutes(30)));
-        if (rows > 0) {
-            log.warn("修复任务超时置部分失败: count={}", rows);
+        var ids=jdbc.queryForList("SELECT id FROM t_fix_task WHERE status=1 AND COALESCE(started_at,created_at)<? ORDER BY id LIMIT 100",Long.class,database.timestampBefore(Duration.ofMinutes(30)));
+        for (Long id:ids) {
+            transaction.executeWithoutResult(status -> {
+                var task=lockedTask(id);
+                if (((Number)task.get("status")).intValue()==1) stopTask(id,3,"派发后 30 分钟未完成，停止排队和重推；已开始的安装需人工检查",null);
+            });
         }
     }
 
@@ -197,14 +201,14 @@ public class FixTaskService {
      * @param items       [{agentId, findingId}]（t_vuln_finding，须有 fixed_version）
      * @param approver    审批人（必填）
      * @param windowStart 维护窗口起（ISO 本地时间，空 = 审批后立即执行）
-     * @param windowEnd   维护窗口止（可选，仅展示约束）
+     * @param windowEnd   维护窗口止（填写窗口时必须提供，限制派发与重推）
      */
     @Transactional
     public Map<String, Object> createPackageTask(String name, List<Map<String, Object>> items,
                                                  String approver, String windowStart, String windowEnd,
                                                  Long createdBy) {
-        if (items == null || items.isEmpty()) {
-            throw new IllegalArgumentException("请选择修复项");
+        if (items == null || items.isEmpty() || items.size()>500) {
+            throw new IllegalArgumentException("请选择 1 至 500 项修复目标");
         }
         if (approver == null || approver.isBlank()) {
             throw new IllegalArgumentException("软件包类修复必须指定审批人");
@@ -216,9 +220,22 @@ public class FixTaskService {
         if (findingIds.size() != items.size() || findingIds.isEmpty()) {
             throw new IllegalArgumentException("修复项格式非法（需 agentId + findingId）");
         }
+        requireActor(createdBy);
+        var reviewers=jdbc.queryForList("""
+                SELECT u.id,u.username FROM t_user u JOIN t_role r ON r.id=u.role_id
+                WHERE u.username=? AND u.status=1 AND r.name IN ('admin','operator')
+                """,approver.trim());
+        if (reviewers.size()!=1) throw new IllegalArgumentException("审批人必须是已启用的管理员或运维账号");
+        long approverId=((Number)reviewers.get(0).get("id")).longValue();
+        approver=String.valueOf(reviewers.get(0).get("username"));
+        OffsetDateTime ws=parseTime(windowStart),we=parseTime(windowEnd);
+        if ((ws==null)!=(we==null) || ws!=null && (!we.isAfter(ws) || !we.isAfter(OffsetDateTime.now())))
+            throw new IllegalArgumentException("维护窗口必须同时提供起止时间，结束晚于开始且尚未过期");
+        items.stream().map(it -> String.valueOf(it.get("agentId"))).distinct().sorted().forEach(agent ->
+                jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=? AND deleted=false",agent));
         Map<Long, Map<String, Object>> findings = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbc.queryForList("""
-                SELECT f.id, f.agent_id, f.cve_id, f.software, f.installed_version, f.fixed_version, f.status,
+                SELECT f.id, f.agent_id, f.cve_id, f.software, f.installed_version, f.fixed_version, f.status,f.current_match,
                        f.source,f.architecture,f.distro_id,f.distro_version,f.identity_status,
                         f.os_type AS finding_os_type,f.os_version AS finding_os_version,
                         f.rule_source_id,f.rule_digest,f.evidence_status,
@@ -231,6 +248,7 @@ public class FixTaskService {
 
         // 覆盖率校验 + payload 构造
         List<Map<String, Object>> resolveTargets = new ArrayList<>();
+        var packageKeys=new java.util.HashSet<String>();
         for (Map<String, Object> it : items) {
             String agentId = String.valueOf(it.get("agentId"));
             long fid = it.get("findingId") instanceof Number n ? n.longValue() : -1;
@@ -238,9 +256,17 @@ public class FixTaskService {
             if (f == null || !agentId.equals(String.valueOf(f.get("agent_id")))) {
                 throw new IllegalArgumentException("漏洞项不存在或与主机不匹配: finding=" + fid);
             }
-            if (((Number) f.get("status")).intValue() > 1) {
+            if (((Number) f.get("status")).intValue() > 1 || !DatabaseDialect.readBoolean(f.get("current_match"))) {
                 throw new IllegalArgumentException("漏洞项已处置，请刷新后重选: finding=" + fid);
             }
+            if (!packageKeys.add(JsonUtils.write(List.of(agentId,f.get("software")))))
+                throw new IllegalArgumentException("同一主机的软件包请只选择一个当前修复目标；修复后重新扫描评估其他 CVE");
+            Integer active=jdbc.queryForObject("""
+                    SELECT count(*) FROM t_fix_record r JOIN t_fix_task t ON t.id=r.task_id
+                    JOIN t_vuln_finding f ON CAST(f.id AS TEXT)=r.ref_id AND f.agent_id=r.agent_id
+                    WHERE r.agent_id=? AND f.software=? AND r.ref_type='vuln_finding' AND r.status=0 AND t.status IN (0,1)
+                    """,Integer.class,agentId,f.get("software"));
+            if (active!=null && active>0) throw new IllegalArgumentException("该软件包已有待审批或执行中的修复任务，请先查看原任务");
             if (f.get("fixed_version") == null || String.valueOf(f.get("fixed_version")).isBlank()) {
                 throw new IllegalArgumentException("漏洞 " + f.get("cve_id") + " 无修复版本信息，需人工处理");
             }
@@ -305,16 +331,15 @@ public class FixTaskService {
         }
 
         String taskNo = "FP" + LocalDateTime.now().format(NO_FMT)
-                + ThreadLocalRandom.current().nextInt(100, 1000);
-        OffsetDateTime ws = parseTime(windowStart), we = parseTime(windowEnd);
+                + java.util.UUID.randomUUID().toString().replace("-","").substring(0,12);
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_fix_task (task_no, name, type, scope, targets, status, created_by, approver, "
-                        + "approved, window_start, window_end) "
-                        + "VALUES (?, ?, 2, ?, ?, 0, ?, ?, false, ?, ?) RETURNING id",
+                        + "approver_id,approved, window_start, window_end) "
+                        + "VALUES (?, ?, 2, ?, ?, 0, ?, ?, ?,false, ?, ?) RETURNING id",
                 Long.class, taskNo,
                 name == null || name.isBlank() ? taskNo + " 软件包修复" : name,
                 JsonUtils.write(Map.of("agent_ids", List.copyOf(byAgent.keySet()))),
-                JsonUtils.write(targetRows), createdBy, approver, database.timestamp(ws), database.timestamp(we));
+                JsonUtils.write(targetRows), createdBy, approver,approverId,database.timestamp(ws), database.timestamp(we));
 
         // 预写 t_fix_record（待执行/待审批派发）
         for (Map<String, Object> row : targetRows) {
@@ -328,164 +353,135 @@ public class FixTaskService {
         return Map.of("taskId", taskId, "taskNo", taskNo, "pendingApprove", true);
     }
 
-    /** 审批通过：置 approved；窗口为空或已到 → 立即派发，否则等调度器 */
+    /** Only the designated, currently enabled account may approve; request labels are never identities. */
     @Transactional
-    public Map<String, Object> approve(long taskId, String operator) {
-        Map<String, Object> task = jdbc.queryForMap(
-                "SELECT id, type, status, approved, approver, window_start FROM t_fix_task WHERE id = ?", taskId);
-        if (((Number) task.get("type")).intValue() != 2) {
-            throw new IllegalArgumentException("仅软件包类任务需审批");
-        }
-        if (isTrue(task.get("approved"))) {
-            return Map.of("taskId", taskId, "state", "already");
-        }
-        jdbc.update("UPDATE t_fix_task SET approved = true, approved_at = CURRENT_TIMESTAMP, approver = COALESCE(?, approver) "
-                + "WHERE id = ?", operator, taskId);
-        boolean inWindow = task.get("window_start") == null
-                || !OffsetDateTime.now().isBefore(database.readOffsetDateTime(task.get("window_start")));
-        if (inWindow) {
-            dispatchApproved(taskId);
-            return Map.of("taskId", taskId, "state", "dispatched");
-        }
-        return Map.of("taskId", taskId, "state", "waiting_window");
+    public Map<String,Object> approve(long taskId,Long actor) {
+        return transaction.execute(status -> {
+            String username=requireActor(actor);
+            var task=lockedTask(taskId);
+            if (((Number)task.get("type")).intValue()!=2) throw new IllegalArgumentException("仅软件包类任务需审批");
+            if (!(task.get("approver_id") instanceof Number designated) || designated.longValue()!=actor.longValue())
+                throw new IllegalArgumentException("当前登录账号不是该任务指定的审批人；旧任务缺少账号绑定时请重新创建");
+            if (((Number)task.get("status")).intValue()>1) throw new IllegalArgumentException("任务已结束，不能再次审批");
+            if (expired(task)) throw new IllegalArgumentException("维护窗口已结束，不能审批或派发");
+            if (isTrue(task.get("approved"))) return Map.of("taskId",taskId,"state","already");
+            int changed=jdbc.update("UPDATE t_fix_task SET approved=true,approved_at=CURRENT_TIMESTAMP,approved_by=? WHERE id=? AND status=0 AND approved=false",actor,taskId);
+            if (changed!=1) throw new IllegalArgumentException("任务状态已变化，请刷新后重试");
+            log.info("软件包任务审批: task={} uid={} username={}",taskId,actor,username);
+            boolean dispatched=dispatchApproved(taskId);
+            return Map.of("taskId",taskId,"state",dispatched ? "dispatched" : "waiting_window");
+        });
     }
 
-    /** 维护窗口调度：已审批未派发且窗口已到 → 派发（每分钟） */
-    @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+    public List<Map<String,Object>> approvers() {
+        return jdbc.queryForList("SELECT u.id,u.username,u.real_name FROM t_user u JOIN t_role r ON r.id=u.role_id WHERE u.status=1 AND r.name IN ('admin','operator') ORDER BY u.username");
+    }
+
+    private String requireActor(Long uid) {
+        if (uid==null || uid<=0) throw new IllegalArgumentException("需要已验证的登录身份");
+        var rows=jdbc.queryForList("SELECT u.username FROM t_user u JOIN t_role r ON r.id=u.role_id WHERE u.id=? AND u.status=1 AND r.name IN ('admin','operator')",uid);
+        if (rows.size()!=1) throw new IllegalArgumentException("账号已禁用或没有修复操作权限");
+        return String.valueOf(rows.get(0).get("username"));
+    }
+
+    private Map<String,Object> lockedTask(long taskId) {
+        if (jdbc.update("UPDATE t_fix_task SET status=status WHERE id=?",taskId)!=1) throw new IllegalArgumentException("修复任务不存在");
+        return jdbc.queryForMap("SELECT id,type,status,approved,approver_id,approved_by,created_by,window_start,window_end,started_at,dispatched_at,CAST(targets AS TEXT) AS targets FROM t_fix_task WHERE id=?",taskId);
+    }
+    private boolean expired(Map<String,Object> task) {
+        return task.get("window_end")!=null && !OffsetDateTime.now().isBefore(database.readOffsetDateTime(task.get("window_end")));
+    }
+
+    /** Each scheduler attempt has its own transaction, including the conditional claim and durable commands. */
+    @Scheduled(fixedDelay=60_000,initialDelay=60_000)
     public void dispatchWindowReached() {
-        List<Long> ids = jdbc.queryForList("""
-                SELECT id FROM t_fix_task
-                WHERE type = 2 AND approved = true AND dispatched_at IS NULL
-                  AND (window_start IS NULL OR window_start <= CURRENT_TIMESTAMP)
-                  AND status = 0
-                """, Long.class);
-        for (Long id : ids) {
+        Object now=database.timestamp(java.time.Instant.now());
+        var ids=jdbc.queryForList("SELECT id FROM t_fix_task WHERE type=2 AND status=0 AND ((approved=true AND (window_start IS NULL OR window_start<=?)) OR window_end<=?) ORDER BY id LIMIT 100",Long.class,now,now);
+        for (Long id:ids) {
             try {
-                dispatchApproved(id);
-            } catch (Exception e) {
-                log.error("窗口派发失败: task={}", id, e);
-            }
+                transaction.executeWithoutResult(status -> {
+                    var task=lockedTask(id);
+                    if (((Number)task.get("status")).intValue()!=0) return;
+                    if (expired(task)) { stopTask(id,3,"维护窗口已结束，未派发的任务已停止",null); return; }
+                    if (isTrue(task.get("approved"))) dispatchApproved(id);
+                });
+            } catch (IllegalArgumentException e) {
+                transaction.executeWithoutResult(status -> {
+                    var task=lockedTask(id);
+                    if (((Number)task.get("status")).intValue()==0) stopTask(id,3,e.getMessage(),null);
+                });
+                log.warn("软件包任务停止派发: task={} reason={}",id,e.getMessage());
+            } catch (RuntimeException e) { log.error("窗口派发暂时失败，保留任务等待重试: task={}",id,e); }
         }
     }
 
-    /** 派发已审批任务：按 targets 分组下发 CmdVulnFix（PACKAGE 项） */
-    private void dispatchApproved(long taskId) {
-        Map<String, Object> task = jdbc.queryForMap(
-                "SELECT CAST(targets AS TEXT) AS targets FROM t_fix_task WHERE id = ?", taskId);
-        List<Map<String, Object>> targets = JsonUtils.read((String) task.get("targets"), List.class);
-        Map<String, List<FixItem>> byAgent = new LinkedHashMap<>();
-        for (Map<String, Object> t : targets) {
-            Map<String, Object> payload = JsonUtils.read((String) t.get("fix_payload"), Map.class);
-            if (payload == null || !(payload.get("inventory") instanceof Map<?, ?> identity)
-                    || !identity.equals(currentPackageIdentity(String.valueOf(t.get("agent_id")),
-                    String.valueOf(payload.get("pkg_name")), String.valueOf(identity.get("installed_version"))))) {
-                throw new IllegalArgumentException("软件资产身份已变化或缺少完整采集证据，请重新采集并创建修复任务");
-            }
-            var findings = jdbc.queryForList("""
-                    SELECT source,architecture,distro_id,distro_version,identity_status,installed_version,
-                            os_type AS finding_os_type,os_version AS finding_os_version,status,software,cve_id,fixed_version,
-                            rule_source_id,rule_digest,evidence_status
-                    FROM t_vuln_finding WHERE id=? AND agent_id=?
-                    """, Long.parseLong(String.valueOf(t.get("ref_id"))), t.get("agent_id"));
-            if (findings.size() != 1 || ((Number) findings.get(0).get("status")).intValue() > 1
-                    || !payload.get("pkg_name").equals(findings.get(0).get("software"))
-                    || !payload.get("cve_id").equals(findings.get(0).get("cve_id"))
-                    || !payload.get("target_version").equals(findings.get(0).get("fixed_version"))
-                    || !java.util.Objects.equals(payload.get("rule_source_id"), findings.get(0).get("rule_source_id"))
-                    || !java.util.Objects.equals(payload.get("rule_digest"), findings.get(0).get("rule_digest"))) {
-                throw new IllegalArgumentException("漏洞结果或修复目标已变化，请重新扫描并创建修复任务");
-            }
-            verifyFindingIdentity(findings.get(0), (Map<?, ?>) payload.get("inventory"));
-            verifyFindingEvidence(findings.get(0));
-            var target = new LinkedHashMap<>(payload);
-            target.put("agent_id", t.get("agent_id"));
-            var patch = patchRepo.verifyPin(payload.get("patch_review") instanceof Map<?, ?> pin ? pin : null, target);
-            payload.put("download_url", patchRepo.downloadUrl(String.valueOf(t.get("agent_id")), patch));
-            byAgent.computeIfAbsent(String.valueOf(t.get("agent_id")), k -> new ArrayList<>())
-                    .add(FixItem.newBuilder()
-                            .setRefId(String.valueOf(t.get("ref_id")))
-                            .setType(FixItem.FixType.PACKAGE)
-                            .setPayload(JsonUtils.write(payload))
-                            .build());
+    private boolean dispatchApproved(long taskId) {
+        var task=lockedTask(taskId);
+        if (((Number)task.get("status")).intValue()!=0 || !isTrue(task.get("approved"))) return false;
+        requireActor(task.get("approved_by") instanceof Number n ? n.longValue() : null);
+        if (!java.util.Objects.equals(task.get("approver_id"),task.get("approved_by"))) throw new IllegalArgumentException("审批账号绑定无效，请重新创建任务");
+        if (expired(task)) throw new IllegalArgumentException("维护窗口已结束");
+        if (task.get("window_start")!=null && OffsetDateTime.now().isBefore(database.readOffsetDateTime(task.get("window_start")))) return false;
+        if (jdbc.update("UPDATE t_fix_task SET status=1,started_at=CURRENT_TIMESTAMP,dispatched_at=CURRENT_TIMESTAMP WHERE id=? AND type=2 AND status=0 AND approved=true AND dispatched_at IS NULL",taskId)!=1) return false;
+        List<Map<String,Object>> targets=JsonUtils.read(String.valueOf(task.get("targets")),List.class);
+        Map<String,List<FixItem>> byAgent=new LinkedHashMap<>();
+        targets.stream().map(t -> String.valueOf(t.get("agent_id"))).distinct().sorted().forEach(agent -> jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=? AND deleted=false",agent));
+        for (var target:targets) {
+            var payload=validation.validate(target);
+            payload.remove("validated_patch");
+            payload.put("download_url",""); // Issued after commit, just before the actual delivery attempt.
+            byAgent.computeIfAbsent(String.valueOf(target.get("agent_id")),ignored -> new ArrayList<>()).add(FixItem.newBuilder().setRefId(String.valueOf(target.get("ref_id"))).setType(FixItem.FixType.PACKAGE).setPayload(JsonUtils.write(payload)).build());
         }
-        jdbc.update("UPDATE t_fix_task SET status = 1, started_at = CURRENT_TIMESTAMP, dispatched_at = CURRENT_TIMESTAMP "
-                + "WHERE id = ? AND dispatched_at IS NULL", taskId);
-        for (var e : byAgent.entrySet()) {
-            commandService.dispatch(e.getKey(), Command.newBuilder()
-                    .setVulnFix(CmdVulnFix.newBuilder()
-                            .setTaskId(String.valueOf(taskId))
-                            .addAllFixes(e.getValue())), null);
+        if (byAgent.isEmpty()) throw new IllegalArgumentException("软件包任务没有有效目标");
+        for (var entry:byAgent.entrySet()) {
+            String cmdId=commandService.dispatchAfterCommit(entry.getKey(),Command.newBuilder().setVulnFix(CmdVulnFix.newBuilder().setTaskId(String.valueOf(taskId)).addAllFixes(entry.getValue())),((Number)task.get("approved_by")).longValue());
+            jdbc.update("UPDATE t_fix_record SET command_id=? WHERE task_id=? AND agent_id=? AND status=0",cmdId,taskId,entry.getKey());
         }
-        log.info("软件包修复任务已派发: task_id={} agents={}", taskId, byAgent.size());
+        log.info("软件包任务已持久排队，提交后派发: task={} agents={}",taskId,byAgent.size());
+        return true;
     }
 
-    private void verifyFindingEvidence(Map<String, Object> finding) {
-        var rules = jdbc.queryForList("SELECT rule_source_id,rule_digest,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE cve_id=?", finding.get("cve_id"));
-        if (!"declared".equals(finding.get("evidence_status")) || rules.size() != 1
-                || !java.util.Objects.equals(finding.get("rule_source_id"), rules.get(0).get("rule_source_id"))
-                || !java.util.Objects.equals(finding.get("rule_digest"), rules.get(0).get("rule_digest"))
-                || !String.valueOf(finding.get("rule_digest")).matches("[a-f0-9]{64}")
-                || !finding.get("rule_digest").equals(com.alinksec.service.scan.VulnerabilityEvidence.ruleDigest(
-                String.valueOf(rules.get(0).get("rule_source_id")), String.valueOf(finding.get("cve_id")), JsonUtils.read((String) rules.get(0).get("affected"))))) {
-            throw new IllegalArgumentException("漏洞规则依据缺失、冲突或已变化，请重新扫描并人工核对来源");
-        }
+    @Transactional
+    public Map<String,Object> cancel(long taskId,Long actor,String reason) {
+        return transaction.execute(status -> {
+            requireActor(actor);
+            if (reason==null || reason.trim().length()<2 || reason.length()>1024) throw new IllegalArgumentException("取消原因需为 2 至 1024 字");
+            var task=lockedTask(taskId);
+            if (((Number)task.get("type")).intValue()!=2 || ((Number)task.get("status")).intValue()>1) throw new IllegalArgumentException("只能取消尚未开始安装的软件包任务");
+            if (!matchesId(task.get("created_by"),actor) && !matchesId(task.get("approver_id"),actor)) throw new IllegalArgumentException("只有创建人或指定审批人可取消该任务");
+            Integer delivered=jdbc.queryForObject("SELECT count(*) FROM t_fix_record r JOIN t_command c ON c.cmd_id=r.command_id WHERE r.task_id=? AND c.status<>0",Integer.class,taskId);
+            if (delivered!=null && delivered>0) throw new IllegalArgumentException("任务指令已经送出，不能取消或承诺回滚，请查看执行结果并人工处理");
+            stopTask(taskId,4,"取消："+reason.trim(),actor);
+            return Map.of("taskId",taskId,"state","cancelled");
+        });
     }
 
-    private Map<String, Object> currentPackageIdentity(String agentId, String name, String installedVersion) {
-        var hosts = jdbc.queryForList("""
-                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error,package_repair_contract
-                FROM t_agent WHERE agent_id=? AND deleted=false
-                """, agentId);
-        if (hosts.size() != 1 || !"complete".equals(hosts.get(0).get("software_collection_status"))) {
-            throw new IllegalArgumentException("软件清单采集失败或完整性未知，请先重新采集: " + agentId);
-        }
-        var host = hosts.get(0);
-        var packages = jdbc.queryForList("SELECT version,source,architecture FROM t_asset_software WHERE agent_id=? AND name=?",
-                agentId, name);
-        if (packages.size() != 1 || !installedVersion.equals(packages.get(0).get("version"))) {
-            throw new IllegalArgumentException("软件包已变化、存在多个架构或多个安装版本，需人工处理: " + name);
-        }
-        var pkg = packages.get(0);
-        String source = String.valueOf(pkg.get("source")), architecture = String.valueOf(pkg.get("architecture"));
-        String distroId = String.valueOf(host.get("distro_id")), distroVersion = String.valueOf(host.get("distro_version"));
-        int osType = ((Number) host.get("os_type")).intValue();
-        if (osType != 1 || ((Number) host.get("package_repair_contract")).intValue() != 1) {
-            throw new IllegalArgumentException("该 Agent 未声明受支持的软件包执行校验能力，请更新支持该系统的 Agent 或人工处理");
-        }
-        if (!java.util.Set.of("rpm", "dpkg").contains(source) || architecture.isBlank()
-                || distroId.isBlank() || distroVersion.isBlank() || !"".equals(host.get("software_identity_error"))) {
-            throw new IllegalArgumentException("缺少发行版、包来源或包架构身份，需人工处理: " + name);
-        }
-        return Map.of("contract", 1, "source", source, "architecture", architecture, "distro_id", distroId,
-                "distro_version", distroVersion, "installed_version", installedVersion,
-                "os_type", osType, "os_version", host.get("os_version") == null ? "" : host.get("os_version"));
+    private void stopTask(long taskId,int state,String reason,Long actor) {
+        String bounded=reason==null ? "修复任务停止" : reason.substring(0,Math.min(2048,reason.length()));
+        jdbc.update("UPDATE t_fix_task SET status=?,failure_reason=?,cancelled_by=?,finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN (0,1)",state,bounded,actor,taskId);
+        jdbc.update("UPDATE t_command SET status=5,finished_at=CURRENT_TIMESTAMP,result=? WHERE status IN (0,1,2,3) AND cmd_id IN (SELECT command_id FROM t_fix_record WHERE task_id=?)",JsonUtils.write(Map.of("reason",bounded)),taskId);
+        jdbc.update("UPDATE t_fix_record SET status=5,log=?,finished_at=CURRENT_TIMESTAMP WHERE task_id=? AND status=0",bounded,taskId);
+        jdbc.update("DELETE FROM t_agent_download_token WHERE fix_task_id=?",taskId);
     }
 
-    private static void verifyFindingIdentity(Map<String, Object> finding, Map<?, ?> inventory) {
-        if (!"complete".equals(finding.get("identity_status"))) {
-            throw new IllegalArgumentException("漏洞记录缺少匹配时的软件身份，请重新扫描后创建修复任务");
-        }
-        for (String field : List.of("source", "architecture", "distro_id", "distro_version", "installed_version")) {
-            if (!java.util.Objects.equals(finding.get(field), inventory.get(field))) {
-                throw new IllegalArgumentException("漏洞记录与当前软件资产身份不一致，请重新扫描后创建修复任务");
-            }
-        }
-        if (!(finding.get("finding_os_type") instanceof Number osType)
-                || !(inventory.get("os_type") instanceof Number currentType) || osType.intValue() != currentType.intValue()
-                || !java.util.Objects.equals(finding.get("finding_os_version"), inventory.get("os_version"))) {
-            throw new IllegalArgumentException("漏洞记录与当前系统身份不一致，请重新扫描后创建修复任务");
-        }
-    }
+    private void verifyFindingEvidence(Map<String,Object> finding) { validation.evidence(finding); }
+    private Map<String,Object> currentPackageIdentity(String agent,String name,String version) { return validation.identity(agent,name,version); }
+    private static void verifyFindingIdentity(Map<String,Object> finding,Map<?,?> identity) { PackageRepairValidation.findingIdentity(finding,identity); }
 
     private static OffsetDateTime parseTime(String s) {
         if (s == null || s.isBlank()) {
             return null;
         }
-        return OffsetDateTime.parse(s.contains("+") || s.endsWith("Z") ? s : s + ":00+08:00");
+        try { return OffsetDateTime.parse(s); }
+        catch (java.time.format.DateTimeParseException e) {
+            try { return LocalDateTime.parse(s).atZone(java.time.ZoneId.of("Asia/Shanghai")).toOffsetDateTime(); }
+            catch (java.time.format.DateTimeParseException invalid) { throw new IllegalArgumentException("维护窗口时间格式非法，请使用 ISO 日期时间"); }
+        }
     }
 
     private static boolean isTrue(Object value) {
         return value instanceof Boolean bool ? bool
                 : value instanceof Number number && number.intValue() != 0;
     }
+    private static boolean matchesId(Object value,Long id) { return id!=null && value instanceof Number n && n.longValue()==id.longValue(); }
 }

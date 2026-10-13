@@ -1386,7 +1386,7 @@ class BaselinePackageIntegrationTest {
     @Test void configurationRepairRequiresCurrentFailedEvidenceAndApplicableEnabledTemplate() {
         enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
-        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props), manager));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
         var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
         assertThrows(IllegalArgumentException.class, () -> fixes.createTask("No evidence", target, 7L));
@@ -1411,7 +1411,7 @@ class BaselinePackageIntegrationTest {
     @Test void configurationRepairRejectsExecutionErrorsAndLaterSuccessfulResults() {
         enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
-        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props), manager));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
         var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
         for (String outcome : List.of("fail", "error", "legacy", "pass")) {
@@ -1479,7 +1479,7 @@ class BaselinePackageIntegrationTest {
     @Test void aLateOlderTaskCannotReplaceNewerComplianceEvidenceForRepair() {
         enableSyntheticRepairFixture();
         var props = new AlinkSecProperties(); props.getDatabase().setType("sqlite");
-        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props)));
+        var fixes = transactional(new FixTaskService(jdbc, commands, mock(PatchRepoService.class), new DatabaseDialect(props), manager));
         long item = jdbc.queryForObject("SELECT id FROM t_baseline_item WHERE template_id=1 AND fix_spec IS NOT NULL AND CAST(fix_spec AS TEXT) NOT LIKE '%manual%' LIMIT 1", Long.class);
         var target = List.<Map<String, Object>>of(Map.of("agentId", "ubuntu", "itemId", item));
         long old = tasks.createTask("Older delayed task", List.of("ubuntu"), List.of(1L), 7L);

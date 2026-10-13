@@ -23,14 +23,15 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 let browser
 const errors = [], unexpected = [], scenarios = []
 const host = { agent_id: 'inventory-host', hostname: 'inventory-host', os_type: 1, os_version: 'Ubuntu 24.04', arch: 'arm64', status: 1 }
-let inventory, software, findings = []
+let inventory, software, findings = [], coverageState = 'partial'
+const coverageHost = () => ({ ...host, status: coverageState, distro_id: 'debian', distro_version: '13', software_count: 3, evaluated_packages: 1, unknown_packages: 1, no_rule_packages: 1, assessed_at: '2026-10-13 00:00:00', assessment: JSON.stringify({ distro_id: 'ubuntu', distro_version: '24.04' }) })
 try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   context.setDefaultTimeout(10000)
   await context.addInitScript(() => {
     localStorage.setItem('alinksec_token', 'browser-fixture')
-    localStorage.setItem('alinksec_user', JSON.stringify({ username: 'admin', role: 'admin' }))
+    localStorage.setItem('alinksec_user', JSON.stringify({ id: 1, username: 'admin', role: 'admin' }))
   })
   await context.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname
@@ -41,7 +42,10 @@ try {
     else if (path === '/api/hosts/inventory-host/software') data = software
     else if (/^\/api\/hosts\/inventory-host\/(ports|processes|accounts|containers)$/.test(path)) data = []
     else if (path === '/api/metrics/query_range') data = []
-    else if (path === '/api/vuln/findings') data = { list: findings, total: findings.length }
+    else if (path === '/api/vuln/findings') data = new URL(route.request().url()).searchParams.has('status') ? { list: [{ ...findings[0], status: 3, cve_id: 'CVE-2099-1999', observed_at: '2026-10-13 00:00:00' }], total: 1 } : { list: findings, total: findings.length }
+    else if (path === '/api/vuln/coverage') data = { list: [coverageHost()], total: 1, limitation: '没有漏洞结果不代表安全；人工来源按整条 CVE 选择，不合并其他来源范围。' }
+    else if (path === '/api/vuln/coverage/inventory-host/packages') data = { host: coverageHost(), total: 3, list: ['affected', 'unknown', 'no_applicable_rules'].map((status, i) => ({ software: 'coverage-fixture-' + i, installed_version: '1.0', source: 'dpkg', architecture: 'amd64', status, affected_cves: i === 0 ? 1 : 0, not_affected_cves: 0, unknown_cves: i === 1 ? 1 : 0, evidence: JSON.stringify({ examples: i === 1 ? [{ cve_id: 'CVE-2099-9999', assessment: 'unknown', reason: 'historical_rule', rule_source_id: '', rule_digest: '' }] : [] }) })) }
+    else if (path === '/api/fix/approvers') data = [{ id: 1, username: 'admin' }]
     else if (path === '/api/vuln/stats') data = { bySeverity: [], total: findings.length, pending: findings.length, fixed: 0 }
     else if (path === '/api/vuln/weakpwds' || path === '/api/vuln/ports') data = { list: [], total: 0 }
     else { unexpected.push(path); return route.fulfill({ status: 500, json: { code: 500, msg: 'Unexpected request' } }) }
@@ -129,10 +133,36 @@ try {
   assert.ok(detailHostTag.width > 0 && detailHostTag.height > 0)
   await expect(legacyDialog).not.toContainText('{{')
   await page.screenshot({ path: artifacts + '/vulnerability-legacy-detail.png', fullPage: true, animations: 'disabled' })
+  await legacyDialog.locator('.el-dialog__headerbtn').click()
+  const coverageScenarios = []
+  for (const [state, label] of [['partial', '覆盖存在缺失或未知'], ['failed', '软件采集失败'], ['legacy', '历史清单完整性未知'], ['not_scanned', '尚未比对'], ['stale_rules', '规则已变化，请重新扫描'], ['stale_inventory', '资产已变化，请重新扫描'], ['empty_inventory', '完整采集为空，未评估软件']]) {
+    coverageState = state
+    await page.goto(`http://127.0.0.1:${server.address().port}/vuln`)
+    await page.getByRole('tab', { name: '比对覆盖', exact: true }).click()
+    await expect(page.getByText(label, { exact: true })).toBeVisible()
+    await expect(page.getByText('没有漏洞结果不代表安全；人工来源按整条 CVE 选择，不合并其他来源范围。', { exact: true })).toBeVisible()
+    if (state === 'stale_rules') {
+      await page.getByRole('button', { name: '查看覆盖', exact: true }).click()
+      const packages = page.getByRole('dialog').filter({ hasText: '软件包比对覆盖' })
+      await expect(packages).toContainText('以下为旧资产或旧比对记录')
+      await expect(packages).toContainText('本次记录的系统身份：ubuntu 24.04')
+      await expect(packages).toContainText('没有适用声明')
+      await packages.locator('.el-table__body tr').filter({ hasText: 'coverage-fixture-1' }).getByRole('button', { name: '查看', exact: true }).click()
+      const evidence = page.getByRole('dialog').filter({ hasText: '比对依据示例' })
+      await expect(evidence).toContainText('原始规则来源未知')
+      await page.screenshot({ path: artifacts + '/coverage-stale-history-evidence.png', fullPage: true, animations: 'disabled' })
+    }
+    coverageScenarios.push(state)
+  }
+  await page.getByRole('tab', { name: '处置历史', exact: true }).click()
+  await expect(page.getByText('原修复记录仍可追溯', { exact: false })).toBeVisible()
+  assert.equal(await page.getByRole('tabpanel', { name: '处置历史' }).getByRole('button', { name: '一键修复', exact: true }).count(), 0)
+  await page.screenshot({ path: artifacts + '/vulnerability-disposition-history.png', fullPage: true, animations: 'disabled' })
   const scopeScenarios = ['distribution-release-architecture-version-separated', 'agents-counted-once', 'stale-excluded', 'legacy-blocked', 'multiarch-blocked', 'dialog-identity', 'detail-host-count-and-list']
   assert.deepEqual(errors, [])
   assert.deepEqual(unexpected, [])
-  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, mobileBounds, detailHostTag, errors, unexpected }, null, 2) + '\n')
+  writeFileSync(artifacts + '/validation.json', JSON.stringify({ mode: 'production web bundle with synthetic API fixtures', scenarios, scopeScenarios, coverageScenarios, mobileBounds, detailHostTag, errors, unexpected }, null, 2) + '\n')
   console.log(`Passed software inventory display: ${scenarios.join(', ')} and mobile drawer bounds`)
   console.log(`Passed vulnerability scope display: ${scopeScenarios.join(', ')}`)
+  console.log(`Passed vulnerability coverage and history display: ${coverageScenarios.join(', ')}`)
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)) }

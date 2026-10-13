@@ -157,7 +157,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   assert.equal(inventory.distro_id, 'ubuntu')
   assert.equal(inventory.distro_version, '24.04')
   assert.equal(inventory.software_inventory_source, 'dpkg')
-  assert.equal(inventory.package_repair_contract, 1)
+  assert.equal(inventory.package_repair_contract, 2)
   const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
   assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
@@ -316,7 +316,7 @@ try {
   assert.equal(await command('docker', ['exec', second.container, 'dpkg-query', '-W', '-f=${Version}', 'alinksec-smoke-package']), '1.0')
   console.log('ok - actual server rejects internally mismatched DEB before publication or task creation without changing Agent installation')
   const review = await reviewPatch(initialPatch)
-  const revokedTask = await api('/api/fix/tasks/package', { items: [findings[1]], approver: 'CI', name: 'Revoked pinned review' })
+  const revokedTask = await api('/api/fix/tasks/package', { items: [findings[1]], approver: 'admin', name: 'Revoked pinned review' })
   await api(`/api/fix/patches/${initialPatch.id}/reviews/${review.id}/revoke`, { note: 'Withdraw disposable applicability confirmation before dispatch' })
   const revokedResponse = await fetch(`http://${gateway}:${httpPort}/api/fix/tasks/${revokedTask.taskId}/approve`, {
     method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({operator:'CI'}) })
@@ -326,10 +326,13 @@ try {
   assert.equal(sql('SELECT status FROM t_fix_record WHERE task_id=?',revokedTask.taskId)[0].status,0)
   assert.equal(await command('docker',['exec',second.container,'dpkg-query','-W','-f=${Version}','alinksec-smoke-package']),'1.0')
   console.log('ok - actual server revocation blocks a pinned pending task, rolls back approval and sends no package installation')
+  await api(`/api/fix/tasks/${revokedTask.taskId}/cancel`, { reason: 'Replace revoked fixture task' })
   await reviewPatch(initialPatch)
-  const task = await api('/api/fix/tasks/package', { items: findings, approver: 'CI', name: 'Actual Agent repair' })
+  const task = await api('/api/fix/tasks/package', { items: findings, approver: 'admin', name: 'Actual Agent repair' })
   assert.equal(task.pendingApprove, true)
-  await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'CI' })
+  await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'FORGED DISPLAY LABEL' })
+  const approval = sql('SELECT approver,approver_id,approved_by FROM t_fix_task WHERE id=?',task.taskId)[0]
+  assert.equal(approval.approver,'admin'); assert.equal(approval.approver_id,approval.approved_by); assert.ok(approval.approved_by>0)
   async function fixed(agent) {
     await until(() => sql('SELECT status FROM t_fix_record WHERE task_id=? AND agent_id=?', task.taskId, agent.id)[0]?.status !== 0,
       'Agent did not return package result', 60_000)
@@ -347,7 +350,17 @@ try {
   assert.ok(findings.every(item => sql('SELECT status FROM t_vuln_finding WHERE id=?', item.findingId)[0].status === 3))
   assert.equal(new X509Certificate(readFileSync(join(root, 'data/certs/server.crt'))).checkHost('ci.alinksec.test'), 'ci.alinksec.test')
   console.log('ok - two actual Agents serially install CA-verified packages and complete approved findings')
-  console.log('ok - actual Agent contract 1 checks installed identity and binary metadata before installation and full identity afterward')
+  console.log('ok - actual Agent contract 2 checks execution deadline, installed identity and binary metadata before installation and full identity afterward')
+  const completedRef = findings[0].findingId
+  await command('docker',['exec',first.container,'dpkg','-i','/opt/alinksec-validation/initial.deb'])
+  await api(`/api/hosts/${first.id}/collect`, {})
+  await until(() => sql("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001' AND status=0 AND current_match=true AND id<>?",first.id,completedRef)[0].n === 1,'A fresh inventory after downgrade did not reopen the vulnerability')
+  assert.equal(sql('SELECT status FROM t_vuln_finding WHERE id=?',completedRef)[0].status,3)
+  assert.equal(sql('SELECT ref_id,status FROM t_fix_record WHERE task_id=? AND agent_id=?',task.taskId,first.id)[0].ref_id,String(completedRef))
+  assert.equal(sql('SELECT status FROM t_fix_record WHERE task_id=? AND agent_id=?',task.taskId,first.id)[0].status,1)
+  const coverage = await api(`/api/vuln/coverage?agentId=${first.id}`)
+  assert.equal(coverage.list.length,1); assert.ok(coverage.list[0].affected_packages>0)
+  console.log('ok - fresh actual Agent inventory after downgrade reopens a new finding and preserves the completed fix record')
   await stopAgent(first)
   const oldCA = new X509Certificate(readFileSync(join(root, 'data/certs/ca.crt'))).fingerprint256
   await stopServer()

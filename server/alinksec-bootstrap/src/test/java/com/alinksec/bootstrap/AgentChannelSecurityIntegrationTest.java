@@ -140,6 +140,12 @@ class AgentChannelSecurityIntegrationTest {
         registry.add("ALINKSEC_JWT_SECRET", () -> "integration-test-jwt-secret");
     }
 
+    private Long actorId;
+    private final String approverName = "grpc-reviewer-" + UUID.randomUUID();
+    @org.junit.jupiter.api.BeforeEach void account() {
+        actorId = jdbc.queryForObject("INSERT INTO t_user(username,password_hash,role_id,status) VALUES (?, 'unused',1,1) RETURNING id", Long.class, approverName);
+    }
+
     @AfterEach
     void cleanUp() throws Exception {
         for (ManagedChannel channel : channels) {
@@ -157,10 +163,11 @@ class AgentChannelSecurityIntegrationTest {
         }
         for (String agentId : agentIds) {
             for (String table : List.of("t_command", "t_asset_software", "t_asset_port", "t_asset_account",
-                    "t_asset_process", "t_asset_container", "t_vuln_finding", "t_agent")) {
+                    "t_asset_process", "t_asset_container", "t_vuln_finding", "t_vuln_coverage", "t_vuln_package_assessment", "t_agent")) {
                 jdbc.update("DELETE FROM " + table + " WHERE agent_id = ?", agentId);
             }
         }
+        jdbc.update("DELETE FROM t_user WHERE id=?",actorId);
         for (String token : enrollTokens) {
             jdbc.update("DELETE FROM t_enroll_token WHERE token = ?", token);
         }
@@ -215,16 +222,16 @@ class AgentChannelSecurityIntegrationTest {
                 Map.of("agentId", first.getAgentId(), "findingId", firstFinding),
                 Map.of("agentId", second.getAgentId(), "findingId", secondFinding));
         assertThrows(IllegalArgumentException.class,
-                () -> fixTasks.createPackageTask("missing patch", items, "test", null, null, null));
+                () -> fixTasks.createPackageTask("missing patch", items, approverName, null, null, actorId));
         Map<String, Object> patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")),
                 "patch.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
         patchIds.add(((Number) patch.get("id")).longValue());
         review(patch, cveId);
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("duplicate", List.of(
-                items.get(0), items.get(0)), "test", null, null, null));
+                items.get(0), items.get(0)), approverName, null, null, actorId));
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("foreign finding", List.of(
-                Map.of("agentId", second.getAgentId(), "findingId", firstFinding)), "test", null, null, null));
-        long taskId = ((Number) fixTasks.createPackageTask("approved repair", items, "test", null, null, null)
+                Map.of("agentId", second.getAgentId(), "findingId", firstFinding)), approverName, null, null, actorId));
+        long taskId = ((Number) fixTasks.createPackageTask("approved repair", items, approverName, null, null, actorId)
                 .get("taskId")).longValue();
         fixTaskIds.add(taskId);
         asset(firstStream, first.getAgentId(), pkg);
@@ -239,7 +246,7 @@ class AgentChannelSecurityIntegrationTest {
         assertTrue(firstStream.received.isEmpty());
         assertTrue(secondStream.received.isEmpty());
 
-        assertEquals("dispatched", fixTasks.approve(taskId, "test").get("state"));
+        assertEquals("dispatched", fixTasks.approve(taskId, actorId).get("state"));
         Command firstCommand = firstStream.nextCommand();
         Command secondCommand = secondStream.nextCommand();
         assertEquals(String.valueOf(taskId), firstCommand.getVulnFix().getTaskId());
@@ -249,7 +256,7 @@ class AgentChannelSecurityIntegrationTest {
                 .stream().map(f -> f.getRefId()).toList());
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("download?filename="));
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("token="));
-        assertEquals(1, JsonUtils.read(firstCommand.getVulnFix().getFixes(0).getPayload()).path("inventory").path("contract").asInt());
+        assertEquals(2, JsonUtils.read(firstCommand.getVulnFix().getFixes(0).getPayload()).path("inventory").path("contract").asInt());
         assertFalse(firstCommand.getVulnFix().getFixes(0).getPayload().equals(
                 secondCommand.getVulnFix().getFixes(0).getPayload()));
         asset(secondStream, second.getAgentId(), pkg);
@@ -278,7 +285,7 @@ class AgentChannelSecurityIntegrationTest {
         assertEquals(2, fixStatus(taskId));
         assertEquals(0, pendingFixRecords(taskId));
         assertThrows(IllegalArgumentException.class,
-                () -> fixTasks.createPackageTask("already fixed", items, "test", null, null, null));
+                () -> fixTasks.createPackageTask("already fixed", items, approverName, null, null, actorId));
     }
 
     private void review(Map<String, Object> patch, String cve) throws Exception {
@@ -292,7 +299,7 @@ class AgentChannelSecurityIntegrationTest {
         stream.requests.onNext(report(agentId).setAsset(RptAssetSnapshot.newBuilder()
                 .addCollected("software")
                 .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
-                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(1))
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(2))
                 .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0").setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agentId);
     }
@@ -310,8 +317,8 @@ class AgentChannelSecurityIntegrationTest {
         var patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")), "unverified.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
         patchIds.add(((Number) patch.get("id")).longValue());
         review(patch, cve);
-        long task = ((Number) fixTasks.createPackageTask("unverified result", List.of(Map.of("agentId", agent.getAgentId(), "findingId", finding)), "test", null, null, null).get("taskId")).longValue();
-        fixTaskIds.add(task); assertEquals("dispatched", fixTasks.approve(task, "test").get("state")); stream.nextCommand();
+        long task = ((Number) fixTasks.createPackageTask("unverified result", List.of(Map.of("agentId", agent.getAgentId(), "findingId", finding)), approverName, null, null, actorId).get("taskId")).longValue();
+        fixTaskIds.add(task); assertEquals("dispatched", fixTasks.approve(task, actorId).get("state")); stream.nextCommand();
         stream.requests.onNext(report(agent.getAgentId()).setFixResult(RptFixResult.newBuilder().setTaskId(String.valueOf(task))
                 .addResults(FixResultItem.newBuilder().setRefId(String.valueOf(finding)).setSuccess(true).setVerified(false).setLog("post-install query unavailable"))).build());
         heartbeat(stream, agent.getAgentId());
@@ -331,7 +338,7 @@ class AgentChannelSecurityIntegrationTest {
         cveIds.add(cve);
         stream.requests.onNext(report(agent.getAgentId()).setAsset(RptAssetSnapshot.newBuilder().addCollected("software")
                 .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
-                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(1))
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(2))
                 .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion(installed).setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agent.getAgentId());
         var rule = Map.of("name", pkg, "vrange", "<" + fixed, "source", "dpkg", "version_scheme", "dpkg",

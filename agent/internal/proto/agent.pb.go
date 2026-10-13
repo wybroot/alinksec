@@ -2394,7 +2394,7 @@ type SoftwareInventory struct {
 	DistroVersion         string                   `protobuf:"bytes,4,opt,name=distro_version,json=distroVersion,proto3" json:"distro_version,omitempty"`                            // os-release VERSION_ID, unknown when absent
 	Source                string                   `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`                                                               // rpm / dpkg / mixed / registry
 	IdentityError         string                   `protobuf:"bytes,6,opt,name=identity_error,json=identityError,proto3" json:"identity_error,omitempty"`                            // distribution identity unavailable/invalid
-	PackageRepairContract uint32                   `protobuf:"varint,7,opt,name=package_repair_contract,json=packageRepairContract,proto3" json:"package_repair_contract,omitempty"` // 1: native identity, binary metadata and post-install verification; absent means unsupported
+	PackageRepairContract uint32                   `protobuf:"varint,7,opt,name=package_repair_contract,json=packageRepairContract,proto3" json:"package_repair_contract,omitempty"` // 2: native identity, binary metadata, deadline and post-install verification; older values are unsupported
 }
 
 func (x *SoftwareInventory) Reset() {

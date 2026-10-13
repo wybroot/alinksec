@@ -453,9 +453,11 @@ export async function createPackageFixTask(items, opts) {
 }
 
 /** 审批软件包类修复任务 */
-export async function approveFixTask(taskId, operator) {
-  return post(`/api/fix/tasks/${taskId}/approve`, { operator })
+export async function approveFixTask(taskId) {
+  return post(`/api/fix/tasks/${taskId}/approve`, {})
 }
+export const fetchFixApprovers = () => get('/api/fix/approvers')
+export const cancelFixTask = (taskId, reason) => post(`/api/fix/tasks/${taskId}/cancel`, { reason })
 
 /* ---------------- 补丁仓库 ---------------- */
 
@@ -556,6 +558,9 @@ export async function fetchVulns() {
 export function fetchVulnStats() {
   return get('/api/vuln/stats')
 }
+export const fetchVulnerabilityHistory = (status = 3, page = 1) => get(`/api/vuln/findings?${new URLSearchParams({ status, page, size: 20 })}`)
+export const fetchVulnerabilityCoverage = (page = 1, size = 20) => get(`/api/vuln/coverage?${new URLSearchParams({ page, size })}`)
+export const fetchPackageAssessments = (agentId, page = 1, keyword = '') => get(`/api/vuln/coverage/${encodeURIComponent(agentId)}/packages?${new URLSearchParams({ page, size: 20, keyword })}`)
 
 export async function fetchWeakpwds() {
   return get('/api/vuln/weakpwds?page=1&size=100')

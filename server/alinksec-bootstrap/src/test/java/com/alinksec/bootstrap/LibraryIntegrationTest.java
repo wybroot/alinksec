@@ -395,13 +395,13 @@ class LibraryIntegrationTest {
         var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
         var metadata = JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":4,\"affected\":[]}");
         catalog.cves("manual", List.of(packageEvidence(rule), metadata));
-        var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc);
+        var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource));
         matcher.matchAgent("library-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent'", Integer.class));
         assertEquals("2.0-vendor1", jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding WHERE agent_id='library-agent'", String.class));
         jdbc.update("UPDATE t_agent SET os_version='other-os' WHERE agent_id='library-agent'");
         matcher.matchAgent("library-agent", 0);
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent'", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent' AND status<>4", Integer.class));
         var invalid = rule.deepCopy();
         ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0)).put("match", "typo");
         assertThrows(IllegalArgumentException.class, () -> catalog.cves("manual", List.of(invalid)));
@@ -425,7 +425,7 @@ class LibraryIntegrationTest {
         catalog.cves("manual", List.of(
                 packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}")),
                 packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"x86_64\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}"))));
-        new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("native-version-agent", 0);
+        new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource)).matchAgent("native-version-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='native-version-agent'", Integer.class));
         assertEquals("deb-fixture", jdbc.queryForObject("SELECT software FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
         assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
@@ -446,7 +446,7 @@ class LibraryIntegrationTest {
         assertEquals(0, ((Number) sync.status().get("matchableCveCount")).intValue());
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('nvd-package-agent','fixture',1,'ubuntu 24.04','nvd-package-machine')");
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('nvd-package-agent','fixture-app','1.0-1ubuntu1','dpkg')");
-        new com.alinksec.service.scan.VulnMatchService(jdbc).matchAgent("nvd-package-agent", 0);
+        new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource)).matchAgent("nvd-package-agent", 0);
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='nvd-package-agent'", Integer.class));
     }
     @Test void incompleteNativeScopeRemainsMetadataAndInvalidDeclaredScopesRejectTheWholeBatch() {

@@ -8,7 +8,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -22,8 +21,7 @@ import java.util.Set;
  *   1. Agent 资产快照落库后自动比对（task_id=0，快照触发）
  *   2. 漏洞扫描任务创建时比对（task_id=任务 id）
  *
- * 状态保留：已忽略(2)/已修复(3) 仅保留同一安装版本、发行版和包架构的决定；
- * 新一轮比对前清除该 agent 未处置(0/1)记录后重插，但保留待审批/执行修复引用的记录。
+ * 保留原始依据及修复引用。已修复决定只等待新的资产采集，不永久抑制重新安装。
  */
 @Service
 public class VulnMatchService {
@@ -31,26 +29,40 @@ public class VulnMatchService {
     private static final Logger log = LoggerFactory.getLogger(VulnMatchService.class);
 
     private final JdbcTemplate jdbc;
+    private final org.springframework.transaction.support.TransactionTemplate transaction;
 
-    public VulnMatchService(JdbcTemplate jdbc) {
+    public VulnMatchService(JdbcTemplate jdbc, org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
+        this.transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
     /** 单机比对。taskId=0 表示资产快照触发的自动比对。 */
     @Transactional
     public void matchAgent(String agentId, long taskId) {
+        transaction.executeWithoutResult(status -> matchSnapshot(agentId,taskId));
+    }
+
+    private void matchSnapshot(String agentId, long taskId) {
+        // Serialize scans/results with inventory replacement for this host. This
+        // also makes a fixed finding's inventory revision a durable boundary.
+        jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=? AND deleted=false", agentId);
         var hosts = jdbc.queryForList("""
-                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error
+                SELECT os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error,software_revision
                 FROM t_agent WHERE agent_id=? AND deleted=false
                 """, agentId);
         if (hosts.size() != 1) return;
         var host = hosts.get(0);
+        long inventoryRevision = ((Number)host.get("software_revision")).longValue();
+        long ruleRevision = jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1", Long.class);
+        jdbc.update("UPDATE t_vuln_finding SET current_match=false WHERE agent_id=?", agentId);
+        List<Map<String, Object>> software = jdbc.queryForList(
+                "SELECT name,version,source,architecture FROM t_asset_software WHERE agent_id = ? ORDER BY name,source,architecture,version", agentId);
+        var coverage = new VulnerabilityCoverage(host, software, ruleRevision);
         if (Set.of("failed", "unsupported").contains(text(host, "software_collection_status"))) {
+            coverage.persist(jdbc, agentId, taskId);
             log.info("跳过不完整的软件资产比对: agent={}", agentId);
             return;
         }
-        List<Map<String, Object>> software = jdbc.queryForList(
-                "SELECT name,version,source,architecture FROM t_asset_software WHERE agent_id = ? ORDER BY name,source,architecture,version", agentId);
 
         String pendingRepair = """
                 EXISTS (SELECT 1 FROM t_fix_record r JOIN t_fix_task t ON t.id = r.task_id
@@ -58,19 +70,29 @@ public class VulnMatchService {
                           AND r.ref_type = 'vuln_finding' AND r.status = 0 AND t.status IN (0, 1))
                 """;
         // 保留修复引用的 finding ID，重连时的资产扫描不能让结果失去回写目标。
-        Set<String> dismissed = new HashSet<>();
+        Map<String, Long> dismissed = new LinkedHashMap<>();
         jdbc.query("""
-                         SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status FROM t_vuln_finding f
-                        WHERE agent_id = ? AND (status IN (2, 3) OR %s)
-                          """.formatted(pendingRepair), (rs, i) -> dismissed.add(decisionKey(findingKey(rs.getString(1), rs.getString(2), rs.getString(3),
+                         SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status,id FROM t_vuln_finding f
+                        WHERE agent_id = ? AND (status=2 OR (status=3 AND resolved_inventory_revision>=?) OR %s)
+                          """.formatted(pendingRepair), (rs, i) -> dismissed.put(decisionKey(findingKey(rs.getString(1), rs.getString(2), rs.getString(3),
                           rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8), rs.getString(9), rs.getString(10)),
-                          rs.getString(11), rs.getString(12), rs.getString(13))),
-                agentId);
+                          rs.getString(11), rs.getString(12), rs.getString(13)), rs.getLong(14)),
+                agentId, inventoryRevision);
 
-        // 未处置记录先清后插（快照全量替换语义）
-        jdbc.update("DELETE FROM t_vuln_finding AS f WHERE agent_id = ? AND status IN (0, 1) AND NOT "
-                + pendingRepair, agentId);
-        if (software.isEmpty()) return;
+        Map<String, Long> open = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT cve_id,software,installed_version,source,architecture,distro_id,distro_version,os_type,os_version,
+                  identity_status,rule_source_id,rule_digest,evidence_status,id FROM t_vuln_finding
+                WHERE agent_id=? AND status IN (0,1) ORDER BY id DESC
+                """, (rs,i) -> open.putIfAbsent(decisionKey(findingKey(rs.getString(1),rs.getString(2),rs.getString(3),
+                rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getInt(8),rs.getString(9),rs.getString(10)),
+                rs.getString(11),rs.getString(12),rs.getString(13)),rs.getLong(14)),agentId);
+        Map<String,List<Map<String,Object>>> named = new LinkedHashMap<>();
+        List<Map<String,Object>> registry = new java.util.ArrayList<>();
+        for (var sw : software) {
+            named.computeIfAbsent(text(sw,"name"), ignored -> new java.util.ArrayList<>()).add(sw);
+            if (!VulnerabilityScope.nativeSource(text(sw,"source"))) registry.add(sw);
+        }
 
         String os = text(host, "os_version"), distroId = text(host, "distro_id"), distroVersion = text(host, "distro_version");
         int osType = ((Number) host.get("os_type")).intValue();
@@ -78,8 +100,8 @@ public class VulnMatchService {
         boolean nativeIdentity = complete && osType == 1 && text(host, "software_identity_error").isEmpty()
                 && VulnerabilityScope.distributionId(distroId) && VulnerabilityScope.distributionVersion(distroVersion);
         int[] inserted = {0};
-        // Metadata-only NVD entries are excluded, and candidate rows are consumed one at a time.
-        jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected,rule_source_id,rule_digest,provenance FROM t_cve_db WHERE CAST(affected AS TEXT) <> '[]'",
+        // Metadata-only declarations contribute to coverage without generating findings.
+        jdbc.query("SELECT cve_id,severity,cvss,CAST(affected AS TEXT) AS affected,rule_source_id,rule_digest,provenance FROM t_cve_db ORDER BY cve_id",
                 (org.springframework.jdbc.core.RowCallbackHandler) cve -> {
             String cveId = cve.getString("cve_id");
             int severity = cve.getInt("severity");
@@ -87,6 +109,7 @@ public class VulnMatchService {
             JsonNode rules = JsonUtils.read(cve.getString("affected"));
             String ruleSource = cve.getString("rule_source_id"), ruleDigest = cve.getString("rule_digest");
             boolean recorded = !ruleSource.isEmpty() && ruleDigest.equals(VulnerabilityEvidence.ruleDigest(ruleSource, cveId, rules));
+            coverage.assess(cveId,rules,ruleSource,ruleDigest,recorded);
             Map<String, Candidate> candidates = new LinkedHashMap<>();
             for (JsonNode rule : rules) {
                 String cveName = rule.path("name").asText("");
@@ -94,7 +117,9 @@ public class VulnMatchService {
                 if (cveName.isEmpty()) {
                     continue;
                 }
-                for (Map<String, Object> sw : software) {
+                var applicableSoftware = new java.util.ArrayList<>(named.getOrDefault(cveName,List.of()));
+                for (var sw : registry) if (!applicableSoftware.contains(sw)) applicableSoftware.add(sw);
+                for (Map<String, Object> sw : applicableSoftware) {
                     String swName = String.valueOf(sw.get("name"));
                     String swVersion = String.valueOf(sw.get("version") == null ? "" : sw.get("version"));
                     String source = text(sw, "source"), architecture = text(sw, "architecture");
@@ -111,31 +136,42 @@ public class VulnMatchService {
             }
             for (Candidate candidate : candidates.values()) {
                 if (!candidate.affected()) continue;
-                String evidenceStatus = candidate.excluded() || candidate.fixConflict() ? "conflicting" : recorded
+                boolean indeterminate = coverage.indeterminate(candidate.name(),candidate.version(),candidate.source(),candidate.architecture());
+                String evidenceStatus = candidate.excluded() || candidate.fixConflict() || indeterminate ? "conflicting" : recorded
                         && candidate.rules().stream().allMatch(r -> r.path("evidence").isObject()) ? "declared" : "legacy";
                 String key = findingKey(cveId, candidate.name(), candidate.version(), candidate.source(), candidate.architecture(),
                         distroId, distroVersion, osType, os, candidate.status());
-                if (dismissed.contains(decisionKey(key, ruleSource, ruleDigest, evidenceStatus))) continue;
+                String decision = decisionKey(key,ruleSource,ruleDigest,evidenceStatus);
+                Long retained = dismissed.get(decision);
+                if (retained == null) retained = open.get(decision);
+                if (retained != null) {
+                    jdbc.update("UPDATE t_vuln_finding SET current_match=true,observed_at=CURRENT_TIMESTAMP,inventory_revision=? WHERE id=?",inventoryRevision,retained);
+                    continue;
+                }
                 String snapshot = JsonUtils.write(Map.of("import", JsonUtils.read(cve.getString("provenance")), "rules", candidate.rules()));
                 jdbc.update("""
                             INSERT INTO t_vuln_finding
                                (task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,cvss,
                                  source,architecture,distro_id,distro_version,os_type,os_version,identity_status,
-                                 rule_source_id,rule_digest,rule_evidence,evidence_status)
-                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                              """, taskId, agentId, cveId, candidate.name(), candidate.version(), candidate.excluded() || candidate.fixConflict() ? null : candidate.fixed(), severity, cvss,
+                                 rule_source_id,rule_digest,rule_evidence,evidence_status,current_match,inventory_revision,observed_at)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,?,CURRENT_TIMESTAMP)
+                              """, taskId, agentId, cveId, candidate.name(), candidate.version(), candidate.excluded() || candidate.fixConflict() || indeterminate ? null : candidate.fixed(), severity, cvss,
                               candidate.source(), candidate.architecture(), distroId, distroVersion, osType, os, candidate.status(),
-                              ruleSource, ruleDigest, snapshot, evidenceStatus);
+                              ruleSource, ruleDigest, snapshot, evidenceStatus,inventoryRevision);
                 inserted[0]++;
             }
         });
+        // Keep historical rows and any fix-record references; only their current
+        // assessment ends. Pending task IDs remain available for authenticated results.
+        jdbc.update("UPDATE t_vuln_finding AS f SET status=4 WHERE agent_id=? AND status IN (0,1) AND current_match=false AND NOT " + pendingRepair,agentId);
+        coverage.persist(jdbc,agentId,taskId);
         log.info("漏洞比对完成: agent={} task={} software={} findings={}", agentId, taskId, software.size(), inserted[0]);
     }
 
     /** 全量比对（CVE 库导入后手动刷新）。返回比对主机数。 */
     public int matchAll(long taskId) {
         List<String> agents = jdbc.queryForList(
-                "SELECT agent_id FROM t_asset_software GROUP BY agent_id", String.class);
+                "SELECT agent_id FROM t_agent WHERE deleted=false ORDER BY agent_id", String.class);
         for (String agentId : agents) {
             try {
                 matchAgent(agentId, taskId);

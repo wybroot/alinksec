@@ -32,7 +32,8 @@ class PatchRepoIntegrationTest {
         var manager = new DataSourceTransactionManager(ds); tx = new TransactionTemplate(manager);
         files = new LibraryFiles(library, props); repo = new PatchRepoService(jdbc, props, mock(AgentDownloadTokenService.class), files);
         catalog = new LibraryCatalog(jdbc, library, files, new DatabaseDialect(props), manager);
-        commands = mock(CommandService.class); fixes = new FixTaskService(jdbc, commands, repo, new DatabaseDialect(props));
+        commands = mock(CommandService.class); fixes = new FixTaskService(jdbc, commands, repo, new DatabaseDialect(props), manager);
+        jdbc.update("INSERT INTO t_user(id,username,password_hash,role_id,status) VALUES (7,'operator','unused',1,1)");
         rule("<2.0", "2.0", "Initial disposable fixture manual declaration");
     }
     @AfterEach void close() { files.close(); ds.destroy(); }
@@ -136,11 +137,11 @@ class PatchRepoIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> repo.verifyPin(fresh,t));
     }
     long finding() {
-        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error,package_repair_contract) VALUES ('host','host',1,'Ubuntu 24.04','ubuntu','24.04','complete','',1)");
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,distro_id,distro_version,software_collection_status,software_identity_error,package_repair_contract) VALUES ('host','host',1,'Ubuntu 24.04','ubuntu','24.04','complete','',2)");
         jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('host','patch-fixture','1.0','dpkg','amd64')");
         return jdbc.queryForObject("""
-                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status)
-                SELECT 0,'host',cve_id,'patch-fixture','1.0','2.0',3,'dpkg','amd64','ubuntu','24.04',1,'Ubuntu 24.04','complete',rule_source_id,rule_digest,'declared'
+                INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity,source,architecture,distro_id,distro_version,os_type,os_version,identity_status,rule_source_id,rule_digest,evidence_status,current_match)
+                SELECT 0,'host',cve_id,'patch-fixture','1.0','2.0',3,'dpkg','amd64','ubuntu','24.04',1,'Ubuntu 24.04','complete',rule_source_id,rule_digest,'declared',true
                 FROM t_cve_db WHERE cve_id='CVE-2099-12345' RETURNING id
                 """, Long.class);
     }
@@ -152,7 +153,7 @@ class PatchRepoIntegrationTest {
         String saved = jdbc.queryForObject("SELECT targets FROM t_fix_task WHERE id=?", String.class, task);
         assertTrue(saved.contains("patch_review")); assertTrue(saved.contains("manual_confirmation")); assertFalse(saved.contains("token="));
         repo.revoke(((Number)p.get("id")).longValue(), String.valueOf(review.get("id")), 10L, "Withdraw fixture approval");
-        assertThrows(IllegalArgumentException.class, () -> tx.execute(s -> fixes.approve(task,"operator")));
+        assertThrows(IllegalArgumentException.class, () -> tx.execute(s -> fixes.approve(task,7L)));
         assertEquals(0, jdbc.queryForObject("SELECT approved FROM t_fix_task WHERE id=?", Integer.class,task));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_command", Integer.class)); verifyNoInteractions(commands);
         var rows = (List<Map<String,Object>>)new VulnQueryService(jdbc).findings(null,null,null,null,1,20).get("list");

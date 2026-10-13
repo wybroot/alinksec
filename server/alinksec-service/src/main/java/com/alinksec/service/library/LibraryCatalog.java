@@ -173,6 +173,7 @@ public class LibraryCatalog {
                         cve.hasNonNull("published_at") ? database.timestamp(Instant.parse(cve.path("published_at").asText())) : null,
                         effectiveSource, VulnerabilityEvidence.ruleDigest(effectiveSource, id, cve.path("affected")), effective.get("provenance"));
             }
+            if (!documents.isEmpty()) jdbc.update("UPDATE t_vuln_rule_state SET revision=revision+1 WHERE id=1");
             return documents.size();
         });
     }

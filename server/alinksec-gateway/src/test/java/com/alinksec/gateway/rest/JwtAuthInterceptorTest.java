@@ -73,7 +73,7 @@ class JwtAuthInterceptorTest {
     }
 
     @Test void patchImportReviewAndRevocationRequireAnAuthenticatedWriter() throws Exception {
-        for (String path : new String[]{"/api/fix/patches", "/api/fix/patches/1/reviews", "/api/fix/patches/1/reviews/review/revoke"}) {
+        for (String path : new String[]{"/api/fix/tasks/package", "/api/fix/tasks/1/approve", "/api/fix/tasks/1/cancel", "/api/fix/patches", "/api/fix/patches/1/reviews", "/api/fix/patches/1/reviews/review/revoke"}) {
             for (String role : new String[]{"admin", "operator", "viewer"}) {
                 var req = request(role); req.setMethod("POST"); req.setRequestURI(path);
                 var response = new MockHttpServletResponse();

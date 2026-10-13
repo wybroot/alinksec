@@ -81,8 +81,18 @@ public class FixController {
     }
 
     @PostMapping("/tasks/{id}/approve")
-    public ApiResult<Map<String, Object>> approve(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        return ApiResult.ok(taskService.approve(id, (String) body.get("operator")));
+    public ApiResult<Map<String, Object>> approve(@PathVariable long id, @RequestBody(required=false) Map<String, Object> body,HttpServletRequest request) {
+        Long uid=request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        return ApiResult.ok(taskService.approve(id,uid));
+    }
+
+    @GetMapping("/approvers")
+    public ApiResult<List<Map<String,Object>>> approvers() { return ApiResult.ok(taskService.approvers()); }
+
+    @PostMapping("/tasks/{id}/cancel")
+    public ApiResult<Map<String,Object>> cancel(@PathVariable long id,@RequestBody Map<String,Object> body,HttpServletRequest request) {
+        Long uid=request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
+        return ApiResult.ok(taskService.cancel(id,uid,(String)body.get("reason")));
     }
 
     @GetMapping("/patches")

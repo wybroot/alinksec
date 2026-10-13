@@ -29,17 +29,18 @@ const downloadTimeout = 30 * time.Minute
 
 // PkgPayload CmdVulnFix PACKAGE 项 payload（FixTaskService 构造）
 type PkgPayload struct {
-	RepoType      string              `json:"repo_type"`      // rpm / deb
-	PkgName       string              `json:"pkg_name"`       // openssl / KB5034441
-	TargetVersion string              `json:"target_version"` // 1.1.1k-26.el7_9
-	DownloadURL   string              `json:"download_url"`   // 平台补丁下载端点
-	Sha256        string              `json:"sha256"`
-	CveID         string              `json:"cve_id"`     // 关联 CVE（上报展示）
-	FindingID     string              `json:"finding_id"` // t_vuln_finding.id（平台回写状态用）
-	Inventory     PackageInstallation `json:"inventory"`
+	RepoType           string              `json:"repo_type"`      // rpm / deb
+	PkgName            string              `json:"pkg_name"`       // openssl / KB5034441
+	TargetVersion      string              `json:"target_version"` // 1.1.1k-26.el7_9
+	DownloadURL        string              `json:"download_url"`   // 平台补丁下载端点
+	Sha256             string              `json:"sha256"`
+	CveID              string              `json:"cve_id"`     // 关联 CVE（上报展示）
+	FindingID          string              `json:"finding_id"` // t_vuln_finding.id（平台回写状态用）
+	Inventory          PackageInstallation `json:"inventory"`
+	DispatchDeadlineMS int64               `json:"dispatch_deadline_unix_ms"`
 }
 
-// Contract 1 pins the approved installation; legacy commands cannot silently create a new package.
+// Contract 2 also refuses to start installation after the task/window deadline.
 type PackageInstallation struct {
 	Contract         int    `json:"contract"`
 	Source           string `json:"source"`
@@ -125,6 +126,11 @@ func fixPackageWithOperations(f *pb.FixItem, workDir string, log *slog.Logger, o
 		item.Log = joinLog(lines)
 		return item
 	}
+	if p.DispatchDeadlineMS <= time.Now().UnixMilli() {
+		addLog("任务或维护窗口已结束，未开始安装")
+		item.Log = joinLog(lines)
+		return item
+	}
 	addLog("安装前身份与二进制元数据复核通过；原版本: %s", current.InstalledVersion)
 
 	// 4. 安装（平台实现；失败不回滚，如实上报）
@@ -153,7 +159,7 @@ func fixPackageWithOperations(f *pb.FixItem, workDir string, log *slog.Logger, o
 
 func sameInstallation(p *PkgPayload, current PackageInstallation, version string) bool {
 	expected := p.Inventory
-	return current.Contract == 1 && current.OSType == 1 && current.Source == expected.Source && current.Architecture == expected.Architecture && current.DistroID == expected.DistroID && current.DistroVersion == expected.DistroVersion && packageVersionMatches(p.RepoType, current.InstalledVersion, version)
+	return current.Contract == 2 && current.OSType == 1 && current.Source == expected.Source && current.Architecture == expected.Architecture && current.DistroID == expected.DistroID && current.DistroVersion == expected.DistroVersion && packageVersionMatches(p.RepoType, current.InstalledVersion, version)
 }
 
 func packageVersionMatches(repoType, actual, target string) bool {
@@ -186,8 +192,11 @@ func parsePkgPayload(payload string) (*PkgPayload, error) {
 		source = "dpkg"
 	}
 	identity := p.Inventory
-	if identity.Contract != 1 || identity.OSType != 1 || identity.Source != source || !repairName.MatchString(p.PkgName) || !repairVersion.MatchString(p.TargetVersion) || !repairVersion.MatchString(identity.InstalledVersion) || !repairArchitecture.MatchString(identity.Architecture) || !repairDistro.MatchString(identity.DistroID) || !repairDistroVersion.MatchString(identity.DistroVersion) || !repairChecksum.MatchString(p.Sha256) {
+	if identity.Contract != 2 || identity.OSType != 1 || identity.Source != source || !repairName.MatchString(p.PkgName) || !repairVersion.MatchString(p.TargetVersion) || !repairVersion.MatchString(identity.InstalledVersion) || !repairArchitecture.MatchString(identity.Architecture) || !repairDistro.MatchString(identity.DistroID) || !repairDistroVersion.MatchString(identity.DistroVersion) || !repairChecksum.MatchString(p.Sha256) {
 		return nil, fmt.Errorf("软件包修复缺少受支持的执行契约、完整安装身份或有效摘要，请更新 Agent 并重新采集审批")
+	}
+	if p.DispatchDeadlineMS <= time.Now().UnixMilli() {
+		return nil, fmt.Errorf("任务或维护窗口缺少有效截止时间或已经过期，未执行修复")
 	}
 	if p.RepoType == "rpm" && (!packageVersionMatches("rpm", p.TargetVersion, p.TargetVersion) || !packageVersionMatches("rpm", identity.InstalledVersion, identity.InstalledVersion)) {
 		return nil, fmt.Errorf("RPM 修复必须声明完整 epoch/version/release")
@@ -200,7 +209,12 @@ func parsePkgPayload(payload string) (*PkgPayload, error) {
 
 // downloadPatch 下载补丁到临时文件并校验 sha256（原子：校验失败即删）
 func downloadPatch(workDir string, p *PkgPayload) (string, error) {
-	resp, err := securehttp.Get(context.Background(), workDir, p.DownloadURL, downloadTimeout)
+	if p.DispatchDeadlineMS <= time.Now().UnixMilli() {
+		return "", fmt.Errorf("修复下载截止时间已过")
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.UnixMilli(p.DispatchDeadlineMS))
+	defer cancel()
+	resp, err := securehttp.Get(ctx, workDir, p.DownloadURL, downloadTimeout)
 	if err != nil {
 		return "", err
 	}

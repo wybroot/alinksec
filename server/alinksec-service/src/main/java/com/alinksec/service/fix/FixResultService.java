@@ -36,6 +36,8 @@ public class FixResultService {
             log.warn("修复结果 task_id 非法: {} agent={}", result.getTaskId(), agentId);
             return;
         }
+        jdbc.update("UPDATE t_fix_task SET status=status WHERE id=?",taskId);
+        jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=?",agentId);
         for (FixResultItem item : result.getResultsList()) {
             int status = item.getSuccess() ? 1 : (item.getRolledBack() ? 2 : 3);
             boolean unverifiedSuccess = item.getSuccess() && !item.getVerified();
@@ -44,6 +46,9 @@ public class FixResultService {
                       log = CASE WHEN ref_type='vuln_finding' AND ? THEN ? ELSE ? END, finished_at = CURRENT_TIMESTAMP
                     WHERE task_id = ? AND agent_id = ? AND ref_id = ? AND status = 0
                       AND EXISTS (SELECT 1 FROM t_fix_task t WHERE t.id = ? AND t.status = 1)
+                      AND (ref_type <> 'vuln_finding' OR EXISTS (
+                        SELECT 1 FROM t_command c WHERE c.cmd_id=t_fix_record.command_id
+                          AND c.agent_id=t_fix_record.agent_id AND c.status IN (1,2,3,4)))
                     """, unverifiedSuccess, status, unverifiedSuccess,
                     truncate("未确认安装后身份及完整版本，不标记漏洞已修复。\n" + item.getLog()), truncate(item.getLog()),
                     taskId, agentId, item.getRefId(), taskId);
@@ -58,12 +63,12 @@ public class FixResultService {
                     """, String.class, taskId, agentId, item.getRefId());
             if (item.getSuccess() && item.getVerified() && "vuln_finding".equals(refType)) {
                 jdbc.update("""
-                        UPDATE t_vuln_finding SET status = 3
+                        UPDATE t_vuln_finding SET status = 3,resolved_inventory_revision=(SELECT software_revision FROM t_agent WHERE agent_id=?)
                         WHERE id = CAST(? AS BIGINT) AND agent_id = ?
                           AND EXISTS (SELECT 1 FROM t_fix_record r
                                       WHERE r.task_id = ? AND r.agent_id = ? AND r.ref_id = CAST(? AS TEXT)
                                         AND r.ref_type = 'vuln_finding')
-                        """, item.getRefId(), agentId, taskId, agentId, item.getRefId());
+                        """, agentId,item.getRefId(), agentId, taskId, agentId, item.getRefId());
             }
         }
         refreshTaskStatus(taskId);

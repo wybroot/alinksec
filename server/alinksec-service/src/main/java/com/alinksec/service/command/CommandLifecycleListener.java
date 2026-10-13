@@ -16,4 +16,8 @@ public interface CommandLifecycleListener {
 
     default void onTerminal(String agentId, String cmdId, TerminalState state, String message) {
     }
+
+    default Command prepareDelivery(String agentId,Command command) { return command; }
+
+    default void beforeAck(String agentId,String cmdId) { }
 }

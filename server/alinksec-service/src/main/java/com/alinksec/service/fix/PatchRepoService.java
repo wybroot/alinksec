@@ -317,6 +317,11 @@ public class PatchRepoService {
         return props.getPatch().getDownloadBaseUrl() + "/api/fix/patches/download?filename=" + java.net.URLEncoder.encode(String.valueOf(patchRow.get("filename")), StandardCharsets.UTF_8)
                 + "&token=" + downloadTokens.issue(agentId, "patch", String.valueOf(patchRow.get("filename")));
     }
+    public String repairDownloadUrl(String agentId,Map<String,Object> patch,long taskId,String refId,String reviewId,java.time.Instant deadline) {
+        return props.getPatch().getDownloadBaseUrl()+"/api/fix/patches/download?filename="
+                +java.net.URLEncoder.encode(String.valueOf(patch.get("filename")),StandardCharsets.UTF_8)
+                +"&token="+downloadTokens.issueForRepair(agentId,String.valueOf(patch.get("filename")),taskId,refId,reviewId,deadline);
+    }
     private static String normalizeRepoType(String type, String original) {
         String actual = type == null || type.isBlank() ? (original != null && original.toLowerCase().endsWith(".deb") ? "deb" : original != null && original.toLowerCase().endsWith(".rpm") ? "rpm" : "") : type.trim().toLowerCase();
         if (!List.of("deb", "rpm").contains(actual)) throw new IllegalArgumentException("仅支持 Linux 二进制 DEB/RPM，其他补丁请人工处理");

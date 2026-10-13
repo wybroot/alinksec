@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParsePkgPayloadRequiresChecksum(t *testing.T) {
@@ -47,15 +48,15 @@ func TestParsePkgPayloadAcceptsCompletePackageMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsePkgPayload() error = %v", err)
 	}
-	if pkg.Sha256 != strings.Repeat("a", 64) || pkg.Inventory.Contract != 1 {
+	if pkg.Sha256 != strings.Repeat("a", 64) || pkg.Inventory.Contract != 2 {
 		t.Fatal("complete checksum or approved identity lost")
 	}
 }
 
 func completeRepairPayload(t *testing.T) string {
 	t.Helper()
-	payload := PkgPayload{RepoType: "deb", PkgName: "fixture", TargetVersion: "2.0-1", DownloadURL: "https://fixture.invalid/package", Sha256: strings.Repeat("a", 64), FindingID: "1",
-		Inventory: PackageInstallation{Contract: 1, OSType: 1, Source: "dpkg", Architecture: "amd64", DistroID: "ubuntu", DistroVersion: "24.04", InstalledVersion: "1.0-1"}}
+	payload := PkgPayload{RepoType: "deb", PkgName: "fixture", TargetVersion: "2.0-1", DownloadURL: "https://fixture.invalid/package", Sha256: strings.Repeat("a", 64), FindingID: "1", DispatchDeadlineMS: time.Now().Add(5 * time.Minute).UnixMilli(),
+		Inventory: PackageInstallation{Contract: 2, OSType: 1, Source: "dpkg", Architecture: "amd64", DistroID: "ubuntu", DistroVersion: "24.04", InstalledVersion: "1.0-1"}}
 	value, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -65,11 +66,12 @@ func completeRepairPayload(t *testing.T) string {
 
 func TestPackageRepairRejectsLegacyAndIncompleteContracts(t *testing.T) {
 	for _, mutate := range []func(*PkgPayload){
-		func(p *PkgPayload) { p.Inventory = PackageInstallation{} }, func(p *PkgPayload) { p.Inventory.Contract = 2 },
+		func(p *PkgPayload) { p.Inventory = PackageInstallation{} }, func(p *PkgPayload) { p.Inventory.Contract = 1 },
 		func(p *PkgPayload) { p.Inventory.Architecture = "*" }, func(p *PkgPayload) { p.Inventory.DistroID = "" },
 		func(p *PkgPayload) { p.Inventory.InstalledVersion = "" }, func(p *PkgPayload) { p.Inventory.OSType = 2 },
 		func(p *PkgPayload) { p.Inventory.Source = "rpm" }, func(p *PkgPayload) { p.Sha256 = "abc123" },
 		func(p *PkgPayload) { p.PkgName = "--help" }, func(p *PkgPayload) { p.RepoType = "msu" },
+		func(p *PkgPayload) { p.DispatchDeadlineMS = 0 }, func(p *PkgPayload) { p.DispatchDeadlineMS = time.Now().Add(-time.Minute).UnixMilli() },
 	} {
 		var payload PkgPayload
 		if err := json.Unmarshal([]byte(completeRepairPayload(t)), &payload); err != nil {
@@ -91,7 +93,7 @@ func TestPackageRepairRejectsAMismatchedFindingBeforeInspectingTheHost(t *testin
 }
 
 func TestPackageRepairStopsBeforeInstallationAndRequiresPostInstallIdentity(t *testing.T) {
-	for _, scenario := range []string{"complete", "identity-before-download", "identity-after-download", "wrong-name", "wrong-source", "wrong-version", "wrong-architecture", "unreadable-package", "identity-after-install", "query-after-install", "installation-failed"} {
+	for _, scenario := range []string{"complete", "identity-before-download", "identity-after-download", "window-after-download", "wrong-name", "wrong-source", "wrong-version", "wrong-architecture", "unreadable-package", "identity-after-install", "query-after-install", "installation-failed"} {
 		t.Run(scenario, func(t *testing.T) {
 			value := completeRepairPayload(t)
 			p, err := parsePkgPayload(value)
@@ -112,8 +114,11 @@ func TestPackageRepairStopsBeforeInstallationAndRequiresPostInstallIdentity(t *t
 					return PackageInstallation{}, errors.New("query failed")
 				}
 				return current, nil
-			}, download: func(string, *PkgPayload) (string, error) {
+			}, download: func(_ string, active *PkgPayload) (string, error) {
 				downloads++
+				if scenario == "window-after-download" {
+					active.DispatchDeadlineMS = time.Now().Add(-time.Minute).UnixMilli()
+				}
 				file := filepath.Join(t.TempDir(), "fixture.deb")
 				if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
 					t.Fatal(err)
@@ -183,8 +188,9 @@ func TestDownloadPatchPreservesPackageExtensionAndChecksTLSAndChecksum(t *testin
 	for _, repoType := range []string{"deb", "rpm", "msu"} {
 		t.Run(repoType, func(t *testing.T) {
 			payload := &PkgPayload{RepoType: repoType,
-				DownloadURL: server.URL + "/api/fix/patches/download?filename=test." + repoType + "&token=fixture-secret",
-				Sha256:      hex.EncodeToString(sum[:])}
+				DispatchDeadlineMS: time.Now().Add(time.Minute).UnixMilli(),
+				DownloadURL:        server.URL + "/api/fix/patches/download?filename=test." + repoType + "&token=fixture-secret",
+				Sha256:             hex.EncodeToString(sum[:])}
 			name, err := downloadPatch(workDir, payload)
 			if err != nil {
 				t.Fatal(err)

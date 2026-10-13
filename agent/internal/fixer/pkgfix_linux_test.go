@@ -32,7 +32,7 @@ func TestPackageHeaderKeepsFullBinaryIdentityAndRejectsMalformedOrSourcePackages
 
 func TestInstallationSnapshotRejectsDuplicateNamesAcrossArchitecturesAndSources(t *testing.T) {
 	base := &pb.SoftwareInfo{Name: "fixture", Version: "1.0-1", Source: "dpkg", Architecture: "amd64"}
-	snapshot := &pb.RptAssetSnapshot{Software: []*pb.SoftwareInfo{base}, SoftwareInventory: &pb.SoftwareInventory{Status: pb.SoftwareInventory_COMPLETE, DistroId: "ubuntu", DistroVersion: "24.04", Source: "mixed", PackageRepairContract: 1}}
+	snapshot := &pb.RptAssetSnapshot{Software: []*pb.SoftwareInfo{base}, SoftwareInventory: &pb.SoftwareInventory{Status: pb.SoftwareInventory_COMPLETE, DistroId: "ubuntu", DistroVersion: "24.04", Source: "mixed", PackageRepairContract: 2}}
 	if _, err := installationFromSnapshot("fixture", snapshot); err != nil {
 		t.Fatal(err)
 	}

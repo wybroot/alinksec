@@ -119,7 +119,12 @@ public class AssetService {
                 agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());
         // Only a replaced software inventory should initiate a new comparison.
         // A database error can still roll back the surrounding transaction.
-        if (!replaceSoftware) return;
+        if (!replaceSoftware) {
+            // A failed/unsupported attempt must invalidate apparent coverage even
+            // while retaining the last successful software rows.
+            if (snapshot.hasSoftwareInventory()) vulnMatchService.matchAgent(agentId,0L);
+            return;
+        }
         try {
             vulnMatchService.matchAgent(agentId, 0L);
         } catch (Exception e) {
@@ -130,7 +135,7 @@ public class AssetService {
     private boolean recordSoftwareAttempt(String agentId, RptAssetSnapshot snapshot) {
         if (!snapshot.hasSoftwareInventory()) {
             jdbc.update("""
-                    UPDATE t_agent SET software_collection_status='legacy', software_collection_error='',
+                    UPDATE t_agent SET software_revision=software_revision+1,software_collection_status='legacy', software_collection_error='',
                       software_attempted_at=CURRENT_TIMESTAMP, distro_id='', distro_version='',
                       software_inventory_source='', software_identity_error='legacy_inventory', software_succeeded_at=NULL,
                       package_repair_contract=0
@@ -165,12 +170,12 @@ public class AssetService {
             identityError = "distribution_identity_incomplete";
         }
         jdbc.update("""
-                UPDATE t_agent SET software_collection_status='complete', software_collection_error='',
+                UPDATE t_agent SET software_revision=software_revision+1,software_collection_status='complete', software_collection_error='',
                   software_attempted_at=CURRENT_TIMESTAMP, software_succeeded_at=CURRENT_TIMESTAMP,
                   distro_id=?, distro_version=?, software_inventory_source=?, software_identity_error=?, package_repair_contract=?
                 WHERE agent_id=?
                 """, distroId, distroVersion, inventory.getSource(), identityError,
-                inventory.getPackageRepairContract() == 1 && !"registry".equals(inventory.getSource()) ? 1 : 0, agentId);
+                inventory.getPackageRepairContract() == 2 && !"registry".equals(inventory.getSource()) ? 2 : 0, agentId);
         return true;
     }
 

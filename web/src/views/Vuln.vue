@@ -7,6 +7,7 @@
       <div class="chip"><span class="dot" style="background:#94a3b8"></span><span class="n">{{ sevCount.l }}</span><span class="l">低危</span></div>
       <div class="chip" style="background:#ecfdf5"><span class="dot" style="background:#16a34a"></span><span class="n" style="color:#16a34a">{{ fixRate }}%</span><span class="l">修复率</span></div>
     </div>
+    <el-alert type="info" :closable="false" show-icon title="漏洞清单只显示已匹配结果，没有告警不代表安全；请在“比对覆盖”核对采集状态、未知信息及适用声明。" style="margin-bottom:12px" />
     <div class="panel">
       <div class="toolbar">
         <el-select v-model="sevFilter" placeholder="级别" clearable style="width:120px">
@@ -17,6 +18,8 @@
       </div>
 
       <el-tabs v-model="tab">
+        <el-tab-pane label="处置历史" name="history" lazy><VulnerabilityHistory v-if="tab === 'history'" /></el-tab-pane>
+        <el-tab-pane label="比对覆盖" name="coverage" lazy><VulnerabilityCoverage v-if="tab === 'coverage'" /></el-tab-pane>
         <el-tab-pane label="漏洞清单" name="vuln">
           <el-table :data="filteredVulns" stripe @selection-change="s => selVulns = s">
             <el-table-column type="selection" width="42" />
@@ -117,7 +120,7 @@
       <el-alert v-if="fixRow.fixType === 'config'" type="success" :closable="false" show-icon
         title="配置类修复：Agent 将自动执行，改前备份 → 执行 → 复核，失败自动回滚" />
       <el-alert v-else type="warning" :closable="false" show-icon
-        title="软件包类修复：需审批并限定维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
+        title="软件包类修复：由指定账号审批，可设置维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
       <el-form label-width="96px" style="margin-top:16px">
         <el-form-item label="影响范围">{{ fixRow.hosts }} 台主机</el-form-item>
         <el-form-item v-if="fixRow.identityStatus" label="匹配时身份">{{ fixRow.distroId }} {{ fixRow.distroVersion }} · {{ fixRow.source || '未知' }} · {{ fixRow.architecture || '架构未知' }}</el-form-item>
@@ -137,11 +140,13 @@
             <span class="mono">{{ fixRow.target }}（漏洞库 fixed_version，逐主机按已装版本升级）</span>
           </el-form-item>
           <el-form-item label="审批人" required>
-            <el-input v-model="fixForm.approver" placeholder="必填（提交后由该人员审批放行）" style="width:260px" />
+            <el-select v-model="fixForm.approver" filterable placeholder="选择已启用的审批账号" style="width:100%;max-width:320px"><el-option v-for="user in approvers" :key="user.id" :value="user.username" :label="user.real_name ? `${user.username}（${user.real_name}）` : user.username" /></el-select>
+            <p style="color:#64748b;font-size:12px">由所选账号登录后审批，审批记录使用已验证身份。</p>
           </el-form-item>
           <el-form-item label="维护窗口">
-            <el-date-picker v-model="fixForm.win" type="datetimerange" start-placeholder="开始（可空=审批后立即执行）" end-placeholder="结束" />
+            <el-date-picker v-model="fixForm.win" type="datetimerange" start-placeholder="开始（本地时间）" end-placeholder="结束（本地时间）" />
           </el-form-item>
+          <p style="color:#64748b;font-size:12px">不填窗口则审批后排队；设置时起止必须齐全。截止后停止新安装和重推，已经开始的安装需查看结果，不承诺自动回滚。</p>
           <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
             title="创建时校验补丁仓库覆盖率：任一主机无对应补丁包将阻断提交" />
         </template>
@@ -180,9 +185,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask } from '../api'
+import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask, fetchFixApprovers } from '../api'
 import { sevType, sevLabel } from '../utils/format'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
+import VulnerabilityHistory from '../components/VulnerabilityHistory.vue'
+import VulnerabilityCoverage from '../components/VulnerabilityCoverage.vue'
 
 const tab = ref('vuln')
 const vulns = ref([])
@@ -194,6 +201,7 @@ const weakpwds = ref([])
 const ports = ref([])
 const riskyOnly = ref(false)
 const agents = ref([])
+const approvers = ref([])
 const vulnStats = ref({ bySeverity: [], pending: 0, fixed: 0, total: 0 })
 
 // 发起扫描
@@ -258,6 +266,7 @@ const openFix = row => {
   }
   fixRow.value = row
   fixDlg.value = true
+  loadApprovers()
 }
 const openBatchFix = () => {
   const rows = selVulns.value.filter(v => v.fixType === 'pkg' && v.findings?.length)
@@ -277,6 +286,11 @@ const openBatchFix = () => {
     findings: [...new Map(rows.flatMap(r => r.findings).map(f => [`${f.agentId}:${f.findingId}`, f])).values()],
   }
   fixDlg.value = true
+  loadApprovers()
+}
+async function loadApprovers() {
+  try { approvers.value = await fetchFixApprovers(); if (!approvers.value.some(user => user.username === fixForm.value.approver)) fixForm.value.approver = '' }
+  catch (error) { ElMessage.error(error.message || '审批账号加载失败') }
 }
 const iso = d => (d instanceof Date ? d.toISOString() : (d || ''))
 const submitFix = async () => {

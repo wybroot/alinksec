@@ -83,7 +83,7 @@ func collectLinuxSoftware(snap *pb.RptAssetSnapshot, inventory *pb.SoftwareInven
 		inventory.Source = "mixed"
 	}
 	inventory.Status = pb.SoftwareInventory_COMPLETE
-	inventory.PackageRepairContract = 1
+	inventory.PackageRepairContract = 2
 	snap.Software = packages
 }
 

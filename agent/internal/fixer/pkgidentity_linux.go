@@ -22,7 +22,7 @@ func currentInstallation(name string, log *slog.Logger) (PackageInstallation, er
 
 func installationFromSnapshot(name string, snap *pb.RptAssetSnapshot) (PackageInstallation, error) {
 	identity := snap.GetSoftwareInventory()
-	if identity.GetStatus() != pb.SoftwareInventory_COMPLETE || identity.GetPackageRepairContract() != 1 || identity.GetIdentityError() != "" || !repairDistro.MatchString(identity.GetDistroId()) || !repairDistroVersion.MatchString(identity.GetDistroVersion()) {
+	if identity.GetStatus() != pb.SoftwareInventory_COMPLETE || identity.GetPackageRepairContract() != 2 || identity.GetIdentityError() != "" || !repairDistro.MatchString(identity.GetDistroId()) || !repairDistroVersion.MatchString(identity.GetDistroVersion()) {
 		return PackageInstallation{}, errors.New("native installation identity unavailable")
 	}
 	var installed *pb.SoftwareInfo
@@ -38,7 +38,7 @@ func installationFromSnapshot(name string, snap *pb.RptAssetSnapshot) (PackageIn
 	if installed == nil || (installed.GetSource() != "rpm" && installed.GetSource() != "dpkg") || !repairArchitecture.MatchString(installed.GetArchitecture()) || !repairVersion.MatchString(installed.GetVersion()) {
 		return PackageInstallation{}, errors.New("installed package absent or incomplete")
 	}
-	return PackageInstallation{Contract: 1, OSType: 1, Source: installed.GetSource(), Architecture: installed.GetArchitecture(), DistroID: identity.GetDistroId(), DistroVersion: identity.GetDistroVersion(), InstalledVersion: installed.GetVersion()}, nil
+	return PackageInstallation{Contract: 2, OSType: 1, Source: installed.GetSource(), Architecture: installed.GetArchitecture(), DistroID: identity.GetDistroId(), DistroVersion: identity.GetDistroVersion(), InstalledVersion: installed.GetVersion()}, nil
 }
 
 func inspectPackage(p *PkgPayload, file string) (packageMetadata, error) {
