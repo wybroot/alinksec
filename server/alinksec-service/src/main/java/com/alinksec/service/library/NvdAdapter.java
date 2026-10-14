@@ -27,7 +27,10 @@ public final class NvdAdapter {
         String published = cve.path("published").asText("");
         if (!published.isEmpty()) result.put("published_at", published.endsWith("Z") ? published : published + "Z");
         ArrayNode affected = result.putArray("affected");
-        if (!"Rejected".equals(cve.path("vulnStatus").asText())) {
+        if (List.of("REJECT", "REJECTED").contains(cve.path("vulnStatus").asText().toUpperCase(java.util.Locale.ROOT))) {
+            result.put("status", "withdrawn");
+            result.put("withdrawal_reason", "NVD upstream status: " + cve.path("vulnStatus").asText());
+        } else {
             for (JsonNode config : cve.path("configurations")) {
                 if (config.path("negate").asBoolean() || "AND".equals(config.path("operator").asText())) continue;
                 for (JsonNode node : config.path("nodes")) {

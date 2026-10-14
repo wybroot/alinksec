@@ -38,6 +38,16 @@ class JwtAuthInterceptorTest {
             assertEquals("admin".equals(role), interceptor().preHandle(request, new MockHttpServletResponse(), new Object()));
         }
     }
+    @Test void sourceGovernanceWritesRequireAdminWhileAuditRemainsReadable() throws Exception {
+        for(String role:new String[]{"admin","operator","viewer"}) {
+            for(String path:new String[]{"/api/libraries/sources/provider/retire","/api/libraries/sources/provider/cves/CVE-2099-12345/decision"}) {
+                var write=request(role); write.setMethod("POST"); write.setRequestURI(path);
+                assertEquals("admin".equals(role),interceptor().preHandle(write,new MockHttpServletResponse(),new Object()));
+            }
+            var read=request(role); read.setRequestURI("/api/libraries/sources/provider/governance");
+            assertTrue(interceptor().preHandle(read,new MockHttpServletResponse(),new Object()));
+        }
+    }
     @Test
     void operatorsCanImportButViewersCannotModifyLibraries() throws Exception {
         var operator = request("operator"); operator.setMethod("POST"); operator.setRequestURI("/api/libraries/cves/import");

@@ -26,6 +26,31 @@ public class LibraryController {
                            @RequestParam(defaultValue="20") int size) {
         return ApiResult.ok(catalog.cveRules(keyword, Math.max(1, page), Math.max(1, Math.min(size, 100))));
     }
+    @GetMapping("/cves/{cveId}/declarations")
+    public ApiResult<?> declarations(@PathVariable String cveId) { return ApiResult.ok(catalog.declarations(cveId)); }
+    public record GovernanceRequest(Boolean withdraw, String documentDigest, String note) {}
+    @PostMapping("/sources/{id}/cves/{cveId}/decision")
+    public ApiResult<?> decision(@PathVariable String id, @PathVariable String cveId,
+                                @RequestBody GovernanceRequest body, HttpServletRequest request) {
+        if (body.withdraw()==null) throw new IllegalArgumentException("须明确撤销或恢复声明");
+        var result=catalog.decideCve(id,cveId,body.withdraw(),body.documentDigest(),actor(request),body.note());
+        sync.recheckAssets();
+        return ApiResult.ok(result);
+    }
+    public record RetirementRequest(String note) {}
+    @PostMapping("/sources/{id}/retire")
+    public ApiResult<?> retire(@PathVariable String id, @RequestBody RetirementRequest body, HttpServletRequest request) throws Exception {
+        return ApiResult.ok(sync.retireSource(id,actor(request),body.note()));
+    }
+    @GetMapping("/sources/{id}/governance")
+    public ApiResult<?> governance(@PathVariable String id, @RequestParam(defaultValue="1") int page,
+                                   @RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(catalog.governanceHistory(id,Math.max(1,page),Math.max(1,Math.min(size,50))));
+    }
+    private static Long actor(HttpServletRequest request) {
+        if (!(request.getAttribute("uid") instanceof Number id)) throw new IllegalArgumentException("需要已登录账号");
+        return id.longValue();
+    }
     @PostMapping("/sources/{id}/sync")
     public ApiResult<Map<String, Object>> synchronize(@PathVariable String id) {
         return ApiResult.ok(Map.of("accepted", sync.trigger(id)));
