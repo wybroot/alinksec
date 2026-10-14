@@ -32,6 +32,9 @@ jobs:
         env:
           CGO_ENABLED: '0'
           GOARCH: amd64
+      - name: Check Windows retired signature installation and cache refresh
+        run: go test -v -count=1 -run '^TestRetirementReleaseClearsPreviouslyLoadedHash$' ./internal/virusscan
+        working-directory: agent
       - name: Check actual Windows SCM service and TLS communication
         run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
         working-directory: agent
