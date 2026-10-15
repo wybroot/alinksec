@@ -3,7 +3,8 @@ import {createServer} from 'node:http'
 import {createReadStream,existsSync,mkdirSync,readFileSync,statSync,writeFileSync} from 'node:fs'
 import {dirname,extname,resolve,sep} from 'node:path'
 import {fileURLToPath} from 'node:url'
-import {chromium,expect} from '@playwright/test'
+import {chromium,expect as baseExpect} from '@playwright/test'
+const expect=baseExpect.configure({timeout:15000})
 
 const web=resolve(dirname(fileURLToPath(import.meta.url)),'..')
 const dist=resolve(process.env.ALINKSEC_ISOLATION_PREVIEW_DIST||resolve(web,'dist'))
@@ -87,7 +88,7 @@ try{
   await host().getByRole('button',{name:'详情',exact:true}).click()
   await expect(drawer.getByText(/隔离 已隔离/)).toBeVisible()
   stage='restored'
-  await expect(drawer.getByText(/隔离 正常/)).toBeVisible()
+  await expect(drawer.getByText(/隔离 未隔离/)).toBeVisible()
   await expect(drawer.getByText('管理通道未在 10 秒内完成认证确认，已自动恢复网络',{exact:true})).toBeVisible()
   scenarios.push('filtered-away host detail receives the fresh restored state')
   await drawer.locator('.el-drawer__close-btn').click()

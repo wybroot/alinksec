@@ -149,7 +149,7 @@ SELECT id,'migration-fixture-agent',1,0,1,0 FROM t_baseline_task WHERE task_no='
 SQL
 PGDATABASE="$test_database" pg_dump --format=custom --file="$work_dir/legacy.dump"
 run_migrations "$work_dir/base"
-assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" "59"
+assert_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" "60"
 assert_query "SELECT count(*) FROM t_schema_migration" "17"
 assert_query "SELECT hostname || '|' || isolation_status FROM t_agent WHERE agent_id = 'migration-fixture-agent'" "legacy-host|0"
 assert_query "SELECT name || '|' || version FROM t_asset_software WHERE agent_id = 'migration-fixture-agent'" "legacy-software|1.0"
