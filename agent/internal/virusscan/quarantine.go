@@ -249,6 +249,11 @@ func (q *quarantine) QuarantineExpected(ctx context.Context, path, expected stri
 			out.Close()
 		}
 		if e == nil {
+			// Windows cannot replace the captured destination while this source
+			// descriptor remains open. The verified new inode is ready to publish.
+			e = f.Close()
+		}
+		if e == nil {
 			e = os.Rename(filepath.Join(dir.Name(), temp), filepath.Join(dir.Name(), name))
 		}
 		if e != nil {

@@ -134,7 +134,7 @@ class DetectionEvidenceIntegrationTest {
     }
     @Test void queuedCommandsRecheckVersionAndCurrentActor() {
         long task=task(List.of(a)); Command scan=commands.values().stream().filter(Command::hasVirusScan).findFirst().orElseThrow();
-        jdbc.update("UPDATE t_virus_db SET db_version=? WHERE id=?",version+"-new",release);
+        jdbc.update("UPDATE t_virus_db SET db_version=? WHERE id=?","new-"+version.substring(4),release);
         assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,scan)));
         jdbc.update("UPDATE t_virus_db SET db_version=? WHERE id=?",version,release);
         jdbc.update("UPDATE t_user SET status=0 WHERE id=?",actor);

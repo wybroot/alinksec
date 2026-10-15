@@ -20,7 +20,7 @@ const (
 // VirusCheckFunc 单文件检查回调：命中返回 finding（已隔离/告警），干净返回 nil
 type VirusCheckFunc func(path string) *proto.VirusFinding
 
-// SetVirusEngine comm 启动时注入（实时防护开关由特征库安装状态天然决定）
+// SetVirusEngine 由 comm 启动时注入；周期策略和特征库可用性分别检查。
 func (g *Guard) SetVirusEngine(check VirusCheckFunc) {
 	g.mu.Lock()
 	g.virusCheck = check

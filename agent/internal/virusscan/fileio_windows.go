@@ -64,7 +64,11 @@ func openAtAccess(parent *os.File, name string, create, mutation bool) (*os.File
 	// themselves and rejected, never resolved to a target file.
 	err = windows.NtCreateFile(&h, access, attrs, &iosb, nil, windows.FILE_ATTRIBUTE_NORMAL, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, disposition, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
 	if err != nil {
-		return nil, err
+		// Preserve Go's filesystem error classification (notably optional rules.json).
+		if status, ok := err.(windows.NTStatus); ok {
+			err = status.Errno()
+		}
+		return nil, &os.PathError{Op: "open", Path: filepath.Join(parent.Name(), name), Err: err}
 	}
 	return os.NewFile(uintptr(h), filepath.Join(parent.Name(), name)), nil
 }

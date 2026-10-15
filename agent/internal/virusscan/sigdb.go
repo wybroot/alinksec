@@ -1,6 +1,6 @@
 // Package virusscan 病毒查杀引擎（docs/05 §1）：
 // L1 哈希情报层（纯 Go，零依赖）：SHA256 精确匹配特征库；
-// L2 YARA 规则层：M3 接入（CGO 构建标签降级方案保留），当前 hash-only。
+// L2 内部 JSON 规则层：text/hex、all/any；不使用原生 YARA 语言或解析器。
 //
 // 特征库包格式（zip，全量包 < 20MB）：
 //
@@ -12,7 +12,7 @@
 //	virus/db/hashes.txt   当前生效哈希库
 //	virus/db/manifest.json
 //	virus/quarantine/     隔离区（meta.json 记录原路径）
-//	virus/cache.json      clean 缓存（path+size+mtime 未变跳过）
+// 主动扫描每次读取文件字节，元数据缓存不构成放行依据。
 package virusscan
 
 import (
@@ -45,7 +45,7 @@ type SigDB struct {
 	HashCount int
 	RuleCount int
 	hashes    map[string]HashEntry
-	rules     []*Rule // L2 YARA 规则层（rules.json）
+	rules     []*Rule // L2 内部 JSON 规则（rules.json）
 }
 
 // Lookup 哈希查询
@@ -143,7 +143,7 @@ func CachedHashSnapshot(ctx context.Context, workDir string, limit int) (string,
 	return dbCached.Version, dbCached.HashCount, rules, entries, dbGeneration, true
 }
 
-// parseDB 解析 hashes.txt + manifest.json（损坏时返回空库，不报错：断网沿用旧库语义）
+// parseDB 解析已安装库；损坏时 Valid=false，不把空结果当作可用覆盖。
 func parseDB(dir string) *SigDB {
 	db := &SigDB{hashes: map[string]HashEntry{}}
 	data, err := boundedFile(filepath.Join(dir, "manifest.json"), 64<<10)
