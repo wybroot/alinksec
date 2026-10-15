@@ -78,6 +78,7 @@ message Command {
     CmdVirusAction   virus_action   = 18;
     CmdSignatureUpdate signature_update = 19;
     CmdVulnFix       vuln_fix       = 20;
+    CmdIsolationConfirm isolation_confirm = 21; // ephemeral echo on this authenticated stream; no cmd_id/ACK
   }
 }
 
@@ -116,6 +117,12 @@ message CmdProtectAction {
   string target      = 2;   // IP / PID / 进程路径
   int64  duration_sec = 3;  // 封禁时长，0 = 永久（直至人工解封）
   string reason      = 4;   // 处置原因（审计留痕）
+  uint32 isolation_contract = 5; // 1: independently withdrawn, authenticated 10-second lease
+}
+
+message CmdIsolationConfirm {
+  string lease_id = 1;
+  string nonce = 2;
 }
 
 message CmdAgentUpgrade {
@@ -208,6 +215,7 @@ message Report {
     RptLogBatch       log_batch       = 17;  // 预留：原始日志订阅
     RptVirusResult    virus_result    = 18;
     RptFixResult      fix_result      = 19;
+    RptIsolationState isolation_state = 20; // live state only; never offline replay
   }
 }
 
@@ -222,6 +230,21 @@ message RptHeartbeat {
   string db_version      = 8;   // 病毒特征库本地版本（落后于平台当前版本即触发 CmdSignatureUpdate）
   uint32 virus_execution_contract = 9;
   uint32 upgrade_contract = 10; // 1 only while running under a supported native service manager
+  uint32 isolation_contract = 11; // 1 only with supported native keeper and firewall backend
+}
+
+message RptIsolationState {
+  string lease_id = 1;
+  uint64 generation = 2;
+  uint64 revision = 3;
+  string command_id = 4;
+  string restore_command_id = 5;
+  string phase = 6; // prepared/applying/active/restoring/attention/finished/unknown
+  bool confirmed = 7;
+  bool automatic = 8;
+  string message = 9;
+  int64 deadline = 10;
+  string nonce = 11; // fresh, one-use, current-stream challenge; absent outside active
 }
 
 message RptMetricsBatch {

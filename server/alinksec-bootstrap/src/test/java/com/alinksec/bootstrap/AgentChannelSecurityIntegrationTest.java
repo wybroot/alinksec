@@ -163,7 +163,7 @@ class AgentChannelSecurityIntegrationTest {
         }
         for (String agentId : agentIds) {
             for (String table : List.of("t_command", "t_asset_software", "t_asset_port", "t_asset_account",
-                    "t_asset_process", "t_asset_container", "t_vuln_finding", "t_vuln_coverage", "t_vuln_package_assessment", "t_agent")) {
+                    "t_asset_process", "t_asset_container", "t_alert", "t_vuln_finding", "t_vuln_coverage", "t_vuln_package_assessment", "t_agent")) {
                 jdbc.update("DELETE FROM " + table + " WHERE agent_id = ?", agentId);
             }
         }
@@ -486,9 +486,9 @@ class AgentChannelSecurityIntegrationTest {
         Stream attackerStream = connect(attacker);
         Stream victimStream = connect(victim);
         heartbeat(attackerStream, attacker.getAgentId());
-        heartbeat(victimStream, victim.getAgentId());
+        heartbeat(victimStream, victim.getAgentId(), true);
         String cmdId = commands.dispatch(victim.getAgentId(), Command.newBuilder()
-                .setProtectAction(CmdProtectAction.newBuilder().setAction(CmdProtectAction.Action.ISOLATE_HOST)), null);
+                .setProtectAction(CmdProtectAction.newBuilder().setAction(CmdProtectAction.Action.ISOLATE_HOST).setIsolationContract(1)), null);
         assertEquals(cmdId, victimStream.nextCommand().getCmdId());
         for (RptAck.Stage stage : List.of(RptAck.Stage.RECEIVED, RptAck.Stage.RUNNING,
                 RptAck.Stage.DONE, RptAck.Stage.FAILED)) {
@@ -498,9 +498,43 @@ class AgentChannelSecurityIntegrationTest {
             assertEquals(IsolationCommandLifecycleListener.ISOLATING, isolationStatus(victim.getAgentId()));
         }
         ack(victimStream, victim.getAgentId(), cmdId, RptAck.Stage.DONE);
-        heartbeat(victimStream, victim.getAgentId());
+        heartbeat(victimStream, victim.getAgentId(), true);
         assertEquals(CommandRepository.ST_DONE, commandStatus(cmdId));
+        assertEquals(IsolationCommandLifecycleListener.ISOLATING, isolationStatus(victim.getAgentId()));
+        var pulse=com.alinksec.proto.RptIsolationState.newBuilder().setLeaseId("a".repeat(32)).setGeneration(1).setRevision(3)
+                .setCommandId(cmdId).setPhase("active").setConfirmed(true).setNonce("b".repeat(32)).setDeadline(System.currentTimeMillis()+10000);
+        victimStream.requests.onNext(report(victim.getAgentId()).setIsolationState(pulse).build());
+        var echo=victimStream.nextCommand();
+        assertTrue(echo.getCmdId().isEmpty());
+        assertEquals(pulse.getNonce(),echo.getIsolationConfirm().getNonce());
+        assertEquals(pulse.getLeaseId(),echo.getIsolationConfirm().getLeaseId());
         assertEquals(IsolationCommandLifecycleListener.ISOLATED, isolationStatus(victim.getAgentId()));
+        victimStream.requests.onNext(report(victim.getAgentId()).setIsolationState(pulse.setRevision(4).setPhase("finished").setNonce("").setAutomatic(true)).build());
+        heartbeat(victimStream,victim.getAgentId(),true);
+        assertEquals(IsolationCommandLifecycleListener.NORMAL,isolationStatus(victim.getAgentId()));
+        ack(victimStream,victim.getAgentId(),cmdId,RptAck.Stage.DONE);
+        heartbeat(victimStream,victim.getAgentId(),true);
+        assertEquals(IsolationCommandLifecycleListener.NORMAL,isolationStatus(victim.getAgentId()));
+    }
+
+    @Test
+    void persistentIsolationOutcomeDoesNotRecountAfterTransportDedupExpires() throws Exception {
+        var agent=enroll(); var stream=connect(agent); heartbeat(stream,agent.getAgentId());
+        String lease="d".repeat(32),eventId=lease+"-finished-event";
+        reportIds.add(eventId);
+        var event=com.alinksec.proto.RptSecurityEvent.newBuilder().setType("self_defense").setRuleId("host-isolation-lease")
+                .setSeverity(com.alinksec.proto.Severity.SEV_HIGH).setActionTaken("restored")
+                .setDetail(JsonUtils.write(Map.of("id",lease,"phase","finished","automatic",true,"cause","lease_expired")));
+        stream.requests.onNext(report(agent.getAgentId()).setReportId(eventId).setSecurityEvent(event).build());
+        heartbeat(stream,agent.getAgentId());
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_isolation_outcome_receipt WHERE agent_id=?",Integer.class,agent.getAgentId()));
+        String transportKey=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agent.getAgentId()+"\0"+eventId).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        reportIds.add(transportKey);
+        assertEquals(1,jdbc.update("DELETE FROM t_report_dedup WHERE report_id=?",transportKey));
+        stream.requests.onNext(report(agent.getAgentId()).setReportId(eventId).setSecurityEvent(event).build());
+        heartbeat(stream,agent.getAgentId());
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_isolation_outcome_receipt WHERE agent_id=?",Integer.class,agent.getAgentId()));
+        assertEquals(1,jdbc.queryForObject("SELECT count FROM t_alert WHERE agent_id=? AND rule_id='host-isolation-lease'",Integer.class,agent.getAgentId()));
     }
 
     @Test
@@ -577,10 +611,11 @@ class AgentChannelSecurityIntegrationTest {
         return Report.newBuilder().setAgentId(agentId).setReportId(id).setTs(System.currentTimeMillis());
     }
 
-    private void heartbeat(Stream stream, String agentId) throws Exception {
+    private void heartbeat(Stream stream, String agentId) throws Exception { heartbeat(stream,agentId,false); }
+    private void heartbeat(Stream stream, String agentId,boolean isolationCapable) throws Exception {
         String marker = UUID.randomUUID().toString().substring(0, 20);
         stream.requests.onNext(report(agentId).setHeartbeat(RptHeartbeat.newBuilder()
-                .setAgentVersion(marker).setPolicyVersion(policy.currentVersion())).build());
+                .setAgentVersion(marker).setPolicyVersion(policy.currentVersion()).setIsolationContract(isolationCapable?1:0)).build());
         // Stream ordering makes the persisted heartbeat a barrier for preceding reports.
         await(() -> marker.equals(jdbc.queryForObject(
                 "SELECT agent_version FROM t_agent WHERE agent_id = ?", String.class, agentId)));

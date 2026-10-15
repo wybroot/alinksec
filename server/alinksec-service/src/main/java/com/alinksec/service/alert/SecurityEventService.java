@@ -85,6 +85,10 @@ public class SecurityEventService {
     private String fingerprint(RptSecurityEvent event, String detailJson) {
         String base = event.getType() + ":" + event.getRuleId();
         try {
+            if(event.getType().equals("self_defense") && event.getRuleId().equals("host-isolation-lease")) {
+                var detail=JsonUtils.read(detailJson);
+                return base+":"+detail.path("id").asText()+":"+detail.path("phase").asText();
+            }
             String key = switch (event.getType()) {
                 case "process" -> "process_key";
                 case "file_tamper" -> "path";

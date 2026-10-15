@@ -28,14 +28,14 @@ class AgentChannelImplTest {
     void rejectsLaterReportFromDifferentAgentOnAuthenticatedStream() {
         ReportDispatcher dispatcher = mock(ReportDispatcher.class);
         AgentRepository agents = mock(AgentRepository.class);
-        ConnectionRegistry registry = mock(ConnectionRegistry.class);
+        ConnectionRegistry registry = org.mockito.Mockito.spy(new ConnectionRegistry());
         CommandService commands = mock(CommandService.class);
         AgentEntity agent = mock(AgentEntity.class);
         when(agent.status()).thenReturn(AgentEntity.STATUS_ONLINE);
         when(agents.findByAgentId("agent-a")).thenReturn(Optional.of(agent));
         @SuppressWarnings("unchecked")
         StreamObserver<Command> responses = mock(StreamObserver.class);
-        var channel = new AgentChannelImpl(dispatcher, agents, registry, commands).channel(responses);
+        var channel = new AgentChannelImpl(dispatcher, agents, registry, commands, mock(com.alinksec.service.protect.IsolationLeaseService.class)).channel(responses);
         Report first = Report.newBuilder().setAgentId("agent-a").build();
         Report forged = Report.newBuilder().setAgentId("agent-b").build();
 

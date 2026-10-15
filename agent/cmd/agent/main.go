@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"runtime"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/guard"
 	"github.com/alinksec/alinksec-agent/internal/identity"
+	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 )
 
@@ -40,6 +40,13 @@ func main() {
 		workDir := fs.String("workdir", defaultWorkDir(), "pending upgrade work directory")
 		if err = fs.Parse(os.Args[2:]); err == nil {
 			err = upgrade.RunWatchdog(*workDir)
+		}
+	case "isolation-watchdog":
+		fs := flag.NewFlagSet("isolation-watchdog", flag.ContinueOnError)
+		workDir := fs.String("workdir", defaultWorkDir(), "host isolation work directory")
+		lease := fs.String("lease", "", "owned isolation lease")
+		if err = fs.Parse(os.Args[2:]); err == nil {
+			err = isolation.RunWatchdog(*workDir, *lease)
 		}
 	case "version", "--version":
 		fmt.Println("alinksec-agent " + identity.AgentVersion)
@@ -182,6 +189,11 @@ func cmdUninstall(args []string) error {
 	case now > st.UninstallExpire:
 		return fmt.Errorf("卸载口令已过期（布防后 15 分钟内有效），请重新申请")
 	}
+	releaseIsolation, err := isolation.LockForRemoval(*workDir)
+	if err != nil {
+		return err
+	}
+	defer releaseIsolation()
 	if err := upgrade.CheckRemoval(*workDir); err != nil {
 		return err
 	}
@@ -189,8 +201,10 @@ func cmdUninstall(args []string) error {
 	st.UninstallToken, st.UninstallExpire = "", 0
 	_ = st.Save(*workDir)
 
-	stopService() // 停服务（等 Agent 进程退出释放文件句柄）
-	time.Sleep(2 * time.Second)
+	if err := stopService(); err != nil {
+		return fmt.Errorf("停止 Agent 服务失败，保留恢复记录与工作目录: %w", err)
+	}
+	releaseIsolation()
 	if err := guard.ClearLoginFirewall(); err != nil {
 		return fmt.Errorf("清理登录来源封禁失败: %w", err)
 	}
@@ -205,23 +219,4 @@ func cmdUninstall(args []string) error {
 		fmt.Println("卸载完成")
 	}
 	return nil
-}
-
-// stopService 尽力停止/移除服务单元（权限不足时仅提示，不阻塞数据清理）
-func stopService() {
-	var cmds []*exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmds = []*exec.Cmd{
-			exec.Command("net", "stop", "alinksec-agent"),
-			exec.Command("sc", "delete", "alinksec-agent"),
-		}
-	} else {
-		cmds = []*exec.Cmd{
-			exec.Command("systemctl", "stop", "alinksec-agent"),
-			exec.Command("systemctl", "disable", "alinksec-agent"),
-		}
-	}
-	for _, c := range cmds {
-		_ = c.Run()
-	}
 }

@@ -1,6 +1,6 @@
 //go:build windows
 
-package upgrade
+package securestate
 
 import (
 	"errors"
@@ -24,13 +24,13 @@ func protectDirectory(path string) error {
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
 
-func lockUpgrade(workDir string) (func(), error) {
-	if err := privateDir(upgradeDir(workDir)); err != nil {
+func Lock(dir string) (func(), error) {
+	if err := PrivateDir(dir); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(upgradeDir(workDir), "lock")
+	path := filepath.Join(dir, "lock")
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("invalid upgrade lock")
+		return nil, fmt.Errorf("invalid recovery lock")
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -47,13 +47,13 @@ func lockUpgrade(workDir string) (func(), error) {
 		}
 		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) || time.Now().After(deadline) {
 			f.Close()
-			return nil, fmt.Errorf("upgrade transaction is locked: %w", err)
+			return nil, fmt.Errorf("recovery transaction is locked: %w", err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func replaceRecord(src, dst string) error {
+func move(src, dst string, flags uint32) error {
 	s, err := windows.UTF16PtrFromString(src)
 	if err != nil {
 		return err
@@ -62,18 +62,10 @@ func replaceRecord(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return windows.MoveFileEx(s, d, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	return windows.MoveFileEx(s, d, flags)
 }
-
-func syncDirectory(string) error { return nil }
-func moveExecutable(src, dst string) error {
-	s, err := windows.UTF16PtrFromString(src)
-	if err != nil {
-		return err
-	}
-	d, err := windows.UTF16PtrFromString(dst)
-	if err != nil {
-		return err
-	}
-	return windows.MoveFileEx(s, d, windows.MOVEFILE_WRITE_THROUGH)
+func SyncDirectory(string) error { return nil }
+func Replace(src, dst string) error {
+	return move(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
+func Move(src, dst string) error { return move(src, dst, windows.MOVEFILE_WRITE_THROUGH) }

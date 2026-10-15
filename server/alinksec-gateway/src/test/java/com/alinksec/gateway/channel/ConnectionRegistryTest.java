@@ -7,6 +7,46 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ConnectionRegistryTest {
+    @Test void isolationCapabilityAndEchoAreBoundToTheCurrentStream() {
+        var registry=new ConnectionRegistry();
+        @SuppressWarnings("unchecked") StreamObserver<Command> first=mock(StreamObserver.class),second=mock(StreamObserver.class);
+        var isolate=Command.newBuilder().setProtectAction(CmdProtectAction.newBuilder().setAction(CmdProtectAction.Action.ISOLATE_HOST).setIsolationContract(1)).build();
+        registry.register("agent",first);
+        assertFalse(registry.send("agent",isolate));
+        registry.isolationContract("agent",first,1);
+        assertTrue(registry.send("agent",isolate));
+        registry.register("agent",second);
+        registry.isolationContract("agent",first,1);
+        registry.withCurrent("agent",first,()->fail("superseded stream processed live isolation state"));
+        assertFalse(registry.send("agent",isolate));
+        assertFalse(registry.isolationCapable("agent",second));
+        verifyNoInteractions(second);
+        registry.isolationContract("agent",second,1);
+        assertTrue(registry.send("agent",isolate));
+    }
+
+    @Test void reportDatabaseWorkDoesNotBlockAnOutgoingCommandHoldingADatabaseWriteLock() throws Exception {
+        var registry=new ConnectionRegistry();
+        @SuppressWarnings("unchecked") StreamObserver<Command> first=mock(StreamObserver.class),second=mock(StreamObserver.class);
+        registry.register("agent",first);
+        var entered=new java.util.concurrent.CountDownLatch(1);
+        var release=new java.util.concurrent.CountDownLatch(1);
+        try(var threads=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var processing=threads.submit(()->registry.withCurrent("agent",first,()-> {
+                entered.countDown();
+                try { assertTrue(release.await(3,java.util.concurrent.TimeUnit.SECONDS)); }
+                catch(InterruptedException e) { throw new AssertionError(e); }
+            }));
+            try {
+                assertTrue(entered.await(2,java.util.concurrent.TimeUnit.SECONDS));
+                var send=threads.submit(()->registry.send("agent",Command.newBuilder().setCollectNow(CmdCollectNow.getDefaultInstance()).build()));
+                assertTrue(send.get(1,java.util.concurrent.TimeUnit.SECONDS),"report/send lock inversion can deadlock a pending SQLite transaction");
+            } finally { release.countDown(); }
+            processing.get(2,java.util.concurrent.TimeUnit.SECONDS);
+            registry.register("agent",second);
+            registry.withCurrent("agent",first,()->fail("old stream remained current"));
+        }
+    }
     @Test void staleConnectionCannotAuthorizeUpgradeOnAnUnqualifiedReplacement() {
         var registry=new ConnectionRegistry();
         @SuppressWarnings("unchecked") StreamObserver<Command> first=mock(StreamObserver.class),second=mock(StreamObserver.class);

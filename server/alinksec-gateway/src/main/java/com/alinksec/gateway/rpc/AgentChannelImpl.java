@@ -7,6 +7,8 @@ import com.alinksec.service.agent.AgentEntity;
 import com.alinksec.service.agent.AgentRepository;
 import com.alinksec.service.command.CommandService;
 import com.alinksec.service.report.ReportDispatcher;
+import com.alinksec.service.protect.IsolationLeaseService;
+import com.alinksec.proto.CmdIsolationConfirm;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -26,14 +28,16 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
     private final AgentRepository agentRepository;
     private final com.alinksec.gateway.channel.ConnectionRegistry registry;
     private final CommandService commandService;
+    private final IsolationLeaseService isolationLeases;
 
     public AgentChannelImpl(ReportDispatcher dispatcher, AgentRepository agentRepository,
                              com.alinksec.gateway.channel.ConnectionRegistry registry,
-                             CommandService commandService) {
+                             CommandService commandService, IsolationLeaseService isolationLeases) {
         this.dispatcher = dispatcher;
         this.agentRepository = agentRepository;
         this.registry = registry;
         this.commandService = commandService;
+        this.isolationLeases = isolationLeases;
     }
 
     @Override
@@ -58,9 +62,20 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                                 .withDescription("agent_id 与证书不匹配").asRuntimeException());
                         return;
                     }
-                    if (report.hasHeartbeat()) registry.upgradeContract(authenticatedAgentId,responseObserver,
-                            report.getHeartbeat().getUpgradeContract());
-                    dispatcher.dispatch(authenticatedAgentId, report);
+                    registry.withCurrent(authenticatedAgentId,responseObserver,()-> {
+                        if (report.hasHeartbeat()) {
+                            registry.upgradeContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getUpgradeContract());
+                            registry.isolationContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getIsolationContract());
+                        }
+                        if (report.hasIsolationState()) {
+                            if(registry.isolationCapable(authenticatedAgentId,responseObserver)
+                                    && isolationLeases.observe(authenticatedAgentId,report.getIsolationState())) {
+                                var pulse=report.getIsolationState();
+                                registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setIsolationConfirm(CmdIsolationConfirm.newBuilder()
+                                        .setLeaseId(pulse.getLeaseId()).setNonce(pulse.getNonce())).build());
+                            }
+                        } else dispatcher.dispatch(authenticatedAgentId, report);
+                    });
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);
                     // 单条处理失败不拆流（Agent 无需重发：非关键路径靠下轮心跳/快照补偿）
@@ -98,9 +113,13 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 // previous, newer Agent may have been downgraded while offline.
                 agentRepository.upgradeContract(authenticatedAgentId,
                         report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
+                agentRepository.isolationContract(authenticatedAgentId,
+                        report.hasHeartbeat() ? report.getHeartbeat().getIsolationContract() : 0);
                 registry.register(authenticatedAgentId, responseObserver);
                 if (report.hasHeartbeat()) registry.upgradeContract(authenticatedAgentId,responseObserver,
                         report.getHeartbeat().getUpgradeContract());
+                if (report.hasHeartbeat()) registry.isolationContract(authenticatedAgentId,responseObserver,
+                        report.getHeartbeat().getIsolationContract());
                 commandService.deliverPending(authenticatedAgentId);
                 return true;
             }

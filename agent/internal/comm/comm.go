@@ -27,6 +27,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/fixer"
 	"github.com/alinksec/alinksec-agent/internal/guard"
 	"github.com/alinksec/alinksec-agent/internal/identity"
+	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/logcollect"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/scan"
@@ -65,9 +66,12 @@ type Client struct {
 	// 特征库更新单飞：下载安装互斥（避免并发替换 db 目录）
 	sigBusy atomic.Bool
 	// 配置修复单飞：文件写入互斥（避免并发改同一配置文件）
-	fixBusy         atomic.Bool
-	upgradeBusy     atomic.Bool
-	upgradeContract uint32
+	fixBusy            atomic.Bool
+	upgradeBusy        atomic.Bool
+	upgradeContract    uint32
+	isolationContract  uint32
+	isolationMu        sync.Mutex
+	isolationChallenge isolationChallenge
 
 	// 勒索诱饵防护引擎（本地响应，事件经 reportSecurityEvent 上报）
 	grd *guard.Guard
@@ -98,6 +102,15 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	c.loadPersistedPolicy(cfg)
 	c.grd = guard.New(&cfg.Decoy, cfg.ProcessRules, workDir, log, c.reportSecurityEvent)
 	c.grd.SetServerAddr(cfg.ServerAddr)
+	c.isolationContract = isolation.ExecutionContract()
+	if _, err := os.Lstat(filepath.Join(workDir, "isolated.json")); err == nil {
+		c.isolationContract = 0
+	}
+	if c.isolationContract == 1 {
+		if err := isolation.Recover(workDir); err != nil {
+			log.Error("recover independent isolation watchdog", "err", err)
+		}
+	}
 	c.grd.UpdateProtection(cfg.FileRules, cfg.LoginRules)
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
 	vEngine := virusscan.NewEngine(workDir, log)
@@ -316,6 +329,10 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				return
 			}
 			c.noteChannelActivity(generation, false)
+			if echo := cmd.GetIsolationConfirm(); echo != nil {
+				c.confirmIsolation(echo, generation)
+				continue
+			}
 			if acks := c.handleCommand(cmd, sendCh, sctx); len(acks) > 0 {
 				for _, a := range acks {
 					select {
@@ -356,12 +373,20 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 	upgradeTick := time.NewTicker(time.Second)
 	defer upgradeTick.Stop()
 	upgradeResults := map[string]string{}
+	isolationResults := map[string]string{}
+	isolationState := ""
 	drained := false
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-upgradeTick.C:
+			if err := c.sendIsolationState(stream, generation, &isolationState); err != nil {
+				return err
+			}
+			if err := c.sendIsolationResults(stream, generation, isolationResults); err != nil {
+				return err
+			}
 			if upgrade.CandidatePending(c.workDir) {
 				if err := c.sendReport(stream, c.buildHeartbeat(), generation); err != nil {
 					return err
@@ -474,6 +499,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			GuardStatus:            guardStatus,
 			VirusExecutionContract: 2,
 			UpgradeContract:        c.upgradeContract,
+			IsolationContract:      c.isolationContract,
 			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
 		}},
 	}
@@ -493,6 +519,15 @@ func (c *Client) wrapAck(a *pb.RptAck) *pb.Report {
 func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx context.Context) []*pb.RptAck {
 	if cmd.GetCmdId() == "" {
 		return nil
+	}
+	if action := cmd.GetProtectAction(); action != nil && (action.GetAction() == pb.CmdProtectAction_ISOLATE_HOST || action.GetAction() == pb.CmdProtectAction_RESTORE_ISOLATION) {
+		previous, err := isolation.CommandState(c.workDir, cmd.GetCmdId())
+		if err != nil {
+			return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		}
+		if previous != nil {
+			return []*pb.RptAck{isolationAck(*previous, cmd.GetCmdId())}
+		}
 	}
 	if cmd.GetAgentUpgrade() != nil {
 		result, pending, err := upgrade.CommandState(c.workDir, cmd.GetCmdId())
@@ -677,19 +712,26 @@ func (c *Client) executeProtectAction(pa *pb.CmdProtectAction, received *pb.RptA
 		}
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: stage, Code: 0, Message: msg}}
 	case pb.CmdProtectAction_ISOLATE_HOST:
-		if err := c.grd.IsolateHost(pa.GetReason()); err != nil {
-			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1,
-				Message: "isolate: " + err.Error()}}
+		if c.isolationContract != 1 || pa.GetIsolationContract() != 1 {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "native isolation lease contract 1 is required"}}
 		}
-		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
-			Message: "host isolated (agent channel only)"}}
+		if err := isolation.Begin(c.workDir, c.cfg.ServerAddr, cmdID, pa.GetReason()); err != nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		}
+		return []*pb.RptAck{received}
 	case pb.CmdProtectAction_RESTORE_ISOLATION:
-		if err := c.grd.RestoreIsolation(); err != nil {
-			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1,
-				Message: "restore: " + err.Error()}}
+		if _, err := isolation.Current(c.workDir); err == nil {
+			if err := isolation.Restore(c.workDir, cmdID); err != nil {
+				return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+			}
+			l, err := isolation.Current(c.workDir)
+			if err == nil && l.Phase != "finished" {
+				return []*pb.RptAck{received}
+			}
+		} else if err := c.grd.RestoreIsolation(); err != nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
 		}
-		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
-			Message: "isolation restored"}}
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Message: "isolation withdrawn"}}
 	default:
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1,
 			Message: fmt.Sprintf("protect action %v not implemented", pa.GetAction())}}
@@ -1131,7 +1173,7 @@ func (c *Client) mtlsConfig() (*tls.Config, error) {
 // isTransient 心跳与 ACK 不入离线队列（靠服务端重推/下一心跳补偿）
 func isTransient(r *pb.Report) bool {
 	switch r.GetPayload().(type) {
-	case *pb.Report_Heartbeat, *pb.Report_Ack:
+	case *pb.Report_Heartbeat, *pb.Report_Ack, *pb.Report_IsolationState:
 		return true
 	}
 	return false
