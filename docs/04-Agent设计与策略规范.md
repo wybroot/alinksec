@@ -24,11 +24,13 @@ agent/
     ├── guard/         # 进程、文件、SSH、诱饵与隔离
     ├── logcollect/    # 日志采集与上报
     ├── sysmetrics/    # 性能指标
-    ├── upgrade/       # 下载、SHA256 校验和二进制替换
+    ├── isolation/     # 认证租约、原生独立看护与专属防火墙规则
+    ├── securestate/   # 私有原子恢复记录及跨进程锁
+    ├── upgrade/       # 下载、SHA256 校验、独立看护与失败回退
     └── proto/         # 当前生成的 Go 协议类型
 ```
 
-实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys 及 Windows WMI。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
+实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys、Windows WMI 及固定版本 tailscale/wf（动态 WFP）。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
 
 | 平台 | 默认配置与工作目录 | 常驻日志 |
 | --- | --- | --- |

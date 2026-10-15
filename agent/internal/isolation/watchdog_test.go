@@ -251,3 +251,58 @@ func TestRemovalExcludesNewLeaseTransactionsUntilAgentStops(t *testing.T) {
 		t.Fatal("lease lock not released after service stop")
 	}
 }
+
+type blockingRetirement struct {
+	fakeManager
+	entered chan struct{}
+	proceed chan struct{}
+	calls   int
+}
+
+func (m *blockingRetirement) remove(string, string) error {
+	m.calls++
+	close(m.entered)
+	<-m.proceed
+	return nil
+}
+func TestRetirementCannotRemoveNextLeaseService(t *testing.T) {
+	work, l := fixtureLease(t, "finished", time.Second)
+	m := &blockingRetirement{entered: make(chan struct{}), proceed: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- watch(context.Background(), work, l.ID, m, &fakeFirewall{}) }()
+	<-m.entered
+	advanced := make(chan error, 1)
+	go func() {
+		unlock, err := securestate.Lock(directory(work))
+		if err == nil {
+			defer unlock()
+			next := *l
+			next.ID = "ffffffffffffffffffffffffffffffff"
+			next.Generation++
+			next.Phase = "prepared"
+			err = securestate.WriteJSON(leasePath(work, next.ID), &next)
+			if err == nil {
+				err = securestate.WriteJSON(filepath.Join(directory(work), "current.json"), next.ID)
+			}
+		}
+		advanced <- err
+	}()
+	select {
+	case err := <-advanced:
+		t.Fatal("next lease advanced while previous service was being deleted", err)
+	case <-time.After(60 * time.Millisecond):
+	}
+	close(m.proceed)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-advanced; err != nil {
+		t.Fatal(err)
+	}
+	if err := watch(context.Background(), work, l.ID, m, &fakeFirewall{}); err != nil {
+		t.Fatal(err)
+	}
+	if m.calls != 1 {
+		t.Fatal("old owner removed the next lease service")
+	}
+}

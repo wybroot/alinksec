@@ -283,7 +283,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/guard ./internal/baseline ./internal/comm ./internal/virusscan
+        run: go test -race ./internal/guard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |

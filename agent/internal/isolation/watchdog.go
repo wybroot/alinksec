@@ -132,18 +132,21 @@ func watch(ctx context.Context, work, id string, m serviceManager, f firewall) (
 			}
 		}
 		finished := l.Phase == "finished"
+		if finished && err == nil {
+			if !cleaned {
+				err = f.clear(l)
+				cleaned = err == nil
+			}
+			if err == nil {
+				err = retireWatchdogLocked(work, id, m)
+			}
+		}
 		unlock()
 		if err != nil {
 			return err
 		}
 		if finished {
-			if !cleaned {
-				if e := f.clear(l); e != nil {
-					return e
-				}
-				cleaned = true
-			}
-			return m.remove(helperPath(work, id), work)
+			return nil
 		}
 		// Keep retrying failed cleanup while the owner is running. On shutdown,
 		// fail the service so the native recovery policy retries on next boot.
@@ -172,4 +175,22 @@ func withdrawalMessage(cause string) string {
 	default:
 		return "本机安全保护已自动撤销隔离，网络已恢复"
 	}
+}
+
+// Service retirement and a subsequent Begin share the same transaction lock.
+// The caller holds it through the finished record and service removal.
+// Without it an old owner's remove could delete a newly installed service after
+// checking the previous unit contents. Never retire a different current lease.
+func retireWatchdogLocked(work, id string, m serviceManager) error {
+	current, err := Current(work)
+	if err != nil {
+		return err
+	}
+	if current.ID != id {
+		return nil
+	}
+	if current.Phase != "finished" {
+		return fmt.Errorf("cannot retire unfinished isolation recovery")
+	}
+	return m.remove(helperPath(work, id), work)
 }
