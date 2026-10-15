@@ -331,6 +331,7 @@ class LibraryIntegrationTest {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             assertFalse(sync.trigger("provider"));
             assertFalse(sync.trigger("other"));
+            assertThrows(IllegalArgumentException.class,()->sync.retireSource("provider",1L,"Retire while downloading"));
             sync.scheduled();
             schedules.update("provider", false, 300_000L);
             assertThrows(IllegalArgumentException.class, () -> sync.trigger("provider"));
@@ -609,4 +610,101 @@ class LibraryIntegrationTest {
         assertEquals("success", jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'", String.class));
         assertEquals("private-nvd-key", authHeader.get());
     }
+    private LibraryProperties.Source nvdEndpoint(java.util.function.BiFunction<Map<String,String>,Integer,String> response) throws Exception {
+        http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        var requests=new AtomicInteger();
+        http.createContext("/nvd",exchange->{
+            var query=new HashMap<String,String>();
+            for(String pair:exchange.getRequestURI().getRawQuery().split("&")) {
+                String[] parts=pair.split("=",2); query.put(parts[0],java.net.URLDecoder.decode(parts[1],StandardCharsets.UTF_8));
+            }
+            byte[] bytes=response.apply(query,requests.incrementAndGet()).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200,bytes.length); try(var out=exchange.getResponseBody()){out.write(bytes);}
+        }); http.start();
+        var source=new LibraryProperties.Source(); source.setId("provider"); source.setType("nvd"); source.setEnabled(true);
+        source.setIntervalMs(7200000); source.setApiKey("private-fixture-key"); source.setInitialDays(1);
+        source.setUrl("http://127.0.0.1:"+http.getAddress().getPort()+"/nvd"); props.setSources(List.of(source)); return source;
+    }
+    private String nvdPage(int index,int total,List<String> ids) {
+        return JsonUtils.write(Map.of("startIndex",index,"totalResults",total,"vulnerabilities",ids.stream().map(id->Map.of("cve",Map.of("id",id))).toList()));
+    }
+    @Test void nvdSplitsOversizedWindowWithoutJumpingPastUnprocessedDates() throws Exception {
+        props.setMaxCvesPerImport(2); var intervals=new ArrayList<java.time.Duration>();
+        var source=nvdEndpoint((query,request)->{
+            var duration=java.time.Duration.between(java.time.Instant.parse(query.get("lastModStartDate")),java.time.Instant.parse(query.get("lastModEndDate")));
+            intervals.add(duration);
+            return duration.toSeconds()>43200?nvdPage(0,3,List.of()):nvdPage(0,2,List.of("CVE-2026-12345","CVE-2026-12346"));
+        });
+        sync.sync(source);
+        assertEquals(2,intervals.size()); assertEquals(43200,intervals.get(1).toSeconds());
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='provider'",Integer.class));
+        java.time.Instant cursor=java.time.Instant.parse(jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class));
+        assertTrue(cursor.isBefore(java.time.Instant.now().minusSeconds(43000)));
+        sync.sync(source);
+        assertEquals("success",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'",String.class));
+        assertFalse(JsonUtils.write(sync.status()).contains("private-fixture-key"));
+    }
+    @Test void nvdRejectsChangingPageTotalDuplicateIdsAndInvalidSecondPageAtomically() throws Exception {
+        var mode=new AtomicInteger();
+        var source=nvdEndpoint((query,request)->{
+            int index=Integer.parseInt(query.get("startIndex"));
+            if(index==0) return nvdPage(0,2,List.of("CVE-2026-12345"));
+            return mode.get()==0?nvdPage(1,3,List.of("CVE-2026-12346")):nvdPage(1,2,List.of(mode.get()==1?"CVE-2026-12345":"invalid"));
+        });
+        for(int i=0;i<3;i++) {
+            mode.set(i); sync.sync(source);
+            assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'",String.class));
+            assertEquals("",jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class));
+            assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='provider'",Integer.class));
+            assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_security_governance_event WHERE source_id='provider'",Integer.class));
+        }
+    }
+    @Test void nvdTriesMinimumForwardWindowBeforeFailingWithoutAdvancingCursor() throws Exception {
+        props.setMaxCvesPerImport(1); var intervals=new ArrayList<Long>(); var fail=new java.util.concurrent.atomic.AtomicBoolean();
+        var source=nvdEndpoint((query,request)->{
+            long seconds=java.time.Duration.between(java.time.Instant.parse(query.get("lastModStartDate")),java.time.Instant.parse(query.get("lastModEndDate"))).toSeconds();
+            intervals.add(seconds);
+            return seconds>121 || fail.get()?nvdPage(0,2,List.of()):nvdPage(0,1,List.of("CVE-2026-12345"));
+        });
+        var old=java.time.Instant.now().minusSeconds(600);
+        jdbc.update("INSERT INTO t_security_feed_state(source_id,kind,cursor,nvd_window_seconds) VALUES ('provider','nvd',?,249)",old.toString());
+        sync.sync(source);
+        assertEquals(List.of(249L,124L,121L),intervals);
+        String cursor=jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class);
+        assertEquals(old.plusSeconds(1),java.time.Instant.parse(cursor));
+        fail.set(true); sync.sync(source);
+        assertEquals(cursor,jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class));
+        assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'",String.class));
+        assertTrue(jdbc.queryForObject("SELECT error FROM t_security_feed_state WHERE source_id='provider'",String.class).contains("最小推进窗口"));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='provider'",Integer.class));
+    }
+    @Test void nvdEmptyCompleteWindowAdvancesCursorWithoutRemovingExistingDeclarations() throws Exception {
+        var source=nvdEndpoint((query,request)->nvdPage(0,0,List.of()));
+        catalog.cves("provider",List.of(provenanceFixture()));
+        sync.sync(source);
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='provider'",Integer.class));
+        assertFalse(jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class).isEmpty());
+        assertEquals("success",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'",String.class));
+    }
+    @Test void nvdLongOutageUsesAtMost119DaysAndCheckpointsTheCompletedPrefix() throws Exception {
+        var end=new AtomicReference<java.time.Instant>();
+        var source=nvdEndpoint((query,request)->{
+            var start=java.time.Instant.parse(query.get("lastModStartDate")); end.set(java.time.Instant.parse(query.get("lastModEndDate")));
+            assertEquals(java.time.Duration.ofDays(119),java.time.Duration.between(start,end.get()));
+            return nvdPage(0,0,List.of());
+        });
+        jdbc.update("INSERT INTO t_security_feed_state(source_id,kind,cursor) VALUES ('provider','nvd','2020-01-01T00:00:00Z')");
+        sync.sync(source);
+        assertEquals(end.get().toString(),jdbc.queryForObject("SELECT cursor FROM t_security_feed_state WHERE source_id='provider'",String.class));
+        assertTrue(end.get().isBefore(java.time.Instant.now()));
+    }
+    @Test void nvdRejectedRecordBecomesWithdrawalWithNoInventedRuleOrFix() {
+        for(String status:List.of("REJECT","Rejected","REJECTED")) {
+            var document=NvdAdapter.normalize(JsonUtils.read(JsonUtils.write(Map.of("id","CVE-2026-12345","vulnStatus",status))),List.of());
+            catalog.cves("provider",List.of(document));
+            assertEquals("withdrawn",jdbc.queryForObject("SELECT rule_status FROM t_cve_db WHERE cve_id='CVE-2026-12345'",String.class));
+            assertEquals("[]",jdbc.queryForObject("SELECT affected FROM t_cve_db WHERE cve_id='CVE-2026-12345'",String.class));
+        }
+    }
+
 }

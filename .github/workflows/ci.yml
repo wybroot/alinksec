@@ -32,6 +32,9 @@ jobs:
         env:
           CGO_ENABLED: '0'
           GOARCH: amd64
+      - name: Check Windows retired signature installation and cache refresh
+        run: go test -v -count=1 -run '^TestRetirementReleaseClearsPreviouslyLoadedHash$' ./internal/virusscan
+        working-directory: agent
       - name: Check actual Windows SCM service and TLS communication
         run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
         working-directory: agent
@@ -128,7 +131,11 @@ jobs:
       - run: mvn -B package
         env:
           ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
+          ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
         working-directory: server
+      - name: Check source governance with captured database lifecycle responses
+        working-directory: web
+        run: node test/source-governance-browser.mjs
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
       - name: Check baseline review and mixed-system selection in the production web bundle
@@ -284,6 +291,8 @@ jobs:
           path: |
             .tmp/browser-artifacts-*
             .tmp/library-browser-artifacts
+            .tmp/source-governance-browser
+            .tmp/source-governance-fixtures
             .tmp/software-inventory-browser
             .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
@@ -413,8 +422,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "13"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "54"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "14"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "56"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -449,10 +458,19 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
           ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/alinksec?stringtype=unspecified
           ALINKSEC_INTEGRATION_PG_USER: alinksec_app
           ALINKSEC_INTEGRATION_PG_PASSWORD: alinksec-app-test
+          ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
+      - name: Retain PostgreSQL governance response evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-governance-postgres
+          path: .tmp/source-governance-fixtures
+          include-hidden-files: true
+          if-no-files-found: error

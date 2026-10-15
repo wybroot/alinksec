@@ -26,17 +26,20 @@ public class LibrarySchedule {
     }
     public Plan effective(LibraryProperties.Source source) {
         var overrides = jdbc.queryForList("SELECT enabled,interval_ms FROM t_security_feed_schedule WHERE source_id=?", source.getId());
-        if (overrides.isEmpty()) return new Plan(source.isEnabled(), source.getIntervalMs(), false);
+        boolean retired=jdbc.queryForObject("SELECT count(*) FROM t_security_source_lifecycle WHERE source_id=? AND retired=1",Integer.class,source.getId())>0;
+        if (overrides.isEmpty()) return new Plan(!retired && source.isEnabled(), source.getIntervalMs(), false);
         var row = overrides.get(0);
         long interval = ((Number) row.get("interval_ms")).longValue();
         // A changed deployment type must never inherit an interval below its provider limit.
         interval = Math.max(minimumInterval(source.getType()), Math.min(MAX_INTERVAL_MS, interval));
-        return new Plan(((Number) row.get("enabled")).intValue() == 1, interval, true);
+        return new Plan(!retired && ((Number) row.get("enabled")).intValue() == 1, interval, true);
     }
     public Plan update(String id, Boolean enabled, Long intervalMs) {
         var source = source(id);
         if (enabled == null || intervalMs == null) throw new IllegalArgumentException("须指定启停状态和同步间隔");
         validateInterval(source.getType(), intervalMs);
+        if (enabled && jdbc.queryForObject("SELECT count(*) FROM t_security_source_lifecycle WHERE source_id=? AND retired=1",Integer.class,id)>0)
+            throw new IllegalArgumentException("来源已退役，不能通过计划恢复");
         if (enabled && !configurationIssue(source).isEmpty()) throw new IllegalArgumentException(configurationIssue(source));
         jdbc.update("""
                 INSERT INTO t_security_feed_schedule(source_id,enabled,interval_ms,updated_at) VALUES (?,?,?,?)

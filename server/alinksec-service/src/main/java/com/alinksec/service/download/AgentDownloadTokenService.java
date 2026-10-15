@@ -39,6 +39,10 @@ public class AgentDownloadTokenService {
             return false;
         }
         if ("patch".equals(resourceType)) return authorizedRepair(token,resourceKey);
+        if ("virus-db".equals(resourceType)) {
+            var keys=jdbc.queryForList("SELECT package_key FROM t_virus_db ORDER BY id DESC LIMIT 1",String.class);
+            if (keys.size()!=1 || !keys.get(0).equals(resourceKey)) return false;
+        }
         Integer count = jdbc.queryForObject("""
                 SELECT count(*) FROM t_agent_download_token
                 WHERE token = ? AND resource_type = ? AND resource_key = ? AND expire_at > CURRENT_TIMESTAMP

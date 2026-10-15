@@ -57,7 +57,7 @@ public class LibrarySyncService {
             LibrarySchedule.validateInterval(source.getType(), source.getIntervalMs());
             for (var product : source.getProducts()) {
                 if (!product.getCpePrefix().matches("cpe:2\\.3:a:[^:]+:[^:]+:") || product.getName().isBlank() || product.getOs().isBlank()
-                        || product.getAssetSource().isBlank() || Set.of("rpm", "dpkg").contains(product.getAssetSource())) throw new IllegalArgumentException("NVD 应用映射需明确软件名、系统和非发行版软件来源");
+                        || product.getAssetSource().isBlank() || Set.of("rpm", "dpkg").contains(product.getAssetSource())) throw new NvdProgressException("NVD 应用映射需明确软件名、系统和非发行版软件来源");
             }
         }
         recoverInterruptedRuns();
@@ -97,6 +97,7 @@ public class LibrarySyncService {
     public void sync(LibraryProperties.Source source) { sync(source, "manual"); }
     private void sync(LibraryProperties.Source source, String triggerType) {
         String id = source.getId();
+        if (catalog.isRetired(id)) throw new IllegalArgumentException("来源已退役");
         jdbc.update("""
                 INSERT INTO t_security_feed_state(source_id,kind,checked_at,status) VALUES (?,?,?,'running')
                 ON CONFLICT(source_id) DO UPDATE SET kind=EXCLUDED.kind,checked_at=EXCLUDED.checked_at,status='running',error=''
@@ -156,7 +157,7 @@ public class LibrarySyncService {
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             // Messages from parsers/HTTP libraries may contain a URL, API key or response body.
-            String message = e instanceof IllegalArgumentException ? "数据格式、认证或容量校验失败，已有库保留" : "远端访问或发布失败，已有库保留";
+            String message = e instanceof NvdProgressException ? e.getMessage() : e instanceof IllegalArgumentException ? "数据格式、认证或容量校验失败，已有库保留" : "远端访问或发布失败，已有库保留";
             jdbc.update("UPDATE t_security_feed_state SET status='failed',failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END,error=? WHERE source_id=?", message, id);
             log.warn("Library sync failed: source={} type={}", id, e.getClass().getSimpleName());
         } finally {
@@ -193,38 +194,95 @@ public class LibrarySyncService {
         }
         return documents;
     }
+    private static final class WindowCapacity extends Exception {}
+    private static final class NvdProgressException extends IllegalArgumentException {
+        NvdProgressException(String message) { super(message); }
+    }
+    private static final class NvdBudget {
+        int requests; long bytes; long lastRequest; final long deadline=System.nanoTime()+TimeUnit.MINUTES.toNanos(5);
+    }
     private void syncNvd(LibraryProperties.Source source) throws Exception {
-        var state = jdbc.queryForMap("SELECT * FROM t_security_feed_state WHERE source_id=?", source.getId());
-        String cursor = (String) state.get("cursor");
-        Instant end = Instant.now();
-        Instant start = cursor.isBlank() ? end.minus(Duration.ofDays(source.getInitialDays())) : Instant.parse(cursor).minusSeconds(120);
-        // Catch up in bounded windows; checkpoint each completed window, never skip an outage.
-        if (Duration.between(start, end).toDays() > 119) end = start.plus(Duration.ofDays(119));
-        String endpoint = source.getUrl().isBlank() ? "https://services.nvd.nist.gov/rest/json/cves/2.0/" : source.getUrl();
-        String filter = "lastModStartDate=" + encode(start.toString()) + "&lastModEndDate=" + encode(end.toString());
-        Map<String, String> headers = source.getApiKey().isBlank() ? Map.of() : Map.of("apiKey", source.getApiKey());
-        List<JsonNode> documents = new ArrayList<>();
-        int index = 0, total;
-        long downloaded = 0;
-        do {
-            try (var fetched = download.fetch(endpoint + (endpoint.contains("?") ? "&" : "?") + filter + "&resultsPerPage=200&startIndex=" + index, headers, null)) {
-                downloaded += Files.size(fetched.file());
-                if (downloaded > props.getMaxDownloadBytes()) throw new IllegalArgumentException("NVD 分页累计大小超过同步上限");
-                JsonNode root = JsonUtils.mapper().readTree(fetched.file().toFile());
-                if (fetched.status() != 200 || !root.path("vulnerabilities").isArray() || !root.has("totalResults") || root.path("startIndex").asInt(-1) != index) throw new IllegalArgumentException("NVD 分页响应非法");
-                total = root.path("totalResults").asInt(-1);
-                if (total < 0 || total > props.getMaxCvesPerImport()) throw new IllegalArgumentException("NVD 数据量超过单次同步上限，请缩小初始日期范围");
-                JsonNode page = root.path("vulnerabilities");
-                if ((page.isEmpty() && index < total) || index + page.size() > total) throw new IllegalArgumentException("NVD 分页不完整");
-                for (JsonNode item : page) documents.add(NvdAdapter.normalize(item.path("cve"), source.getProducts()));
-                index += page.size();
+        var state=jdbc.queryForMap("SELECT * FROM t_security_feed_state WHERE source_id=?",source.getId());
+        String cursor=(String)state.get("cursor");
+        Instant now=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        Instant start=cursor.isBlank()?now.minus(Duration.ofDays(source.getInitialDays())):Instant.parse(cursor).minusSeconds(120);
+        Instant end=now.isBefore(start.plus(Duration.ofDays(119)))?now:start.plus(Duration.ofDays(119));
+        long hint=((Number)state.get("nvd_window_seconds")).longValue();
+        if (hint>0 && start.plusSeconds(hint).isBefore(end)) end=start.plusSeconds(hint);
+        if (!cursor.isBlank() && !end.isAfter(Instant.parse(cursor))) end=Instant.parse(cursor).plusSeconds(1);
+        if (end.isAfter(now) || !end.isAfter(start)) throw new NvdProgressException("NVD 游标日期无效");
+        var budget=new NvdBudget();
+        while (true) {
+            try {
+                List<JsonNode> documents=fetchNvdWindow(source,start,end,budget);
+                catalog.cveWindow(source.getId(),documents,end);
+                long next=Math.min(Duration.ofDays(119).toSeconds(),Math.max(121,Duration.between(start,end).toSeconds()*2));
+                jdbc.update("UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",next,source.getId());
+                int count=jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id=?",Integer.class,source.getId());
+                success(source.getId(),count,end.toString(),"","");
+                // Matching may be retried independently; a committed complete window remains committed.
+                if (!documents.isEmpty()) recheckAssets();
+                return;
+            } catch (WindowCapacity e) {
+                long currentSeconds=Duration.between(start,end).toSeconds();
+                // Two-minute overlap must not consume the entire window and stall progress.
+                if (currentSeconds<=121) throw new NvdProgressException("NVD 最小推进窗口仍超过容量，请人工缩小导入范围");
+                long seconds=Math.max(121,currentSeconds/2);
+                end=start.plusSeconds(seconds);
+                jdbc.update("UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",seconds,source.getId());
+                if (budget.bytes>=props.getMaxDownloadBytes() || budget.requests>=64) throw new NvdProgressException("NVD 本次访问预算已用尽，下次继续较小窗口");
             }
-            if (index < total) Thread.sleep(source.getApiKey().isBlank() ? 6000 : 700);
-        } while (index < total);
-        catalog.cves(source.getId(), documents);
-        if (!documents.isEmpty()) matcher.matchAll(0);
-        int count = jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id=?", Integer.class, source.getId());
-        success(source.getId(), count, end.toString(), "", "");
+        }
+    }
+    private List<JsonNode> fetchNvdWindow(LibraryProperties.Source source,Instant start,Instant end,NvdBudget budget) throws Exception {
+        String endpoint=source.getUrl().isBlank()?"https://services.nvd.nist.gov/rest/json/cves/2.0/":source.getUrl();
+        String filter="lastModStartDate="+encode(start.toString())+"&lastModEndDate="+encode(end.toString());
+        Map<String,String> headers=source.getApiKey().isBlank()?Map.of():Map.of("apiKey",source.getApiKey());
+        List<JsonNode> documents=new ArrayList<>(); Set<String> ids=new HashSet<>();
+        int index=0,total=-1;
+        do {
+            if (System.nanoTime()>budget.deadline) throw new NvdProgressException("NVD 同步达到五分钟预算，下次继续");
+            if (++budget.requests>64) throw new NvdProgressException("NVD 请求数超过本次预算");
+            long delay=source.getApiKey().isBlank()?6000:700;
+            if (budget.lastRequest>0) {
+                long wait=delay-TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-budget.lastRequest);
+                if (wait>0) Thread.sleep(wait);
+            }
+            budget.lastRequest=System.nanoTime();
+            try (var fetched=download.fetch(endpoint+(endpoint.contains("?")?"&":"?")+filter+"&resultsPerPage=200&startIndex="+index,headers,null)) {
+                if (fetched.status()!=200) throw new NvdProgressException("NVD 分页响应状态非法");
+                budget.bytes+=Files.size(fetched.file());
+                if (budget.bytes>props.getMaxDownloadBytes()) throw new WindowCapacity();
+                JsonNode root=JsonUtils.mapper().readTree(fetched.file().toFile());
+                if (!root.path("vulnerabilities").isArray() || !root.path("totalResults").canConvertToInt()
+                        || !root.path("totalResults").isIntegralNumber() || !root.path("startIndex").isIntegralNumber()
+                        || root.path("startIndex").asInt(-1)!=index) throw new NvdProgressException("NVD 分页响应非法");
+                int pageTotal=root.path("totalResults").asInt(-1);
+                if (pageTotal<0 || (total>=0 && pageTotal!=total)) throw new NvdProgressException("NVD 分页总数变化，保留游标后重试");
+                total=pageTotal;
+                if (total>props.getMaxCvesPerImport()) throw new WindowCapacity();
+                JsonNode page=root.path("vulnerabilities");
+                if (page.size()>200 || (page.isEmpty() && index<total) || index+page.size()>total)
+                    throw new NvdProgressException("NVD 分页不完整");
+                for (JsonNode item:page) {
+                    JsonNode document=NvdAdapter.normalize(item.path("cve"),source.getProducts());
+                    LibraryCatalog.validateCve(document);
+                    if (!ids.add(document.path("cve_id").asText())) throw new NvdProgressException("NVD 分页存在重复公告");
+                    documents.add(document);
+                }
+                index+=page.size();
+            }
+        } while(index<total);
+        return documents;
+    }
+    public Map<String,Object> retireSource(String id,Long actor,String note) throws IOException {
+        if (!busy.compareAndSet(false,true)) throw new IllegalArgumentException("同步正在执行，请完成后再退役来源");
+        try {
+            var result=catalog.retire(id,actor,note);
+            try { if (Boolean.TRUE.equals(result.get("changed"))) virus.pushToAllAgents(); }
+            catch (RuntimeException e) { log.warn("Retirement committed; signature delivery deferred to heartbeat/push retry: source={}",id); }
+            recheckAssets(); return result;
+        } finally { busy.set(false); }
     }
     private static String encode(String text) { return URLEncoder.encode(text, StandardCharsets.UTF_8); }
     private void success(String id, int count, String cursor, String etag, String modified) {
@@ -240,9 +298,16 @@ public class LibrarySyncService {
             var plan = schedules.effective(source);
             row.put("id", source.getId()); row.put("type", source.getType()); row.put("enabled", plan.enabled()); row.put("intervalMs", plan.intervalMs());
             row.put("scheduleOverridden", plan.overridden()); row.put("minIntervalMs", LibrarySchedule.minimumInterval(source.getType()));
+            row.put("retired",catalog.isRetired(source.getId()));
             row.put("configurationIssue", LibrarySchedule.configurationIssue(source));
-            var states = jdbc.queryForList("SELECT checked_at,success_at,status,error,entry_count,cursor,failure_count FROM t_security_feed_state WHERE source_id=?", source.getId());
+            var states = jdbc.queryForList("SELECT checked_at,success_at,status,error,entry_count,cursor,failure_count,nvd_window_seconds FROM t_security_feed_state WHERE source_id=?", source.getId());
             if (!states.isEmpty()) row.putAll(states.get(0)); else row.put("status", "never");
+            boolean catchingUp=false;
+            if ("nvd".equals(source.getType()) && row.get("cursor") instanceof String checkpoint && !checkpoint.isBlank()) {
+                try { catchingUp=Instant.parse(checkpoint).isBefore(Instant.now().minusSeconds(120)); }
+                catch (java.time.DateTimeException ignored) { catchingUp=true; }
+            }
+            row.put("catchingUp",catchingUp);
             Object last = row.get("success_at");
             row.put("stale", last == null || Instant.parse((String) last).plusMillis(plan.intervalMs() * 2).isBefore(Instant.now()));
             row.put("nextCheckAt", plan.enabled() ? LibrarySchedule.nextCheck(plan, row).toString() : null);
@@ -255,8 +320,11 @@ public class LibrarySyncService {
         result.put("sources", sources); result.put("running", busy.get()); result.put("storage", props.getStorage().getBackend());
         result.put("signature", virusRows.isEmpty() ? Map.of() : virusRows.get(0));
         result.put("cveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db", Integer.class));
-        String effective = "SELECT cve_id,matchable,ROW_NUMBER() OVER(PARTITION BY cve_id ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id) AS priority FROM t_security_cve";
-        var counts = jdbc.queryForMap("SELECT count(*) AS total,COALESCE(SUM(matchable),0) AS matchable FROM (" + effective + ") v WHERE priority=1");
+        var counts=jdbc.queryForMap("SELECT count(*) AS total FROM t_cve_db WHERE rule_source_id<>''");
+        // Count the selected validated source without loading the entire CVE corpus into memory.
+        counts.put("matchable",jdbc.queryForObject("SELECT count(*) FROM t_cve_db c JOIN t_security_cve s ON s.cve_id=c.cve_id AND s.source_id=c.rule_source_id WHERE c.rule_status='active' AND s.matchable=1",Integer.class));
+        result.put("withdrawnCveCount",jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_status<>'active'",Integer.class));
+        result.put("governanceSources",catalog.governanceSources());
         result.put("managedCveCount", counts.get("total")); result.put("matchableCveCount", counts.get("matchable"));
         result.put("unattributedCveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_source_id='' OR rule_digest=''", Long.class));
         result.put("manualSignature", jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='manual'", Integer.class));
