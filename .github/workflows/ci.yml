@@ -71,7 +71,8 @@ jobs:
       ALINKSEC_POSTGRES_APP_PASSWORD: ci-postgres-app-password
       ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
       ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ENROLL-ci-smoke-test
-      ALINKSEC_JWT_SECRET: ci-jwt-secret-for-compose-smoke-test
+      # Full maintenance must preserve the generated secret in server-data too.
+      ALINKSEC_JWT_SECRET: ''
       ALINKSEC_SERVER_IMAGE: alinksec-server:latest
       ALINKSEC_WEB_IMAGE: alinksec-web:latest
       ALINKSEC_SQLITE_MAINTENANCE_IMAGE: alinksec-sqlite-maintenance:latest
@@ -101,6 +102,8 @@ jobs:
           node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
+      - name: Check complete maintenance failure, rollback and archive boundaries
+        run: python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_operations.py -v
       - name: Check security feed and baseline package tools
         run: |
           python3 -B -m unittest discover -s deploy/tests -p 'test_*_tools.py' -v
@@ -274,6 +277,12 @@ jobs:
         run: bash deploy/tests/server-image-smoke.sh
         env:
           ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server:latest
+      - name: Check actual archive paths, UID/GID and mode with one bounded helper
+        run: python3 -B deploy/tests/operations-volume-local.py
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_OPERATIONS_TEST_IMAGE: alinksec-server:latest
+          ALINKSEC_OPERATIONS_WEB_IMAGE: alinksec-web:latest
       - name: Check second clean server build with a changed version
         run: |
           mkdir -p .tmp/changed-version
@@ -334,6 +343,11 @@ jobs:
           ALINKSEC_SMOKE_DB: postgres
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-ca.crt
+      - name: Check complete PostgreSQL maintenance and interrupted recovery
+        timeout-minutes: 10
+        run: python3 -B deploy/tests/operations-smoke.py --mode postgres
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
       - name: Stop production deployment before lightweight smoke test
         working-directory: deploy/docker
         run: docker compose down -v --remove-orphans
@@ -370,6 +384,23 @@ jobs:
           ALINKSEC_SMOKE_DB: sqlite
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-lite-ca.crt
+      - name: Check complete SQLite maintenance and interrupted recovery
+        timeout-minutes: 10
+        run: python3 -B deploy/tests/operations-smoke.py --mode sqlite
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+      - name: Retain sanitized complete maintenance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-validation-${{ matrix.arch }}
+          path: |
+            .tmp/operations-volume-local/result.json
+            .tmp/operations-native-postgres/result.json
+            .tmp/operations-native-sqlite/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Show Compose logs on failure
         if: failure()
         run: |

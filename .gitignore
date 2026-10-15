@@ -25,6 +25,7 @@ alinksec-m1.zip
 data/
 backups/
 .tmp/
+.operations/
 *.crt
 *.key
 *.pem
