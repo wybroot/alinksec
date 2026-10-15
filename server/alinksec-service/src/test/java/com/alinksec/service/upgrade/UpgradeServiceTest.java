@@ -56,6 +56,20 @@ class UpgradeServiceTest {
         verify(commands).dispatch(eq("host-1"), any(Command.Builder.class), isNull());
     }
 
+    @Test
+    void dispatchPreservesVersionBuildMetadataInDownloadQuery() {
+        String key = "1.2.3+build-linux-amd64.bin";
+        when(jdbc.queryForMap(anyString(), eq(1L))).thenReturn(Map.of(
+                "platform", "linux-amd64", "version", "1.2.3+build", "package_key", key, "sha256", "a".repeat(64)));
+        host("host-1", 1, "amd64");
+        when(tokens.issue("host-1", "agent-upgrade", key)).thenReturn("token");
+        service().dispatch(1L, List.of("host-1"), null);
+        var sent = org.mockito.ArgumentCaptor.forClass(Command.Builder.class);
+        verify(commands).dispatch(eq("host-1"), sent.capture(), isNull());
+        assertEquals("https://127.0.0.1:8443/api/upgrade/download?packageKey=1.2.3%2Bbuild-linux-amd64.bin&token=token",
+                sent.getValue().getAgentUpgrade().getDownloadUrl());
+    }
+
     @ParameterizedTest
     @CsvSource({"1, amd64", "2, arm64", "0, arm64", "1, armv7l", "1, unknown"})
     void incompatibleTargetRejectsEntireBatchBeforeDispatch(int os, String arch) {

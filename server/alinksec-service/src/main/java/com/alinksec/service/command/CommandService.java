@@ -20,6 +20,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -257,9 +260,12 @@ public class CommandService {
             if (resourceKey == null || resourceKey.isBlank()) {
                 throw new IllegalStateException("download URL has no " + resourceParameter);
             }
+            // Query values are still encoded here. Bind fresh credentials to
+            // the original key, then encode once for the replayed HTTP query.
+            resourceKey = URLDecoder.decode(resourceKey, StandardCharsets.UTF_8);
             return UriComponentsBuilder.fromUriString(downloadBaseUrl(resourceType))
                     .path(uri.getPath())
-                    .replaceQueryParam(resourceParameter, resourceKey)
+                    .replaceQueryParam(resourceParameter, URLEncoder.encode(resourceKey, StandardCharsets.UTF_8))
                     .replaceQueryParam("token", downloadTokens.issue(agentId, resourceType, resourceKey))
                     .build(true)
                     .toUriString();

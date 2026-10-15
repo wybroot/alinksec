@@ -9,6 +9,8 @@ import com.alinksec.service.download.AgentDownloadTokenService;
 import com.alinksec.service.config.AlinkSecProperties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -56,19 +58,20 @@ class CommandServiceTest {
         assertTrue(saved.getCmdId().length() > 10);
     }
 
-    @Test
-    void deliverPendingRefreshesLegacyHttpUpgradeUrlUsingConfiguredHttpsBase() {
+    @ParameterizedTest
+    @CsvSource({"agent-v1.bin, agent-v1.bin", "1.2.3+build-linux-amd64.bin, 1.2.3%2Bbuild-linux-amd64.bin"})
+    void deliverPendingRefreshesLegacyHttpUpgradeUrlUsingConfiguredHttpsBase(String key, String encodedKey) {
         AlinkSecProperties props = new AlinkSecProperties();
         props.getUpgrade().setDownloadBaseUrl("https://console.example.test:8443");
         Command saved = Command.newBuilder().setAgentUpgrade(CmdAgentUpgrade.newBuilder()
-                .setDownloadUrl("http://legacy.example.test:8080/api/upgrade/download?packageKey=agent-v1.bin&token=expired"))
+                .setDownloadUrl("http://legacy.example.test:8080/api/upgrade/download?packageKey=" + encodedKey + "&token=expired"))
                 .build();
         Map<String, Object> row = Map.of(
                 "cmd_id", "cmd-1",
                 "payload", JsonUtils.write(Map.of("command_b64",
                         Base64.getEncoder().encodeToString(saved.toByteArray()))));
         when(repository.findPendingByAgent("agent-1")).thenReturn(List.of(row));
-        when(downloadTokens.issue("agent-1", "agent-upgrade", "agent-v1.bin")).thenReturn("fresh-token");
+        when(downloadTokens.issue("agent-1", "agent-upgrade", key)).thenReturn("fresh-token");
         when(sender.send(eq("agent-1"), org.mockito.ArgumentMatchers.any(Command.class))).thenReturn(true);
         CommandService service = new CommandService(repository, sender, downloadTokens, props,
                 List.of(lifecycleListener), transactionManager);
@@ -77,7 +80,7 @@ class CommandServiceTest {
 
         ArgumentCaptor<Command> sent = ArgumentCaptor.forClass(Command.class);
         verify(sender).send(eq("agent-1"), sent.capture());
-        assertEquals("https://console.example.test:8443/api/upgrade/download?packageKey=agent-v1.bin&token=fresh-token",
+        assertEquals("https://console.example.test:8443/api/upgrade/download?packageKey=" + encodedKey + "&token=fresh-token",
                 sent.getValue().getAgentUpgrade().getDownloadUrl());
         verify(repository).markSent("cmd-1");
     }

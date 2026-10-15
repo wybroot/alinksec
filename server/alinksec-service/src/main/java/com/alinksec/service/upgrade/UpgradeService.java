@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -184,7 +186,7 @@ public class UpgradeService {
 
     private String downloadUrl(String agentId, String packageKey) {
         String base = props.getUpgrade().getDownloadBaseUrl().replaceAll("/+$", "");
-        return base + "/api/upgrade/download?packageKey=" + packageKey
+        return base + "/api/upgrade/download?packageKey=" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8)
                 + "&token=" + downloadTokens.issue(agentId, "agent-upgrade", packageKey);
     }
 
