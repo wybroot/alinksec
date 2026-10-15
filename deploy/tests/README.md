@@ -50,6 +50,43 @@ When testing a locally built maintenance image, set
 Run checks serially on low-memory machines. Build the server before starting API
 validation, and stop one scenario before starting another.
 
+## Complete deployment maintenance
+
+Linux Python 3.10+ unit checks use real SQLite/WAL and archives with simulated
+Docker failures; they start no containers:
+
+```sh
+python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_operations.py -v
+```
+
+On a low-memory Linux Docker host, run these two native scenarios serially,
+with a resource watchdog and the application backend paused. Both require
+`ALINKSEC_SMOKE_ALLOW_FIXTURES=true`, cached images and no other validation
+containers. They create and remove their own named volumes and stopped Compose
+fixtures; the existing user deployment is never a restoration target.
+
+```sh
+ALINKSEC_SMOKE_ALLOW_FIXTURES=true python3 -B deploy/tests/operations-volume-local.py
+ALINKSEC_SMOKE_ALLOW_FIXTURES=true python3 -B deploy/tests/operations-postgres-local.py
+```
+
+The volume scenario checks numeric UID/GID/mode and stale file removal with a
+64 MiB network-disabled helper. The PostgreSQL scenario alternates one 192 MiB
+PostgreSQL container and that helper; it verifies database recreation, table and
+database ACLs, database comments and database/role settings. Set
+`ALINKSEC_OPERATIONS_TEST_IMAGE`, `ALINKSEC_OPERATIONS_WEB_IMAGE` and
+`ALINKSEC_OPERATIONS_PG_IMAGE` for cached images on the host architecture.
+
+`operations-smoke.py --mode postgres|sqlite` requires `GITHUB_ACTIONS=true` and
+runs only on disposable full-stack CI deployments. Each native Linux runner
+checks both modes serially, including actual SIGKILL after the first restored
+volume and rollback after invalid CA material prevents application startup.
+It also checks persisted JWT, CA, TLS, uploaded files, database privileges,
+private permissions, pre-downtime checksum rejection and helper cleanup.
+Only sanitized result JSON files enter `operations-validation-<arch>` artifacts;
+raw snapshots, environment files and deployment metadata must not be uploaded.
+See [operator commands and recovery boundaries](../../docs/54-部署维护与成套恢复.md).
+
 ## Native Windows Service
 
 On a disposable Windows host, run in `agent/` with administrator permissions:

@@ -33,6 +33,7 @@
   independent CI runners. Keep checks that share ports, containers or state
   ordered within one runner.
 
+- Create each functional module branch from the latest merged and validated `main`.
 - Complete one functional module on its own branch before moving to another.
 - Stay on that module's branch while completing its functionality, system
   applicability, failure handling, security boundaries, and validation.
@@ -41,5 +42,10 @@
 - Open a new pull request only after the module's implementation and required
   validation are complete. Keep an existing pull request in draft while its
   module is still being improved.
-- Defer merges and version releases until the user instructs proceeding after
-  the planned functionality is complete.
+- After implementation and required validation are complete, merge the module PR
+  into `main` under the user's standing instruction. Verify the merged source and
+  checks, then synchronize local `main` before creating the next module branch.
+- Do not base a new functional module on an unmerged module branch or stack its
+  PR on an unmerged module PR.
+- Version releases and production deployments require separate user instructions;
+  module merge authorization does not authorize either action.
