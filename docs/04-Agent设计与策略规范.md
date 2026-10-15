@@ -24,11 +24,13 @@ agent/
     ├── guard/         # 进程、文件、SSH、诱饵与隔离
     ├── logcollect/    # 日志采集与上报
     ├── sysmetrics/    # 性能指标
-    ├── upgrade/       # 下载、SHA256 校验和二进制替换
+    ├── isolation/     # 认证租约、原生独立看护与专属防火墙规则
+    ├── securestate/   # 私有原子恢复记录及跨进程锁
+    ├── upgrade/       # 下载、SHA256 校验、独立看护与失败回退
     └── proto/         # 当前生成的 Go 协议类型
 ```
 
-实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys 及 Windows WMI。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
+实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys、Windows WMI 及固定版本 tailscale/wf（动态 WFP）。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
 
 | 平台 | 默认配置与工作目录 | 常驻日志 |
 | --- | --- | --- |
@@ -236,16 +238,20 @@ rules:
 
 ### 5.5 主机隔离（ISOLATE_HOST）
 
-- Linux：iptables INPUT 链默认 DROP，仅放行 Agent↔Server 通信 IP:9443 与既有关联会话。
-- Windows：防火墙新建阻断规则 + 放行规则。
-- **双向确认**：隔离指令下发后 Agent 必须在 10s 内 ACK，超时视为失败并自动回滚（防止把客户的机器"锁死"后失联）；解封指令 `RESTORE_ISOLATION` 恢复。
+- 原生 systemd/SCM 服务声明 `isolation_contract=1`；平台在创建、派发和当前认证连接复核能力。旧 Agent、前台与容器进程拒绝新隔离。
+- Linux：独立看护创建本次专属 iptables/ip6tables 链及 INPUT/OUTPUT/FORWARD 首部跳转，放行回环、解析时固定的管理端 TCP IP/端口与 IPv6 邻居发现；其余流量丢弃，包含既有业务连接。保留管理员策略，仅清理本次带身份标记的规则。
+- Windows：独立 SCM 看护持有动态 WFP 会话，在 IPv4/IPv6 ALE 连接与接收授权层安装本次过滤器；放行回环和管理 TCP 端点，不改 Windows 防火墙配置文件默认策略。
+- 隔离生效后，Agent 必须经当前认证通道完成新随机数往返，才记录成功；每次有效往返续租 10 秒。独立看护按持久化期限撤销隔离，主 Agent 崩溃不妨碍撤销；看护重启清理旧隔离，不重置期限或重新隔离。
+- 平台只依据当前通道的租约状态更新隔离状态，历史 ACK 不覆盖较新恢复结果。失去后续状态时显示“隔离状态待确认”，收到本机实际清理结果后显示正常及自动解除原因。
+- `RESTORE_ISOLATION` 等待本机清理完成才成功；清理失败保留记录、提示失败并重试。卸载在隔离尚未清理时拒绝，持有隔离事务锁直到 Agent 服务确认停止。
+- 适用性、失败边界与验收入口见 [主机隔离租约与失联撤销](56-主机隔离租约与失联撤销.md)。
 
 ### 5.6 勒索诱饵防护（decoy，详见 05-扩展能力设计 §2）
 
 - **诱饵文件由 Agent 本地生成**（文件名模板池随机组合，随机字节 + 合理文件头，不依赖平台下载），投放目录与数量由防护策略下发（默认用户文档/共享目录，每目录 4 个）。
 - **双触发**：诱饵被写入/篡改（高置信）+ 受监听目录写速率异常（10s 窗口 >50 文件重命名且扩展变化率 >80%，典型加密拖尾特征）。
 - **归因**：Linux 经 `/proc/*/fd` 反查写入进程 inode；Windows 当前回退为最近活跃进程启发式，Restart Manager API 为后续增强项。
-- **本地响应链**（不依赖服务端在线）：递归结束涉事进程及其后代（含进程链取证）→ 主机隔离（复用 §5.5 的 10s ACK 回滚安全垫）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
+- **本地响应链**（不依赖服务端在线）：递归结束涉事进程及其后代（含进程链取证）→ 主机隔离（复用 §5.5 的 10 秒认证租约；离线不续租自动解除）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
 - **误报防护**：备份/杀毒/索引类进程按 exe 路径排除（策略可配）；诱饵目录避开业务工作区；响应级别可配（alert_only / kill / kill_and_isolate，默认 kill_and_isolate）。
 
 ## 6. 本地自治与策略缓存（policystore / offlineq）

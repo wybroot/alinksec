@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/proto"
 )
 
@@ -68,6 +69,7 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 	g.files = newFileMonitor(workDir, log)
 	g.login = newLoginMonitor(workDir, log, g.applyLoginBlock)
 	g.login.reset = ClearLoginFirewall
+	g.recoverIsolationMarker()
 	return g
 }
 
@@ -150,9 +152,6 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 
 // Run 主循环：初始投放 → 并行跑健康检查（60s）与速率监测（窗口周期）
 func (g *Guard) Run(ctx context.Context) {
-	// 隔离残留：marker 存在则恢复隔离状态（与诱饵开关无关，防火墙规则可能已随重启丢失）
-	g.recoverIsolationMarker()
-
 	g.initialDeploy()
 
 	healthTick := time.NewTicker(healthInterval)
@@ -322,87 +321,60 @@ type isolateMarker struct {
 	Reason string    `json:"reason"`
 }
 
-// IsolateHost 主机隔离：先确保管控通道放行（server IP 解析失败则拒绝隔离，防失联）；
-// comm 的 CmdProtectAction(ISOLATE_HOST) 与本地响应链共用
+// IsolateHost starts a local-response lease. The authenticated communication
+// loop confirms it exactly like a remotely requested isolation. Offline local
+// responses are automatically withdrawn after the original ten-second window.
 func (g *Guard) IsolateHost(reason string) error {
-	ip := g.resolveServerIP()
-	if ip == "" {
-		return errNoServerIP
-	}
-	if err := isolatePlatform(ip); err != nil {
+	id, err := isolation.NewNonce()
+	if err != nil {
 		return err
 	}
-	g.mu.Lock()
-	g.isolated = true
-	g.mu.Unlock()
-	m, _ := json.Marshal(isolateMarker{Since: time.Now(), Reason: reason})
-	_ = os.WriteFile(filepath.Join(g.workDir, "isolated.json"), m, 0600)
-	g.log.Warn("主机已隔离", "reason", reason, "server_ip", ip)
-	return nil
+	return isolation.Begin(g.workDir, g.serverAddr(), "local-"+id, reason)
 }
-
-// RestoreIsolation 解除隔离（comm 的 CmdProtectAction RESTORE_ISOLATION 调用）
 func (g *Guard) RestoreIsolation() error {
+	if _, err := isolation.Current(g.workDir); err == nil {
+		return isolation.Restore(g.workDir, "")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// Compatibility cleanup requires an actual legacy marker. Do not change any
+	// firewall policy during ordinary non-isolated RESTORE commands.
+	if _, err := os.Lstat(filepath.Join(g.workDir, "isolated.json")); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
 	if err := restorePlatform(); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(g.workDir, "isolated.json")); err != nil {
 		return err
 	}
 	g.mu.Lock()
 	g.isolated = false
 	g.mu.Unlock()
-	_ = os.Remove(filepath.Join(g.workDir, "isolated.json"))
-	g.log.Info("主机隔离已解除")
 	return nil
 }
-
-// Isolated 当前隔离状态（心跳 guard_status 上报用）
 func (g *Guard) Isolated() bool {
+	if l, err := isolation.Current(g.workDir); err == nil {
+		return l.Phase != "finished" && l.Phase != "prepared"
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.isolated
 }
-
-// recoverIsolationMarker 启动时发现 marker：说明隔离后重启过，防火墙规则可能丢失 → 重新隔离
 func (g *Guard) recoverIsolationMarker() {
-	b, err := os.ReadFile(filepath.Join(g.workDir, "isolated.json"))
-	if err != nil {
+	if _, err := os.Lstat(filepath.Join(g.workDir, "isolated.json")); err != nil {
 		return
 	}
-	var m isolateMarker
-	_ = json.Unmarshal(b, &m)
 	g.mu.Lock()
 	g.isolated = true
 	g.mu.Unlock()
-	if ip := g.resolveServerIP(); ip != "" {
-		if err := isolatePlatform(ip); err != nil {
-			g.log.Error("重启后重新隔离失败", "err", err)
-		} else {
-			g.log.Warn("检测到隔离 marker，重启后已重新隔离", "since", m.Since.Format(time.RFC3339))
-		}
+	if err := g.RestoreIsolation(); err != nil {
+		g.log.Error("旧版隔离标记恢复失败，需核对原有防火墙策略", "err", err)
+	} else {
+		g.log.Warn("已撤销旧版无期限主机隔离")
 	}
-}
-
-// resolveServerIP 解析 server 地址为 IP（隔离放行必需；域名解析失败返回空）
-func (g *Guard) resolveServerIP() string {
-	cfg := g.serverAddr()
-	host, _, err := net.SplitHostPort(cfg)
-	if err != nil {
-		host = cfg
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return host
-	}
-	if addrs, err := net.LookupIP(host); err == nil && len(addrs) > 0 {
-		return addrs[0].String()
-	}
-	return ""
-}
-
-var errNoServerIP = &isolateErr{}
-
-type isolateErr struct{}
-
-func (*isolateErr) Error() string {
-	return "server 地址无法解析为 IP，拒绝隔离以防管控通道失联"
 }
 
 // serverAddr 从全局配置读连接地址（由 comm 启动时通过 SetServerAddr 注入，避免 guard 依赖完整 Config）

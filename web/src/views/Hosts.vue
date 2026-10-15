@@ -6,7 +6,7 @@
       <el-select v-model="statusFilter" placeholder="状态" clearable style="width:130px">
         <el-option label="在线" value="online" /><el-option label="离线" value="offline" />
         <el-option label="隔离中" value="isolating" /><el-option label="已隔离" value="isolated" />
-        <el-option label="解除中" value="restoring" /><el-option label="隔离失败" value="isolate_failed" />
+        <el-option label="隔离状态待确认" value="isolation_unknown" /><el-option label="解除中" value="restoring" /><el-option label="隔离失败" value="isolate_failed" />
         <el-option label="解除失败" value="restore_failed" /><el-option label="待激活" value="pending" /></el-select>
       <el-select placeholder="主机组" clearable style="width:150px">
         <el-option v-for="g in groups" :key="g" :label="g" :value="g" /></el-select>
@@ -33,12 +33,12 @@
       <el-table-column label="风险账户" width="96">
         <template #default="{ row }"><el-tag v-if="row.riskyAccountCount" size="small" type="danger">{{ row.riskyAccountCount }}</el-tag><span v-else>—</span></template>
       </el-table-column>
-      <el-table-column label="连接 / 隔离" width="152">
+      <el-table-column label="连接 / 隔离" width="190">
         <template #default="{ row }">
           <div style="display:flex;align-items:center;gap:4px">
             <el-tag size="small" :type="hostTagType(row.connectionStatus)">{{ hostStatusLabel(row.connectionStatus) }}</el-tag>
-            <el-tooltip v-if="row.isolationStatus !== 'normal'" :disabled="!row.isolationError" :content="row.isolationError">
-              <el-tag size="small" :type="hostTagType(row.isolationStatus)">{{ hostStatusLabel(row.isolationStatus) }}</el-tag>
+            <el-tooltip v-if="row.isolationStatus !== 'normal' || row.isolationAutomatic" :disabled="!row.isolationError" :content="row.isolationError">
+              <el-tag size="small" :type="hostTagType(row.isolationStatus)">{{ row.isolationAutomatic && row.isolationStatus === 'normal' ? '已自动解除' : hostStatusLabel(row.isolationStatus) }}</el-tag>
             </el-tooltip>
           </div>
         </template>
@@ -71,6 +71,8 @@
         <el-descriptions-item label="IP">{{ curHost.ip }}</el-descriptions-item>
         <el-descriptions-item label="操作系统">{{ curHost.os }} · {{ curHost.arch }}</el-descriptions-item>
         <el-descriptions-item label="Agent 版本">{{ curHost.ver }}（策略 v20260820）</el-descriptions-item>
+        <el-descriptions-item label="隔离保护">{{ curHost.isolationContract === 1 ? '管理通道失联 10 秒后自动解除' : '当前 Agent 不支持安全隔离，请升级并使用原生服务' }}</el-descriptions-item>
+        <el-descriptions-item v-if="curHost.isolationError" label="隔离说明">{{ curHost.isolationError }}</el-descriptions-item>
         <el-descriptions-item label="状态">连接 {{ hostStatusLabel(curHost.connectionStatus) }} · 隔离 {{ hostStatusLabel(curHost.isolationStatus) }} · 心跳 {{ curHost.hb }}</el-descriptions-item>
       </el-descriptions>
       <div class="panel" style="margin-top:14px;box-shadow:none;border:1px solid #eef2f7">
@@ -164,11 +166,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, nextTick, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { fetchHosts, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+import { fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 
 const router = useRouter()
@@ -239,9 +241,12 @@ const renderMiniChart = (metrics) => {
 }
 
 let loadVersion = 0
-const loadHosts = async () => {
+let hostRequestPending = false
+const loadHosts = async (silent = false) => {
+  silent = silent === true
   const version = ++loadVersion
-  loading.value = true
+  hostRequestPending = true
+  if (!silent) loading.value = true
   try {
     const result = await fetchHosts({
       keyword: query.value,
@@ -251,11 +256,18 @@ const loadHosts = async () => {
     })
     if (version !== loadVersion) return
     hosts.splice(0, hosts.length, ...result.list)
+    const current = result.list.find(row => row.agentId === curHost.agentId)
+    if (current) Object.assign(curHost, current)
+    else if (drawer.value && curHost.agentId) {
+      const agentId = curHost.agentId
+      const state = await fetchHostState(agentId)
+      if (version === loadVersion && curHost.agentId === agentId) Object.assign(curHost, state)
+    }
     total.value = result.total
   } catch (e) {
-    if (version === loadVersion) ElMessage({ message: e?.message || '主机列表加载失败', type: 'error' })
+    if (version === loadVersion && !silent) ElMessage({ message: e?.message || '主机列表加载失败', type: 'error' })
   } finally {
-    if (version === loadVersion) loading.value = false
+    if (version === loadVersion) { loading.value = false; hostRequestPending = false }
   }
 }
 
@@ -272,8 +284,8 @@ watch(statusFilter, () => {
 
 const msg = t => ElMessage({ message: t, type: 'success', duration: 1800 })
 const busyIsolation = ref('')
-const canIsolate = row => row.connectionStatus === 'online' && ['normal', 'isolate_failed'].includes(row.isolationStatus)
-const canRestore = row => row.connectionStatus === 'online' && ['isolated', 'restore_failed'].includes(row.isolationStatus)
+const canIsolate = row => row.connectionStatus === 'online' && row.isolationContract === 1 && ['normal', 'isolate_failed'].includes(row.isolationStatus)
+const canRestore = row => row.connectionStatus === 'online' && ['isolating', 'isolated', 'isolate_failed', 'restore_failed', 'isolation_unknown'].includes(row.isolationStatus)
 
 // 卸载口令（docs/01 §6.1 防恶意卸载）：平台布防 → 15min 内目标主机执行一次性口令卸载
 const armUninstall = async row => {
@@ -322,10 +334,10 @@ const openHost = async row => {
   }
 }
 
-// 隔离 / 解除隔离：CmdProtectAction.ISOLATE_HOST / RESTORE_ISOLATION（Agent ACK 后生效）
+// 隔离 / 解除隔离：CmdProtectAction.ISOLATE_HOST / RESTORE_ISOLATION（本机状态与认证往返确认后生效）
 const isolate = async (row, toIsolated) => {
   const tip = toIsolated
-    ? '隔离后仅保留 Agent 与平台通信通道，业务访问将被阻断。确认隔离？'
+    ? '隔离后仅保留 Agent 与平台通信通道，业务访问将被阻断。管理通道失联 10 秒后会自动解除隔离。确认隔离？'
     : '确认解除该主机隔离，恢复业务网络访问？'
   try {
     await ElMessageBox.confirm(tip, toIsolated ? '主机隔离确认' : '解除隔离确认',
@@ -336,6 +348,7 @@ const isolate = async (row, toIsolated) => {
     const result = await isolateHost(row.agentId, toIsolated)
     row.isolationStatus = result.isolationStatus
     row.isolationError = ''
+    row.isolationAutomatic = false
     row.status = result.isolationStatus
     if (curHost.agentId === row.agentId) Object.assign(curHost, row)
     msg(toIsolated ? '隔离指令已下发，等待 Agent 确认' : '解除指令已下发，等待 Agent 确认')
@@ -387,10 +400,15 @@ const newInstallToken = async () => {
   }
 }
 
+let isolationRefreshTimer
 onMounted(async () => {
+  isolationRefreshTimer = setInterval(() => {
+    if (!hostRequestPending && !busyIsolation.value && document.visibilityState === 'visible') loadHosts(true)
+  }, 3000)
   await Promise.all([
     loadHosts(),
     fetchGroups().then(value => { groups.value = value }),
   ])
 })
+onBeforeUnmount(() => { clearInterval(isolationRefreshTimer); clearTimeout(queryTimer); loadVersion++ })
 </script>

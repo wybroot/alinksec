@@ -91,6 +91,10 @@ public class AgentRepository {
         jdbc.update("UPDATE t_agent SET virus_execution_contract=?,virus_db_version=? WHERE agent_id=?",contract==2?2:0,version.length()<=128?version:"",agentId);
     }
 
+    public void isolationContract(String agentId,int contract) {
+        jdbc.update("UPDATE t_agent SET isolation_contract=? WHERE agent_id=?",contract==1?1:0,agentId);
+    }
+
     public void upgradeContract(String agentId,int contract) {
         jdbc.update("UPDATE t_agent SET upgrade_contract=? WHERE agent_id=?",contract==1?1:0,agentId);
     }

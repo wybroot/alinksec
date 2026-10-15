@@ -66,14 +66,14 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasVirusResult() || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+        if(report.hasVirusResult() || isolationOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
             virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
-        if((report.hasVirusResult() || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if((report.hasVirusResult() || isolationOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
@@ -86,6 +86,15 @@ public class ReportDispatcher {
             case ACK -> commandService.onAck(agentId, report.getAck());
             case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
             case SECURITY_EVENT -> {
+                if(isolationOutcome(report)) {
+                    var detail=com.alinksec.common.util.JsonUtils.read(report.getSecurityEvent().getDetail());
+                    String id=detail.path("id").asText(),phase=detail.path("phase").asText();
+                    if(!id.matches("[0-9a-f]{32}") || !java.util.Set.of("finished","attention").contains(phase)
+                            || !report.getReportId().equals(id+"-"+phase+"-event"))
+                        throw new IllegalArgumentException("invalid persistent isolation outcome identity");
+                    if(jdbc.update("INSERT INTO t_isolation_outcome_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
+                            agentId,report.getReportId(),report.getSecurityEvent().getDetail())==0) return;
+                }
                 securityEventService.onEvent(agentId, report.getSecurityEvent());
                 virusResultService.onRealtime(agentId,report.getSecurityEvent(),report.getReportId());
             }
@@ -97,6 +106,11 @@ public class ReportDispatcher {
             case LOG_BATCH -> logBatchService.onBatch(agentId, report.getLogBatch());
             default -> log.warn("未知上报类型: {}", report.getPayloadCase());
         }
+    }
+
+    private static boolean isolationOutcome(com.alinksec.proto.Report report) {
+        return report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("self_defense")
+                && report.getSecurityEvent().getRuleId().equals("host-isolation-lease");
     }
 
     /** 去重表 SETNX 语义：插入成功 = 首次见到 */

@@ -6,7 +6,6 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync,
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
-import { networkInterfaces } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -25,7 +24,7 @@ const agentWorkDirs = []
 const password = 'agent-workflow-admin-password'
 const detectionOnly=process.env.ALINKSEC_SMOKE_DETECTION_ONLY==='true'
 const agentStateRoot=detectionOnly?'/tmp/alinksec-native/work':'/work'
-let server, proxy, business, token, passed = false
+let server, proxy, token, passed = false
 let accessHost = 'ci.alinksec.test'
 const controller = new AbortController()
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
@@ -277,30 +276,14 @@ try {
     pass: text => console.log('ok - '+text),
   })
   await baselineRuntimeWorkflow(first)
-  const businessAddress = Object.values(networkInterfaces()).flat().find(a => a.family === 'IPv4' && !a.internal && a.address !== gateway)?.address
-  assert.ok(businessAddress, 'An additional local IPv4 is required to check blocked business traffic')
-  business = http.createServer((req, res) => res.end('business-fixture'))
-  await new Promise(ok => business.listen(0, businessAddress, ok))
-  const businessURL = `http://${businessAddress}:${business.address().port}`
-  const probe = ['exec', first.container, 'curl', '--noproxy', '*', '--fail', '--silent', '--show-error', '--max-time', '2', businessURL]
-  assert.equal(await command('docker', probe), 'business-fixture')
-  await api(`/api/hosts/${first.id}/isolate`, { isolate: true })
-  await until(() => sql('SELECT isolation_status FROM t_agent WHERE agent_id=?', first.id)[0].isolation_status === 2,
-    'Agent isolation ACK did not complete')
-  assert.ok(existsSync(join(first.dir, 'work/isolated.json')))
-  assert.match(await command('docker', ['exec', first.container, 'iptables', '-S', 'ALINKSEC_ISO']), /-j DROP/)
-  await assert.rejects(command('docker', probe), error => error.code === 28)
-  await stopAgent(first)
-  await stopServer()
-  await startServer()
-  await startAgent(first)
-  assert.equal(sql('SELECT isolation_status FROM t_agent WHERE agent_id=?', first.id)[0].isolation_status, 2)
-  await api(`/api/hosts/${first.id}/unisolate`, {})
-  await until(() => sql('SELECT isolation_status FROM t_agent WHERE agent_id=?', first.id)[0].isolation_status === 0,
-    'Agent restore ACK did not complete')
-  assert.equal(existsSync(join(first.dir, 'work/isolated.json')), false)
-  assert.equal(await command('docker', probe), 'business-fixture')
-  console.log('ok - actual iptables isolation, Agent/server restart, heartbeat and restoration')
+  assert.equal(sql('SELECT isolation_contract FROM t_agent WHERE agent_id=?',first.id)[0].isolation_contract,0)
+  const rejectedIsolation = await fetch(`http://${gateway}:${httpPort}/api/hosts/${first.id}/isolate`, {method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:'{}'})
+  const rejectedResult=await rejectedIsolation.json()
+  assert.notEqual(rejectedResult.code,0)
+  assert.match(rejectedResult.msg,/原生 Agent 隔离契约/)
+  assert.equal(existsSync(join(first.dir,'work/isolated.json')),false)
+  assert.equal(existsSync(join(first.dir,'work/isolation/current.json')),false)
+  console.log('ok - foreground/container Agents reject isolation without an independent native recovery service')
   await stopAgent(first)
   const second = await makeAgent('second')
   const initialPatch = await patchFile()
@@ -414,7 +397,6 @@ try {
     try { await exec('docker', ['rm', '-f', id], { timeout: 30_000 }) } catch { cleanupFailed = true }
   }
   if (proxy) await new Promise(ok => proxy.close(ok))
-  if (business) await new Promise(ok => business.close(ok))
   await stopServer()
   if (passed && !cleanupFailed) {
     try {

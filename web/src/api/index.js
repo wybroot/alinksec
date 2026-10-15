@@ -121,6 +121,7 @@ const ISOLATION_STATUS = {
   3: 'restoring',
   4: 'isolate_failed',
   5: 'restore_failed',
+  6: 'isolation_unknown',
 }
 
 /* ---------------- 总览 ---------------- */
@@ -310,14 +311,13 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
   if (keyword.trim()) params.set('keyword', keyword.trim())
   const connectionFilter = { pending: 0, online: 1, offline: 2 }[status]
   const isolationFilter = {
-    normal: 0, isolating: 1, isolated: 2, restoring: 3, isolate_failed: 4, restore_failed: 5,
+    normal: 0, isolating: 1, isolated: 2, restoring: 3, isolate_failed: 4, restore_failed: 5, isolation_unknown: 6,
   }[status]
   if (connectionFilter !== undefined) params.set('status', String(connectionFilter))
   if (isolationFilter !== undefined) params.set('isolationStatus', String(isolationFilter))
   const data = await get(`/api/hosts?${params}`)
   const list = (data?.list || []).map((h) => {
-    const connectionStatus = HOST_STATUS[h.status] || 'offline'
-    const isolationStatus = ISOLATION_STATUS[Number(h.isolation_status)] || 'normal'
+    const state = hostConnectionAndIsolation(h)
     return {
       agentId: h.agent_id,
       virusExecutionContract: Number(h.virus_execution_contract || 0),
@@ -327,10 +327,7 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
       arch: h.arch || '—',
       group: '—',
       ver: h.agent_version || '—',
-      connectionStatus,
-      isolationStatus,
-      isolationError: h.isolation_error || '',
-      status: isolationStatus === 'normal' ? connectionStatus : isolationStatus,
+      ...state,
       protect: !!h.protect_enabled,
       hb: fmtAgo(h.last_heartbeat),
       risk: Number(h.alert_count || 0),
@@ -345,6 +342,18 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
     }
   })
   return { list, total: Number(data?.total || 0), page, size }
+}
+
+function hostConnectionAndIsolation(h) {
+  const connectionStatus = HOST_STATUS[h.status] || 'offline'
+  const isolationStatus = ISOLATION_STATUS[Number(h.isolation_status)] || 'normal'
+  return { connectionStatus, isolationStatus, isolationError: h.isolation_error || '',
+    isolationContract: Number(h.isolation_contract || 0),
+    isolationAutomatic: h.isolation_automatic === true || Number(h.isolation_automatic) === 1,
+    status: isolationStatus === 'normal' ? connectionStatus : isolationStatus }
+}
+export async function fetchHostState(agentId) {
+  return hostConnectionAndIsolation(await get(`/api/hosts/${agentId}`))
 }
 
 export async function fetchAllHosts() {

@@ -3,15 +3,15 @@ package upgrade
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/shirou/gopsutil/v3/process"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 )
 
 const startupTimeout = 60 * time.Second
@@ -56,64 +56,15 @@ func resultPath(workDir, id string) string {
 }
 
 func privateDir(path string) error {
-	if err := os.MkdirAll(path, 0700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("upgrade directory is not a real directory")
-	}
-	return protectDirectory(path)
+	return securestate.PrivateDir(path)
 }
 
 func readJSON(path string, value any) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Size() > 65536 {
-		return fmt.Errorf("invalid upgrade record")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	d := json.NewDecoder(io.LimitReader(f, 65537))
-	d.DisallowUnknownFields()
-	if err := d.Decode(value); err != nil {
-		return err
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("trailing upgrade record data")
-	}
-	return nil
+	return securestate.ReadJSON(path, value)
 }
 
 func writeJSON(path string, value any) error {
-	b, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".record-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
-	}
-	if e := f.Close(); err == nil {
-		err = e
-	}
-	if err != nil {
-		return err
-	}
-	return replaceRecord(tmp, path)
+	return securestate.WriteJSON(path, value)
 }
 
 func loadTransaction(workDir string) (*transaction, error) {

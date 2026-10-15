@@ -106,6 +106,7 @@ public class ProtectRuleService {
         String cmdId = commandService.dispatch(agentId, Command.newBuilder()
                 .setProtectAction(CmdProtectAction.newBuilder()
                         .setAction(act)
+                        .setIsolationContract(act==CmdProtectAction.Action.ISOLATE_HOST?1:0)
                         .setTarget(target == null ? "" : target)
                         .setReason(reason == null ? "" : reason)),
                 issuedBy);

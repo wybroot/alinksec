@@ -19,20 +19,16 @@ class IsolationCommandLifecycleListenerTest {
     @Test
     void isolateDispatchStartsTrackedTransition() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        when(jdbc.update(org.mockito.ArgumentMatchers.anyString(),
-                eq(IsolationCommandLifecycleListener.ISOLATING), eq("cmd-1"), eq("agent-1"),
-                eq(IsolationCommandLifecycleListener.NORMAL),
-                eq(IsolationCommandLifecycleListener.ISOLATE_FAILED))).thenReturn(1);
+        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(),eq(Integer.class),eq("agent-1"))).thenReturn(1);
+        when(jdbc.update(org.mockito.ArgumentMatchers.anyString(),eq(IsolationCommandLifecycleListener.ISOLATING),eq("cmd-1"),eq("cmd-1"),eq("agent-1"))).thenReturn(1);
         IsolationCommandLifecycleListener listener = new IsolationCommandLifecycleListener(jdbc);
 
         listener.onDispatched("agent-1", command("cmd-1", CmdProtectAction.Action.ISOLATE_HOST));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).update(sql.capture(), eq(IsolationCommandLifecycleListener.ISOLATING),
-                eq("cmd-1"), eq("agent-1"), eq(IsolationCommandLifecycleListener.NORMAL),
-                eq(IsolationCommandLifecycleListener.ISOLATE_FAILED));
-        assertTrue(sql.getValue().contains("isolation_command_id = ?"));
-        assertTrue(sql.getValue().contains("isolation_status IN (?, ?)"));
+        verify(jdbc).update(sql.capture(),eq(IsolationCommandLifecycleListener.ISOLATING),eq("cmd-1"),eq("cmd-1"),eq("agent-1"));
+        assertTrue(sql.getValue().contains("isolation_contract=1"));
+
     }
 
     @Test
@@ -75,7 +71,7 @@ class IsolationCommandLifecycleListenerTest {
     private static Command command(String cmdId, CmdProtectAction.Action action) {
         return Command.newBuilder()
                 .setCmdId(cmdId)
-                .setProtectAction(CmdProtectAction.newBuilder().setAction(action))
+                .setProtectAction(CmdProtectAction.newBuilder().setAction(action).setIsolationContract(1))
                 .build();
     }
 }

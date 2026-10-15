@@ -203,11 +203,11 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(59, jdbc.queryForObject("""
+        assertEquals(60, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(16, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(17, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));
@@ -249,6 +249,81 @@ class SqliteDatabaseIntegrationTest {
         assertEquals(version, policy.currentVersion());
         assertFalse(JsonUtils.read(policy.contentJson()).path("file_rules").get(0).path("enabled").asBoolean());
         assertEquals("alert",JsonUtils.read(policy.contentJson()).path("login_rules").get(0).path("actions").get(0).asText());
+    }
+
+    @Test
+    void nativeIsolationLiveStateWinsOverLateAcksAndOlderLeases() throws Exception {
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,status,isolation_contract) VALUES ('lease-agent','leased',1,1,1)");
+        var lifecycle=new com.alinksec.service.protect.IsolationCommandLifecycleListener(jdbc);
+        var leases=new com.alinksec.service.protect.IsolationLeaseService(jdbc);
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,status) VALUES ('legacy-console','旧版主机',2,1)");
+        var query=new HostQueryService(jdbc);
+        Map<String,Object> stages=new java.util.LinkedHashMap<>();
+        java.util.function.Consumer<String> capture=stage->stages.put(stage,query.list("",null,null,1,20));
+        capture.accept("normal");
+        java.util.function.Supplier<Integer> status=()->jdbc.queryForObject("SELECT isolation_status FROM t_agent WHERE agent_id='lease-agent'",Integer.class);
+        var isolate=com.alinksec.proto.Command.newBuilder().setCmdId("isolate-1").setProtectAction(com.alinksec.proto.CmdProtectAction.newBuilder()
+                .setAction(com.alinksec.proto.CmdProtectAction.Action.ISOLATE_HOST).setIsolationContract(1)).build();
+        lifecycle.onDispatched("lease-agent",isolate);
+        capture.accept("isolating");
+        var pulse=com.alinksec.proto.RptIsolationState.newBuilder().setLeaseId("a".repeat(32)).setGeneration(1).setRevision(2)
+                .setCommandId("isolate-1").setPhase("active").setNonce("b".repeat(32)).setDeadline(System.currentTimeMillis()+10000);
+        assertTrue(leases.observe("lease-agent",pulse.build()));
+        assertEquals(1,status.get());
+        lifecycle.onTerminal("lease-agent","isolate-1",com.alinksec.service.command.CommandLifecycleListener.TerminalState.DONE,"late done");
+        assertEquals(1,status.get(),"historical ACK cannot establish current isolation");
+        assertTrue(leases.observe("lease-agent",pulse.setRevision(3).setConfirmed(true).build()));
+        assertEquals(2,status.get());
+        capture.accept("isolated");
+        jdbc.update("UPDATE t_agent SET isolation_seen_at=? WHERE agent_id='lease-agent'",System.currentTimeMillis()-15000);
+        leases.expireObservations();
+        assertEquals(6,status.get(),"lost observations must not claim either ongoing isolation or restored networking");
+        capture.accept("unknown");
+        assertTrue(leases.observe("lease-agent",pulse.build()));
+        assertEquals(2,status.get());
+        assertFalse(leases.observe("lease-agent",pulse.setRevision(4).setPhase("attention").setNonce("").setMessage("cleanup failed").build()));
+        assertEquals(5,status.get(),"failed cleanup cannot claim normal networking");
+        capture.accept("restore_failed");
+        assertFalse(leases.observe("lease-agent",pulse.setRevision(5).setPhase("finished").setAutomatic(true).setMessage("管理通道未在 10 秒内完成认证确认，已自动恢复网络").build()));
+        assertEquals(0,status.get());
+        capture.accept("restored");
+        lifecycle.onTerminal("lease-agent","isolate-1",com.alinksec.service.command.CommandLifecycleListener.TerminalState.DONE,"replayed done");
+        assertEquals(0,status.get(),"late success resurrected withdrawn isolation");
+        assertFalse(leases.observe("lease-agent",pulse.setRevision(3).setPhase("active").setNonce("b".repeat(32)).build()));
+        assertEquals(0,status.get());
+        lifecycle.onDispatched("lease-agent",isolate.toBuilder().setCmdId("isolate-2").build());
+        assertFalse(leases.observe("lease-agent",pulse.setRevision(5).setPhase("finished").setNonce("").build()));
+        assertEquals(1,status.get(),"previous finished lease cleared a newer pending request");
+        pulse.setPhase("active").setNonce("b".repeat(32));
+        var second=pulse.setLeaseId("c".repeat(32)).setGeneration(2).setRevision(2).setCommandId("isolate-2").setAutomatic(false).build();
+        assertTrue(leases.observe("lease-agent",second));
+        assertEquals(2,status.get());
+        assertFalse(leases.observe("lease-agent",second.toBuilder().setLeaseId("a".repeat(32)).setGeneration(1).setRevision(1000).setPhase("finished").build()));
+        assertEquals(2,status.get(),"older lease overwrote current isolation");
+        lifecycle.onDispatched("lease-agent",com.alinksec.proto.Command.newBuilder().setCmdId("restore-2").setProtectAction(com.alinksec.proto.CmdProtectAction.newBuilder().setAction(com.alinksec.proto.CmdProtectAction.Action.RESTORE_ISOLATION)).build());
+        assertTrue(leases.observe("lease-agent",second.toBuilder().setRevision(3).build()));
+        assertEquals(3,status.get(),"active observation erased queued operator restore");
+        capture.accept("restoring");
+        leases.observe("lease-agent",second.toBuilder().setRevision(4).setPhase("finished").setNonce("").setRestoreCommandId("restore-2").build());
+        assertEquals(0,status.get());
+        String output=System.getenv("ALINKSEC_ISOLATION_FIXTURE_DIR");
+        if(output!=null && !output.isBlank()) {
+            var file=Path.of(output).resolve("console-sqlite.json");
+            java.nio.file.Files.createDirectories(file.getParent());
+            java.nio.file.Files.writeString(file,JsonUtils.write(Map.of("agent","lease-agent","stages",stages)));
+        }
+    }
+
+    @Test
+    void unsupportedNativeIsolationIsRejectedAtCreationAndDelivery() {
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,status) VALUES ('legacy-agent','legacy',1,1)");
+        var listener=new com.alinksec.service.protect.IsolationCommandLifecycleListener(jdbc);
+        var cmd=com.alinksec.proto.Command.newBuilder().setCmdId("unsafe").setProtectAction(com.alinksec.proto.CmdProtectAction.newBuilder().setAction(com.alinksec.proto.CmdProtectAction.Action.ISOLATE_HOST).setIsolationContract(1)).build();
+        assertThrows(IllegalArgumentException.class,()->listener.onDispatched("legacy-agent",cmd));
+        jdbc.update("UPDATE t_agent SET isolation_contract=1 WHERE agent_id='legacy-agent'");
+        listener.onDispatched("legacy-agent",cmd);
+        jdbc.update("UPDATE t_agent SET isolation_contract=0 WHERE agent_id='legacy-agent'");
+        assertThrows(IllegalArgumentException.class,()->listener.prepareDelivery("legacy-agent",cmd));
     }
 
     @Test
