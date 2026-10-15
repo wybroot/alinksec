@@ -102,14 +102,30 @@ func TestNativeIsolationLifecycle(t *testing.T) {
 	if hb.GetIsolationContract() != 1 {
 		t.Fatalf("native isolation contract not advertised: %+v", hb)
 	}
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		l, err := isolation.Current(work)
+		data, _ := json.Marshal(l)
+		t.Logf("failure lease: %s (%v)", data, err)
+		for _, r := range fixture.pending {
+			if a := r.report.GetAck(); a != nil {
+				t.Logf("pending ACK session=%d %s", r.session, a)
+			}
+		}
+	})
 	baseline := isolationNativePolicy(t)
 	command := func(id string, action pb.CmdProtectAction_Action, contract uint32) *pb.Command {
 		return &pb.Command{CmdId: id, Payload: &pb.Command_ProtectAction{ProtectAction: &pb.CmdProtectAction{Action: action, Reason: "disposable native validation", IsolationContract: contract}}}
 	}
 	awaitAck := func(id string, stage pb.RptAck_Stage) {
+		t.Helper()
+		t.Logf("waiting for %s ACK %s on session %d", id, stage, connection.number)
 		fixture.awaitReport(t, connection.number, func(r *pb.Report) bool { return r.GetAck().GetCmdId() == id && r.GetAck().GetStage() == stage })
 	}
 	active := func(id string) *pb.RptIsolationState {
+		t.Helper()
 		return fixture.awaitReport(t, connection.number, func(r *pb.Report) bool {
 			p := r.GetIsolationState()
 			return p != nil && p.CommandId == id && p.Phase == "active" && p.Nonce != ""
