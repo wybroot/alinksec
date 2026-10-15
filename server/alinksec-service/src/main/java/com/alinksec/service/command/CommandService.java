@@ -132,7 +132,7 @@ public class CommandService {
 
     /** 策略版本同步指令（心跳版本不一致时由 HeartbeatService / 规则编辑后触发）；policyJson 为空 = 仅版本同步（M1 兼容） */
     public void dispatchPolicySync(String agentId, String policyVersion, String policyJson) {
-        dispatch(agentId, Command.newBuilder()
+        dispatchAfterCommit(agentId, Command.newBuilder()
                 .setPolicySync(CmdPolicySync.newBuilder()
                         .setPolicyVersion(policyVersion)
                         .setPolicyJson(policyJson == null ? "" : policyJson)), null);

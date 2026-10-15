@@ -45,6 +45,9 @@ type Guard struct {
 	watchDirs     []string
 	serverAddrVal string         // gRPC 连接地址（comm 注入，隔离放行解析用）
 	virusCheck    VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
+	virusTrees    []string
+	virusEnabled  func() bool
+	virusPrev     map[string]treeSnapshot
 	files         *fileMonitor
 	login         *loginMonitor
 
@@ -162,6 +165,8 @@ func (g *Guard) Run(ctx context.Context) {
 	defer processTick.Stop()
 	fileTick := time.NewTicker(5 * time.Second)
 	loginTick := time.NewTicker(5 * time.Second)
+	virusTick := time.NewTicker(10 * time.Second)
+	defer virusTick.Stop()
 	defer fileTick.Stop()
 	defer loginTick.Stop()
 	g.fileLoop()
@@ -175,6 +180,8 @@ func (g *Guard) Run(ctx context.Context) {
 			g.healthLoop()
 		case <-rateTick.C:
 			g.rateLoop()
+		case <-virusTick.C:
+			g.virusLoop()
 		case <-processTick.C:
 			g.processLoop()
 		case <-fileTick.C:
@@ -288,7 +295,6 @@ func (g *Guard) rateLoop() {
 		return
 	}
 	// 病毒实时防护：窗口内新增/修改文件 L1 检查（与速率触发独立，未触发也检查）
-	g.virusSweep(append(append([]string{}, merged.Modified...), merged.Created...))
 
 	if !merged.triggered(c.RateThreshold, c.ExtChangeRatio) {
 		return

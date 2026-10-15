@@ -142,13 +142,14 @@ class SqliteDatabaseIntegrationTest {
         policy.init();
         VirusActionService actions = new VirusActionService(jdbc, commands, policy);
         String before = policy.currentVersion();
-        actions.addWhitelistEntry("hash", "a".repeat(64), "local test", 1L);
+        long actor=jdbc.queryForObject("INSERT INTO t_user(username,password_hash,role_id,status) VALUES('whitelist-admin','unused',1,1) RETURNING id",Long.class);
+        actions.addWhitelistEntry("hash", "a".repeat(64), "local test", actor);
         var entries = JsonUtils.read(policy.contentJson()).path("virus_whitelist");
         assertEquals(1, entries.size());
         assertEquals("a".repeat(64), entries.get(0).path("value").asText());
         assertFalse(before.equals(policy.currentVersion()));
         long id = jdbc.queryForObject("SELECT id FROM t_virus_whitelist", Long.class);
-        actions.removeWhitelist(id);
+        actions.removeWhitelist(id,actor);
         assertEquals(0, JsonUtils.read(policy.contentJson()).path("virus_whitelist").size());
     }
 
@@ -176,12 +177,13 @@ class SqliteDatabaseIntegrationTest {
                 INSERT INTO t_virus_scan_task(task_no, mode, scope, status)
                 VALUES ('VS-LIVE', 3, ?, 1) RETURNING id
                 """, Long.class, scope);
+        jdbc.update("INSERT INTO t_virus_task_agent(task_id,agent_id) VALUES(?,?)",virusTask,"agent-scan-1");
         VirusResultService viruses = new VirusResultService(jdbc);
         viruses.onResult("agent-scan-1", RptVirusResult.newBuilder()
-                .setTaskId(String.valueOf(virusTask)).setFilesScanned(1)
+                .setTaskId(String.valueOf(virusTask)).setFilesScanned(1).setFilesSeen(1).setMode(RptVirusResult.Mode.CUSTOM).setExecutionContract(2).setStatus(RptVirusResult.Status.COMPLETE)
                 .addFindings(VirusFinding.newBuilder().setPath("/tmp/harmless-fixture")
                         .setName("Test.Fixture").setSha256("a".repeat(64)).setEngine("hash")
-                        .setSeverity(Severity.SEV_HIGH).setActionTaken("quarantined"))
+                        .setSeverity(Severity.SEV_HIGH).setActionTaken("quarantined").setQuarantineId("c".repeat(32)))
                 .build());
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_virus_finding", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT status FROM t_virus_finding", Integer.class));
@@ -193,18 +195,19 @@ class SqliteDatabaseIntegrationTest {
                 INSERT INTO t_virus_scan_task(task_no, mode, scope, status)
                 VALUES ('VS-CLEAN', 3, ?, 1) RETURNING id
                 """, Long.class, scope);
+        jdbc.update("INSERT INTO t_virus_task_agent(task_id,agent_id) VALUES(?,?)",cleanTask,"agent-scan-1");
         viruses.onResult("agent-scan-1", RptVirusResult.newBuilder()
-                .setTaskId(String.valueOf(cleanTask)).setFilesScanned(1).build());
+                .setTaskId(String.valueOf(cleanTask)).setFilesScanned(1).setFilesSeen(1).setMode(RptVirusResult.Mode.CUSTOM).setExecutionContract(2).setStatus(RptVirusResult.Status.COMPLETE).build());
         assertEquals(2, jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?", Integer.class, cleanTask));
     }
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(56, jdbc.queryForObject("""
+        assertEquals(59, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(14, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(15, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));

@@ -87,6 +87,10 @@ public class AgentRepository {
                 status, agentId);
     }
 
+    public void virusContract(String agentId,int contract,String version) {
+        jdbc.update("UPDATE t_agent SET virus_execution_contract=?,virus_db_version=? WHERE agent_id=?",contract==2?2:0,version.length()<=128?version:"",agentId);
+    }
+
     public List<AgentEntity> findByStatus(short status) {
         return jdbc.query("SELECT * FROM t_agent WHERE status = ?", MAPPER, status);
     }

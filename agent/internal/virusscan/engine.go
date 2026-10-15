@@ -1,282 +1,426 @@
-// Package virusscan 引擎：遍历扫描 + SHA256 比对 + clean 缓存 + IO 限速。
 package virusscan
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
+	"fmt"
+	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
-
-	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"unicode/utf8"
 )
 
-// maxFileSize 超限大文件跳过（docs/05 §1.3：默认 >500MB 跳过）
-const maxFileSize = 500 << 20
-
-// ioLimitRate 扫描 IO 限速（docs/05：默认 10MB/s，保护业务盘）
-const ioLimitRate = 10 << 20
-
-// cacheMaxEntries clean 缓存条目上限（防内存无界增长）
+const maxFileSize int64 = 500 << 20
+const ioLimitRate int64 = 10 << 20
 const cacheMaxEntries = 200_000
+const scanCoverage = "SHA256 of regular files <=500MiB; internal rules inspect first 2MiB of eligible files <=50MiB; symlinks, special files, virtual/container filesystems and Agent work directory excluded; archives not expanded"
 
-// cacheEntry clean 缓存条目：path+size+mtime 未变 → 跳过哈希计算
+// File metadata never proves unchanged content; legacy caches cannot bypass reads.
 type cacheEntry struct {
 	Size   int64 `json:"s"`
 	ModSec int64 `json:"m"`
 }
-
-// Engine 扫描引擎（无状态，每次任务独立实例；缓存跨任务复用由 LoadCache/SaveCache 承担）
 type Engine struct {
+	mu        sync.Mutex
 	db        *SigDB
 	cache     map[string]cacheEntry
 	whitelist []whitelistEntry
 	log       *slog.Logger
 }
 
-// NewEngine 创建引擎并加载 clean 缓存
 func NewEngine(workDir string, log *slog.Logger) *Engine {
-	db := LoadDB(workDir)
-	return &Engine{
-		db:        db,
-		cache:     loadCache(workDir, db.Version),
-		whitelist: loadWhitelist(workDir),
-		log:       log,
-	}
+	return &Engine{db: LoadDB(workDir), cache: map[string]cacheEntry{}, whitelist: loadWhitelist(workDir), log: log}
 }
-
-// Scan 执行扫描：mode QUICK/FULL/CUSTOM；paths 仅 CUSTOM 生效。
-// 检出默认隔离（docs/05 §1.4：隔离为默认动作）。
 func (e *Engine) Scan(taskID string, mode pb.CmdVirusScan_Mode, paths []string, workDir string) *pb.RptVirusResult {
+	return e.ScanCommand(context.Background(), &pb.CmdVirusScan{TaskId: taskID, Mode: mode, Paths: paths, ExecutionContract: 2}, workDir)
+}
+func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir string) *pb.RptVirusResult {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.refresh(workDir)
-	result := &pb.RptVirusResult{TaskId: taskID, Mode: rptMode(mode)}
 	start := time.Now()
-
-	var roots []string
-	switch mode {
+	r := &pb.RptVirusResult{TaskId: cmd.GetTaskId(), Mode: rptMode(cmd.GetMode()), ExecutionContract: 2, Coverage: scanCoverage, Status: pb.RptVirusResult_COMPLETE}
+	finish := func() *pb.RptVirusResult { r.DurationMs = uint32(time.Since(start).Milliseconds()); return r }
+	if e.db != nil {
+		r.DbVersion = e.db.Version
+	}
+	fail := func(code string) *pb.RptVirusResult {
+		r.Status = pb.RptVirusResult_FAILED
+		issue(r, "", code)
+		return finish()
+	}
+	if cmd.GetExecutionContract() != 2 {
+		return fail("unsupported_contract")
+	}
+	if e.db != nil && !e.db.Valid {
+		return fail("invalid_signatures")
+	}
+	if e.db == nil || len(e.db.hashes)+len(e.db.rules) == 0 {
+		return fail("no_signatures")
+	}
+	if cmd.GetExpectedDbVersion() != "" && cmd.GetExpectedDbVersion() != r.DbVersion {
+		return fail("signature_version_changed")
+	}
+	if cmd.GetMode() != pb.CmdVirusScan_QUICK && cmd.GetMode() != pb.CmdVirusScan_FULL && cmd.GetMode() != pb.CmdVirusScan_CUSTOM {
+		return fail("invalid_mode")
+	}
+	seconds, files, bytesLimit := cmd.GetTimeLimitSec(), cmd.GetMaxFiles(), cmd.GetMaxTotalBytes()
+	if seconds == 0 {
+		seconds = 7200
+	}
+	if files == 0 {
+		files = 100000
+	}
+	if bytesLimit == 0 {
+		bytesLimit = 20 << 30
+	}
+	if seconds > 7200 || files > 100000 || bytesLimit > 20<<30 {
+		return fail("invalid_budget")
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
+	defer cancel()
+	roots := cmd.GetPaths()
+	switch cmd.GetMode() {
+	case pb.CmdVirusScan_QUICK:
+		roots = quickScanRoots()
 	case pb.CmdVirusScan_FULL:
 		roots = fullScanRoots()
-	case pb.CmdVirusScan_CUSTOM:
-		roots = paths
-	default: // QUICK
-		roots = quickScanRoots()
 	}
-	// 特征库未安装（无哈希且无规则）：空跑记录 0 文件（服务端据此提示导入特征库）
-	if e.db == nil || (len(e.db.hashes) == 0 && len(e.db.rules) == 0) {
-		e.log.Warn("特征库未安装，跳过扫描", "local_version", LocalVersion(workDir))
-		result.DurationMs = uint32(time.Since(start).Milliseconds())
-		return result
+	if len(roots) == 0 || len(roots) > 64 {
+		return fail("invalid_roots")
 	}
-
-	q := NewQuarantine(workDir)
+	seen := map[string]bool{}
+	visited := uint32(0)
+	var walk func(string, string, int) error
+	walk = func(path, scope string, depth int) error {
+		if ctx.Err() != nil || r.FilesSeen >= files || visited >= files*4 || r.BytesRead >= bytesLimit {
+			return errScanBudget
+		}
+		visited++
+		abs, err := filepath.Abs(path)
+		if err != nil || !utf8.ValidString(abs) {
+			scanFailure(r, path, "invalid_path")
+			return nil
+		}
+		key := pathKey(abs)
+		if seen[key] {
+			return nil
+		}
+		seen[key] = true
+		if protectedPath(abs, workDir) || isExcludedDir(abs) || e.whitelisted(abs, "") {
+			r.FilesSkipped++
+			return nil
+		}
+		st, err := os.Lstat(abs)
+		if err != nil {
+			scanFailure(r, abs, "unreadable")
+			return nil
+		}
+		if st.Mode()&os.ModeSymlink != 0 || (!st.IsDir() && !st.Mode().IsRegular()) {
+			r.FilesSkipped++
+			return nil
+		}
+		if st.IsDir() {
+			if depth >= 64 {
+				scanFailure(r, abs, "depth_limit")
+				return nil
+			}
+			canonical, err := filepath.EvalSymlinks(abs)
+			if err != nil || !within(canonical, scope) {
+				scanFailure(r, abs, "parent_changed")
+				return nil
+			}
+			f, err := openDirectory(abs)
+			if err != nil {
+				scanFailure(r, abs, "unreadable_directory")
+				return nil
+			}
+			defer f.Close()
+			fst, err := f.Stat()
+			if err != nil || !os.SameFile(st, fst) {
+				scanFailure(r, abs, "directory_changed")
+				return nil
+			}
+			for {
+				entries, err := f.ReadDir(128)
+				for _, d := range entries {
+					if err := walk(filepath.Join(abs, d.Name()), scope, depth+1); err != nil {
+						return err
+					}
+				}
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					scanFailure(r, abs, "unreadable_directory")
+					break
+				}
+			}
+			return nil
+		}
+		r.FilesSeen++
+		if len(abs) > 512 {
+			scanFailure(r, abs, "report_path_limit")
+			return nil
+		}
+		if st.Size() > maxFileSize {
+			r.FilesSkipped++
+			issue(r, abs, "oversize")
+			return nil
+		}
+		canonical, err := filepath.EvalSymlinks(filepath.Dir(abs))
+		if err != nil || !within(canonical, scope) {
+			scanFailure(r, abs, "parent_changed")
+			return nil
+		}
+		if protectedPath(filepath.Join(canonical, filepath.Base(abs)), workDir) {
+			r.FilesSkipped++
+			return nil
+		}
+		snap, err := readSnapshotScoped(ctx, abs, maxFileSize, bytesLimit-r.BytesRead, true, scope, workDir)
+		r.BytesRead += snap.bytesRead
+		if errors.Is(err, errScanBudget) {
+			scanFailure(r, abs, "budget_exhausted")
+			return errScanBudget
+		}
+		if err != nil {
+			scanFailure(r, abs, "read_failed_or_changed")
+			return nil
+		}
+		r.FilesScanned++
+		if e.whitelisted(abs, snap.sum) {
+			r.FilesSkipped++
+			return nil
+		}
+		if finding := e.detect(abs, snap); finding != nil {
+			id, err := NewQuarantine(workDir).QuarantineExpected(ctx, abs, snap.sum)
+			if err != nil {
+				finding.QuarantineId = id
+				finding.ActionTaken = "alert_only"
+				finding.ActionError = actionErrorCode(err)
+			} else {
+				finding.ActionTaken = "quarantined"
+				finding.QuarantineId = id
+			}
+			r.Findings = append(r.Findings, finding)
+			if len(r.Findings) >= 1000 {
+				issue(r, "", "finding_limit")
+				return errScanBudget
+			}
+		}
+		return nil
+	}
 	for _, root := range roots {
-		if root == "" {
+		if !filepath.IsAbs(root) || strings.ContainsRune(root, 0) || len(root) > 4096 {
+			scanFailure(r, root, "invalid_root")
 			continue
 		}
-		e.walk(root, result, q)
-	}
-	result.DurationMs = uint32(time.Since(start).Milliseconds())
-	saveCache(workDir, e.db.Version, e.cache, e.log)
-	e.log.Info("病毒扫描完成", "task", taskID, "mode", mode.String(),
-		"files", result.GetFilesScanned(), "findings", len(result.GetFindings()),
-		"duration", time.Since(start).Round(time.Millisecond))
-	return result
-}
-
-// walk 遍历目录树（符号链接不跟随，防环）
-func (e *Engine) walk(root string, result *pb.RptVirusResult, q *quarantine) {
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		abs := filepath.Clean(root)
+		scope := abs
+		if st, err := os.Lstat(abs); err == nil && !st.IsDir() {
+			scope = filepath.Dir(abs)
+		}
+		scope, err := filepath.EvalSymlinks(scope)
 		if err != nil {
-			return nil // 无权限/已删除：跳过继续
+			scanFailure(r, abs, "root_unavailable")
+			continue
 		}
-		if d.IsDir() {
-			if isExcludedDir(path) {
-				return filepath.SkipDir
-			}
-			return nil
+		if err := walk(abs, scope, 0); err != nil {
+			r.BudgetExhausted = true
+			issue(r, "", "budget_exhausted")
+			break
 		}
-		if d.Type() != 0 { // 符号链接/设备文件等非普通文件
-			return nil
+	}
+	if r.FilesFailed > 0 || r.BudgetExhausted {
+		r.Status = pb.RptVirusResult_PARTIAL
+		if r.FilesScanned == 0 {
+			r.Status = pb.RptVirusResult_FAILED
 		}
-		if e.whitelisted(path, "") {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxFileSize || info.Size() == 0 {
-			return nil
-		}
-		result.FilesScanned++
-
-		// clean 缓存命中：内容未变直接跳过
-		key := strings.ToLower(path)
-		if c, ok := e.cache[key]; ok && c.Size == info.Size() && c.ModSec == info.ModTime().Unix() {
-			return nil
-		}
-		sum, err := hashFileLimited(path)
-		if err != nil {
-			return nil
-		}
-		if e.whitelisted(path, sum) {
-			return nil
-		}
-		if entry, hit := e.db.Lookup(sum); hit {
-			finding := &pb.VirusFinding{
-				Path: path, Name: entry.Name, Sha256: sum,
-				Size: uint64(info.Size()), Engine: "hash", Severity: pb.Severity(entry.Severity),
-			}
-			// 默认处置：隔离（失败降级 alert_only，不阻断扫描）
-			if err := q.QuarantineFile(path); err != nil {
-				e.log.Error("隔离失败，仅告警", "path", path, "err", err)
-				finding.ActionTaken = "alert_only"
-			} else {
-				finding.ActionTaken = "quarantined"
-				e.log.Warn("检出恶意文件并隔离", "path", path, "name", entry.Name)
-			}
-			result.Findings = append(result.Findings, finding)
-			return nil
-		}
-		// L1 未命中 → L2 规则层（docs/05 §1.1：仅 PE/ELF/脚本/office 类且 < 50MB）
-		if r := matchRules(e.db.rules, path, info.Size(), readHeadLimited(path)); r != nil {
-			finding := &pb.VirusFinding{
-				Path: path, Name: r.Name, Sha256: sum,
-				Size: uint64(info.Size()), Engine: "rule", Severity: pb.Severity(r.Severity),
-			}
-			if err := q.QuarantineFile(path); err != nil {
-				e.log.Error("L2 检出隔离失败，仅告警", "path", path, "err", err)
-				finding.ActionTaken = "alert_only"
-			} else {
-				finding.ActionTaken = "quarantined"
-				e.log.Warn("L2 规则检出并隔离", "path", path, "rule", r.Name)
-			}
-			result.Findings = append(result.Findings, finding)
-			return nil
-		}
-		// 干净文件进缓存（上限淘汰：简单随机丢弃一半）
-		if len(e.cache) >= cacheMaxEntries {
-			e.dropHalfCache()
-		}
-		e.cache[key] = cacheEntry{Size: info.Size(), ModSec: info.ModTime().Unix()}
-		return nil
-	})
+	}
+	return finish()
 }
 
-// dropHalfCache 缓存满时随机丢弃一半（FIFO 需额外队列，随机足够）
-func (e *Engine) dropHalfCache() {
-	drop := false
-	for k := range e.cache {
-		if drop {
-			delete(e.cache, k)
+var errScanBudget = errors.New("scan budget exhausted")
+
+func issue(r *pb.RptVirusResult, path, code string) {
+	if len(r.Issues) < 32 {
+		path = strings.ToValidUTF8(path, "�")
+		if len(path) > 4096 {
+			path = path[:4096]
+			for !utf8.ValidString(path) {
+				path = path[:len(path)-1]
+			}
 		}
-		drop = !drop
+		r.Issues = append(r.Issues, &pb.VirusScanIssue{Path: path, Code: code})
 	}
 }
-
-// CheckAndQuarantine 单文件检查（实时防护用，docs/05 §1.5）：
-// 大小过滤 → clean 缓存 → L1 哈希 → L2 规则（可扫描扩展且 < 50MB）→ 命中默认隔离。
-// 与 walk 共用 db/cache；线程安全由调用侧（单 goroutine 周期触发）保证。
-func (e *Engine) CheckAndQuarantine(path, workDir string) *pb.VirusFinding {
-	e.refresh(workDir)
-	if e.db == nil || (len(e.db.hashes) == 0 && len(e.db.rules) == 0) {
-		return nil // 特征库未安装：实时防护静默跳过
+func scanFailure(r *pb.RptVirusResult, path, code string) { r.FilesFailed++; issue(r, path, code) }
+func pathKey(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(filepath.Clean(path))
 	}
-	if e.whitelisted(path, "") {
-		return nil
+	return filepath.Clean(path)
+}
+func within(path, root string) bool {
+	rel, err := filepath.Rel(pathKey(root), pathKey(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+func protectedPath(path, workDir string) bool {
+	abs, err := filepath.Abs(workDir)
+	if err == nil && within(path, abs) {
+		return true
 	}
-	info, err := os.Stat(path)
-	if err != nil || info.Size() > maxFileSize || info.Size() == 0 || !info.Mode().IsRegular() {
-		return nil
-	}
-	key := strings.ToLower(path)
-	if c, ok := e.cache[key]; ok && c.Size == info.Size() && c.ModSec == info.ModTime().Unix() {
-		return nil
-	}
-	sum, err := hashFileLimited(path)
-	if err != nil {
-		return nil
-	}
-	if e.whitelisted(path, sum) {
-		return nil
-	}
-	entry, hit := e.db.Lookup(sum)
+	exe, err := os.Executable()
+	return err == nil && pathKey(path) == pathKey(exe)
+}
+func (e *Engine) detect(path string, s snapshot) *pb.VirusFinding {
+	entry, hit := e.db.Lookup(s.sum)
 	engine, name, severity := "hash", entry.Name, entry.Severity
 	if !hit {
-		// L1 未命中 → L2 规则层
-		r := matchRules(e.db.rules, path, info.Size(), readHeadLimited(path))
+		r := matchRules(e.db.rules, path, s.info.Size(), s.head)
 		if r == nil {
-			if len(e.cache) >= cacheMaxEntries {
-				e.dropHalfCache()
-			}
-			e.cache[key] = cacheEntry{Size: info.Size(), ModSec: info.ModTime().Unix()}
 			return nil
 		}
 		engine, name, severity = "rule", r.Name, r.Severity
 	}
-	finding := &pb.VirusFinding{
-		Path: path, Name: name, Sha256: sum,
-		Size: uint64(info.Size()), Engine: engine, Severity: pb.Severity(severity),
+	return &pb.VirusFinding{Path: path, Name: name, Sha256: s.sum, Size: uint64(s.info.Size()), Engine: engine, Severity: pb.Severity(severity)}
+}
+func (e *Engine) CheckAndQuarantine(path, workDir string) *pb.VirusFinding {
+	return e.CheckFile(path, workDir, true)
+}
+func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFinding {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.refresh(workDir)
+	if !utf8.ValidString(path) || len(path) > 512 || e.db == nil || !e.db.Valid || len(e.db.hashes)+len(e.db.rules) == 0 || protectedPath(path, workDir) || isExcludedDir(path) || e.whitelisted(path, "") {
+		return nil
 	}
-	if err := NewQuarantine(workDir).QuarantineFile(path); err != nil {
-		e.log.Error("实时防护隔离失败，仅告警", "path", path, "err", err)
-		finding.ActionTaken = "alert_only"
-	} else {
-		finding.ActionTaken = "quarantined"
-		e.log.Warn("实时防护检出恶意文件并隔离", "path", path, "name", entry.Name)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s, err := readSnapshotScoped(ctx, path, maxFileSize, 20<<20, true, "", workDir)
+	if err != nil {
+		e.log.Debug("周期检测未覆盖文件", "path", path, "reason", actionErrorCode(err))
+		return nil
+	}
+	if e.whitelisted(path, s.sum) {
+		return nil
+	}
+	finding := e.detect(path, s)
+	if finding == nil {
+		return nil
+	}
+	finding.ActionTaken = "alert_only"
+	if quarantine {
+		id, err := NewQuarantine(workDir).QuarantineExpected(ctx, path, s.sum)
+		if err != nil {
+			finding.QuarantineId = id
+			finding.ActionError = actionErrorCode(err)
+		} else {
+			finding.ActionTaken = "quarantined"
+			finding.QuarantineId = id
+		}
 	}
 	return finding
 }
 
-// isExcludedDir 全盘扫描排除目录（虚拟文件系统 / Agent 自身目录）
-func isExcludedDir(path string) bool {
-	p := filepath.ToSlash(strings.ToLower(path))
-	switch runtime.GOOS {
-	case "windows":
-		return strings.HasSuffix(p, "/windows/system32/drivers") // 驱动目录误杀风险高
-	default:
-		for _, d := range []string{"/proc", "/sys", "/dev", "/run", "/var/lib/docker", "/.snapshots"} {
-			if p == d || strings.HasPrefix(p, d+"/") {
-				return true
+type snapshot struct {
+	sum       string
+	head      []byte
+	info      os.FileInfo
+	bytesRead uint64
+}
+
+func readSnapshot(ctx context.Context, path string, maxSize int64, budget uint64, limited bool) (snapshot, error) {
+	return readSnapshotScoped(ctx, path, maxSize, budget, limited, "", "")
+}
+func readSnapshotScoped(ctx context.Context, path string, maxSize int64, budget uint64, limited bool, scope, workDir string) (snapshot, error) {
+	var s snapshot
+	f, parent, err := openRegular(path, false)
+	if err != nil {
+		return s, err
+	}
+	defer f.Close()
+	defer parent.Close()
+	if scope != "" && !within(parent.Name(), scope) || workDir != "" && protectedPath(filepath.Join(parent.Name(), filepath.Base(path)), workDir) {
+		return s, fmt.Errorf("opened parent escaped scan scope")
+	}
+	s.info, err = f.Stat()
+	if err != nil || !s.info.Mode().IsRegular() || s.info.Size() > maxSize {
+		return s, fmt.Errorf("invalid regular file")
+	}
+	h := sha256.New()
+	buf := make([]byte, 64<<10)
+	started := time.Now()
+	for {
+		if ctx.Err() != nil {
+			return s, errScanBudget
+		}
+		n, err := f.Read(buf)
+		if n > 0 {
+			s.bytesRead += uint64(n)
+			if s.bytesRead > budget || s.bytesRead > uint64(maxSize) {
+				return s, errScanBudget
 			}
+			h.Write(buf[:n])
+			if len(s.head) < ruleHeadBytes {
+				count := min(n, ruleHeadBytes-len(s.head))
+				s.head = append(s.head, buf[:count]...)
+			}
+			if limited {
+				delay := time.Duration(s.bytesRead)*time.Second/time.Duration(ioLimitRate) - time.Since(started)
+				if delay > 0 {
+					timer := time.NewTimer(delay)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return s, errScanBudget
+					case <-timer.C:
+					}
+				}
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return s, err
+		}
+	}
+	after, err := f.Stat()
+	current, cerr := statAt(parent, filepath.Base(path))
+	if err != nil || cerr != nil || !os.SameFile(s.info, after) || !os.SameFile(after, current) || after.Size() != s.info.Size() || uint64(after.Size()) != s.bytesRead || !after.ModTime().Equal(s.info.ModTime()) || !current.Mode().IsRegular() {
+		return s, fmt.Errorf("file changed during read")
+	}
+	s.sum = hex.EncodeToString(h.Sum(nil))
+	return s, nil
+}
+func isExcludedDir(path string) bool {
+	p := filepath.ToSlash(pathKey(path))
+	if runtime.GOOS == "windows" {
+		return strings.HasSuffix(p, "/windows/system32/drivers")
+	}
+	if p == "/dev/shm" || strings.HasPrefix(p, "/dev/shm/") {
+		return false
+	}
+	for _, d := range []string{"/proc", "/sys", "/dev", "/run", "/var/lib/docker", "/.snapshots"} {
+		if p == d || strings.HasPrefix(p, d+"/") {
+			return true
 		}
 	}
 	return false
 }
-
-// hashFileLimited 计算文件 SHA256（IO 限速：令牌桶简化为按块 sleep）
 func hashFileLimited(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	buf := make([]byte, 1<<20)
-	read := int64(0)
-	for {
-		n, rerr := f.Read(buf)
-		if n > 0 {
-			h.Write(buf[:n])
-			read += int64(n)
-			// 每 10MB 停 1s（10MB/s 限速）
-			if chunk := read / ioLimitRate; chunk > 0 && read%ioLimitRate < int64(n) {
-				time.Sleep(time.Second)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return "", rerr
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	s, err := readSnapshot(context.Background(), path, maxFileSize, uint64(maxFileSize), true)
+	return s.sum, err
 }
-
-// fileSha256 全速计算（特征包校验用，不走扫描限速）
 func fileSha256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -284,55 +428,16 @@ func fileSha256(path string) (string, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	n, err := io.Copy(h, io.LimitReader(f, (20<<20)+1))
+	if err != nil {
 		return "", err
+	}
+	if n > 20<<20 {
+		return "", fmt.Errorf("signature package exceeds 20MiB")
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-
-/* ==================== clean 缓存持久化 ==================== */
-
 func cachePath(workDir string) string { return filepath.Join(workDir, "virus", "cache.json") }
-
-type persistedCache struct {
-	Version string                `json:"db_version"`
-	Entries map[string]cacheEntry `json:"entries"`
-}
-
-func loadCache(workDir, version string) map[string]cacheEntry {
-	b, err := os.ReadFile(cachePath(workDir))
-	if err != nil {
-		return map[string]cacheEntry{}
-	}
-	var c persistedCache
-	if json.Unmarshal(b, &c) != nil || c.Version != version || c.Entries == nil {
-		return map[string]cacheEntry{}
-	}
-	return c.Entries
-}
-
-func saveCache(workDir, version string, c map[string]cacheEntry, log *slog.Logger) {
-	if len(c) == 0 {
-		return
-	}
-	b, err := json.Marshal(persistedCache{Version: version, Entries: c})
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(cachePath(workDir)), 0700); err != nil {
-		return
-	}
-	// 临时文件 + 原子替换（扫描中断不留半截缓存）
-	tmp := cachePath(workDir) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0600); err != nil {
-		return
-	}
-	if err := os.Rename(tmp, cachePath(workDir)); err != nil {
-		log.Debug("clean 缓存写入失败", "err", err)
-	}
-}
-
-// rptMode 指令模式 → 上报模式
 func rptMode(m pb.CmdVirusScan_Mode) pb.RptVirusResult_Mode {
 	switch m {
 	case pb.CmdVirusScan_FULL:

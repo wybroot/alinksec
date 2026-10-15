@@ -96,6 +96,10 @@ public class PolicyStoreService {
     /** 聚合 t_protect_rule → policy_json（诱饵配置 + EDR 进程规则）。 */
     private String buildFromRules() {
         ObjectNode root = MAPPER.createObjectNode();
+        var virus=jdbc.queryForList("SELECT realtime_enabled,realtime_action FROM t_virus_state WHERE id=1");
+        if(!virus.isEmpty()) root.putObject("virus_realtime")
+                .put("enabled",((Number)virus.get(0).get("realtime_enabled")).intValue()==1)
+                .put("action",String.valueOf(virus.get(0).get("realtime_action")));
         ArrayNode whitelist = root.putArray("virus_whitelist");
         for (Map<String, Object> entry : jdbc.queryForList("SELECT type, value FROM t_virus_whitelist ORDER BY id")) {
             whitelist.addObject().put("type", (String) entry.get("type")).put("value", (String) entry.get("value"));

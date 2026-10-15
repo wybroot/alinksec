@@ -145,6 +145,11 @@ message CmdVirusScan {
   enum Mode { QUICK = 0; FULL = 1; CUSTOM = 2; }
   Mode mode = 2;
   repeated string paths = 3;          // CUSTOM 时指定
+  uint32 execution_contract = 4;      // 2: bounded scan, explicit coverage and byte-bound actions
+  string expected_db_version = 5;
+  uint32 time_limit_sec = 6;
+  uint32 max_files = 7;
+  uint64 max_total_bytes = 8;
 }
 
 message CmdVirusAction {
@@ -157,11 +162,14 @@ message CmdVirusAction {
   }
   Action action = 1;
   repeated VirusTarget targets = 2;
+  uint32 execution_contract = 3;      // 2; legacy destructive commands are refused
 }
 
 message VirusTarget {
   string path = 1;
   string sha256 = 2;
+  string finding_id = 3;
+  string quarantine_id = 4;
 }
 
 message CmdSignatureUpdate {
@@ -211,6 +219,7 @@ message RptHeartbeat {
   string policy_version  = 6;   // 服务端据此判断是否需要下发 CmdPolicySync
   string guard_status    = 7;   // guard 引擎运行状态（normal/degraded）
   string db_version      = 8;   // 病毒特征库本地版本（落后于平台当前版本即触发 CmdSignatureUpdate）
+  uint32 virus_execution_contract = 9;
 }
 
 message RptMetricsBatch {
@@ -372,6 +381,22 @@ message RptVirusResult {
   uint32 files_scanned = 3;
   uint32 duration_ms = 4;
   repeated VirusFinding findings = 5;
+  uint32 execution_contract = 6;
+  enum Status { UNKNOWN = 0; COMPLETE = 1; PARTIAL = 2; FAILED = 3; }
+  Status status = 7;
+  string db_version = 8;
+  uint32 files_seen = 9;
+  uint32 files_skipped = 10;
+  uint32 files_failed = 11;
+  uint64 bytes_read = 12;
+  repeated VirusScanIssue issues = 13; // first 32 issues; counters retain all failures
+  string coverage = 14;              // declared exclusions and rule head limit
+  bool budget_exhausted = 15;
+}
+
+message VirusScanIssue {
+  string path = 1;
+  string code = 2;
 }
 
 message VirusFinding {
@@ -382,6 +407,8 @@ message VirusFinding {
   string engine = 5;         // hash / yara
   Severity severity = 6;
   string action_taken = 7;   // quarantined / deleted / alert_only
+  string quarantine_id = 8; // immutable Agent-local object identity, absent on old evidence
+  string action_error = 9;
 }
 
 message RptFixResult {

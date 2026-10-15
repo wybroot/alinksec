@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { protectionWorkflow } from './protection-workflow.mjs'
+import { detectionWorkflow } from './detection-workflow.mjs'
 
 assert.equal(process.env.ALINKSEC_SMOKE_ALLOW_FIXTURES, 'true')
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -22,6 +23,8 @@ const exec = promisify(execFile)
 const containers = []
 const agentWorkDirs = []
 const password = 'agent-workflow-admin-password'
+const detectionOnly=process.env.ALINKSEC_SMOKE_DETECTION_ONLY==='true'
+const agentStateRoot=detectionOnly?'/tmp/alinksec-native/work':'/work'
 let server, proxy, business, token, passed = false
 let accessHost = 'ci.alinksec.test'
 const controller = new AbortController()
@@ -34,7 +37,7 @@ async function command(exe, args, options = {}) {
     maxBuffer: 1024 * 1024, signal: controller.signal, ...options })).stdout.trim()
 }
 async function agentFile(container, file) {
-  return command('docker', ['exec', container, 'cat', `/work/${file}`])
+  return command('docker', ['exec', container, 'cat', `${agentStateRoot}/${file}`])
 }
 async function port(host) {
   const listener = net.createServer()
@@ -97,10 +100,12 @@ async function startServer(host = accessHost, expectFailure = false) {
     server = undefined
     return
   }
-  await until(async () => {
+  let startupError
+  try { await until(async () => {
     try { token = (await api('/api/auth/login', { username: 'admin', password })).token; return !!token }
-    catch { return false }
-  }, 'Server did not start', 45_000)
+    catch (error) { startupError=error; return false }
+  }, 'Server did not start', 45_000) }
+  catch (error) { throw new Error(`${error.message}: ${startupError?.message}; ${startupError?.cause?.code || ''}`, {cause:startupError}) }
 }
 async function stopServer() {
   if (!server) return
@@ -125,6 +130,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   writeFileSync(join(dir, 'work/virus/db/manifest.json'), JSON.stringify({ db_version:'baseline-native-v1',hash_count:1,rule_count:0,sha256:'' }))
   writeFileSync(join(dir, 'work/virus/db/hashes.txt'), 'e'.repeat(64)+' baseline-native-fixture 4\n')
   agentWorkDirs.push(`/cleanup/${label}/work`)
+  if(detectionOnly) agentWorkDirs.push(`/cleanup/${label}/scan`)
   copyFileSync(process.env.ALINKSEC_SMOKE_AGENT_BIN, join(fixtures, 'alinksec-agent'))
   copyFileSync(join(repo, 'deploy/tests/fixtures/agent-entry.sh'), join(fixtures, 'agent-entry.sh'))
   copyFileSync(join(root, 'data/certs/ca.crt'), join(fixtures, 'ca.crt'))
@@ -139,13 +145,14 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     '--mount', `type=bind,src=${fixtures},dst=/fixtures,readonly`,
     '--mount', `type=bind,src=${fixtures}/machine-id,dst=/etc/machine-id,readonly`,
     '--mount', `type=bind,src=${fixtures}/product_uuid,dst=/sys/class/dmi/id/product_uuid,readonly`,
-    '--mount', `type=bind,src=${dir}/work,dst=/work`,
+    '--mount', detectionOnly?`type=bind,src=${dir},dst=/tmp/alinksec-native`:`type=bind,src=${dir}/work,dst=/work`,
+    '-e', `ALINKSEC_TEST_WORKDIR=${agentStateRoot}`,
     '-e', `ALINKSEC_TEST_SERVER=${accessHost}:${grpcPort}`, '-e', `ALINKSEC_TEST_TOKEN=${enrollment.token}`, image])
   containers.push(container)
   await until(() => existsSync(join(dir, 'work/state.yml')), 'Actual Agent did not enroll')
   const id = (await agentFile(container, 'state.yml')).match(/^agent_id: (.+)$/m)?.[1]
   assert.match(id, /^[\da-f-]{36}$/)
-  const agent = { id, dir, fixtures, container }
+  const agent = { id, dir, fixtures, container, workDir:agentStateRoot }
   await until(() => sql('SELECT status FROM t_agent WHERE agent_id=?', id)[0]?.status === 1,
     'Actual Agent did not establish mTLS channel')
   assert.equal(sql('SELECT machine_id FROM t_agent WHERE agent_id=?', id)[0].machine_id,
@@ -155,11 +162,12 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     'Actual Agent did not report a complete software inventory')
   const inventory = await api(`/api/hosts/${id}`)
   assert.equal(inventory.distro_id, 'ubuntu')
-  assert.equal(inventory.distro_version, '24.04')
+  assert.equal(inventory.distro_version, process.env.ALINKSEC_SMOKE_AGENT_DISTRO_VERSION || '24.04')
   assert.equal(inventory.software_inventory_source, 'dpkg')
   assert.equal(inventory.package_repair_contract, 2)
   const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
-  assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
+  if(process.env.ALINKSEC_SMOKE_DETECTION_ONLY!=='true')
+    assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
 }
 async function baselineRuntimeWorkflow(agent) {
@@ -226,7 +234,9 @@ async function reviewPatch(patch) {
     notes: 'Disposable actual Agent manual confirmation of distribution and declared binary CVE fix', acknowledged: true })
 }
 try {
-  assert.equal(await command('docker', ['ps', '-q']), '', 'Stop other validation scenarios first')
+  const preserved=new Set((process.env.ALINKSEC_SMOKE_PRESERVE_CONTAINERS||'').split(',').filter(Boolean))
+  const running=(await command('docker',['ps','--format','{{.Names}}'])).split('\n').filter(Boolean)
+  assert.deepEqual(running.filter(name=>!preserved.has(name)),[], 'Stop other validation scenarios first; preserve explicitly named user services')
   await command('docker', ['image', 'inspect', image])
   gateway = JSON.parse(await command('docker', ['network', 'inspect', 'bridge']))[0].IPAM.Config.find(c => net.isIP(c.Gateway) === 4).Gateway
   httpPort = await port(gateway); grpcPort = await port('127.0.0.1'); tlsPort = await port(gateway)
@@ -242,6 +252,13 @@ try {
   })
   await new Promise(ok => proxy.listen(tlsPort, gateway, ok))
   const first = await makeAgent('first')
+  const detection=()=>detectionWorkflow({api,command,until,agent:first,sql,pass:text=>console.log('ok - '+text),importPackage:async path=>{
+    const form=new FormData();form.set('file',new Blob([readFileSync(path)],{type:'application/zip'}),'detection.zip')
+    const response=await fetch(`http://${gateway}:${httpPort}/api/virus/db/import`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:form,signal:AbortSignal.timeout(10000)})
+    const body=await response.json();assert.equal(response.status,200);assert.equal(body.code,0,body.msg)
+  }})
+  if(process.env.ALINKSEC_SMOKE_DETECTION_ONLY==='true') { await detection();passed=true }
+  else {
   await until(() => existsSync(join(first.dir, 'work/policy.json')), 'Initial policy was not applied')
   await api('/api/protect/rules/PR-0010', { enabled: true, actions: ['alert'], match: { dirs: ['/work/decoys'], count_per_dir: 2 } }, 'PUT')
   await until(async () => JSON.parse(await agentFile(first.container, 'policy.json')).decoy.enabled === true,
@@ -389,6 +406,7 @@ try {
   assert.equal(new X509Certificate(readFileSync(join(root, 'data/certs/server.crt'))).checkHost(accessHost), accessHost)
   console.log('ok - stale SAN blocks startup; new CA rejects old Agent trust and permits re-enrollment')
   passed = true
+  }
 } finally {
   let cleanupFailed = false
   for (const id of containers) {

@@ -39,6 +39,7 @@ public class ReportDispatcher {
     private final LogBatchService logBatchService;
     private final JdbcTemplate jdbc;
     private final DatabaseDialect database;
+    private final org.springframework.transaction.support.TransactionTemplate virusTransaction;
 
     public ReportDispatcher(HeartbeatService heartbeatService, AssetService assetService,
                             SecurityEventService securityEventService, CommandService commandService,
@@ -48,7 +49,7 @@ public class ReportDispatcher {
                             FixResultService fixResultService,
                             MetricsForwarder metricsForwarder,
                             LogBatchService logBatchService,
-                            JdbcTemplate jdbc, DatabaseDialect database) {
+                            JdbcTemplate jdbc, DatabaseDialect database,org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.heartbeatService = heartbeatService;
         this.assetService = assetService;
         this.securityEventService = securityEventService;
@@ -61,11 +62,22 @@ public class ReportDispatcher {
         this.logBatchService = logBatchService;
         this.jdbc = jdbc;
         this.database = database;
+        this.virusTransaction=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
+        if(report.hasVirusResult() || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+            virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
+        } else dispatchAccepted(agentId,report);
+    }
+    private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
-        if (!report.getReportId().isBlank() && !tryAcquire(report.getReportId(), Duration.ofMinutes(10))) {
+        String key=report.getReportId();
+        if((report.hasVirusResult() || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+            try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
+            catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+        }
+        if (!key.isBlank() && !tryAcquire(key, Duration.ofMinutes(10))) {
             log.debug("重复上报丢弃: report_id={}", report.getReportId());
             return;
         }
@@ -73,7 +85,10 @@ public class ReportDispatcher {
             case HEARTBEAT -> heartbeatService.onHeartbeat(agentId, report.getHeartbeat());
             case ACK -> commandService.onAck(agentId, report.getAck());
             case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
-            case SECURITY_EVENT -> securityEventService.onEvent(agentId, report.getSecurityEvent());
+            case SECURITY_EVENT -> {
+                securityEventService.onEvent(agentId, report.getSecurityEvent());
+                virusResultService.onRealtime(agentId,report.getSecurityEvent(),report.getReportId());
+            }
             case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
             case BASELINE_RESULT -> baselineResultService.onResult(agentId, report.getBaselineResult());
             case SCAN_RESULT -> scanResultService.onResult(agentId, report.getScanResult());

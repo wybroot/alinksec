@@ -99,8 +99,9 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
 	vEngine := virusscan.NewEngine(workDir, log)
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
-		return vEngine.CheckAndQuarantine(path, workDir)
+		return vEngine.CheckRealtime(path, workDir)
 	})
+	c.grd.SetVirusRoots(virusscan.QuickScanRoots(), func() bool { enabled, _ := virusscan.RealtimePolicy(workDir); return enabled })
 	return c, nil
 }
 
@@ -122,9 +123,16 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 		ProcessRules *[]config.ProcessRule `json:"process_rules"`
 		FileRules    *[]config.FileRule    `json:"file_rules"`
 		LoginRules   *[]config.LoginRule   `json:"login_rules"`
+		Virus        *struct {
+			Enabled bool   `json:"enabled"`
+			Action  string `json:"action"`
+		} `json:"virus_realtime"`
 	}
 	if err := json.Unmarshal([]byte(js), &p); err != nil {
 		return fmt.Errorf("解析 policy_json: %w", err)
+	}
+	if len(js) > 1<<20 || p.Virus != nil && p.Virus.Action != "alert_only" && p.Virus.Action != "quarantine" {
+		return fmt.Errorf("周期病毒检测策略无效或过大")
 	}
 	files, logins := c.cfg.FileRules, c.cfg.LoginRules
 	if p.FileRules != nil {
@@ -429,14 +437,15 @@ func (c *Client) buildHeartbeat() *pb.Report {
 		ReportId: newUUID(),
 		Ts:       time.Now().UnixMilli(),
 		Payload: &pb.Report_Heartbeat{Heartbeat: &pb.RptHeartbeat{
-			AgentVersion:  identity.AgentVersion,
-			CpuUsage:      s.CpuUsage,
-			MemUsage:      s.MemUsage,
-			ProcessCount:  s.ProcessCount,
-			UptimeSec:     s.UptimeSec,
-			PolicyVersion: c.state.PolicyVersion,
-			GuardStatus:   guardStatus,
-			DbVersion:     virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
+			AgentVersion:           identity.AgentVersion,
+			CpuUsage:               s.CpuUsage,
+			MemUsage:               s.MemUsage,
+			ProcessCount:           s.ProcessCount,
+			UptimeSec:              s.UptimeSec,
+			PolicyVersion:          c.state.PolicyVersion,
+			GuardStatus:            guardStatus,
+			VirusExecutionContract: 2,
+			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
 		}},
 	}
 }
@@ -516,7 +525,7 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 	case *pb.Command_VirusScan:
 		return c.executeVirusScan(p.VirusScan, received)
 	case *pb.Command_VirusAction:
-		return c.executeVirusAction(p.VirusAction, received)
+		return c.executeVirusAction(p.VirusAction, received, cmd.GetIssuedAt())
 	case *pb.Command_SignatureUpdate:
 		return c.executeSignatureUpdate(p.SignatureUpdate, received, sctx)
 	case *pb.Command_VulnFix:
@@ -727,14 +736,14 @@ func (c *Client) executeVirusScan(vs *pb.CmdVirusScan, received *pb.RptAck) []*p
 		defer c.virusBusy.Store(false)
 		start := time.Now()
 		engine := virusscan.NewEngine(c.workDir, c.log)
-		result := engine.Scan(vs.GetTaskId(), vs.GetMode(), vs.GetPaths(), c.workDir)
+		result := engine.ScanCommand(context.Background(), vs, c.workDir)
 		stage, code, msg := pb.RptAck_DONE, int32(0),
 			fmt.Sprintf("virus task %s: files=%d findings=%d quarantined=%d in %s",
 				vs.GetTaskId(), result.GetFilesScanned(), len(result.GetFindings()),
 				countAction(result, "quarantined"), time.Since(start).Round(time.Millisecond))
-		if result.GetFilesScanned() == 0 {
+		if result.GetStatus() != pb.RptVirusResult_COMPLETE {
 			stage, code, msg = pb.RptAck_FAILED, int32(1),
-				"virus task "+vs.GetTaskId()+": 特征库未安装或扫描范围为空"
+				"virus task "+vs.GetTaskId()+": 扫描未完整完成，请查看覆盖和错误证据"
 		}
 		finalAck := &pb.RptAck{CmdId: cmdID, Stage: stage, Code: code, Message: msg}
 		c.dedup.Put(cmdID, finalAck)
@@ -751,42 +760,54 @@ func (c *Client) executeVirusScan(vs *pb.CmdVirusScan, received *pb.RptAck) []*p
 	return []*pb.RptAck{received, running}
 }
 
-// executeVirusAction 处置指令：隔离/删除/恢复均为本机文件操作（秒级），同步执行。
-// WHITELIST 由平台全局生效（t_virus_whitelist），Agent 无需动作直接确认。
-func (c *Client) executeVirusAction(va *pb.CmdVirusAction, received *pb.RptAck) []*pb.RptAck {
+// executeVirusAction runs a bounded asynchronous batch and reports each target.
+func (c *Client) executeVirusAction(va *pb.CmdVirusAction, received *pb.RptAck, issuedAt int64) []*pb.RptAck {
 	cmdID := received.GetCmdId()
-	q := virusscan.NewQuarantine(c.workDir)
-	var ok, fail int
-	var lastErr string
-	for _, t := range va.GetTargets() {
-		var err error
-		switch va.GetAction() {
-		case pb.CmdVirusAction_QUARANTINE:
-			err = q.QuarantineFile(t.GetPath())
-		case pb.CmdVirusAction_DELETE:
-			err = q.Delete(t.GetPath())
-		case pb.CmdVirusAction_RESTORE:
-			err = q.Restore(t.GetPath())
-		case pb.CmdVirusAction_WHITELIST:
-			// 平台侧白名单表已生效，Agent 端无动作
-		default:
-			err = fmt.Errorf("未知处置动作 %v", va.GetAction())
-		}
-		if err != nil {
-			fail++
-			lastErr = err.Error()
-			c.log.Warn("病毒处置失败", "action", va.GetAction().String(), "path", t.GetPath(), "err", err)
-		} else {
-			ok++
-		}
+	if issuedAt < time.Now().Add(-15*time.Minute).UnixMilli() || issuedAt > time.Now().Add(5*time.Minute).UnixMilli() || va.GetExecutionContract() != 2 || len(va.GetTargets()) == 0 || len(va.GetTargets()) > 32 || va.GetAction() == pb.CmdVirusAction_UNKNOWN || va.GetAction() == pb.CmdVirusAction_WHITELIST {
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "digest-bound execution contract 2 and 1-32 targets required"}}
 	}
-	if fail > 0 {
-		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1,
-			Message: fmt.Sprintf("action %s: ok=%d fail=%d last_err=%s",
-				va.GetAction().String(), ok, fail, lastErr)}}
-	}
-	return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
-		Message: fmt.Sprintf("action %s: ok=%d", va.GetAction().String(), ok)}}
+	running := &pb.RptAck{CmdId: cmdID, Stage: pb.RptAck_RUNNING}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		q := virusscan.NewQuarantine(c.workDir)
+		receipts := make([]map[string]any, 0, len(va.GetTargets()))
+		failed := false
+		for _, target := range va.GetTargets() {
+			var err error
+			id := target.GetQuarantineId()
+			if target.GetFindingId() == "" {
+				err = fmt.Errorf("missing finding identity")
+			} else {
+				switch va.GetAction() {
+				case pb.CmdVirusAction_QUARANTINE:
+					id, err = q.QuarantineExpected(ctx, target.GetPath(), target.GetSha256())
+				case pb.CmdVirusAction_DELETE:
+					id, err = q.DeleteExpectedWithID(ctx, target.GetPath(), id, target.GetSha256())
+				case pb.CmdVirusAction_RESTORE:
+					err = q.RestoreExpected(ctx, target.GetPath(), id, target.GetSha256())
+				default:
+					err = fmt.Errorf("unsupported action")
+				}
+			}
+			code := ""
+			if err != nil {
+				failed = true
+				code = "file_identity_or_io_failure"
+				c.log.Warn("病毒处置失败", "path", target.GetPath(), "err", err)
+			}
+			receipts = append(receipts, map[string]any{"finding_id": target.GetFindingId(), "success": err == nil, "quarantine_id": id, "error": code})
+		}
+		body, _ := json.Marshal(map[string]any{"virus_action_contract": 2, "results": receipts})
+		stage, code := pb.RptAck_DONE, int32(0)
+		if failed {
+			stage, code = pb.RptAck_FAILED, 1
+		}
+		ack := &pb.RptAck{CmdId: cmdID, Stage: stage, Code: code, Message: string(body)}
+		c.dedup.Put(cmdID, ack)
+		c.pushReport(c.wrapAck(ack))
+	}()
+	return []*pb.RptAck{received, running}
 }
 
 // executeSignatureUpdate 特征库更新指令：限速下载 + sha256 校验 + 原子替换。

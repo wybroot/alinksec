@@ -37,7 +37,7 @@ func TestSignatureUpdateInvalidatesLiveAndPersistedCleanCaches(t *testing.T) {
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
 	testDB(t, dir, "v1", strings.Repeat("0", 64))
-	liveFile, scanFile := filepath.Join(dir, "live.txt"), filepath.Join(dir, "scan.txt")
+	liveFile, scanFile := filepath.Join(t.TempDir(), "live.txt"), filepath.Join(t.TempDir(), "scan.txt")
 	for _, path := range []string{liveFile, scanFile} {
 		if err := os.WriteFile(path, data, 0600); err != nil {
 			t.Fatal(err)
@@ -63,7 +63,7 @@ func TestWhitelistPreventsScanAndRealtimeQuarantineAndCanBeRemoved(t *testing.T)
 		for _, kind := range []string{"hash", "path"} {
 			t.Run(mode+"/"+kind, func(t *testing.T) {
 				dir := t.TempDir()
-				file := filepath.Join(dir, "harmless.txt")
+				file := filepath.Join(t.TempDir(), "harmless.txt")
 				data := []byte("harmless whitelist test")
 				sum := sha256.Sum256(data)
 				hash := hex.EncodeToString(sum[:])
@@ -73,7 +73,7 @@ func TestWhitelistPreventsScanAndRealtimeQuarantineAndCanBeRemoved(t *testing.T)
 				}
 				value := hash
 				if kind == "path" {
-					value = dir
+					value = filepath.Dir(file)
 				}
 				policy, _ := json.Marshal(map[string]any{"virus_whitelist": []whitelistEntry{{Type: kind, Value: value}}})
 				if err := os.WriteFile(filepath.Join(dir, "policy.json"), policy, 0600); err != nil {

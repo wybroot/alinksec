@@ -19,14 +19,17 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // HashEntry 单条哈希情报
@@ -37,6 +40,7 @@ type HashEntry struct {
 
 // SigDB 内存态特征库
 type SigDB struct {
+	Valid     bool
 	Version   string
 	HashCount int
 	RuleCount int
@@ -91,7 +95,7 @@ var (
 func LoadDB(workDir string) *SigDB {
 	dbMu.Lock()
 	defer dbMu.Unlock()
-	if dbCached == nil || dbPath != DBDir(workDir) {
+	if dbCached == nil || !dbCached.Valid || dbPath != DBDir(workDir) {
 		dbPath = DBDir(workDir)
 		dbCached = parseDB(dbPath)
 		dbGeneration++
@@ -125,7 +129,7 @@ func CachedHashSnapshot(ctx context.Context, workDir string, limit int) (string,
 	if ctx.Err() != nil {
 		return "", 0, 0, nil, 0, false
 	}
-	if dbCached == nil || dbPath != DBDir(workDir) || limit < 1 || len(dbCached.hashes) > limit {
+	if dbCached == nil || !dbCached.Valid || dbPath != DBDir(workDir) || limit < 1 || len(dbCached.hashes) > limit {
 		return "", 0, 0, nil, 0, false
 	}
 	entries := make(map[string]HashEntry, len(dbCached.hashes))
@@ -142,46 +146,87 @@ func CachedHashSnapshot(ctx context.Context, workDir string, limit int) (string,
 // parseDB 解析 hashes.txt + manifest.json（损坏时返回空库，不报错：断网沿用旧库语义）
 func parseDB(dir string) *SigDB {
 	db := &SigDB{hashes: map[string]HashEntry{}}
-	if b, err := os.ReadFile(filepath.Join(dir, "manifest.json")); err == nil {
-		var m dbManifest
-		if json.Unmarshal(b, &m) == nil {
-			db.Version, db.HashCount, db.RuleCount = m.DbVersion, m.HashCount, m.RuleCount
-		}
+	data, err := boundedFile(filepath.Join(dir, "manifest.json"), 64<<10)
+	if err != nil {
+		return db
 	}
-	db.rules = parseRules(dir)
-	if len(db.rules) > 0 && db.RuleCount == 0 {
-		db.RuleCount = len(db.rules)
+	var manifest dbManifest
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &manifest) != nil || json.Unmarshal(data, &fields) != nil || !signatureVersion.MatchString(manifest.DbVersion) || manifest.HashCount < 0 || manifest.HashCount > maxHashEntries || manifest.RuleCount < 0 || manifest.RuleCount > 2000 {
+		return db
 	}
-	f, err := os.Open(filepath.Join(dir, "hashes.txt"))
+	db.Version = manifest.DbVersion
+	rules, err := readRuleFile(dir)
+	if err != nil {
+		return db
+	}
+	db.rules = rules
+	if _, ok := fields["rule_count"]; ok && manifest.RuleCount != len(rules) {
+		return db
+	}
+	f, parent, err := openRegular(filepath.Join(dir, "hashes.txt"), false)
 	if err != nil {
 		return db
 	}
 	defer f.Close()
-	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for s.Scan() {
-		// 行格式：sha256 threat_name severity（threat_name 不含空格）
-		p := strings.Fields(s.Text())
-		if len(p) < 2 || len(p[0]) != 64 {
+	defer parent.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() > maxExpandedBytes {
+		return db
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 4096), 4096)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		sev := int32(4) // 缺省高危
-		if len(p) >= 3 {
-			if v, err := strconv.Atoi(p[2]); err == nil && v >= 1 && v <= 5 {
-				sev = int32(v)
-			}
+		parts := strings.Fields(line)
+		if len(parts) < 2 || len(parts) > 3 || len(parts[0]) != 64 || !utf8.ValidString(parts[1]) || utf8.RuneCountInString(parts[1]) > 255 {
+			return db
 		}
-		db.hashes[strings.ToLower(p[0])] = HashEntry{Name: p[1], Severity: sev}
+		if _, err := hex.DecodeString(parts[0]); err != nil {
+			return db
+		}
+		severity := 4
+		if len(parts) == 3 {
+			value, err := strconv.Atoi(parts[2])
+			if err != nil || value < 1 || value > 5 {
+				return db
+			}
+			severity = value
+		}
+		key := strings.ToLower(parts[0])
+		if _, duplicate := db.hashes[key]; duplicate {
+			return db
+		}
+		db.hashes[key] = HashEntry{Name: parts[1], Severity: int32(severity)}
+		if len(db.hashes) > maxHashEntries {
+			return db
+		}
 	}
-	if db.HashCount == 0 {
-		db.HashCount = len(db.hashes)
+	if scanner.Err() != nil {
+		return db
 	}
+	if _, ok := fields["hash_count"]; ok && manifest.HashCount != len(db.hashes) {
+		return db
+	}
+	db.HashCount = len(db.hashes)
+	db.RuleCount = len(rules)
+	db.Valid = true
 	return db
 }
+
+var installMu sync.Mutex
 
 // InstallDB 安装特征库包：sha256 校验 → 解压到临时目录 → 原子替换 db 目录。
 // 失败保留旧库（断网沿用本地库）。
 func InstallDB(workDir, pkgPath, expectSha256 string) error {
+	installMu.Lock()
+	defer installMu.Unlock()
+	if info, err := os.Stat(pkgPath); err != nil || info.Size() > 20<<20 {
+		return fmt.Errorf("signature package exceeds 20MiB or is unreadable")
+	}
 	// 包完整性校验
 	got, err := fileSha256(pkgPath)
 	if err != nil {
@@ -197,19 +242,29 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 	defer zr.Close()
 
 	dbDir := DBDir(workDir)
-	tmp := dbDir + ".tmp"
-	if err := os.RemoveAll(tmp); err != nil {
-		return fmt.Errorf("清理临时目录: %w", err)
+	if err := os.MkdirAll(filepath.Dir(dbDir), 0700); err != nil {
+		return err
 	}
-	if err := os.MkdirAll(tmp, 0700); err != nil {
-		return fmt.Errorf("创建临时目录: %w", err)
+	tmp, err := os.MkdirTemp(filepath.Dir(dbDir), "db.install-")
+	if err != nil {
+		return err
 	}
+	defer os.RemoveAll(tmp)
 	// 解压（仅接受白名单文件名，防 zip 路径穿越）
 	allowed := map[string]bool{"manifest.json": true, "hashes.txt": true, "rules.json": true}
+	if len(zr.File) > 3 {
+		return fmt.Errorf("unexpected package entries")
+	}
+	seen := map[string]bool{}
+	remaining := maxExpandedBytes
 	for _, f := range zr.File {
-		name := filepath.Clean(f.Name)
-		if !allowed[name] || f.FileInfo().IsDir() {
-			continue
+		name := f.Name
+		if !allowed[name] || seen[name] || f.FileInfo().IsDir() || f.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("invalid or duplicate package entry")
+		}
+		seen[name] = true
+		if f.UncompressedSize64 > uint64(remaining) {
+			return fmt.Errorf("expanded package exceeds 64MiB")
 		}
 		rc, err := f.Open()
 		if err != nil {
@@ -220,11 +275,13 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 			rc.Close()
 			return fmt.Errorf("写 %s: %w", name, err)
 		}
-		if _, err := out.ReadFrom(rc); err != nil {
+		n, copyErr := io.Copy(out, io.LimitReader(rc, remaining+1))
+		if copyErr != nil || n > remaining {
 			rc.Close()
 			out.Close()
-			return fmt.Errorf("写 %s: %w", name, err)
+			return fmt.Errorf("expanded package exceeds limit or cannot be read: %s", name)
 		}
+		remaining -= n
 		rc.Close()
 		out.Close()
 	}
@@ -232,6 +289,9 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 	if _, err := os.Stat(filepath.Join(tmp, "manifest.json")); err != nil {
 		os.RemoveAll(tmp)
 		return fmt.Errorf("特征包缺少 manifest.json")
+	}
+	if err := validateInstalledDB(tmp); err != nil {
+		return err
 	}
 	// 原子替换：旧目录 → .old，tmp → db，删 .old
 	old := dbDir + ".old"

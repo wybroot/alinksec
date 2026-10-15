@@ -2,6 +2,9 @@ package virusscan
 
 import (
 	"encoding/json"
+	"fmt"
+	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +17,7 @@ type whitelistEntry struct {
 }
 
 func loadWhitelist(workDir string) []whitelistEntry {
-	data, err := os.ReadFile(filepath.Join(workDir, "policy.json"))
+	data, err := readVirusPolicy(workDir)
 	if err != nil {
 		return nil
 	}
@@ -25,6 +28,48 @@ func loadWhitelist(workDir string) []whitelistEntry {
 		return nil
 	}
 	return policy.Entries
+}
+
+func readVirusPolicy(workDir string) ([]byte, error) {
+	f, err := os.Open(filepath.Join(workDir, "policy.json"))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if len(data) > 1<<20 {
+		return nil, fmt.Errorf("policy exceeds 1MiB")
+	}
+	return data, err
+}
+func RealtimePolicy(workDir string) (bool, bool) {
+	data, err := readVirusPolicy(workDir)
+	if os.IsNotExist(err) {
+		return true, true
+	}
+	if err != nil {
+		return false, false
+	}
+	var p struct {
+		Virus *struct {
+			Enabled bool   `json:"enabled"`
+			Action  string `json:"action"`
+		} `json:"virus_realtime"`
+	}
+	if json.Unmarshal(data, &p) != nil {
+		return false, false
+	}
+	if p.Virus == nil {
+		return true, true
+	}
+	return p.Virus.Enabled, p.Virus.Action == "quarantine"
+}
+func (e *Engine) CheckRealtime(path, workDir string) *pb.VirusFinding {
+	enabled, quarantine := RealtimePolicy(workDir)
+	if !enabled {
+		return nil
+	}
+	return e.CheckFile(path, workDir, quarantine)
 }
 
 // Refresh long-lived engines after signature or policy changes, before consulting clean caches.

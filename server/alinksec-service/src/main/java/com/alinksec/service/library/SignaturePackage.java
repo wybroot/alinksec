@@ -46,6 +46,9 @@ public record SignaturePackage(String version, Map<String, Hash> hashes, List<Js
             }
             if (!entries.containsKey("manifest.json")) throw new IllegalArgumentException("特征包缺少 manifest.json");
             manifest = JsonUtils.mapper().readTree(entries.get("manifest.json"));
+            if(!manifest.isObject() || !manifest.path("db_version").isTextual()
+                    || manifest.has("hash_count") && (!manifest.path("hash_count").isIntegralNumber() || !manifest.path("hash_count").canConvertToInt())
+                    || manifest.has("rule_count") && (!manifest.path("rule_count").isIntegralNumber() || !manifest.path("rule_count").canConvertToInt())) throw new IllegalArgumentException("特征包版本和数量声明类型非法");
             version = manifest.path("db_version").asText("");
             if (!version.matches("[A-Za-z0-9._-]{1,32}")) throw new IllegalArgumentException("特征库版本号非法");
             hashes = readHashes(Files.newInputStream(hashFile), props.getMaxHashes());
@@ -106,10 +109,10 @@ public record SignaturePackage(String version, Map<String, Hash> hashes, List<Js
         JsonNode strings = rule.path("strings");
         if (name.isBlank() || name.length() > 255 || !Set.of("all", "linux", "windows").contains(platform)
                 || !Set.of("all", "any").contains(condition) || severity < 1 || severity > 5
-                || !strings.isArray() || strings.isEmpty() || strings.size() > 128) throw new IllegalArgumentException("内部规则格式非法");
+                || !strings.isArray() || strings.isEmpty() || strings.size() > 64) throw new IllegalArgumentException("内部规则格式非法");
         for (JsonNode string : strings) {
             String type = string.path("type").asText("text"), value = string.path("value").asText("");
-            if (!Set.of("text", "hex").contains(type) || value.isEmpty() || value.length() > 4096) throw new IllegalArgumentException("规则特征串非法");
+            if (!Set.of("text", "hex").contains(type) || value.isEmpty() || value.length() > 1024) throw new IllegalArgumentException("规则特征串非法");
             if ("hex".equals(type)) {
                 String hex = value.replaceAll("\\s", "");
                 if (hex.isEmpty() || hex.length() % 2 != 0 || !hex.matches("[A-Fa-f0-9]+")) throw new IllegalArgumentException("规则十六进制特征非法");
@@ -117,12 +120,12 @@ public record SignaturePackage(String version, Map<String, Hash> hashes, List<Js
         }
         if (!rule.path("name").isTextual() || (rule.has("platform") && !rule.path("platform").isTextual())
                 || (rule.has("condition") && !rule.path("condition").isTextual())
-                || (rule.has("severity") && !rule.path("severity").isIntegralNumber())
-                || (rule.has("max_mb") && (!rule.path("max_mb").isIntegralNumber() || rule.path("max_mb").asInt() < 1 || rule.path("max_mb").asInt() > 50))) throw new IllegalArgumentException("规则字段类型非法");
+                || (rule.has("severity") && (!rule.path("severity").isIntegralNumber() || !rule.path("severity").canConvertToInt()))
+                || (rule.has("max_mb") && (!rule.path("max_mb").isIntegralNumber() || !rule.path("max_mb").canConvertToInt() || rule.path("max_mb").asInt() < 1 || rule.path("max_mb").asInt() > 50))) throw new IllegalArgumentException("规则字段类型非法");
         for (JsonNode string : strings) if (!string.path("value").isTextual() || (string.has("type") && !string.path("type").isTextual())) throw new IllegalArgumentException("规则特征串类型非法");
         if (rule.has("exts")) {
-            if (!rule.path("exts").isArray()) throw new IllegalArgumentException("规则扩展名格式非法");
-            for (JsonNode ext : rule.path("exts")) if (!ext.isTextual()) throw new IllegalArgumentException("规则扩展名类型非法");
+            if (!rule.path("exts").isArray() || rule.path("exts").size()>64) throw new IllegalArgumentException("规则扩展名格式或数量非法");
+            for (JsonNode ext : rule.path("exts")) if (!ext.isTextual() || ext.asText().getBytes(StandardCharsets.UTF_8).length>32 || !ext.asText().startsWith(".") || ext.asText().contains("/") || ext.asText().contains("\\") || ext.asText().indexOf('\0')>=0) throw new IllegalArgumentException("规则扩展名类型或范围非法");
         }
     }
     public static byte[] readBounded(InputStream input, long max) throws IOException {

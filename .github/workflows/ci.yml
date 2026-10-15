@@ -32,8 +32,8 @@ jobs:
         env:
           CGO_ENABLED: '0'
           GOARCH: amd64
-      - name: Check Windows retired signature installation and cache refresh
-        run: go test -v -count=1 -run '^TestRetirementReleaseClearsPreviouslyLoadedHash$' ./internal/virusscan
+      - name: Check native Windows detection, quarantine and periodic protection
+        run: go test -v -count=1 ./internal/virusscan ./internal/guard ./internal/comm
         working-directory: agent
       - name: Check actual Windows SCM service and TLS communication
         run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
@@ -132,10 +132,14 @@ jobs:
         env:
           ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
           ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
+          ALINKSEC_DETECTION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/detection-capabilities-fixtures
         working-directory: server
       - name: Check source governance with captured database lifecycle responses
         working-directory: web
         run: node test/source-governance-browser.mjs
+      - name: Check detection evidence and acknowledged file states with database lifecycle responses
+        working-directory: web
+        run: node test/detection-capabilities-browser.mjs
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
       - name: Check baseline review and mixed-system selection in the production web bundle
@@ -248,6 +252,7 @@ jobs:
           test "$(.tmp/alinksec-agent version)" = "alinksec-agent $(cat VERSION)"
           docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-agent-validation .
           bash deploy/tests/agent-workflow-local.sh
+          ALINKSEC_SMOKE_DETECTION_ONLY=true bash deploy/tests/agent-workflow-local.sh
           bash deploy/tests/firewall-local.sh
           cp .tmp/alinksec-agent ".tmp/alinksec-agent-linux-$GOARCH"
         env:
@@ -293,6 +298,9 @@ jobs:
             .tmp/library-browser-artifacts
             .tmp/source-governance-browser
             .tmp/source-governance-fixtures
+            .tmp/detection-capabilities-browser
+            .tmp/detection-capabilities-fixtures
+            .tmp/detection-capabilities-native
             .tmp/software-inventory-browser
             .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
@@ -422,8 +430,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "14"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "56"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "15"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "59"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -458,7 +466,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -466,11 +474,14 @@ jobs:
           ALINKSEC_INTEGRATION_PG_USER: alinksec_app
           ALINKSEC_INTEGRATION_PG_PASSWORD: alinksec-app-test
           ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
-      - name: Retain PostgreSQL governance response evidence
+          ALINKSEC_DETECTION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/detection-capabilities-fixtures
+      - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: source-governance-postgres
-          path: .tmp/source-governance-fixtures
+          path: |
+            .tmp/source-governance-fixtures
+            .tmp/detection-capabilities-fixtures
           include-hidden-files: true
           if-no-files-found: error
