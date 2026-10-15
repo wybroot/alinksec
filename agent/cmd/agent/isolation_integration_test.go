@@ -187,9 +187,13 @@ func TestNativeIsolationLifecycle(t *testing.T) {
 	if connects() {
 		t.Fatal("unconfirmed isolation never blocked business networking")
 	}
-	// The authenticated stream remains usable, but an obsolete nonce must not
-	// extend this lease. Wait past its generation window before replaying it.
-	time.Sleep(time.Second)
+	// Windows rejects blocked TCP immediately; a one-second sleep can land
+	// before the next send tick and replay a nonce that is still current.
+	// Observe its actual replacement first, then replay only the obsolete nonce.
+	replacement := active("isolation-no-echo")
+	if replacement.Nonce == stalePulse.Nonce {
+		t.Fatal("isolation challenge was reused")
+	}
 	for i := 0; i < 8; i++ {
 		if current, _ := isolation.Current(work); current.Phase == "finished" {
 			break
@@ -198,6 +202,9 @@ func TestNativeIsolationLifecycle(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	assertRestored()
+	if expired, err := isolation.Current(work); err != nil || !expired.Confirmed.IsZero() {
+		t.Fatal("obsolete nonce incorrectly confirmed isolation", err)
+	}
 	awaitAck("isolation-no-echo", pb.RptAck_FAILED)
 	fixture.awaitReport(t, connection.number, func(r *pb.Report) bool {
 		return r.GetSecurityEvent().GetRuleId() == "host-isolation-lease" && r.GetSecurityEvent().GetActionTaken() == "restored"
