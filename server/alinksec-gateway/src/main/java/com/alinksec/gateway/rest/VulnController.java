@@ -81,4 +81,19 @@ public class VulnController {
     public ApiResult<Map<String, Object>> stats() {
         return ApiResult.ok(query.stats());
     }
+
+    @GetMapping("/coverage")
+    public ApiResult<Map<String,Object>> coverage(@RequestParam(required=false) String agentId,
+                                                 @RequestParam(defaultValue="1") int page,
+                                                 @RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(query.coverage(agentId,Math.max(1,page),Math.max(1,Math.min(100,size))));
+    }
+
+    @GetMapping("/coverage/{agentId}/packages")
+    public ApiResult<Map<String,Object>> packageAssessments(@org.springframework.web.bind.annotation.PathVariable String agentId,
+                                                           @RequestParam(required=false) String keyword,
+                                                           @RequestParam(defaultValue="1") int page,
+                                                           @RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(query.packageAssessments(agentId,keyword,Math.max(1,page),Math.max(1,Math.min(100,size))));
+    }
 }

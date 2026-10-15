@@ -389,18 +389,19 @@ class LibraryIntegrationTest {
     }
     @Test void importedRulesProduceFindingsOnlyForTheApplicableAssetAndPreserveVendorFix() {
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('library-agent','fixture',1,'vendor-os','library-machine')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('library-agent','fixture-app','1.5','dpkg')");
-        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('library-agent','fixture-app-helper','1.5','dpkg')");
-        var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
+        jdbc.update("UPDATE t_agent SET software_collection_status='complete',distro_id='ubuntu',distro_version='24.04' WHERE agent_id='library-agent'");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('library-agent','fixture-app','1.5','dpkg','amd64')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('library-agent','fixture-app-helper','1.5','dpkg','amd64')");
+        var rule = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture-app\",\"os\":\"vendor-os\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"ranges\":[\">=1.0\",\"<2.0\"],\"fixed_version\":\"2.0-vendor1\"}]}");
         var metadata = JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":4,\"affected\":[]}");
-        catalog.cves("manual", List.of(rule, metadata));
-        var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc);
+        catalog.cves("manual", List.of(packageEvidence(rule), metadata));
+        var matcher = new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource));
         matcher.matchAgent("library-agent", 0);
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent'", Integer.class));
         assertEquals("2.0-vendor1", jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding WHERE agent_id='library-agent'", String.class));
         jdbc.update("UPDATE t_agent SET os_version='other-os' WHERE agent_id='library-agent'");
         matcher.matchAgent("library-agent", 0);
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent'", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='library-agent' AND status<>4", Integer.class));
         var invalid = rule.deepCopy();
         ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0)).put("match", "typo");
         assertThrows(IllegalArgumentException.class, () -> catalog.cves("manual", List.of(invalid)));
@@ -415,12 +416,111 @@ class LibraryIntegrationTest {
         ((com.fasterxml.jackson.databind.node.ObjectNode) cve.path("configurations").get(0).path("nodes").get(0)).put("operator", "AND");
         assertTrue(NvdAdapter.normalize(cve, List.of(product)).path("affected").isEmpty());
     }
+
+    @Test void fullPackageOrderingKeepsEpochAndVendorRevisionAndDoesNotInventFixes() {
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('native-version-agent','fixture',1,'fixture-distro','native-version-machine')");
+        jdbc.update("UPDATE t_agent SET software_collection_status='complete',distro_id='ubuntu',distro_version='24.04' WHERE agent_id='native-version-agent'");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','deb-fixture','1.0-1ubuntu2','dpkg','amd64')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES ('native-version-agent','rpm-fixture','2:1.0-1','rpm','x86_64')");
+        catalog.cves("manual", List.of(
+                packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"os\":\"fixture-distro\",\"vrange\":\"<1.0-1ubuntu10\"}]}")),
+                packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12346\",\"severity\":3,\"affected\":[{\"name\":\"rpm-fixture\",\"source\":\"rpm\",\"version_scheme\":\"rpm\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"x86_64\",\"os\":\"fixture-distro\",\"vrange\":\"<1:99.0-99\"}]}"))));
+        new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource)).matchAgent("native-version-agent", 0);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='native-version-agent'", Integer.class));
+        assertEquals("deb-fixture", jdbc.queryForObject("SELECT software FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
+        assertNull(jdbc.queryForObject("SELECT fixed_version FROM t_vuln_finding WHERE agent_id='native-version-agent'", String.class));
+        var malformed = JsonUtils.read("{\"cve_id\":\"CVE-2026-12347\",\"severity\":3,\"affected\":[{\"name\":\"deb-fixture\",\"source\":\"dpkg\",\"vrange\":\"<1.0^git1\"}]}");
+        assertThrows(IllegalArgumentException.class, () -> catalog.cves("invalid-native", List.of(malformed)));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='invalid-native'", Integer.class));
+    }
+
+    @Test void nvdUpstreamMappingDoesNotBecomeAComparableDistributionPackageRule() {
+        var cve = JsonUtils.read("{\"id\":\"CVE-2026-12345\",\"configurations\":[{\"nodes\":[{\"operator\":\"OR\",\"cpeMatch\":[{\"vulnerable\":true,\"criteria\":\"cpe:2.3:a:fixture:app:*:*:*:*:*:*:*:*\",\"versionEndExcluding\":\"2.0\"}]}]}]}");
+        var product = new LibraryProperties.Product();
+        product.setCpePrefix("cpe:2.3:a:fixture:app:"); product.setName("fixture-app");
+        product.setOs("ubuntu 24.04"); product.setAssetSource("dpkg");
+        var document = NvdAdapter.normalize(cve, List.of(product));
+        assertEquals("upstream", document.path("affected").get(0).path("version_scheme").asText());
+        catalog.cves("nvd-fixture", List.of(document));
+        assertEquals(1, ((Number) sync.status().get("managedCveCount")).intValue());
+        assertEquals(0, ((Number) sync.status().get("matchableCveCount")).intValue());
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id) VALUES ('nvd-package-agent','fixture',1,'ubuntu 24.04','nvd-package-machine')");
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source) VALUES ('nvd-package-agent','fixture-app','1.0-1ubuntu1','dpkg')");
+        new com.alinksec.service.scan.VulnMatchService(jdbc, new DataSourceTransactionManager(dataSource)).matchAgent("nvd-package-agent", 0);
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id='nvd-package-agent'", Integer.class));
+    }
+    @Test void incompleteNativeScopeRemainsMetadataAndInvalidDeclaredScopesRejectTheWholeBatch() {
+        var unscoped = JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"vrange\":\"<2.0\"}]}");
+        catalog.cves("manual", List.of(unscoped));
+        assertEquals(0, jdbc.queryForObject("SELECT matchable FROM t_security_cve WHERE cve_id='CVE-2026-12345'", Integer.class));
+        for (var invalidField : Map.of("distro_id", "*", "distro_version", "24.*", "architecture", "amd64,i386").entrySet()) {
+            var invalid = unscoped.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0)).put(invalidField.getKey(), invalidField.getValue());
+            assertThrows(IllegalArgumentException.class, () -> catalog.cves("bad-scope", List.of(unscoped, invalid)));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='bad-scope'", Integer.class));
+        }
+    }
     @Test void boundedDownloaderRejectsOversizeAndCredentialRedirects() throws Exception {
         var body = new AtomicReference<>("a".repeat(2000)); var source = endpoint("hashes", body);
         props.setMaxDownloadBytes(1024);
         assertThrows(IOException.class, () -> new FeedDownload(files, props).fetch(source.getUrl(), Map.of(), null));
         assertThrows(IllegalArgumentException.class, () -> new FeedDownload(files, props).fetch("http://example.com/feed", Map.of(), null));
         try (var paths = Files.list(root.resolve("work/tmp"))) { assertEquals(0, paths.count()); }
+    }
+    private com.fasterxml.jackson.databind.JsonNode packageEvidence(com.fasterxml.jackson.databind.JsonNode document) {
+        for (var rule : document.path("affected")) {
+            ((com.fasterxml.jackson.databind.node.ObjectNode) rule).putObject("evidence").put("basis", "manual_analysis")
+                    .put("assessment", "affected").put("package_scope", "binary").put("notes", "Disposable package analysis declaration.");
+        }
+        return document;
+    }
+    private com.fasterxml.jackson.databind.JsonNode provenanceFixture() {
+        return packageEvidence(JsonUtils.read("{\"cve_id\":\"CVE-2026-12345\",\"severity\":3,\"affected\":[{\"name\":\"fixture\",\"source\":\"dpkg\",\"version_scheme\":\"dpkg\",\"distro_id\":\"ubuntu\",\"distro_version\":\"24.04\",\"architecture\":\"amd64\",\"vrange\":\"<2.0\"}]}"));
+    }
+    @Test void recordsActualSourceAuthenticatedActorAndDocumentDigestWithoutTrustingClientProvenance() {
+        var document = provenanceFixture(); ((com.fasterxml.jackson.databind.node.ObjectNode) document).put("source_id", "forged");
+        catalog.cves("manual", List.of(document), 77L);
+        var record = jdbc.queryForMap("SELECT document,provenance FROM t_security_cve WHERE source_id='manual'");
+        var provenance = JsonUtils.read((String) record.get("provenance"));
+        assertEquals("manual", provenance.path("source_id").asText()); assertEquals(77, provenance.path("imported_by").asInt());
+        assertEquals("imported_declaration", provenance.path("verification").asText());
+        assertEquals(com.alinksec.service.scan.VulnerabilityEvidence.sha256((String) record.get("document")), provenance.path("document_sha256").asText());
+        var rows = (List<Map<String, Object>>) catalog.cveRules("12345", 1, 20).get("list");
+        assertEquals("manual", rows.get(0).get("rule_source_id"));
+        var forged = document.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) forged).putObject("provenance").put("verification", "verified");
+        assertThrows(IllegalArgumentException.class, () -> catalog.cves("forged", List.of(forged)));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='forged'", Integer.class));
+    }
+    @Test void missingNativeEvidenceSourcePackagesAndUnknownAssertionsRemainMetadata() {
+        for (String scope : List.of("missing", "source", "unknown")) {
+            var document = provenanceFixture(); var rule = (com.fasterxml.jackson.databind.node.ObjectNode) document.path("affected").get(0);
+            if ("missing".equals(scope)) rule.remove("evidence");
+            else ((com.fasterxml.jackson.databind.node.ObjectNode) rule.path("evidence")).put("source".equals(scope) ? "package_scope" : "assessment", scope);
+            catalog.cves("manual", List.of(document));
+            assertEquals(0, jdbc.queryForObject("SELECT matchable FROM t_security_cve WHERE source_id='manual'", Integer.class));
+        }
+    }
+    @Test void invalidOrSelfAuthenticatedEvidenceRejectsTheWholeBatch() {
+        for (var invalid : Map.of("url", "javascript:alert(1)", "sha256", "bad", "verified", "true", "notes", "").entrySet()) {
+            var valid = provenanceFixture(); var changed = valid.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) changed.path("affected").get(0).path("evidence")).put(invalid.getKey(), invalid.getValue());
+            assertThrows(IllegalArgumentException.class, () -> catalog.cves("bad-proof", List.of(valid, changed)));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id='bad-proof'", Integer.class));
+        }
+    }
+    @Test void configuredCveFeedKeepsItsActualOriginAndFailedEvidencePreservesThePreviousRules() throws Exception {
+        var body = new AtomicReference<>(JsonUtils.write(List.of(provenanceFixture())));
+        var source = endpoint("cve-json", body); sync.sync(source);
+        var before = jdbc.queryForMap("SELECT rule_digest,provenance FROM t_cve_db WHERE cve_id='CVE-2026-12345'");
+        var provenance = JsonUtils.read((String) before.get("provenance"));
+        assertEquals("provider", provenance.path("source_id").asText());
+        assertEquals("configured_import", provenance.path("ingestion").asText());
+        var invalid = provenanceFixture(); ((com.fasterxml.jackson.databind.node.ObjectNode) invalid.path("affected").get(0).path("evidence")).put("url", "https://user:secret@fixture.invalid/feed");
+        // The shared fixture has a fixed ETag: request the changed body instead of its 304 response.
+        jdbc.update("UPDATE t_security_feed_state SET etag='',last_modified='' WHERE source_id='provider'");
+        body.set(JsonUtils.write(List.of(invalid))); sync.sync(source);
+        assertEquals(before, jdbc.queryForMap("SELECT rule_digest,provenance FROM t_cve_db WHERE cve_id='CVE-2026-12345'"));
+        assertEquals("failed", jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'", String.class));
     }
     @Test void retentionPreservesLatestVersionsPendingCommandsAndActiveDownloads() throws Exception {
         for (char c : new char[]{'a','b','c','d'}) catalog.signatures("remote", hashes(String.valueOf(c).repeat(64), "Remote"), false, null);
@@ -466,8 +566,8 @@ class LibraryIntegrationTest {
     }
     @Test void patchArtifactsAndDownloadUrlsPreserveDebianVersionCharacters() throws Exception {
         var patches = new com.alinksec.service.fix.PatchRepoService(jdbc, platform, mock(AgentDownloadTokenService.class), files);
-        byte[] bytes = "harmless package fixture".getBytes(StandardCharsets.UTF_8);
-        var imported = patches.importPackage(new ByteArrayInputStream(bytes), "fixture_1.0~deb12+security_amd64.deb", 1, "", "fixture", "1.0", "deb", null);
+        byte[] bytes = NativePatchFixture.deb(root, "fixture", "1.0~deb12+security", "amd64");
+        var imported = patches.importPackage(new ByteArrayInputStream(bytes), "fixture_1.0~deb12+security_amd64.deb", 1, "", "fixture", "1.0~deb12+security", "deb", "debian", "12", "amd64", 1L);
         String key = (String) imported.get("filename");
         try (var input = patches.downloadPackage(key).resource().getInputStream()) { assertArrayEquals(bytes, input.readAllBytes()); }
         String url = patches.downloadUrl("agent", imported);

@@ -46,7 +46,13 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V004__baseline_packages.sql",
                 "db/common/V005__baseline_execution_evidence.sql",
                 "db/common/V006__retire_legacy_baseline.sql",
-                "db/common/V007__baseline_log_target.sql"
+                "db/common/V007__baseline_log_target.sql",
+                "db/common/V008__software_inventory_identity.sql",
+                "db/common/V009__vulnerability_finding_identity.sql",
+                "db/common/V010__vulnerability_rule_provenance.sql",
+                "db/common/V011__package_repair_contract.sql",
+                "db/common/V012__patch_applicability_review.sql",
+                "db/common/V013__vulnerability_remediation_state.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

@@ -108,13 +108,25 @@ public class CommandService {
         return cmd;
     }
 
-    private void send(String agentId, Command cmd) {
+    private boolean send(String agentId, Command cmd) { return send(agentId,cmd,null); }
+
+    private boolean send(String agentId,Command cmd,Integer retry) {
         String cmdId = cmd.getCmdId();
+        try {
+            for (var listener:lifecycleListeners) cmd=listener.prepareDelivery(agentId,cmd);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            if (repository.markFailed(cmdId,e.getMessage())>0) notifyTerminal(agentId,cmdId,CommandLifecycleListener.TerminalState.FAILED,e.getMessage());
+            log.warn("指令执行条件失效，停止派发: cmd={} reason={}",cmdId,e.getMessage());
+            return true;
+        }
+        if (repository.lockForDelivery(cmdId,retry==null ? CommandRepository.ST_PENDING : CommandRepository.ST_SENT,retry)!=1) return true;
         if (sender.send(agentId, cmd)) {
-            repository.markSent(cmdId);
+            if (retry==null) repository.markSent(cmdId); else repository.bumpRetry(cmdId);
             log.debug("指令已下发: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
+            return true;
         } else {
             log.info("指令挂起待推: cmd_id={} agent={} type={}", cmdId, agentId, commandType(cmd));
+            return false;
         }
     }
 
@@ -132,6 +144,7 @@ public class CommandService {
         if (ack.getCmdId().isBlank()) {
             return;
         }
+        lifecycleListeners.forEach(listener -> listener.beforeAck(agentId,ack.getCmdId()));
         int rows = repository.onAck(agentId, ack);
         if (rows == 0) {
             log.debug("ACK 未命中指令行（终态后重复 ACK）: cmd_id={}", ack.getCmdId());
@@ -154,17 +167,14 @@ public class CommandService {
                 command = refreshDownloadCredentials(agentId, rebuild(row));
             } catch (IllegalStateException e) {
                 String cmdId = (String) row.get("cmd_id");
-                if (repository.markFailed(cmdId, e.getMessage()) > 0) {
-                    notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.FAILED,
-                            e.getMessage());
-                }
+                failDelivery(agentId,cmdId,e.getMessage());
                 log.error("Cannot deliver pending command: cmd_id={}", cmdId, e);
                 continue;
             }
-            if (!sender.send(agentId, command)) {
+            Command ready=command;
+            if (!Boolean.TRUE.equals(deliveryTransaction.execute(status -> send(agentId,ready)))) {
                 return;
             }
-            repository.markSent((String) row.get("cmd_id"));
         }
     }
 
@@ -177,11 +187,10 @@ public class CommandService {
             String agentId = (String) row.get("agent_id");
             int retry = ((Number) row.get("retry_count")).intValue();
             if (retry >= CommandRepository.MAX_RETRY) {
-                if (repository.markTimeout(cmdId) > 0) {
-                    notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.TIMEOUT,
-                            "指令 ACK 超时");
-                    log.warn("指令超时: cmd_id={} agent={} retry={}", cmdId, agentId, retry);
-                }
+                deliveryTransaction.executeWithoutResult(status -> {
+                    lifecycleListeners.forEach(listener -> listener.beforeAck(agentId,cmdId));
+                    if (repository.markTimeout(cmdId)>0) notifyTerminal(agentId,cmdId,CommandLifecycleListener.TerminalState.TIMEOUT,"指令 ACK 超时");
+                });
                 continue;
             }
             repository.findByCmdId(cmdId).ifPresent(cmdRow -> {
@@ -190,19 +199,21 @@ public class CommandService {
                 try {
                     command = refreshDownloadCredentials(agentId, rebuild(cmdRow));
                 } catch (IllegalStateException e) {
-                    if (repository.markFailed(cmdId, e.getMessage()) > 0) {
-                        notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.FAILED,
-                                e.getMessage());
-                    }
+                    failDelivery(agentId,cmdId,e.getMessage());
                     log.error("Cannot rebuild command for retry: cmd_id={}", cmdId, e);
                     return;
                 }
-                if (sender.send(agentId, command)) {
-                    repository.bumpRetry(cmdId);
-                    log.info("指令重推: cmd_id={} agent={} retry={}", cmdId, agentId, retry + 1);
-                }
+                Command ready=command;
+                deliveryTransaction.executeWithoutResult(status -> send(agentId,ready,retry));
             });
         }
+    }
+
+    private void failDelivery(String agentId,String cmdId,String reason) {
+        deliveryTransaction.executeWithoutResult(status -> {
+            lifecycleListeners.forEach(listener -> listener.beforeAck(agentId,cmdId));
+            if (repository.markFailed(cmdId,reason)>0) notifyTerminal(agentId,cmdId,CommandLifecycleListener.TerminalState.FAILED,reason);
+        });
     }
 
     private Command rebuild(Map<String, Object> row) {
@@ -213,7 +224,11 @@ public class CommandService {
             throw new IllegalStateException("command payload does not contain a serialized command");
         }
         try {
-            return Command.parseFrom(Base64.getDecoder().decode(encoded));
+            Command command=Command.parseFrom(Base64.getDecoder().decode(encoded));
+            String id=String.valueOf(row.get("cmd_id"));
+            if (!command.getCmdId().isBlank() && !id.equals(command.getCmdId()))
+                throw new IllegalStateException("serialized command identity differs from its durable row");
+            return command.toBuilder().setCmdId(id).build();
         } catch (Exception e) {
             throw new IllegalStateException("cannot rebuild command " + row.get("cmd_id"), e);
         }
@@ -228,32 +243,11 @@ public class CommandService {
             case SIGNATURE_UPDATE -> command.toBuilder().setSignatureUpdate(command.getSignatureUpdate().toBuilder()
                     .setDownloadUrl(refreshDownloadUrl(agentId, command.getSignatureUpdate().getDownloadUrl(),
                             "virus-db", "packageKey"))).build();
-            case VULN_FIX -> refreshPatchDownloadCredentials(agentId, command);
+            // PACKAGE URLs are reissued by the task-bound guard after validating
+            // current approval, window, inventory, rule and immutable review.
+            case VULN_FIX -> command;
             default -> command;
         };
-    }
-
-    private Command refreshPatchDownloadCredentials(String agentId, Command command) {
-        CmdVulnFix.Builder fix = command.getVulnFix().toBuilder().clearFixes();
-        for (FixItem item : command.getVulnFix().getFixesList()) {
-            if (item.getType() != FixItem.FixType.PACKAGE) {
-                fix.addFixes(item);
-                continue;
-            }
-            Map<String, Object> payload;
-            try {
-                payload = com.alinksec.common.util.JsonUtils.read(item.getPayload(), Map.class);
-            } catch (Exception e) {
-                throw new IllegalStateException("cannot read patch payload", e);
-            }
-            if (payload == null || !(payload.get("download_url") instanceof String downloadUrl)) {
-                throw new IllegalStateException("patch payload has no download_url");
-            }
-            payload = new java.util.LinkedHashMap<>(payload);
-            payload.put("download_url", refreshDownloadUrl(agentId, downloadUrl, "patch", "filename"));
-            fix.addFixes(item.toBuilder().setPayload(com.alinksec.common.util.JsonUtils.write(payload)));
-        }
-        return command.toBuilder().setVulnFix(fix).build();
     }
 
     private String refreshDownloadUrl(String agentId, String url, String resourceType, String resourceParameter) {

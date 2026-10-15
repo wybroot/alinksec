@@ -11,6 +11,10 @@ RUN --mount=type=cache,id=alinksec-maven,target=/root/.m2/repository,sharing=loc
 
 FROM eclipse-temurin:21-jre-jammy
 
+# Package headers are read with fixed tools, bounded resources and reduced privileges.
+RUN apt-get update && apt-get install -y --no-install-recommends rpm dpkg util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=build /build/server/alinksec-bootstrap/target/alinksec-bootstrap.jar app.jar
 

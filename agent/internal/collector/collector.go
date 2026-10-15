@@ -51,6 +51,10 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					if t.name == "software" {
+						snap.Software = nil
+						snap.SoftwareInventory = &pb.SoftwareInventory{Status: pb.SoftwareInventory_FAILED, Error: "collector_panic"}
+					}
 					log.Error("采集器异常", "collector", t.name, "panic", r)
 				}
 			}()

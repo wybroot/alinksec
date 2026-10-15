@@ -37,7 +37,7 @@ class CommandRepositoryTest {
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(sql.capture(), org.mockito.ArgumentMatchers.eq(CommandRepository.ST_RECEIVED),
-                org.mockito.ArgumentMatchers.eq("command-b"), org.mockito.ArgumentMatchers.eq("agent-a"));
+                org.mockito.ArgumentMatchers.eq("command-b"), org.mockito.ArgumentMatchers.eq("agent-a"), org.mockito.ArgumentMatchers.eq(CommandRepository.ST_RECEIVED));
         assertTrue(sql.getValue().contains("cmd_id = ? AND agent_id = ?"));
     }
 

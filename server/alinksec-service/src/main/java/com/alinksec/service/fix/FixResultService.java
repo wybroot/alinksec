@@ -36,13 +36,22 @@ public class FixResultService {
             log.warn("修复结果 task_id 非法: {} agent={}", result.getTaskId(), agentId);
             return;
         }
+        jdbc.update("UPDATE t_fix_task SET status=status WHERE id=?",taskId);
+        jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=?",agentId);
         for (FixResultItem item : result.getResultsList()) {
             int status = item.getSuccess() ? 1 : (item.getRolledBack() ? 2 : 3);
+            boolean unverifiedSuccess = item.getSuccess() && !item.getVerified();
             int updated = jdbc.update("""
-                    UPDATE t_fix_record SET status = ?, log = ?, finished_at = CURRENT_TIMESTAMP
+                    UPDATE t_fix_record SET status = CASE WHEN ref_type='vuln_finding' AND ? THEN 3 ELSE ? END,
+                      log = CASE WHEN ref_type='vuln_finding' AND ? THEN ? ELSE ? END, finished_at = CURRENT_TIMESTAMP
                     WHERE task_id = ? AND agent_id = ? AND ref_id = ? AND status = 0
                       AND EXISTS (SELECT 1 FROM t_fix_task t WHERE t.id = ? AND t.status = 1)
-                    """, status, truncate(item.getLog()), taskId, agentId, item.getRefId(), taskId);
+                      AND (ref_type <> 'vuln_finding' OR EXISTS (
+                        SELECT 1 FROM t_command c WHERE c.cmd_id=t_fix_record.command_id
+                          AND c.agent_id=t_fix_record.agent_id AND c.status IN (1,2,3,4)))
+                    """, unverifiedSuccess, status, unverifiedSuccess,
+                    truncate("未确认安装后身份及完整版本，不标记漏洞已修复。\n" + item.getLog()), truncate(item.getLog()),
+                    taskId, agentId, item.getRefId(), taskId);
             if (updated == 0) {
                 log.warn("忽略未下发、越权或重复的修复结果: task={} agent={} ref={}",
                         taskId, agentId, item.getRefId());
@@ -52,14 +61,14 @@ public class FixResultService {
             String refType = jdbc.queryForObject("""
                     SELECT ref_type FROM t_fix_record WHERE task_id = ? AND agent_id = ? AND ref_id = ?
                     """, String.class, taskId, agentId, item.getRefId());
-            if (item.getSuccess() && "vuln_finding".equals(refType)) {
+            if (item.getSuccess() && item.getVerified() && "vuln_finding".equals(refType)) {
                 jdbc.update("""
-                        UPDATE t_vuln_finding SET status = 3
+                        UPDATE t_vuln_finding SET status = 3,resolved_inventory_revision=(SELECT software_revision FROM t_agent WHERE agent_id=?)
                         WHERE id = CAST(? AS BIGINT) AND agent_id = ?
                           AND EXISTS (SELECT 1 FROM t_fix_record r
                                       WHERE r.task_id = ? AND r.agent_id = ? AND r.ref_id = CAST(? AS TEXT)
                                         AND r.ref_type = 'vuln_finding')
-                        """, item.getRefId(), agentId, taskId, agentId, item.getRefId());
+                        """, agentId,item.getRefId(), agentId, taskId, agentId, item.getRefId());
             }
         }
         refreshTaskStatus(taskId);

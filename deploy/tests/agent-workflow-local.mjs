@@ -150,6 +150,16 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     'Actual Agent did not establish mTLS channel')
   assert.equal(sql('SELECT machine_id FROM t_agent WHERE agent_id=?', id)[0].machine_id,
     hardwareId)
+  await api(`/api/hosts/${id}/collect`, {})
+  await until(() => sql('SELECT software_collection_status FROM t_agent WHERE agent_id=?', id)[0]?.software_collection_status === 'complete',
+    'Actual Agent did not report a complete software inventory')
+  const inventory = await api(`/api/hosts/${id}`)
+  assert.equal(inventory.distro_id, 'ubuntu')
+  assert.equal(inventory.distro_version, '24.04')
+  assert.equal(inventory.software_inventory_source, 'dpkg')
+  assert.equal(inventory.package_repair_contract, 2)
+  const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
+  assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])
   return agent
 }
 async function baselineRuntimeWorkflow(agent) {
@@ -190,23 +200,30 @@ async function baselineRuntimeWorkflow(agent) {
   await api(prefix+'/withdraw',{note:'Disposable workflow cleanup'})
   console.log('ok - actual Agent baseline runtime: observations=4 current_mtls_channel=true cache_match_stale_repeat_restart=true baseline_cache_reload=0 secrets_reported=0')
 }
-async function patchFile() {
+async function patchFile(binaryVersion = '2.0', expectedStatus = 200) {
   const pkgDir = join(root, 'deb')
   mkdirSync(join(pkgDir, 'DEBIAN'), { recursive: true })
   mkdirSync(join(pkgDir, 'usr/share/alinksec-smoke'), { recursive: true })
-  writeFileSync(join(pkgDir, 'DEBIAN/control'), 'Package: alinksec-smoke-package\nVersion: 2.0\nArchitecture: all\nMaintainer: CI <ci@example.test>\nDescription: disposable validation fixture\n')
-  writeFileSync(join(pkgDir, 'usr/share/alinksec-smoke/version'), '2.0\n')
+  writeFileSync(join(pkgDir, 'DEBIAN/control'), `Package: alinksec-smoke-package\nVersion: ${binaryVersion}\nArchitecture: all\nMaintainer: CI <ci@example.test>\nDescription: disposable validation fixture\n`)
+  writeFileSync(join(pkgDir, 'usr/share/alinksec-smoke/version'), binaryVersion + '\n')
   const file = join(root, 'fixture.deb')
   await command('dpkg-deb', ['--build', '--root-owner-group', pkgDir, file])
   const form = new FormData()
   form.set('file', new Blob([readFileSync(file)]), 'fixture.deb')
-  for (const [key, value] of Object.entries({ osType: '1', pkgName: 'alinksec-smoke-package', targetVersion: '2.0', repoType: 'deb' })) form.set(key, value)
+  for (const [key, value] of Object.entries({ osType: '1', pkgName: 'alinksec-smoke-package', targetVersion: '2.0', repoType: 'deb', distroId: 'ubuntu', distroVersion: '24.04', architecture: 'all' })) form.set(key, value)
   const response = await fetch(`http://${gateway}:${httpPort}/api/fix/patches`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
   })
   const result = await response.json()
-  assert.equal(response.status, 200)
+  assert.equal(response.status, expectedStatus)
+  if (expectedStatus !== 200) { assert.notEqual(result.code, 0); assert.match(result.msg, /实际二进制包头不一致/); return }
   assert.equal(result.code, 0, result.msg)
+  return result.data
+}
+async function reviewPatch(patch) {
+  const ctx = await api(`/api/fix/patches/${patch.id}/review-context?cveId=CVE-2099-0001`, null, 'GET')
+  return api(`/api/fix/patches/${patch.id}/reviews`, { cveId: 'CVE-2099-0001', ruleDigest: ctx.cve.rule_digest, patchDigest: ctx.patchDigest,
+    notes: 'Disposable actual Agent manual confirmation of distribution and declared binary CVE fix', acknowledged: true })
 }
 try {
   assert.equal(await command('docker', ['ps', '-q']), '', 'Stop other validation scenarios first')
@@ -269,18 +286,60 @@ try {
   console.log('ok - actual iptables isolation, Agent/server restart, heartbeat and restoration')
   await stopAgent(first)
   const second = await makeAgent('second')
-  await patchFile()
-  const findings = [first, second].map(agent => ({ agentId: agent.id, findingId: sql(`
-    INSERT INTO t_vuln_finding(task_id,agent_id,cve_id,software,installed_version,fixed_version,severity)
-    VALUES (0,?,'CVE-2099-0001','alinksec-smoke-package','1.0','2.0',3) RETURNING id`, agent.id)[0].id }))
-  const task = await api('/api/fix/tasks/package', { items: findings, approver: 'CI', name: 'Actual Agent repair' })
+  const initialPatch = await patchFile()
+  const declarations = [{ cve_id: 'CVE-2099-0001', severity: 3, affected: [
+    { name: 'alinksec-smoke-package', match: 'exact', source: 'dpkg', version_scheme: 'dpkg',
+      distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: '<2.0', fixed_version: '2.0',
+      evidence: { basis: 'manual_analysis', assessment: 'affected', package_scope: 'binary', notes: 'Disposable actual-Agent repair fixture declaration; not authenticated vendor evidence.' } },
+  ] }]
+  const cveForm = new FormData(); cveForm.set('file', new Blob([JSON.stringify(declarations)]), 'declarations.json')
+  const imported = await fetch(`http://${gateway}:${httpPort}/api/libraries/cves/import`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: cveForm })
+  assert.equal(imported.status, 200)
+  const importResult = await imported.json(); assert.equal(importResult.code, 0, importResult.msg)
+  await until(() => [first, second].every(agent => sql("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)[0].n === 1), 'Imported declaration did not produce both Agent findings')
+  await api('/api/vuln/tasks', { agentIds: [first.id, second.id], includeVuln: true, includeWeakPassword: false, includePortService: false })
+  const findings = [first, second].map(agent => {
+    const rows = sql("SELECT id,source,architecture,distro_id,distro_version,identity_status,rule_source_id,rule_digest,evidence_status,rule_evidence FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001'", agent.id)
+    assert.equal(rows.length, 1)
+    const { id, rule_source_id, rule_digest, evidence_status, rule_evidence, ...identity } = rows[0]
+    assert.deepEqual({ ...identity }, { source: 'dpkg', architecture: 'all', distro_id: 'ubuntu', distro_version: '24.04', identity_status: 'complete' })
+    assert.equal(rule_source_id, 'manual'); assert.match(rule_digest, /^[a-f0-9]{64}$/); assert.equal(evidence_status, 'declared')
+    const snapshot = JSON.parse(rule_evidence); assert.equal(snapshot.import.source_id, 'manual'); assert.ok(snapshot.import.imported_by > 0)
+    assert.equal(snapshot.import.verification, 'imported_declaration'); assert.equal(snapshot.rules[0].evidence.basis, 'manual_analysis')
+    return { agentId: agent.id, findingId: rows[0].id }
+  })
+  console.log('ok - scoped server matching preserves actual Agent package identity in both findings')
+  console.log('ok - authenticated CVE import and actual matching retain declared rule provenance in both Agent findings')
+  const packageCount = sql('SELECT count(*) AS n FROM t_patch_package')[0].n
+  await patchFile('3.0', 400)
+  assert.equal(sql('SELECT count(*) AS n FROM t_patch_package')[0].n, packageCount)
+  assert.equal(await command('docker', ['exec', second.container, 'dpkg-query', '-W', '-f=${Version}', 'alinksec-smoke-package']), '1.0')
+  console.log('ok - actual server rejects internally mismatched DEB before publication or task creation without changing Agent installation')
+  const review = await reviewPatch(initialPatch)
+  const revokedTask = await api('/api/fix/tasks/package', { items: [findings[1]], approver: 'admin', name: 'Revoked pinned review' })
+  await api(`/api/fix/patches/${initialPatch.id}/reviews/${review.id}/revoke`, { note: 'Withdraw disposable applicability confirmation before dispatch' })
+  const revokedResponse = await fetch(`http://${gateway}:${httpPort}/api/fix/tasks/${revokedTask.taskId}/approve`, {
+    method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({operator:'CI'}) })
+  assert.equal(revokedResponse.status,400); const revokedResult = await revokedResponse.json(); assert.match(revokedResult.msg,/复核已变化或被撤销/)
+  const revokedState = sql('SELECT approved,dispatched_at FROM t_fix_task WHERE id=?',revokedTask.taskId)[0]
+  assert.equal(revokedState.approved,0); assert.equal(revokedState.dispatched_at,null)
+  assert.equal(sql('SELECT status FROM t_fix_record WHERE task_id=?',revokedTask.taskId)[0].status,0)
+  assert.equal(await command('docker',['exec',second.container,'dpkg-query','-W','-f=${Version}','alinksec-smoke-package']),'1.0')
+  console.log('ok - actual server revocation blocks a pinned pending task, rolls back approval and sends no package installation')
+  await api(`/api/fix/tasks/${revokedTask.taskId}/cancel`, { reason: 'Replace revoked fixture task' })
+  await reviewPatch(initialPatch)
+  const task = await api('/api/fix/tasks/package', { items: findings, approver: 'admin', name: 'Actual Agent repair' })
   assert.equal(task.pendingApprove, true)
-  await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'CI' })
+  await api(`/api/fix/tasks/${task.taskId}/approve`, { operator: 'FORGED DISPLAY LABEL' })
+  const approval = sql('SELECT approver,approver_id,approved_by FROM t_fix_task WHERE id=?',task.taskId)[0]
+  assert.equal(approval.approver,'admin'); assert.equal(approval.approver_id,approval.approved_by); assert.ok(approval.approved_by>0)
   async function fixed(agent) {
     await until(() => sql('SELECT status FROM t_fix_record WHERE task_id=? AND agent_id=?', task.taskId, agent.id)[0]?.status !== 0,
       'Agent did not return package result', 60_000)
     const record = sql('SELECT status,log FROM t_fix_record WHERE task_id=? AND agent_id=?', task.taskId, agent.id)[0]
     assert.equal(record.status, 1, record.log)
+    assert.ok(record.log.includes('安装前身份与二进制元数据复核通过'), record.log)
+    assert.ok(record.log.includes('安装后身份与完整版本复核通过'), record.log)
     assert.equal(await command('docker', ['exec', agent.container, 'dpkg-query', '-W', '-f=${Version}', 'alinksec-smoke-package']), '2.0')
   }
   await fixed(second)
@@ -291,6 +350,17 @@ try {
   assert.ok(findings.every(item => sql('SELECT status FROM t_vuln_finding WHERE id=?', item.findingId)[0].status === 3))
   assert.equal(new X509Certificate(readFileSync(join(root, 'data/certs/server.crt'))).checkHost('ci.alinksec.test'), 'ci.alinksec.test')
   console.log('ok - two actual Agents serially install CA-verified packages and complete approved findings')
+  console.log('ok - actual Agent contract 2 checks execution deadline, installed identity and binary metadata before installation and full identity afterward')
+  const completedRef = findings[0].findingId
+  await command('docker',['exec',first.container,'dpkg','-i','/opt/alinksec-validation/initial.deb'])
+  await api(`/api/hosts/${first.id}/collect`, {})
+  await until(() => sql("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-0001' AND status=0 AND current_match=true AND id<>?",first.id,completedRef)[0].n === 1,'A fresh inventory after downgrade did not reopen the vulnerability')
+  assert.equal(sql('SELECT status FROM t_vuln_finding WHERE id=?',completedRef)[0].status,3)
+  assert.equal(sql('SELECT ref_id,status FROM t_fix_record WHERE task_id=? AND agent_id=?',task.taskId,first.id)[0].ref_id,String(completedRef))
+  assert.equal(sql('SELECT status FROM t_fix_record WHERE task_id=? AND agent_id=?',task.taskId,first.id)[0].status,1)
+  const coverage = await api(`/api/vuln/coverage?agentId=${first.id}`)
+  assert.equal(coverage.list.length,1); assert.ok(coverage.list[0].affected_packages>0)
+  console.log('ok - fresh actual Agent inventory after downgrade reopens a new finding and preserves the completed fix record')
   await stopAgent(first)
   const oldCA = new X509Certificate(readFileSync(join(root, 'data/certs/ca.crt'))).fingerprint256
   await stopServer()

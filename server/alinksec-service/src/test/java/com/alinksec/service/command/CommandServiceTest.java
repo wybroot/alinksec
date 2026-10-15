@@ -34,6 +34,12 @@ class CommandServiceTest {
     @Mock private CommandLifecycleListener lifecycleListener;
     @Mock private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
+    @org.junit.jupiter.api.BeforeEach void deliveryChecks() {
+        org.mockito.Mockito.lenient().when(lifecycleListener.prepareDelivery(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(Command.class)))
+                .thenAnswer(call -> call.getArgument(1));
+        org.mockito.Mockito.lenient().when(repository.lockForDelivery(anyString(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.isNull())).thenReturn(1);
+    }
+
     @Test
     void dispatchPersistsCompleteProtobufForReplay() throws Exception {
         when(sender.send(eq("agent-1"), org.mockito.ArgumentMatchers.any(Command.class))).thenReturn(false);

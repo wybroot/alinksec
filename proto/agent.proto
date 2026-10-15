@@ -234,6 +234,20 @@ message RptAssetSnapshot {
   // Empty means a legacy full snapshot. New Agents list every category collected
   // in this report so that a targeted collection cannot remove other assets.
   repeated string collected = 7;
+  SoftwareInventory software_inventory = 8;
+}
+
+// Describes this software collection attempt, independently of other assets.
+// Absent metadata identifies a legacy Agent whose completeness is unknown.
+message SoftwareInventory {
+  enum Status { UNKNOWN = 0; COMPLETE = 1; FAILED = 2; UNSUPPORTED = 3; }
+  Status status = 1;
+  string error = 2;               // bounded reason code, no command output
+  string distro_id = 3;           // os-release ID; never inferred from ID_LIKE
+  string distro_version = 4;      // os-release VERSION_ID, unknown when absent
+  string source = 5;              // rpm / dpkg / mixed / registry
+  string identity_error = 6;      // distribution identity unavailable/invalid
+  uint32 package_repair_contract = 7; // 2: native identity, binary metadata, deadline and post-install verification; older values are unsupported
 }
 
 message ContainerInfo {
@@ -256,6 +270,7 @@ message SoftwareInfo {
   string name = 1; string version = 2; string vendor = 3;
   int64  install_time = 4;
   string source = 5;              // rpm / dpkg / registry
+  string architecture = 6;        // native package architecture, not Agent GOARCH
 }
 
 message PortInfo {

@@ -7,6 +7,7 @@
       <div class="chip"><span class="dot" style="background:#94a3b8"></span><span class="n">{{ sevCount.l }}</span><span class="l">低危</span></div>
       <div class="chip" style="background:#ecfdf5"><span class="dot" style="background:#16a34a"></span><span class="n" style="color:#16a34a">{{ fixRate }}%</span><span class="l">修复率</span></div>
     </div>
+    <el-alert type="info" :closable="false" show-icon title="漏洞清单只显示已匹配结果，没有告警不代表安全；请在“比对覆盖”核对采集状态、未知信息及适用声明。" style="margin-bottom:12px" />
     <div class="panel">
       <div class="toolbar">
         <el-select v-model="sevFilter" placeholder="级别" clearable style="width:120px">
@@ -17,6 +18,8 @@
       </div>
 
       <el-tabs v-model="tab">
+        <el-tab-pane label="处置历史" name="history" lazy><VulnerabilityHistory v-if="tab === 'history'" /></el-tab-pane>
+        <el-tab-pane label="比对覆盖" name="coverage" lazy><VulnerabilityCoverage v-if="tab === 'coverage'" /></el-tab-pane>
         <el-tab-pane label="漏洞清单" name="vuln">
           <el-table :data="filteredVulns" stripe @selection-change="s => selVulns = s">
             <el-table-column type="selection" width="42" />
@@ -25,6 +28,14 @@
             </el-table-column>
             <el-table-column label="软件 / 版本" width="180">
               <template #default="{ row }">{{ row.pkg }}<br /><span class="mono" style="color:#94a3b8;font-size:11px">{{ row.cur }} → {{ row.target }}</span></template>
+            </el-table-column>
+            <el-table-column label="匹配时身份" min-width="180">
+              <template #default="{ row }">
+                <span>{{ row.distroId ? `${row.distroId} ${row.distroVersion}` : row.osVersion || '发行版未知' }}</span><br />
+                <span class="mono" style="font-size:11px;color:#64748b">{{ row.source || '来源未知' }} · {{ row.architecture || '架构未知' }}</span><br />
+                <span v-if="row.identityStatus !== 'complete'" style="font-size:11px;color:#b45309">历史结果，请重新扫描</span>
+                <span v-else-if="row.blocked" style="font-size:11px;color:#b45309">{{ row.blocked }} 项需重新采集/扫描或人工处理</span>
+              </template>
             </el-table-column>
             <el-table-column label="级别" width="80">
               <template #default="{ row }"><el-tag size="small" :type="sevType(row.sev)" :effect="row.sev === 'critical' ? 'dark' : 'light'">{{ sevLabel(row.sev) }}</el-tag></template>
@@ -39,7 +50,7 @@
             </el-table-column>
             <el-table-column label="操作" width="110" fixed="right">
               <template #default="{ row }">
-                <el-button v-if="row.status === 'todo'" link :type="row.fixType === 'config' ? 'success' : 'warning'" size="small" @click="openFix(row)">一键修复</el-button>
+                <el-button v-if="row.status === 'todo' && row.findings.length" link :type="row.fixType === 'config' ? 'success' : 'warning'" size="small" @click="openFix(row)">一键修复</el-button>
                 <el-button v-else link size="small" @click="detailRow = row; detailDlg = true">详情</el-button>
               </template>
             </el-table-column>
@@ -104,14 +115,19 @@
   </el-dialog>
 
   <!-- 一键修复对话框 -->
-  <el-dialog v-model="fixDlg" :title="'一键修复 · ' + fixRow.cve" width="560px">
+  <el-dialog v-model="fixDlg" :title="'一键修复 · ' + fixRow.cve" width="min(560px, calc(100% - 24px))">
     <template v-if="fixRow.cve">
       <el-alert v-if="fixRow.fixType === 'config'" type="success" :closable="false" show-icon
         title="配置类修复：Agent 将自动执行，改前备份 → 执行 → 复核，失败自动回滚" />
       <el-alert v-else type="warning" :closable="false" show-icon
-        title="软件包类修复：需审批并限定维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
+        title="软件包类修复：由指定账号审批，可设置维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
       <el-form label-width="96px" style="margin-top:16px">
         <el-form-item label="影响范围">{{ fixRow.hosts }} 台主机</el-form-item>
+        <el-form-item v-if="fixRow.identityStatus" label="匹配时身份">{{ fixRow.distroId }} {{ fixRow.distroVersion }} · {{ fixRow.source || '未知' }} · {{ fixRow.architecture || '架构未知' }}</el-form-item>
+        <el-form-item v-if="fixRow.ruleSourceId" label="规则依据"><VulnerabilityEvidence :snapshot="fixRow.ruleEvidence" :source-id="fixRow.ruleSourceId" :digest="fixRow.ruleDigest" :status="fixRow.evidenceStatus" /></el-form-item>
+        <el-alert v-if="fixRow.repairUnreviewed" type="warning" :closable="false" :title="`${fixRow.repairUnreviewed} 项缺少对应当前规则与包范围的补丁人工复核，请先到基线核查的离线补丁仓库复核`" />
+        <el-alert v-if="fixRow.executionUnsupported" type="warning" :closable="false" :title="`${fixRow.executionUnsupported} 项未声明受支持的执行校验能力，请更新支持该系统的 Agent 或人工处理`" />
+        <el-alert v-if="fixRow.blocked" type="warning" :closable="false" :title="`${fixRow.blocked} 项缺少当前身份、执行能力、规则依据、修复版本或补丁复核证据，仅提交符合条件的检测项`" />
         <template v-if="fixRow.fixType === 'config'">
           <el-form-item label="修复步骤">
             <div class="mono" style="font-size:12px;color:#475569;line-height:1.9">
@@ -124,11 +140,13 @@
             <span class="mono">{{ fixRow.target }}（漏洞库 fixed_version，逐主机按已装版本升级）</span>
           </el-form-item>
           <el-form-item label="审批人" required>
-            <el-input v-model="fixForm.approver" placeholder="必填（提交后由该人员审批放行）" style="width:260px" />
+            <el-select v-model="fixForm.approver" filterable placeholder="选择已启用的审批账号" style="width:100%;max-width:320px"><el-option v-for="user in approvers" :key="user.id" :value="user.username" :label="user.real_name ? `${user.username}（${user.real_name}）` : user.username" /></el-select>
+            <p style="color:#64748b;font-size:12px">由所选账号登录后审批，审批记录使用已验证身份。</p>
           </el-form-item>
           <el-form-item label="维护窗口">
-            <el-date-picker v-model="fixForm.win" type="datetimerange" start-placeholder="开始（可空=审批后立即执行）" end-placeholder="结束" />
+            <el-date-picker v-model="fixForm.win" type="datetimerange" start-placeholder="开始（本地时间）" end-placeholder="结束（本地时间）" />
           </el-form-item>
+          <p style="color:#64748b;font-size:12px">不填窗口则审批后排队；设置时起止必须齐全。截止后停止新安装和重推，已经开始的安装需查看结果，不承诺自动回滚。</p>
           <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
             title="创建时校验补丁仓库覆盖率：任一主机无对应补丁包将阻断提交" />
         </template>
@@ -141,7 +159,7 @@
   </el-dialog>
 
   <!-- 漏洞详情（数据来自漏洞明细按 CVE 聚合） -->
-  <el-dialog v-model="detailDlg" :title="detailRow?.cve" width="560px">
+  <el-dialog v-model="detailDlg" :title="detailRow?.cve" width="min(560px, calc(100% - 24px))">
     <template v-if="detailRow?.cve">
       <el-descriptions :column="1" border size="small">
         <el-descriptions-item label="描述">{{ detailRow.desc }}</el-descriptions-item>
@@ -149,10 +167,15 @@
           <span class="mono">{{ detailRow.pkg }} {{ detailRow.cur }} → {{ detailRow.target }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="级别 / CVSS">{{ sevLabel(detailRow.sev) }} · {{ detailRow.cvss }}</el-descriptions-item>
+        <el-descriptions-item label="匹配时身份">{{ detailRow.distroId }} {{ detailRow.distroVersion }} · {{ detailRow.source || '来源未知' }} · {{ detailRow.architecture || '架构未知' }}</el-descriptions-item>
+        <el-descriptions-item label="规则依据"><VulnerabilityEvidence :snapshot="detailRow.ruleEvidence" :source-id="detailRow.ruleSourceId" :digest="detailRow.ruleDigest" :status="detailRow.evidenceStatus" /></el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.repairUnreviewed" label="补丁复核">{{ detailRow.repairUnreviewed }} 项缺少对应当前规则与包范围的补丁人工复核</el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.executionUnsupported" label="执行限制">{{ detailRow.executionUnsupported }} 项未声明受支持的执行校验能力，请更新支持该系统的 Agent 或人工处理</el-descriptions-item>
+        <el-descriptions-item v-if="detailRow.blocked" label="修复限制">{{ detailRow.blocked }} 项缺少当前身份、执行能力、规则依据、修复版本或补丁复核证据，请重新采集、扫描或人工处理</el-descriptions-item>
         <el-descriptions-item label="修复方式">{{ detailRow.fixType === 'config' ? '配置类' : '软件包类' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ detailRow.status === 'fixed' ? '已修复' : detailRow.status === 'fixing' ? '修复中' : '待修复' }}</el-descriptions-item>
-        <el-descriptions-item label="影响主机（{{ detailRow.hosts }} 台）">
-          <el-tag v-for="h in detailRow.hostList" :key="h" size="small" effect="plain" style="margin:2px">{{ h }}</el-tag>
+        <el-descriptions-item :label="`影响主机（${detailRow.hosts} 台）`">
+          <div><el-tag v-for="h in detailRow.hostList" :key="h" size="small" effect="plain" style="margin:2px">{{ h }}</el-tag></div>
         </el-descriptions-item>
       </el-descriptions>
     </template>
@@ -162,8 +185,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask } from '../api'
+import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask, fetchFixApprovers } from '../api'
 import { sevType, sevLabel } from '../utils/format'
+import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
+import VulnerabilityHistory from '../components/VulnerabilityHistory.vue'
+import VulnerabilityCoverage from '../components/VulnerabilityCoverage.vue'
 
 const tab = ref('vuln')
 const vulns = ref([])
@@ -175,6 +201,7 @@ const weakpwds = ref([])
 const ports = ref([])
 const riskyOnly = ref(false)
 const agents = ref([])
+const approvers = ref([])
 const vulnStats = ref({ bySeverity: [], pending: 0, fixed: 0, total: 0 })
 
 // 发起扫描
@@ -239,6 +266,7 @@ const openFix = row => {
   }
   fixRow.value = row
   fixDlg.value = true
+  loadApprovers()
 }
 const openBatchFix = () => {
   const rows = selVulns.value.filter(v => v.fixType === 'pkg' && v.findings?.length)
@@ -250,11 +278,19 @@ const openBatchFix = () => {
     cve: `${rows.length} 项漏洞批量修复`,
     desc: rows.map(r => r.cve).join('、'),
     fixType: 'pkg',
-    hosts: rows.reduce((n, r) => n + r.hosts, 0),
+    hosts: new Set(rows.flatMap(r => r.findings.map(f => f.agentId))).size,
+    blocked: rows.reduce((n, r) => n + r.blocked, 0),
+    repairUnreviewed: rows.reduce((n, r) => n + (r.repairUnreviewed || 0), 0),
+    executionUnsupported: rows.reduce((n, r) => n + (r.executionUnsupported || 0), 0),
     target: '按漏洞库 fixed_version 逐项升级',
-    findings: rows.flatMap(r => r.findings),
+    findings: [...new Map(rows.flatMap(r => r.findings).map(f => [`${f.agentId}:${f.findingId}`, f])).values()],
   }
   fixDlg.value = true
+  loadApprovers()
+}
+async function loadApprovers() {
+  try { approvers.value = await fetchFixApprovers(); if (!approvers.value.some(user => user.username === fixForm.value.approver)) fixForm.value.approver = '' }
+  catch (error) { ElMessage.error(error.message || '审批账号加载失败') }
 }
 const iso = d => (d instanceof Date ? d.toISOString() : (d || ''))
 const submitFix = async () => {

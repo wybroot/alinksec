@@ -23,6 +23,8 @@ public class FixQueryService {
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_fix_task", Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT t.id, t.task_no, t.name, t.type, t.status, t.created_at, t.started_at, t.finished_at,
+                       t.created_by,t.approver,t.approver_id,t.approved,t.approved_by,t.approved_at,
+                       t.window_start,t.window_end,t.dispatched_at,t.cancelled_by,t.failure_reason,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id) AS total_records,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status = 1) AS ok_records,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status IN (2,3,5)) AS failed_records
@@ -42,7 +44,7 @@ public class FixQueryService {
                        COALESCE(i.name, v.software || ' ' || COALESCE(v.installed_version,'') || ' → '
                                 || COALESCE(v.fixed_version,'')) AS name,
                        COALESCE(i.category, '漏洞修复') AS category,
-                       r.status, r.log, r.finished_at, r.created_at
+                       r.status, r.log, r.finished_at, r.created_at,r.command_id
                 FROM t_fix_record r
                 LEFT JOIN t_agent a ON a.agent_id = r.agent_id
                 LEFT JOIN t_baseline_item i ON (r.ref_type = 'baseline_item' AND i.id = CAST(r.ref_id AS BIGINT))
@@ -50,7 +52,7 @@ public class FixQueryService {
                 WHERE r.task_id = ? ORDER BY a.hostname NULLS LAST, code
                 """, taskId);
         Map<String, Object> task = jdbc.queryForMap(
-                "SELECT id, task_no, name, type, status, approver, approved, approved_at, "
+                "SELECT id, task_no, name, type, status, created_by,approver,approver_id,approved,approved_by,approved_at,cancelled_by,failure_reason, "
                         + "window_start, window_end, dispatched_at, created_at, started_at, finished_at "
                         + "FROM t_fix_task WHERE id = ?",
                 taskId);

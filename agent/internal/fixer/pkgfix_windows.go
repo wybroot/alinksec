@@ -5,6 +5,7 @@ package fixer
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,13 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"golang.org/x/sys/windows"
 )
+
+func currentInstallation(string, *slog.Logger) (PackageInstallation, error) {
+	return PackageInstallation{}, fmt.Errorf("Windows 注册表资产不能确认 MSU 补丁适用性，软件包自动修复尚不支持，请人工处理")
+}
+func inspectPackage(*PkgPayload, string) (packageMetadata, error) {
+	return packageMetadata{}, fmt.Errorf("Windows 软件包自动修复尚未具备二进制适用性校验")
+}
 
 // freeDiskMB 临时目录所在盘余量
 func freeDiskMB() (float64, error) {

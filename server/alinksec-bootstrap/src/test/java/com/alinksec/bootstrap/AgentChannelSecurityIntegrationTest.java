@@ -18,6 +18,7 @@ import com.alinksec.proto.RptAssetSnapshot;
 import com.alinksec.proto.RptHeartbeat;
 import com.alinksec.proto.RptFixResult;
 import com.alinksec.proto.SoftwareInfo;
+import com.alinksec.proto.SoftwareInventory;
 import com.alinksec.service.agent.AgentEntity;
 import com.alinksec.service.cert.CertService;
 import com.alinksec.service.command.CommandRepository;
@@ -86,6 +87,8 @@ class AgentChannelSecurityIntegrationTest {
     @Autowired ConnectionRegistry connections;
     @Autowired PolicyStoreService policy;
     @Autowired FixTaskService fixTasks;
+    @Autowired com.alinksec.service.library.LibraryCatalog library;
+    @Autowired com.alinksec.service.scan.VulnMatchService matcher;
     @Autowired PatchRepoService patches;
     @Autowired ProtectRuleService rules;
 
@@ -137,6 +140,12 @@ class AgentChannelSecurityIntegrationTest {
         registry.add("ALINKSEC_JWT_SECRET", () -> "integration-test-jwt-secret");
     }
 
+    private Long actorId;
+    private final String approverName = "grpc-reviewer-" + UUID.randomUUID();
+    @org.junit.jupiter.api.BeforeEach void account() {
+        actorId = jdbc.queryForObject("INSERT INTO t_user(username,password_hash,role_id,status) VALUES (?, 'unused',1,1) RETURNING id", Long.class, approverName);
+    }
+
     @AfterEach
     void cleanUp() throws Exception {
         for (ManagedChannel channel : channels) {
@@ -149,19 +158,22 @@ class AgentChannelSecurityIntegrationTest {
             jdbc.update("DELETE FROM t_fix_task WHERE id = ?", id);
         }
         for (Long id : patchIds) {
+            jdbc.update("DELETE FROM t_patch_review WHERE patch_id=?", id);
             jdbc.update("DELETE FROM t_patch_package WHERE id = ?", id);
         }
         for (String agentId : agentIds) {
             for (String table : List.of("t_command", "t_asset_software", "t_asset_port", "t_asset_account",
-                    "t_asset_process", "t_asset_container", "t_vuln_finding", "t_agent")) {
+                    "t_asset_process", "t_asset_container", "t_vuln_finding", "t_vuln_coverage", "t_vuln_package_assessment", "t_agent")) {
                 jdbc.update("DELETE FROM " + table + " WHERE agent_id = ?", agentId);
             }
         }
+        jdbc.update("DELETE FROM t_user WHERE id=?",actorId);
         for (String token : enrollTokens) {
             jdbc.update("DELETE FROM t_enroll_token WHERE token = ?", token);
         }
         for (String cveId : cveIds) {
             jdbc.update("DELETE FROM t_cve_db WHERE cve_id = ?", cveId);
+            jdbc.update("DELETE FROM t_security_cve WHERE cve_id = ?", cveId);
         }
         for (String reportId : reportIds) {
             jdbc.update("DELETE FROM t_report_dedup WHERE report_id = ?", reportId);
@@ -196,9 +208,13 @@ class AgentChannelSecurityIntegrationTest {
         heartbeat(firstStream, first.getAgentId());
         heartbeat(secondStream, second.getAgentId());
         String pkg = "grpc-patch-" + UUID.randomUUID();
-        String cveId = "CVE-test-" + UUID.randomUUID().toString().substring(0, 20);
-        jdbc.update("INSERT INTO t_cve_db(cve_id,severity,affected) VALUES (?,3,?)", cveId,
-                JsonUtils.write(List.of(Map.of("name", pkg, "vrange", "<2.0"))));
+        asset(firstStream, first.getAgentId(), pkg);
+        asset(secondStream, second.getAgentId(), pkg);
+        String cveId = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cveId, "severity", 3, "affected",
+                List.of(Map.of("name", pkg, "vrange", "<2.0", "source", "dpkg", "version_scheme", "dpkg",
+                        "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "match", "exact", "fixed_version", "2.0",
+                        "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Disposable gRPC package fixture declaration."))))))));
         cveIds.add(cveId);
         long firstFinding = finding(first.getAgentId(), pkg, cveId);
         long secondFinding = finding(second.getAgentId(), pkg, cveId);
@@ -206,15 +222,16 @@ class AgentChannelSecurityIntegrationTest {
                 Map.of("agentId", first.getAgentId(), "findingId", firstFinding),
                 Map.of("agentId", second.getAgentId(), "findingId", secondFinding));
         assertThrows(IllegalArgumentException.class,
-                () -> fixTasks.createPackageTask("missing patch", items, "test", null, null, null));
-        Map<String, Object> patch = patches.importPackage(new ByteArrayInputStream(new byte[]{1, 2, 3}),
-                "patch.deb", 1, "", pkg, "2.0", "deb", null);
+                () -> fixTasks.createPackageTask("missing patch", items, approverName, null, null, actorId));
+        Map<String, Object> patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")),
+                "patch.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
         patchIds.add(((Number) patch.get("id")).longValue());
+        review(patch, cveId);
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("duplicate", List.of(
-                items.get(0), items.get(0)), "test", null, null, null));
+                items.get(0), items.get(0)), approverName, null, null, actorId));
         assertThrows(IllegalArgumentException.class, () -> fixTasks.createPackageTask("foreign finding", List.of(
-                Map.of("agentId", second.getAgentId(), "findingId", firstFinding)), "test", null, null, null));
-        long taskId = ((Number) fixTasks.createPackageTask("approved repair", items, "test", null, null, null)
+                Map.of("agentId", second.getAgentId(), "findingId", firstFinding)), approverName, null, null, actorId));
+        long taskId = ((Number) fixTasks.createPackageTask("approved repair", items, approverName, null, null, actorId)
                 .get("taskId")).longValue();
         fixTaskIds.add(taskId);
         asset(firstStream, first.getAgentId(), pkg);
@@ -229,7 +246,7 @@ class AgentChannelSecurityIntegrationTest {
         assertTrue(firstStream.received.isEmpty());
         assertTrue(secondStream.received.isEmpty());
 
-        assertEquals("dispatched", fixTasks.approve(taskId, "test").get("state"));
+        assertEquals("dispatched", fixTasks.approve(taskId, actorId).get("state"));
         Command firstCommand = firstStream.nextCommand();
         Command secondCommand = secondStream.nextCommand();
         assertEquals(String.valueOf(taskId), firstCommand.getVulnFix().getTaskId());
@@ -239,6 +256,7 @@ class AgentChannelSecurityIntegrationTest {
                 .stream().map(f -> f.getRefId()).toList());
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("download?filename="));
         assertTrue(firstCommand.getVulnFix().getFixes(0).getPayload().contains("token="));
+        assertEquals(2, JsonUtils.read(firstCommand.getVulnFix().getFixes(0).getPayload()).path("inventory").path("contract").asInt());
         assertFalse(firstCommand.getVulnFix().getFixes(0).getPayload().equals(
                 secondCommand.getVulnFix().getFixes(0).getPayload()));
         asset(secondStream, second.getAgentId(), pkg);
@@ -267,20 +285,75 @@ class AgentChannelSecurityIntegrationTest {
         assertEquals(2, fixStatus(taskId));
         assertEquals(0, pendingFixRecords(taskId));
         assertThrows(IllegalArgumentException.class,
-                () -> fixTasks.createPackageTask("already fixed", items, "test", null, null, null));
+                () -> fixTasks.createPackageTask("already fixed", items, approverName, null, null, actorId));
+    }
+
+    private void review(Map<String, Object> patch, String cve) throws Exception {
+        long id = ((Number) patch.get("id")).longValue();
+        var ctx = patches.reviewContext(id, cve);
+        patches.review(id, cve, String.valueOf(((Map<?, ?>) ctx.get("cve")).get("rule_digest")), String.valueOf(ctx.get("patchDigest")),
+                "Disposable gRPC fixture manual confirmation", true, 1L);
     }
 
     private void asset(Stream stream, String agentId, String pkg) throws Exception {
         stream.requests.onNext(report(agentId).setAsset(RptAssetSnapshot.newBuilder()
-                .addCollected("software").addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0"))).build());
+                .addCollected("software")
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(2))
+                .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion("1.0").setSource("dpkg").setArchitecture("amd64"))).build());
         heartbeat(stream, agentId);
     }
 
+    @Test void unverifiedPackageSuccessRemainsUnfixedAndCannotBeReplacedByALaterResult() throws Exception {
+        var agent = enroll(); var stream = connect(agent); heartbeat(stream, agent.getAgentId());
+        String pkg = "grpc-unverified-" + UUID.randomUUID(); asset(stream, agent.getAgentId(), pkg);
+        String cve = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        cveIds.add(cve);
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cve, "severity", 3, "affected", List.of(
+                Map.of("name", pkg, "match", "exact", "source", "dpkg", "version_scheme", "dpkg", "distro_id", "ubuntu",
+                        "distro_version", "24.04", "architecture", "amd64", "vrange", "<2.0", "fixed_version", "2.0",
+                        "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Unverified result fixture."))))))));
+        long finding = finding(agent.getAgentId(), pkg, cve);
+        var patch = patches.importPackage(new ByteArrayInputStream(NativePatchFixture.deb(tempDir, pkg, "2.0", "amd64")), "unverified.deb", 1, "", pkg, "2.0", "deb", "ubuntu", "24.04", "amd64", 1L);
+        patchIds.add(((Number) patch.get("id")).longValue());
+        review(patch, cve);
+        long task = ((Number) fixTasks.createPackageTask("unverified result", List.of(Map.of("agentId", agent.getAgentId(), "findingId", finding)), approverName, null, null, actorId).get("taskId")).longValue();
+        fixTaskIds.add(task); assertEquals("dispatched", fixTasks.approve(task, actorId).get("state")); stream.nextCommand();
+        stream.requests.onNext(report(agent.getAgentId()).setFixResult(RptFixResult.newBuilder().setTaskId(String.valueOf(task))
+                .addResults(FixResultItem.newBuilder().setRefId(String.valueOf(finding)).setSuccess(true).setVerified(false).setLog("post-install query unavailable"))).build());
+        heartbeat(stream, agent.getAgentId());
+        assertEquals(0, findingStatus(finding)); assertEquals(3, fixStatus(task));
+        assertEquals(3, jdbc.queryForObject("SELECT status FROM t_fix_record WHERE task_id=?", Integer.class, task));
+        String stored = jdbc.queryForObject("SELECT log FROM t_fix_record WHERE task_id=?", String.class, task);
+        assertTrue(stored.contains("不标记漏洞已修复"));
+        fixResult(stream, agent.getAgentId(), task, finding, true); heartbeat(stream, agent.getAgentId());
+        assertEquals(0, findingStatus(finding));
+        assertEquals(stored, jdbc.queryForObject("SELECT log FROM t_fix_record WHERE task_id=?", String.class, task));
+    }
+
+    @Test void fullNativeVersionsAndDeclaredTargetsLongerThan64CharactersSurviveRealStorage() throws Exception {
+        var agent = enroll(); var stream = connect(agent); heartbeat(stream, agent.getAgentId());
+        String pkg = "grpc-long-version-" + UUID.randomUUID(), installed = "1.0+git" + "a".repeat(80) + "-1", fixed = "2.0+git" + "b".repeat(80) + "-1";
+        String cve = "CVE-2099-" + String.format("%019d", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE);
+        cveIds.add(cve);
+        stream.requests.onNext(report(agent.getAgentId()).setAsset(RptAssetSnapshot.newBuilder().addCollected("software")
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                        .setSource("dpkg").setDistroId("ubuntu").setDistroVersion("24.04").setPackageRepairContract(2))
+                .addSoftware(SoftwareInfo.newBuilder().setName(pkg).setVersion(installed).setSource("dpkg").setArchitecture("amd64"))).build());
+        heartbeat(stream, agent.getAgentId());
+        var rule = Map.of("name", pkg, "vrange", "<" + fixed, "source", "dpkg", "version_scheme", "dpkg",
+                "distro_id", "ubuntu", "distro_version", "24.04", "architecture", "amd64", "fixed_version", fixed,
+                "evidence", Map.of("basis", "manual_analysis", "assessment", "affected", "package_scope", "binary", "notes", "Disposable long-version declaration."));
+        library.cves("manual", List.of(JsonUtils.read(JsonUtils.write(Map.of("cve_id", cve, "severity", 3, "affected", List.of(rule))))));
+        matcher.matchAgent(agent.getAgentId(), 0);
+        var finding = jdbc.queryForMap("SELECT installed_version,fixed_version,evidence_status FROM t_vuln_finding WHERE agent_id=? AND cve_id=?", agent.getAgentId(), cve);
+        assertEquals(installed, finding.get("installed_version")); assertEquals(fixed, finding.get("fixed_version"));
+        assertEquals("declared", finding.get("evidence_status"));
+    }
+
     private long finding(String agentId, String pkg, String cveId) {
-        return jdbc.queryForObject("""
-                INSERT INTO t_vuln_finding(task_id, agent_id, cve_id, software, installed_version, fixed_version, severity)
-                VALUES (0, ?, ?, ?, '1.0', '2.0', 3) RETURNING id
-                """, Long.class, agentId, cveId, pkg);
+        matcher.matchAgent(agentId, 0);
+        return jdbc.queryForObject("SELECT id FROM t_vuln_finding WHERE agent_id=? AND software=? AND cve_id=?", Long.class, agentId, pkg, cveId);
     }
 
     private void fixResult(Stream stream, String agentId, long taskId, long findingId, boolean success) {

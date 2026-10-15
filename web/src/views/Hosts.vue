@@ -65,7 +65,7 @@
   </div>
 
   <!-- 主机详情抽屉 -->
-  <el-drawer v-model="drawer" :title="curHost.host" size="480px">
+  <el-drawer v-model="drawer" :title="curHost.host" size="min(480px, 100vw)">
     <template v-if="curHost.host">
       <el-descriptions :column="1" border size="small">
         <el-descriptions-item label="IP">{{ curHost.ip }}</el-descriptions-item>
@@ -88,6 +88,25 @@
         <el-button size="small" type="danger" v-if="canIsolate(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, true)">隔离主机</el-button>
         <el-button size="small" type="success" v-if="canRestore(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, false)">解除隔离</el-button>
       </div>
+      <section class="container-assets">
+        <h4>软件清单</h4>
+        <el-alert :type="softwareInventory.software_collection_status === 'complete' ? 'info' : 'warning'"
+          :title="inventoryStatusLabel" :closable="false" />
+        <p style="font-size:12px;line-height:1.8">
+          发行版：{{ softwareInventory.distro_id || '未知' }} · {{ softwareInventory.distro_version || '版本未知' }}<br />
+          清单来源：{{ softwareInventory.software_inventory_source || '未知' }}<br />
+          最近成功采集：{{ softwareInventory.software_succeeded_at || '暂无完整采集记录' }}
+        </p>
+        <el-table v-if="software.length" :data="software" size="small" max-height="220">
+          <el-table-column prop="name" label="软件包" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="version" label="完整版本" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="source" label="来源" width="85" />
+          <el-table-column label="包架构" width="100"><template #default="{ row }">{{ row.architecture || '未知' }}</template></el-table-column>
+        </el-table>
+        <p v-if="software.length === 500" style="font-size:12px">当前展示前 500 条软件记录。</p>
+        <el-empty v-if="!software.length" :image-size="48"
+          :description="softwareInventory.software_collection_status === 'complete' ? '完整采集结果为空' : '暂无可用软件清单'" />
+      </section>
       <section class="container-assets">
         <h4>本机容器与工作负载 <span>{{ containers.length }}</span></h4>
         <el-table v-if="containers.length" :data="containers" size="small" max-height="220">
@@ -145,7 +164,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref, nextTick, watch } from 'vue'
+import { computed, onMounted, reactive, ref, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
@@ -169,6 +188,17 @@ const containers = ref([])
 const processes = ref([])
 const ports = ref([])
 const riskyAccounts = ref([])
+const software = ref([])
+const softwareInventory = ref({})
+const inventoryStatusLabel = computed(() => {
+  const inventory = softwareInventory.value
+  if (inventory.software_collection_status === 'complete') {
+    return inventory.software_identity_error ? '软件清单已采集，发行版身份信息不完整' : '软件清单已完整采集'
+  }
+  if (inventory.software_collection_status === 'failed') return '最近软件采集失败；当前显示上次保留的清单，自动修复已阻断'
+  if (inventory.software_collection_status === 'unsupported') return '当前系统的软件采集尚不支持；自动修复已阻断'
+  return '软件清单完整性未知，请重新采集后进行自动修复'
+})
 const riskReasons = row => {
   const value = row.risk_reasons
   if (Array.isArray(value)) return value.join(', ')
@@ -268,6 +298,8 @@ const openHost = async row => {
   processes.value = []
   ports.value = []
   riskyAccounts.value = []
+  software.value = []
+  softwareInventory.value = {}
   drawer.value = true
   renderMiniChart()
   try {
@@ -277,6 +309,8 @@ const openHost = async row => {
     processes.value = data.processes || []
     ports.value = data.ports || []
     riskyAccounts.value = (data.accounts || []).filter(account => account.risky)
+    software.value = data.software || []
+    softwareInventory.value = data.detail || {}
   } catch (e) {
     ElMessage({ message: e?.message || '主机资产加载失败', type: 'error' })
   }

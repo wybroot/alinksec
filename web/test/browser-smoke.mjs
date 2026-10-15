@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { debFixture } from '../../deploy/tests/native-patch-fixture.mjs'
 import { createHash, X509Certificate } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -17,6 +18,8 @@ const malicious = '<img src="xss-fixture" onerror="window.__xss=1">'
 const artifacts = resolve(process.env.ALINKSEC_SMOKE_BROWSER_ARTIFACTS || `.tmp/browser-artifacts-${Date.now()}`)
 mkdirSync(artifacts, { recursive: true })
 const errors = []
+const expectedNetworkErrors = []
+let legacyRejectionStarted = false
 let browser, page
 try {
   database.exec('BEGIN')
@@ -43,7 +46,13 @@ try {
   const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } })
   page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (legacyRejectionStarted && expectedNetworkErrors.length === 0
+      && message.location().url.endsWith('/api/fix/tasks/package')
+      && /^Failed to load resource:.*\b400\b/.test(message.text())) expectedNetworkErrors.push(message.text())
+    else errors.push(message.text())
+  })
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('admin')
   await page.getByPlaceholder('密码', { exact: true }).fill(process.env.ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD)
@@ -92,35 +101,153 @@ try {
   await page.goto('/vuln')
   await expect(page.locator('.chip').filter({ hasText: '修复率' })).toContainText('25%')
   async function importPatch(pkgName, targetVersion) {
-    const result = await page.evaluate(async ({ pkgName, targetVersion }) => {
+    const result = await page.evaluate(async ({ pkgName, targetVersion, bytes }) => {
       const token = localStorage.getItem('alinksec_token')
       const form = new FormData()
-      form.set('file', new Blob(['browser fixture']), 'patch.deb')
-      for (const [name, value] of Object.entries({ osType: '1', pkgName, targetVersion, repoType: 'deb' })) form.set(name, value)
+      form.set('file', new Blob([Uint8Array.from(atob(bytes), c => c.charCodeAt(0))]), 'patch.deb')
+      for (const [name, value] of Object.entries({ osType: '1', pkgName, targetVersion, repoType: 'deb', distroId: 'ubuntu', distroVersion: '24.04', architecture: 'all' })) form.set(name, value)
       return (await fetch('/api/fix/patches', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })).json()
-    }, { pkgName, targetVersion })
+    }, { pkgName, targetVersion, bytes: debFixture(pkgName, targetVersion).toString('base64') })
     assert.equal(result.code, 0, result.msg)
+    return result.data
   }
-  await importPatch('browser-openssl', '2.0')
-  await importPatch('browser-libcurl', '3.0')
+  const opensslPatch = await importPatch('browser-openssl', '2.0')
+  const curlPatch = await importPatch('browser-libcurl', '3.0')
   const firstVuln = page.locator('.el-table__body tr').filter({ hasText: 'CVE-2099-1001' })
   await expect(firstVuln).toContainText('2.0')
+  await expect(firstVuln).toContainText('历史结果，请重新扫描')
+  assert.equal(await firstVuln.getByRole('button', { name: '一键修复', exact: true }).count(), 0)
+  const packageResponse = response => response.url().endsWith('/api/fix/tasks/package') && response.request().method() === 'POST'
+  const tasksBeforeLegacyRejection = database.prepare('SELECT count(*) AS n FROM t_fix_task').get().n
+  legacyRejectionStarted = true
+  const rejected = await page.evaluate(async items => {
+    const response = await fetch('/api/fix/tasks/package', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('alinksec_token')}` },
+      body: JSON.stringify({ items, approver: 'admin' }) })
+    return { status: response.status, body: await response.json() }
+  }, items.slice(0, 2))
+  assert.equal(rejected.status, 400)
+  const rejection = rejected.body
+  assert.notEqual(rejection.code, 0, 'Legacy inventory must block repair creation')
+  assert.match(rejection.msg, /软件清单采集失败或完整性未知|漏洞项已处置，请刷新后重选/)
+  assert.equal(database.prepare('SELECT count(*) AS n FROM t_fix_task').get().n, tasksBeforeLegacyRejection)
+  await page.screenshot({ path: `${artifacts}/vulnerability-legacy-rejected.png`, fullPage: true })
+  console.log('ok - real browser/API rejects legacy inventory without creating a repair task')
+  database.exec('BEGIN')
+  const completeInventory = database.prepare(`UPDATE t_agent SET distro_id='ubuntu', distro_version='24.04',
+    software_inventory_source='dpkg', software_collection_status='complete', software_identity_error='',
+    software_succeeded_at=CURRENT_TIMESTAMP,package_repair_contract=2 WHERE agent_id=?`)
+  const installedPackage = database.prepare(`INSERT INTO t_asset_software(agent_id,name,version,source,architecture)
+    VALUES(?,?,'1.0','dpkg','all')`)
+  for (const [index, item] of items.entries()) {
+    completeInventory.run(item.agentId)
+    installedPackage.run(item.agentId, index === 2 ? 'browser-libcurl' : 'browser-openssl')
+  }
+  database.exec('COMMIT')
+  const declarations = [['CVE-2099-1001', 'browser-openssl', '2.0'], ['CVE-2099-1002', 'browser-libcurl', '3.0']].map(([cve_id, name, fixed_version]) => ({
+    cve_id, severity: 4, affected: [{ name, match: 'exact', source: 'dpkg', version_scheme: 'dpkg', distro_id: 'ubuntu', distro_version: '24.04', architecture: 'all', vrange: `<${fixed_version}`, fixed_version,
+      evidence: { basis: 'manual_analysis', assessment: 'affected', package_scope: 'binary', notes: 'Disposable browser repair fixture declaration.' } }],
+  }))
+  const imported = await page.evaluate(async declarations => {
+    const form = new FormData(); form.set('file', new Blob([JSON.stringify(declarations)]), 'browser-declarations.json')
+    const response = await fetch('/api/libraries/cves/import', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('alinksec_token')}` }, body: form })
+    return { status: response.status, body: await response.json() }
+  }, declarations)
+  assert.equal(imported.status, 200); assert.equal(imported.body.code, 0, imported.body.msg)
+  for (const [index, item] of items.entries()) {
+    const cve = index === 2 ? 'CVE-2099-1002' : 'CVE-2099-1001'
+    await expect.poll(() => database.prepare("SELECT count(*) AS n FROM t_vuln_finding WHERE agent_id=? AND cve_id=? AND evidence_status='declared'").get(item.agentId, cve).n).toBe(1)
+    const finding = database.prepare("SELECT id,rule_source_id,rule_digest,rule_evidence FROM t_vuln_finding WHERE agent_id=? AND cve_id=? AND evidence_status='declared'").get(item.agentId, cve)
+    item.findingId = finding.id
+    assert.equal(finding.rule_source_id, 'manual'); assert.match(finding.rule_digest, /^[a-f0-9]{64}$/)
+    const snapshot = JSON.parse(finding.rule_evidence); assert.equal(snapshot.import.verification, 'imported_declaration'); assert.ok(snapshot.import.imported_by > 0)
+  }
+  console.log('ok - real browser/API imports authenticated rule provenance and scans fresh findings without backfilling legacy evidence')
+  await page.reload()
+  assert.equal(await firstVuln.getByRole('button', { name: '一键修复', exact: true }).count(), 0, 'Unreviewed package cannot enable repair')
+  await page.goto('/baseline')
+  await page.getByRole('button', { name: '离线补丁仓库', exact: true }).click()
+  const repository = page.getByRole('dialog').filter({ hasText: '离线补丁仓库' })
+  for (const [patch, cve] of [[opensslPatch, 'CVE-2099-1001'], [curlPatch, 'CVE-2099-1002']]) {
+    const row = repository.locator('.el-table__body tr').filter({ hasText: patch.pkg_name })
+    await expect(row).toContainText('包头已核验'); await expect(row).toContainText('0 条未撤销人工复核')
+    await row.getByRole('button', { name: '查看并复核' }).click()
+    const dialog = page.getByRole('dialog').filter({ hasText: '补丁适用性与修复目标复核' })
+    await dialog.getByPlaceholder('CVE-2026-12345', { exact: true }).fill(cve)
+    await dialog.getByRole('button', { name: '查看当前依据' }).click()
+    await expect(dialog).toContainText(patch.sha256)
+    await expect(dialog).toContainText(`正在复核：${cve}`)
+    await dialog.getByPlaceholder('CVE-2026-12345', { exact: true }).fill('CVE-2099-99999')
+    await expect(dialog.getByRole('button', { name: '确认人工复核' })).toBeDisabled()
+    await expect(dialog).not.toContainText(patch.sha256)
+    await dialog.getByPlaceholder('CVE-2026-12345', { exact: true }).fill(cve)
+    await dialog.getByRole('button', { name: '查看当前依据' }).click()
+    await expect(dialog).toContainText(patch.sha256)
+    await expect(dialog).toContainText('平台未认证厂商声明')
+    await dialog.getByPlaceholder('填写发行版适用性、二进制包修复目标及来源依据，至少 10 字').fill('Disposable browser manual confirmation of exact distribution, package and current declared CVE target')
+    await dialog.getByText('我已核对上述具体补丁、系统范围和当前 CVE 修复目标', { exact: true }).click()
+    await expect(dialog.getByRole('checkbox')).toBeChecked()
+    await expect(dialog.getByRole('button', { name: '确认人工复核' })).toBeEnabled()
+    await page.screenshot({ path: `${artifacts}/patch-review-${patch.pkg_name}.png`, fullPage: true, animations: 'disabled' })
+    await dialog.getByRole('button', { name: '确认人工复核' }).click()
+    await expect(dialog).toBeHidden(); await expect(row).toContainText('1 条未撤销人工复核')
+    const audit = database.prepare('SELECT reviewed_by,patch_sha256,rule_digest,notes FROM t_patch_review WHERE patch_id=?').get(patch.id)
+    assert.ok(audit.reviewed_by > 0); assert.equal(audit.patch_sha256, patch.sha256); assert.match(audit.rule_digest, /^[a-f0-9]{64}$/)
+  }
+  console.log('ok - actual browser displays unreviewed native packages, explicit manual applicability confirmation and authenticated immutable review evidence')
+  await page.goto('/vuln')
+  await page.reload()
+  await expect(firstVuln).toContainText('ubuntu 24.04')
   await firstVuln.getByRole('button', { name: '一键修复', exact: true }).click()
-  await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
+  await page.locator('.el-dialog:visible .el-select').click()
+  await page.getByRole('option', { name: /^admin(?:（|$)/ }).click()
   let submitted = page.waitForRequest(request => request.url().endsWith('/api/fix/tasks/package') && request.method() === 'POST')
+  let response = page.waitForResponse(packageResponse)
   await page.getByRole('button', { name: '提交审批', exact: true }).click()
   const singleRequest = await submitted
   assert.deepEqual(singleRequest.postDataJSON().items.sort((a, b) => a.findingId - b.findingId), items.slice(0, 2))
+  const singleResult = await (await response).json()
+  assert.equal(singleResult.code, 0, singleResult.msg)
   await expect(page.locator('.el-dialog').filter({ hasText: '一键修复' })).not.toBeVisible()
+  const cancelled = await page.evaluate(async taskId => {
+    const response = await fetch(`/api/fix/tasks/${taskId}/cancel`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('alinksec_token')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Replace disposable single repair with grouped repair' }) })
+    return response.json()
+  }, singleResult.data.taskId)
+  assert.equal(cancelled.code, 0, cancelled.msg)
+  assert.equal(database.prepare('SELECT status FROM t_fix_task WHERE id=?').get(singleResult.data.taskId).status, 4)
   await page.locator('.el-table__header-wrapper .el-checkbox').first().click()
   await page.getByRole('button', { name: /批量修复/ }).click()
-  await page.getByPlaceholder('必填（提交后由该人员审批放行）').fill('Browser CI')
+  await page.locator('.el-dialog:visible .el-select').click()
+  await page.getByRole('option', { name: /^admin(?:（|$)/ }).click()
   submitted = page.waitForRequest(request => request.url().endsWith('/api/fix/tasks/package') && request.method() === 'POST')
+  response = page.waitForResponse(packageResponse)
   await page.getByRole('button', { name: '提交审批', exact: true }).click()
   const batchRequest = await submitted
   assert.deepEqual(batchRequest.postDataJSON().items.sort((a, b) => a.findingId - b.findingId), items)
-  await expect.poll(() => database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='Browser CI' AND status=0").get().n).toBe(2)
+  const batchResult = await (await response).json()
+  assert.equal(batchResult.code, 0, batchResult.msg)
+  await expect.poll(() => database.prepare("SELECT count(*) AS n FROM t_fix_task WHERE approver='admin' AND status=0").get().n).toBe(1)
   console.log('ok - browser single/batch repair submits the correct pending findings and renders versions/rate')
+
+  await page.goto('/baseline')
+  await page.getByRole('button', { name: '修复任务记录', exact: true }).click()
+  const tasks = page.getByRole('dialog').filter({ hasText: '修复任务记录' })
+  const taskRow = tasks.locator('.el-table__body tr').filter({ hasText: batchResult.data.taskNo })
+  await expect(taskRow).toContainText('待审批')
+  await taskRow.getByRole('button', { name: '审批放行', exact: true }).click()
+  await expect.poll(() => database.prepare('SELECT approved FROM t_fix_task WHERE id=?').get(batchResult.data.taskId).approved).toBe(1)
+  const approval = database.prepare('SELECT approver,approver_id,approved_by FROM t_fix_task WHERE id=?').get(batchResult.data.taskId)
+  assert.equal(approval.approver, 'admin'); assert.equal(approval.approver_id, approval.approved_by)
+  await expect(taskRow).toContainText('执行中')
+  await page.screenshot({ path: `${artifacts}/vulnerability-approval-queue.png`, fullPage: true, animations: 'disabled' })
+  await taskRow.getByRole('button', { name: '取消', exact: true }).click()
+  const prompt = page.getByRole('dialog').filter({ hasText: '取消软件包修复' })
+  await prompt.locator('input').fill('Cancel disposable offline browser repair')
+  await prompt.getByRole('button', { name: /^(确定|OK)$/, exact: true }).click()
+  await expect.poll(() => database.prepare('SELECT status FROM t_fix_task WHERE id=?').get(batchResult.data.taskId).status).toBe(4)
+  await expect(taskRow).toContainText('已取消')
+  assert.equal(database.prepare('SELECT count(*) AS n FROM t_agent_download_token WHERE fix_task_id=?').get(batchResult.data.taskId).n, 0)
+  console.log('ok - actual browser uses the designated authenticated account to approve durable offline work and cancels it with an audit reason')
 
   await page.goto('/protect')
   await expect(page.locator('.prot-card')).toHaveCount(4)
@@ -194,7 +321,7 @@ try {
   await page.screenshot({ path: `${artifacts}/console-after-screen.png`, fullPage: true })
   console.log('ok - return from screen restores the console theme and navigation')
   assert.deepEqual(errors, [], 'Browser console or page errors')
-  writeFileSync(`${artifacts}/result.json`, JSON.stringify({ passed: true, errors }, null, 2))
+  writeFileSync(`${artifacts}/result.json`, JSON.stringify({ passed: true, errors, expectedNetworkErrors }, null, 2))
   console.log(`Browser artifacts: ${artifacts}`)
 } catch (error) {
   if (page) {

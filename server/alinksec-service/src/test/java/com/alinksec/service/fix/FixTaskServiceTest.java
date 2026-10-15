@@ -20,7 +20,7 @@ class FixTaskServiceTest {
     @Test
     void rejectsDuplicateFindingBeforeQueryingDatabase() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), mock(PatchRepoService.class), database());
+        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), mock(PatchRepoService.class), database(), mock(org.springframework.transaction.PlatformTransactionManager.class));
         Map<String, Object> item = Map.of("agentId", "agent-a", "findingId", 11);
 
         assertThrows(IllegalArgumentException.class, () ->
@@ -33,15 +33,20 @@ class FixTaskServiceTest {
     void rejectsAlreadyHandledFinding() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         PatchRepoService patches = mock(PatchRepoService.class);
-        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), patches, database());
-        when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of(
-                Map.of("id", 11L, "agent_id", "agent-a", "status", 3)));
+        FixTaskService service = new FixTaskService(jdbc, mock(CommandService.class), patches, database(), mock(org.springframework.transaction.PlatformTransactionManager.class));
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.contains("WHERE u.id=?"), org.mockito.ArgumentMatchers.eq(7L)))
+                .thenReturn(List.of(Map.of("username","admin")));
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.contains("WHERE u.username=?"), org.mockito.ArgumentMatchers.eq("admin")))
+                .thenReturn(List.of(Map.of("id",7L,"username","admin")));
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.contains("WHERE f.id IN"), org.mockito.ArgumentMatchers.eq(11L)))
+                .thenReturn(List.of(Map.of("id",11L,"agent_id","agent-a","status",3,"current_match",true)));
 
-        assertThrows(IllegalArgumentException.class, () ->
+        var error = assertThrows(IllegalArgumentException.class, () ->
                 service.createPackageTask(null,
                         List.of(Map.of("agentId", "agent-a", "findingId", 11)),
                         "admin", null, null, 7L));
 
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("已处置"));
         verifyNoInteractions(patches);
     }
 

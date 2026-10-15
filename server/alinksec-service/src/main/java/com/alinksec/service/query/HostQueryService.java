@@ -76,7 +76,9 @@ public class HostQueryService {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT agent_id, hostname, ip, os_type, os_version, kernel, arch, agent_version,
                        machine_id, status, protect_enabled, policy_version, last_heartbeat, created_at,
-                       isolation_status, isolation_command_id, isolation_error, isolation_updated_at
+                       isolation_status, isolation_command_id, isolation_error, isolation_updated_at,
+                       distro_id, distro_version, software_inventory_source, software_identity_error, package_repair_contract,
+                       software_collection_status, software_collection_error, software_attempted_at, software_succeeded_at
                 FROM t_agent WHERE agent_id = ? AND status <> 4
                 """, agentId);
         if (rows.isEmpty()) {
@@ -97,10 +99,10 @@ public class HostQueryService {
     public List<Map<String, Object>> software(String agentId, String keyword, int page, int size) {
         String normalizedKeyword = blankToNull(keyword);
         return jdbc.queryForList("""
-                SELECT name, version, vendor, install_time, source
+                SELECT name, version, vendor, install_time, source, architecture
                 FROM t_asset_software WHERE agent_id = ?
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(name) LIKE LOWER('%' || ? || '%'))
-                ORDER BY name LIMIT ? OFFSET ?
+                ORDER BY name, source, architecture, version LIMIT ? OFFSET ?
                 """, agentId, normalizedKeyword, normalizedKeyword, size, (page - 1) * size);
     }
 

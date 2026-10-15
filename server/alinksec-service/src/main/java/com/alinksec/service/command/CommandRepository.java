@@ -47,15 +47,21 @@ public class CommandRepository {
     }
 
     public int markSent(String cmdId) {
-        return jdbc.update("UPDATE t_command SET status = ? WHERE cmd_id = ? AND status = ?",
+        return jdbc.update("UPDATE t_command SET status = ?,sent_at=CURRENT_TIMESTAMP WHERE cmd_id = ? AND status = ?",
                 ST_SENT, cmdId, ST_PENDING);
     }
 
     public int bumpRetry(String cmdId) {
         return jdbc.update("""
-                UPDATE t_command SET retry_count = retry_count + 1, status = ?
-                WHERE cmd_id = ?
+                UPDATE t_command SET retry_count = retry_count + 1, status = ?,sent_at=CURRENT_TIMESTAMP
+                WHERE cmd_id = ? AND status=1
                 """, ST_SENT, cmdId);
+    }
+
+    /** Row lock plus expected state/retry prevents concurrent delivery of one queue entry. */
+    public int lockForDelivery(String cmdId,int expectedStatus,Integer expectedRetry) {
+        if (expectedRetry==null) return jdbc.update("UPDATE t_command SET status=status WHERE cmd_id=? AND status=?",cmdId,expectedStatus);
+        return jdbc.update("UPDATE t_command SET status=status WHERE cmd_id=? AND status=? AND retry_count=?",cmdId,expectedStatus,expectedRetry);
     }
 
     public int markTimeout(String cmdId) {
@@ -86,14 +92,14 @@ public class CommandRepository {
                     UPDATE t_command
                     SET status = ?, acked_at = COALESCE(acked_at, CURRENT_TIMESTAMP), finished_at = CURRENT_TIMESTAMP,
                         result = ?
-                    WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
+                    WHERE cmd_id = ? AND agent_id = ? AND status IN (1,2,3)
                     """, target, result, ack.getCmdId(), agentId);
         }
         return jdbc.update("""
                 UPDATE t_command
                 SET status = ?, acked_at = COALESCE(acked_at, CURRENT_TIMESTAMP)
-                WHERE cmd_id = ? AND agent_id = ? AND status NOT IN (4, 5, 6)
-                """, target, ack.getCmdId(), agentId);
+                WHERE cmd_id = ? AND agent_id = ? AND status>=1 AND status<?
+                """, target, ack.getCmdId(), agentId,target);
     }
 
     /** 待超时判定的 SENT 指令：下发超过 30s 仍未 RECEIVED */
@@ -101,7 +107,7 @@ public class CommandRepository {
         return jdbc.queryForList("""
                 SELECT id, cmd_id, agent_id, retry_count
                 FROM t_command
-                WHERE status = ? AND created_at < ?
+                WHERE status = ? AND COALESCE(sent_at,created_at) < ?
                 """, ST_SENT, database.timestampBefore(Duration.ofSeconds(ACK_TIMEOUT_SECONDS)));
     }
 

@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline
+        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -118,7 +118,16 @@ jobs:
       - name: Check library schedules and history in the production web bundle
         working-directory: web
         run: node test/libraries-browser.mjs
+      - name: Check software inventory identity and incomplete collection in the production web bundle
+        working-directory: web
+        run: node test/software-inventory-browser.mjs
+      - name: Check rule provenance, backport declarations and unsafe historical references in the production web bundle
+        working-directory: web
+        run: node test/vulnerability-provenance-browser.mjs
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux
       - run: mvn -B package
+        env:
+          ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
         working-directory: server
       - name: Check local SQLite validation workflow
         run: bash deploy/tests/api-smoke-local.sh
@@ -147,6 +156,7 @@ jobs:
         working-directory: agent
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
+          ALINKSEC_PACKAGE_REPAIR_NATIVE_REQUIRED: 'true'
       - name: Check native protected local identity files and redacted evidence
         working-directory: agent
         run: |
@@ -184,6 +194,35 @@ jobs:
         run: |
           (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
           bash deploy/tests/dnf-native.sh
+      - name: Compare full package versions with native RPM and DPKG ordering
+        run: python3 -B deploy/tests/package-version-native.py
+      - name: Check native DPKG and RPM inventory identities
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/software-native.test ./internal/collector)
+          ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true .tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+          docker run --rm --read-only --network=none --memory=128m --memory-swap=128m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+            --env ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true --env GOMEMLIMIT=64MiB \
+            alinksec-dnf-native-validation:latest \
+            /workspace/.tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+      - name: Check bounded native RPM headers without executing package scripts
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/package-repair-native.test ./internal/fixer)
+          docker build -f deploy/tests/fixtures/Dockerfile.package-repair -t alinksec-package-repair-validation:latest .
+          docker run --rm --network=none --memory=192m --memory-swap=256m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" --env GOMEMLIMIT=96MiB \
+            --env ALINKSEC_RPM_REPAIR_NATIVE_REQUIRED=true alinksec-package-repair-validation:latest \
+            /workspace/.tmp/package-repair-native.test -test.v -test.run '^TestNativeRPMPackageMetadataIsReadWithoutRunningPackageScripts$'
+      - name: Retain native package version comparisons
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-version-native-${{ matrix.arch }}
+          path: .tmp/package-version-native.tsv
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
         run: bash deploy/tests/shadow-defaults-native.sh
       - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
@@ -245,6 +284,8 @@ jobs:
           path: |
             .tmp/browser-artifacts-*
             .tmp/library-browser-artifacts
+            .tmp/software-inventory-browser
+            .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
@@ -342,7 +383,7 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client rpm dpkg util-linux
       - run: psql -v ON_ERROR_STOP=1 -h localhost -U alinksec -d alinksec -f deploy/sql/001_init.sql
         env:
           PGPASSWORD: alinksec-test
@@ -372,8 +413,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "7"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "50"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "13"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "54"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -404,11 +445,11 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Check Agent identity and concurrent baseline reports with the PostgreSQL application role
+      - name: Check Agent identity and concurrent baseline and vulnerability workflows with the PostgreSQL application role
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:

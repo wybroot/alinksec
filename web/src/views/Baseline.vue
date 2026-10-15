@@ -8,6 +8,7 @@
       <div class="toolbar">
         <el-button type="primary" @click="openCreate">+ 发起核查</el-button>
         <el-button plain @click="$router.push('/baseline-templates')">基线模板</el-button>
+        <el-button plain @click="openPatchRepo">离线补丁仓库</el-button>
         <div class="spacer"></div>
         <span style="font-size:12px;color:#94a3b8">{{ lastSummary }}</span>
       </div>
@@ -98,7 +99,7 @@
     </el-dialog>
 
     <!-- 修复任务记录 -->
-    <el-dialog v-model="fixTasks.visible" title="修复任务记录" width="860px">
+    <el-dialog v-model="fixTasks.visible" title="修复任务记录" width="min(1100px, calc(100% - 24px))">
       <el-table :data="fixTasks.list" stripe max-height="440">
         <el-table-column prop="task_no" label="任务号" width="160" />
         <el-table-column label="类型" width="86">
@@ -114,9 +115,11 @@
           <template #default="{ row }">
             <span v-if="Number(row.type) !== 2" style="color:#94a3b8">—</span>
             <span v-else-if="row.approved" style="color:#16a34a">{{ row.approver || '已审批' }}</span>
-            <el-button v-else link type="warning" size="small" @click="approveTask(row)">审批放行</el-button>
+            <el-button v-else-if="Number(row.status) === 0 && canApprove(row)" link type="warning" size="small" @click="approveTask(row)">审批放行</el-button>
+            <span v-else>{{ row.approver_id ? row.approver : '旧任务，请重建' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="维护窗口 / 停止原因" min-width="190"><template #default="{ row }">{{ row.window_start ? `${fmtTime(row.window_start)} 至 ${fmtTime(row.window_end)}` : '审批后立即进入派发' }}<br /><span style="color:#b45309">{{ row.failure_reason }}</span></template></el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <span :style="{ color: fixStatusColor(row) }">{{ fixStatusText(row) }}</span>
@@ -125,16 +128,19 @@
         <el-table-column prop="created_at" label="创建时间" width="150">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="80">
+        <el-table-column label="操作" fixed="right" width="130">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="viewFixRecords(row)">明细</el-button>
+            <el-button v-if="Number(row.type) === 2 && Number(row.status) <= 1 && canCancel(row)" link type="warning" size="small" @click="cancelTask(row)">取消</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-dialog>
 
     <!-- 修复明细 -->
-    <el-dialog v-model="fixRecDlg.visible" :title="`修复明细 · ${fixRecDlg.name}`" width="960px">
+    <el-dialog v-model="fixRecDlg.visible" :title="`修复明细 · ${fixRecDlg.name}`" width="min(1100px, calc(100% - 24px))">
+      <p v-if="Number(fixRecDlg.task?.type) === 2">审批账号：{{ fixRecDlg.task.approver }} · 指定账号 ID {{ fixRecDlg.task.approver_id || '旧任务未知' }} · 实际审批 ID {{ fixRecDlg.task.approved_by || '尚未审批' }}</p>
+      <p v-if="fixRecDlg.task?.failure_reason" style="color:#b45309">{{ fixRecDlg.task.failure_reason }}</p>
       <el-table :data="fixRecDlg.list" stripe max-height="480">
         <el-table-column prop="hostname" label="主机" width="130" />
         <el-table-column prop="code" label="基线项" width="130" />
@@ -150,7 +156,7 @@
       </el-table>
     </el-dialog>
     <!-- 补丁仓库 -->
-    <el-dialog v-model="patchDlg.visible" title="离线补丁仓库" width="920px">
+    <el-dialog v-model="patchDlg.visible" title="离线补丁仓库" width="min(1100px, calc(100vw - 24px))">
       <div class="toolbar">
         <el-select v-model="patchDlg.osType" clearable placeholder="系统" style="width:120px" @change="loadPatches">
           <el-option label="Linux" :value="1" /><el-option label="Windows" :value="2" />
@@ -163,10 +169,20 @@
         <el-table-column label="系统" width="110">
           <template #default="{ row }">{{ row.os_type === 1 ? 'Linux' : 'Windows' }}{{ row.os_version ? ' / ' + row.os_version : '' }}</template>
         </el-table-column>
+        <el-table-column label="包范围" min-width="180">
+          <template #default="{ row }">{{ row.distro_id || '未声明' }} / {{ row.distro_version || '未声明' }} / {{ row.architecture || '未声明' }}</template>
+        </el-table-column>
         <el-table-column prop="pkg_name" label="包名" min-width="140" />
         <el-table-column prop="target_version" label="目标版本" min-width="140" />
         <el-table-column label="类型" width="70">
           <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.repo_type }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="验证与复核" min-width="170">
+          <template #default="{ row }">
+            <div>{{ row.metadata_status === 'validated' ? '包头已核验' : '历史包，需重新导入' }}</div>
+            <div>{{ (row.reviews || []).filter(r => !r.revoked_at).length }} 条未撤销人工复核</div>
+            <el-button v-if="row.metadata_status === 'validated'" link type="primary" @click="openPatchReview(row)">查看并复核</el-button>
+          </template>
         </el-table-column>
         <el-table-column label="大小" width="90">
           <template #default="{ row }">{{ (row.size / 1048576).toFixed(1) }} MB</template>
@@ -178,48 +194,73 @@
     </el-dialog>
 
     <!-- 导入补丁 -->
-    <el-dialog v-model="patchImport.visible" title="导入补丁包" width="520px">
+    <el-dialog v-model="patchImport.visible" title="导入补丁包" width="min(520px, calc(100vw - 24px))">
       <el-form label-width="96px">
         <el-form-item label="补丁文件">
           <input type="file" @change="e => (patchImport.file = e.target.files[0])" />
         </el-form-item>
         <el-form-item label="系统" required>
           <el-select v-model="patchImport.osType" style="width:160px">
-            <el-option label="Linux" :value="1" /><el-option label="Windows" :value="2" />
+            <el-option label="Linux" :value="1" />
           </el-select>
         </el-form-item>
         <el-form-item label="系统版本">
-          <el-input v-model="patchImport.osVersion" placeholder="centos7 / ubuntu2204 / win2019（空=通用）" style="width:240px" />
+          <el-input v-model="patchImport.osVersion" placeholder="仅作显示，例如 Ubuntu 24.04" style="width:240px" />
         </el-form-item>
+        <el-form-item label="发行版标识" required><el-input v-model="patchImport.distroId" placeholder="ubuntu / debian / rhel（精确标识）" /></el-form-item>
+        <el-form-item label="发行版版本" required><el-input v-model="patchImport.distroVersion" placeholder="24.04 / 12 / 9（精确版本）" /></el-form-item>
+        <el-form-item label="包架构" required><el-input v-model="patchImport.architecture" placeholder="amd64 / arm64 / all / x86_64 / noarch" /></el-form-item>
         <el-form-item label="包名" required>
-          <el-input v-model="patchImport.pkgName" placeholder="openssl / KB5034441" style="width:240px" />
+          <el-input v-model="patchImport.pkgName" placeholder="实际二进制包名，例如 openssl" style="width:240px" />
         </el-form-item>
         <el-form-item label="目标版本" required>
           <el-input v-model="patchImport.targetVersion" placeholder="1.1.1k-26.el7_9" style="width:240px" />
         </el-form-item>
         <el-form-item label="包类型">
           <el-select v-model="patchImport.repoType" clearable placeholder="按扩展名自动识别" style="width:160px">
-            <el-option label="rpm" value="rpm" /><el-option label="deb" value="deb" /><el-option label="msu" value="msu" />
+            <el-option label="rpm" value="rpm" /><el-option label="deb" value="deb" />
           </el-select>
         </el-form-item>
         <el-alert type="info" :closable="false" show-icon
-          title="导入后 sha256 入库；Agent 修复时经 filename+key 双因子校验下载" />
+          title="平台核验实际包名、完整版本和架构；发行版适用性及 CVE 修复目标需另行人工复核。Windows 补丁请人工处理。" />
       </el-form>
       <template #footer>
         <el-button @click="patchImport.visible = false">取消</el-button>
         <el-button type="primary" :loading="patchImport.loading" @click="submitPatchImport">导入</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="patchReview.visible" title="补丁适用性与修复目标复核" width="min(780px, calc(100vw - 24px))">
+      <el-alert type="warning" :closable="false" title="包头核验仅确认包内信息。发行版适用性及该版本修复 CVE 的结论由复核人负责；平台未认证厂商声明。规则或补丁变化后需重新复核。" />
+      <p v-if="patchReview.patch">{{ patchReview.patch.pkg_name }} · {{ patchReview.patch.target_version }} · {{ patchReview.patch.distro_id }} {{ patchReview.patch.distro_version }} · {{ patchReview.patch.architecture }}</p>
+      <el-form label-width="96px">
+        <el-form-item label="CVE 编号"><el-input v-model="patchReview.cveId" placeholder="CVE-2026-12345" /><el-button @click="loadPatchReviewContext">查看当前依据</el-button></el-form-item>
+      </el-form>
+      <template v-if="patchReview.context">
+        <p>正在复核：{{ patchReview.context.cve.cve_id }}</p>
+        <p class="mono" style="overflow-wrap:anywhere">补丁 SHA256：{{ patchReview.context.patch.sha256 }}</p>
+        <p>规则来源：{{ patchReview.context.cve.rule_source_id }}</p>
+        <p class="mono" style="overflow-wrap:anywhere">规则指纹：{{ patchReview.context.cve.rule_digest }}</p>
+        <pre style="white-space:pre-wrap;max-height:220px;overflow:auto;font-size:12px">{{ formatReviewEvidence(patchReview.context.cve) }}</pre>
+        <el-input v-model="patchReview.notes" type="textarea" :rows="3" maxlength="2048" placeholder="填写发行版适用性、二进制包修复目标及来源依据，至少 10 字" />
+        <el-checkbox v-model="patchReview.acknowledged" style="white-space:normal;height:auto">我已核对上述具体补丁、系统范围和当前 CVE 修复目标</el-checkbox>
+      </template>
+      <el-table :data="patchReview.patch?.reviews || []" max-height="180">
+        <el-table-column prop="cve_id" label="历史复核" /><el-table-column prop="reviewed_by" label="复核人 ID" width="100" />
+        <el-table-column prop="notes" label="依据" show-overflow-tooltip />
+        <el-table-column label="状态" width="100"><template #default="{ row }"><span v-if="row.revoked_at">已撤销</span><el-button v-else link type="danger" @click="revokeReview(row)">撤销</el-button></template></el-table-column>
+      </el-table>
+      <template #footer><el-button @click="patchReview.visible = false">关闭</el-button><el-button type="primary" :disabled="!patchReview.context || !patchReview.acknowledged" :loading="patchReview.loading" @click="submitPatchReview">确认人工复核</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
-  createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
-  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts,
+  fetchPatchReviewContext, reviewPatch, revokePatchReview, createBaselineTask, createFixTask, fetchBaseline, fetchBaselineCategoryStats, approveFixTask, fetchPatches, importPatch,
+  fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts, cancelFixTask, getUser,
 } from '../api'
 import { useChart } from '../composables/useChart'
 
@@ -316,30 +357,40 @@ async function submitFix() {
 
 /* ---------------- 修复任务记录 ---------------- */
 
-const FIX_STATUS = { 0: '待执行', 1: '执行中', 2: '已完成', 3: '部分失败' }
-const FIX_STATUS_COLOR = { 0: '#94a3b8', 1: '#2563eb', 2: '#16a34a', 3: '#dc2626' }
+const FIX_STATUS = { 0: '待执行', 1: '执行中', 2: '已完成', 3: '部分失败', 4: '已取消' }
+const FIX_STATUS_COLOR = { 0: '#94a3b8', 1: '#2563eb', 2: '#16a34a', 3: '#dc2626', 4: '#64748b' }
 const fixStatusText = (row) => (Number(row.type) === 2 && !row.approved && Number(row.status) === 0
   ? '待审批' : FIX_STATUS[Number(row.status)] || '未知')
 const fixStatusColor = (row) => (Number(row.type) === 2 && !row.approved && Number(row.status) === 0
   ? '#f59e0b' : FIX_STATUS_COLOR[Number(row.status)] || '#64748b')
-const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '复核未通过' }
+const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '未完成' }
 const FIX_REC_COLOR = { 0: '#94a3b8', 1: '#16a34a', 2: '#f59e0b', 3: '#dc2626', 5: '#f59e0b' }
 
 async function approveTask(row) {
   try {
-    const res = await approveFixTask(row.id, row.approver || 'admin')
-    const state = res?.state === 'waiting_window' ? '已审批，等待维护窗口自动派发' : '已审批并立即派发'
+    const res = await approveFixTask(row.id)
+    const state = res?.state === 'waiting_window' ? '已审批，等待维护窗口自动派发' : '已审批并加入派发队列'
     msg(`任务 ${row.task_no} ${state}`)
     openFixTasks()
   } catch (e) {
     msg(e.message || '审批失败', 'error')
   }
 }
+const actorId = () => Number(getUser()?.id || 0)
+const canWriteFix = () => ['admin', 'operator'].includes(getUser()?.role)
+const canApprove = row => canWriteFix() && actorId() > 0 && actorId() === Number(row.approver_id)
+const canCancel = row => canWriteFix() && actorId() > 0 && [Number(row.approver_id), Number(row.created_by)].includes(actorId())
+async function cancelTask(row) {
+  try {
+    const { value } = await ElMessageBox.prompt('填写原因。仅能取消尚未送出的任务；已开始的安装需要查看结果并人工处理。', '取消软件包修复', { inputValidator: value => value?.trim()?.length >= 2 || '请填写至少 2 字原因' })
+    await cancelFixTask(row.id, value); msg('任务已取消，待推指令和下载凭证已停止'); await openFixTasks()
+  } catch (error) { if (error !== 'cancel' && error !== 'close') msg(error.message || '取消失败', 'error') }
+}
 
 /* ---------------- 补丁仓库 ---------------- */
 
 const patchDlg = reactive({ visible: false, list: [], osType: null, keyword: '' })
-const patchImport = reactive({ visible: false, loading: false, file: null, osType: 1, osVersion: '', pkgName: '', targetVersion: '', repoType: '' })
+const patchImport = reactive({ visible: false, loading: false, file: null, osType: 1, osVersion: '', pkgName: '', targetVersion: '', repoType: '', distroId: '', distroVersion: '', architecture: '' })
 
 async function openPatchRepo() {
   patchDlg.visible = true
@@ -356,8 +407,8 @@ async function loadPatches() {
 }
 
 async function submitPatchImport() {
-  if (!patchImport.file || !patchImport.pkgName.trim() || !patchImport.targetVersion.trim()) {
-    return msg('请补全文件、包名与目标版本', 'warning')
+  if (!patchImport.file || !patchImport.pkgName.trim() || !patchImport.targetVersion.trim() || !patchImport.distroId.trim() || !patchImport.distroVersion.trim() || !patchImport.architecture.trim()) {
+    return msg('请补全文件、包名、完整版本、发行版与包架构', 'warning')
   }
   patchImport.loading = true
   try {
@@ -367,6 +418,7 @@ async function submitPatchImport() {
     fd.append('osVersion', patchImport.osVersion)
     fd.append('pkgName', patchImport.pkgName.trim())
     fd.append('targetVersion', patchImport.targetVersion.trim())
+    for (const field of ['distroId', 'distroVersion', 'architecture']) fd.append(field, patchImport[field].trim())
     if (patchImport.repoType) fd.append('repoType', patchImport.repoType)
     await importPatch(fd)
     patchImport.visible = false
@@ -379,8 +431,43 @@ async function submitPatchImport() {
   }
 }
 
+const patchReview = reactive({ visible: false, loading: false, patch: null, cveId: '', context: null, notes: '', acknowledged: false })
+watch(() => patchReview.cveId, () => { patchReview.context = null; patchReview.acknowledged = false })
+function openPatchReview(row) { Object.assign(patchReview, { visible: true, patch: row, cveId: '', context: null, notes: '', acknowledged: false }) }
+function formatReviewEvidence(cve) {
+  try { return JSON.stringify({ provenance: JSON.parse(cve.provenance), affected: JSON.parse(cve.affected) }, null, 2) }
+  catch { return '依据无法读取，请重新核对' }
+}
+async function loadPatchReviewContext() {
+  patchReview.context = null; patchReview.acknowledged = false
+  const id = patchReview.patch.id, cveId = patchReview.cveId.trim()
+  try {
+    const context = await fetchPatchReviewContext(id, cveId)
+    if (patchReview.patch?.id === id && patchReview.cveId.trim() === cveId) patchReview.context = context
+  }
+  catch (e) { msg(e.message || '当前复核依据不可用', 'error') }
+}
+async function submitPatchReview() {
+  if (patchReview.notes.trim().length < 10) return msg('请填写至少 10 字的复核依据', 'warning')
+  patchReview.loading = true
+  try {
+    const ctx = patchReview.context
+    await reviewPatch(patchReview.patch.id, { cveId: ctx.cve.cve_id, ruleDigest: ctx.cve.rule_digest, patchDigest: ctx.patchDigest, notes: patchReview.notes, acknowledged: patchReview.acknowledged })
+    patchReview.visible = false; msg('人工复核已记录；创建与派发时会再次核对'); await loadPatches()
+  } catch (e) { patchReview.context = null; patchReview.acknowledged = false; msg(e.message || '复核失败，请重新查看依据', 'error') }
+  finally { patchReview.loading = false }
+}
+async function revokeReview(row) {
+  try {
+    const { value } = await ElMessageBox.prompt('填写撤销原因。引用这条复核的待派发任务将被阻断。', '撤销人工复核', { inputValidator: v => !!v?.trim() || '请填写撤销原因' })
+    await revokePatchReview(patchReview.patch.id, row.id, value); await loadPatches()
+    patchReview.patch = patchDlg.list.find(p => p.id === patchReview.patch.id); patchReview.context = null; patchReview.acknowledged = false
+    msg('复核已撤销')
+  } catch (e) { if (e !== 'cancel' && e !== 'close') msg(e.message || '撤销失败', 'error') }
+}
+
 const fixTasks = reactive({ visible: false, list: [] })
-const fixRecDlg = reactive({ visible: false, name: '', list: [] })
+const fixRecDlg = reactive({ visible: false, name: '', list: [], task: null })
 
 async function openFixTasks() {
   fixTasks.visible = true
@@ -396,10 +483,12 @@ async function openFixTasks() {
 async function viewFixRecords(row) {
   fixRecDlg.name = `${row.task_no} ${row.name || ''}`
   fixRecDlg.list = []
+  fixRecDlg.task = null
   fixRecDlg.visible = true
   try {
     const res = await fetchFixTaskRecords(row.id)
     fixRecDlg.list = res?.list || []
+    fixRecDlg.task = res?.task || null
   } catch (e) {
     msg(e.message || '修复明细加载失败', 'error')
   }

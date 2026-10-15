@@ -20,9 +20,29 @@
       <el-alert v-if="!state.signature?.db_version" title="请导入基础特征库或启用远端同步。当前缺少病毒识别依据。" type="warning" :closable="false" show-icon style="margin-top:12px" />
       <p class="hint">人工导入与远端同步可同时使用。远端不可用时，平台和 Agent 继续使用已有库；人工补充的规则优先保留。</p>
       <p class="hint">漏洞信息只有包含适用的软件和版本条件，才能参与资产比对。补丁包继续在漏洞修复流程中按需使用。</p>
+      <el-alert v-if="state.unattributedCveCount" type="warning" :closable="false" :title="`${state.unattributedCveCount} 条历史漏洞缺少入库来源记录，请重新导入并扫描；旧依据保持未知`" style="margin-bottom:12px" />
+      <el-button @click="showRules = true; loadRules()">查看漏洞规则依据</el-button>
       <input ref="signatureInput" type="file" accept=".zip" hidden @change="importFile($event, 'signature')" />
       <input ref="cveInput" type="file" accept=".json" hidden @change="importFile($event, 'cve')" />
     </div>
+    <div v-if="showRules" class="panel" style="margin-top:16px">
+      <h4>漏洞规则与依据</h4>
+      <p class="hint">公告引用和引用摘要来自导入声明，不代表厂商真实性已验证。源码包和上游范围不能直接推断发行版二进制包的回移状态。</p>
+      <el-input v-model="rulesKeyword" placeholder="CVE 或标题" @keyup.enter="rulesPage = 1; loadRules()" style="max-width:320px" />
+      <el-button :loading="rulesLoading" @click="rulesPage = 1; loadRules()">查询</el-button>
+      <el-alert v-if="rulesError" :title="rulesError" type="error" :closable="false" />
+      <el-table :data="ruleRows" v-loading="rulesLoading" style="margin-top:12px">
+        <el-table-column prop="cve_id" label="CVE" min-width="160" />
+        <el-table-column prop="title" label="标题" min-width="180" />
+        <el-table-column label="声明用途" min-width="130"><template #default="{ row }">{{ row.evaluation === 'declared' ? '含可评估声明' : '仅元数据或旧依据缺失' }}</template></el-table-column>
+        <el-table-column label="实际导入来源" min-width="130"><template #default="{ row }">{{ row.rule_source_id || '历史来源未知' }}</template></el-table-column>
+        <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" @click="ruleDetail = row">查看依据</el-button></template></el-table-column>
+      </el-table>
+      <el-pagination v-model:current-page="rulesPage" :page-size="20" :total="rulesTotal" layout="prev, pager, next" @current-change="loadRules" />
+    </div>
+    <el-dialog :model-value="!!ruleDetail" :title="ruleDetail?.cve_id" :width="compact ? 'calc(100% - 24px)' : '650px'" @close="ruleDetail = null">
+      <VulnerabilityEvidence v-if="ruleDetail" :snapshot="{ import: ruleDetail.provenance, rules: ruleDetail.affected }" :source-id="ruleDetail.rule_source_id" :digest="ruleDetail.rule_digest" :status="ruleDetail.rule_digest ? 'declared' : 'legacy'" />
+    </el-dialog>
     <div class="panel" style="margin-top:16px">
       <h4>远端同步状态</h4>
       <p class="hint">数据源按计划串行检查。连续失败会延后重试，已有库继续可用。管理员可调整计划，设置保存后立即生效。</p>
@@ -90,9 +110,19 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchLibraries, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, importCveLibrary, importVirusDb, getUser } from '../api'
+import { fetchLibraries, fetchLibraryCves, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, importCveLibrary, importVirusDb, getUser } from '../api'
+import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 
 const state = ref({ sources: [], signature: {} })
+const showRules = ref(false), ruleRows = ref([]), rulesKeyword = ref(''), rulesPage = ref(1), rulesTotal = ref(0), rulesLoading = ref(false), rulesError = ref(''), ruleDetail = ref(null)
+async function loadRules() {
+  rulesLoading.value = true
+  try {
+    const data = await fetchLibraryCves({ keyword: rulesKeyword.value, page: rulesPage.value })
+    ruleRows.value = data.list || []; rulesTotal.value = Number(data.total || 0); rulesError.value = ''
+  } catch (e) { rulesError.value = e.message }
+  finally { rulesLoading.value = false }
+}
 const loading = ref(false), uploading = ref(false), syncing = ref(false), error = ref('')
 const signatureInput = ref(), cveInput = ref()
 const schedule = ref({ visible: false, saving: false })
