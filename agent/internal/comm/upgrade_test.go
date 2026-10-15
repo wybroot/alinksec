@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"google.golang.org/grpc/metadata"
@@ -106,6 +107,38 @@ func TestUpgradeRefusesLegacyCommandAndUnsupportedSupervisor(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(c.workDir, "upgrade")); !os.IsNotExist(err) {
 				t.Fatal("unsupported upgrade changed disk state")
+			}
+		})
+	}
+}
+
+func TestReconnectAdvertisesUpgradeCapabilityBeforeBacklog(t *testing.T) {
+	for _, source := range []string{"pending", "offline"} {
+		t.Run(source, func(t *testing.T) {
+			c := reportTestClient(t)
+			c.workDir = t.TempDir()
+			c.cfg = &config.Config{HeartbeatInterval: time.Hour, DrainRatePerSec: 1}
+			c.state = &State{AgentID: "agent"}
+			c.upgradeContract = 1
+			backlog := securityReport("backlog-before-upgrade")
+			if source == "pending" {
+				c.pendingReports <- backlog
+			} else if err := c.queue.Push(backlog); err != nil {
+				t.Fatal(err)
+			}
+			// Disconnect while draining, after the first report was accepted.
+			stream := &upgradeStream{failAt: 2}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := c.sendLoop(ctx, stream, make(chan *pb.Report), 0); err == nil {
+				t.Fatal("missing backlog transport failure")
+			}
+			if len(stream.reports) != 1 || stream.reports[0].GetHeartbeat().GetUpgradeContract() != 1 {
+				t.Fatalf("first report did not establish upgrade capability: %v", stream.reports)
+			}
+			remaining, err := c.queue.PopAll()
+			if err != nil || len(remaining) != 1 || remaining[0].GetReportId() != backlog.GetReportId() {
+				t.Fatalf("heartbeat ordering lost failed backlog: %v, %v", remaining, err)
 			}
 		})
 	}

@@ -303,9 +303,6 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 
 	c.log.Info("主通道已建立", "agent_id", c.state.AgentID)
 
-	// 重连成功立即心跳（协议设计 §5）
-	sendCh <- c.buildHeartbeat()
-
 	// 连接建立后触发一次资产采集（受最小间隔约束，防止连接抖动重复采集）
 	c.triggerCollect(nil)
 
@@ -348,6 +345,12 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 
 // sendLoop 发送协程：心跳定时、离线队列补传、sendCh 消费
 func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelClient, sendCh <-chan *pb.Report, generation uint64) error {
+	// The authenticated first report establishes this connection's capabilities
+	// before the server delivers queued upgrades. Backlog and result replay must
+	// never win a select race against this heartbeat.
+	if err := c.sendReport(stream, c.buildHeartbeat(), generation); err != nil {
+		return fmt.Errorf("发送初始心跳: %w", err)
+	}
 	ticker := time.NewTicker(c.cfg.HeartbeatInterval)
 	defer ticker.Stop()
 	upgradeTick := time.NewTicker(time.Second)
