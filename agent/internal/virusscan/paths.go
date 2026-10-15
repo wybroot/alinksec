@@ -23,6 +23,8 @@ func quickScanRoots() []string {
 	return dedupExists(roots)
 }
 
+func QuickScanRoots() []string { return quickScanRoots() }
+
 // fullScanRoots 全盘扫描根：Windows 盘符 / Linux 挂载点
 func fullScanRoots() []string {
 	if runtime.GOOS == "windows" {

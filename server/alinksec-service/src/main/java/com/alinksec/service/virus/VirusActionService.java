@@ -1,132 +1,81 @@
 package com.alinksec.service.virus;
 
-import com.alinksec.proto.CmdVirusAction;
-import com.alinksec.proto.Command;
-import com.alinksec.proto.VirusTarget;
+import com.alinksec.proto.*;
 import com.alinksec.service.command.CommandService;
 import com.alinksec.service.protect.PolicyStoreService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.Instant;
+import java.util.*;
 
-import java.util.List;
-import java.util.Map;
-
-/**
- * 病毒处置（docs/05 §1.4）：隔离 / 删除 / 恢复 / 加白。
- *
- * 状态模型（t_virus_finding.status）：0新增 1已隔离 2已删除 3已恢复 4已加白。
- * 乐观更新：先改 finding 状态并下发指令；Agent 执行失败经 ACK FAILED 留痕（指令记录可查），
- * 人工可再次处置或恢复。加白写 t_virus_whitelist 平台全局生效。
- */
 @Service
 public class VirusActionService {
-
-    private static final Logger log = LoggerFactory.getLogger(VirusActionService.class);
-
-    private final JdbcTemplate jdbc;
-    private final CommandService commandService;
-    private final PolicyStoreService policyStore;
-
-    public VirusActionService(JdbcTemplate jdbc, CommandService commandService, PolicyStoreService policyStore) {
-        this.jdbc = jdbc;
-        this.commandService = commandService;
-        this.policyStore = policyStore;
-    }
-
-    /**
-     * 对一组 finding 执行处置。
-     * @param action quarantine/delete/restore/whitelist
-     * @return 各主机下发情况摘要
-     */
+    private final JdbcTemplate jdbc; private final CommandService commands; private final PolicyStoreService policies;
+    public VirusActionService(JdbcTemplate jdbc,CommandService commands,PolicyStoreService policies) { this.jdbc=jdbc; this.commands=commands; this.policies=policies; }
     @Transactional
-    public Map<String, Object> act(List<Long> findingIds, String action, Long operatedBy) {
-        if (findingIds == null || findingIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择处置对象");
+    public Map<String,Object> act(List<Long> ids,String action,Long actor) {
+        VirusExecution.lock(jdbc); VirusExecution.actor(jdbc,actor);
+        if(ids==null || ids.isEmpty() || ids.size()>32 || ids.stream().anyMatch(i->i==null || i<=0) || ids.stream().distinct().count()!=ids.size() || action==null || !Set.of("quarantine","delete","restore","whitelist").contains(action)) throw new IllegalArgumentException("请选择1至32个唯一检出记录和有效动作");
+        List<Map<String,Object>> findings=new ArrayList<>();
+        for(long id:ids) {
+            var rows=jdbc.queryForList("SELECT f.id,f.agent_id,f.path,f.sha256,f.status,f.quarantine_id,a.virus_execution_contract FROM t_virus_finding f JOIN t_agent a ON a.agent_id=f.agent_id WHERE f.id=? AND a.deleted=false",id);
+            if(rows.size()!=1) throw new IllegalArgumentException("部分检出或主机已不存在，请刷新");
+            var row=rows.get(0); VirusExecution.path((String)row.get("path")); VirusExecution.hash((String)row.get("sha256"));
+            if(jdbc.queryForObject("SELECT count(*) FROM t_virus_action_evidence WHERE finding_id=? AND state='pending'",Integer.class,id)>0) throw new IllegalArgumentException("部分文件已有待确认的处置");
+            int status=((Number)row.get("status")).intValue();
+            if(!action.equals("whitelist")) {
+                if(((Number)row.get("virus_execution_contract")).intValue()!=2) throw new IllegalArgumentException("旧Agent不支持摘要绑定处置，请先更新并等待心跳");
+                if(action.equals("restore") && (status!=0 && status!=1 || !String.valueOf(row.get("quarantine_id")).matches("[0-9a-f]{32}"))) throw new IllegalArgumentException("恢复需要可复核的隔离对象编号");
+                if(action.equals("quarantine") && !String.valueOf(row.get("quarantine_id")).isEmpty()) throw new IllegalArgumentException("此记录已有保留的隔离对象，请先复核恢复或删除");
+                if(action.equals("quarantine") && status!=0 && status!=3 || action.equals("delete") && status!=0 && status!=1 && status!=3) throw new IllegalArgumentException("检出处置状态已变化，请刷新");
+                if(status==1 && String.valueOf(row.get("quarantine_id")).isEmpty()) throw new IllegalArgumentException("旧隔离证据缺少对象编号，须由本机人工复核");
+            }
+            findings.add(row);
         }
-        String marks = findingIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
-        List<Map<String, Object>> findings = jdbc.queryForList(
-                "SELECT id, agent_id, path, sha256, status FROM t_virus_finding WHERE id IN (" + marks + ")");
-        if (findings.isEmpty()) {
-            throw new IllegalArgumentException("检出记录不存在");
+        if(action.equals("whitelist")) {
+            for(var f:findings) {
+                insertWhitelist("hash",VirusExecution.hash((String)f.get("sha256")),"检出记录加白: "+f.get("path"),actor);
+                history(f,"",action,"committed",actor);
+            }
+            policies.rebuild(); return Map.of("count",findings.size(),"state","policy_committed");
         }
-
-        switch (action) {
-            case "quarantine" -> doAction(findings, CmdVirusAction.Action.QUARANTINE, 1, operatedBy);
-            case "delete" -> doAction(findings, CmdVirusAction.Action.DELETE, 2, operatedBy);
-            case "restore" -> doAction(findings, CmdVirusAction.Action.RESTORE, 3, operatedBy);
-            case "whitelist" -> addWhitelist(findings, operatedBy);
-            default -> throw new IllegalArgumentException("未知处置动作: " + action);
+        Map<String,List<Map<String,Object>>> grouped=new LinkedHashMap<>();
+        for(var f:findings) grouped.computeIfAbsent((String)f.get("agent_id"),a->new ArrayList<>()).add(f);
+        var commandsOut=new ArrayList<String>();
+        for(var group:grouped.entrySet()) {
+            var targets=group.getValue().stream().map(f->VirusTarget.newBuilder().setFindingId(String.valueOf(f.get("id"))).setPath((String)f.get("path")).setSha256(VirusExecution.hash((String)f.get("sha256"))).setQuarantineId((String)f.get("quarantine_id")).build()).toList();
+            String cmd=commands.dispatchAfterCommit(group.getKey(),Command.newBuilder().setVirusAction(CmdVirusAction.newBuilder().setExecutionContract(2).setAction(CmdVirusAction.Action.valueOf(action.toUpperCase(Locale.ROOT))).addAllTargets(targets)),actor);
+            for(var f:group.getValue()) history(f,cmd,action,"pending",actor);
+            commandsOut.add(cmd);
         }
-        return Map.of("count", findings.size());
+        return Map.of("count",findings.size(),"state","pending","commands",commandsOut);
     }
-
-    /** 下发本机文件处置指令 + 更新 finding 状态 */
-    private void doAction(List<Map<String, Object>> findings, CmdVirusAction.Action act, int newStatus, Long operatedBy) {
-        // 按 agent 分组下发（一次指令携带该主机全部目标）
-        Map<String, List<VirusTarget>> byAgent = new java.util.LinkedHashMap<>();
-        for (Map<String, Object> f : findings) {
-            byAgent.computeIfAbsent((String) f.get("agent_id"), k -> new java.util.ArrayList<>())
-                    .add(VirusTarget.newBuilder()
-                            .setPath((String) f.get("path"))
-                            .setSha256((String) f.get("sha256"))
-                            .build());
-        }
-        String marks = findings.stream().map(f -> String.valueOf(f.get("id")))
-                .reduce((a, b) -> a + "," + b).orElse("");
-        for (var e : byAgent.entrySet()) {
-            commandService.dispatch(e.getKey(), Command.newBuilder()
-                    .setVirusAction(CmdVirusAction.newBuilder()
-                            .setAction(act)
-                            .addAllTargets(e.getValue())),
-                    operatedBy);
-        }
-        jdbc.update("UPDATE t_virus_finding SET status = " + newStatus + " WHERE id IN (" + marks + ")");
-        log.info("病毒处置指令已下发: action={} findings={} agents={}", act, findings.size(), byAgent.size());
+    private void history(Map<String,Object> f,String command,String action,String state,Long actor) {
+        jdbc.update("INSERT INTO t_virus_action_evidence(id,finding_id,agent_id,command_id,action,state,actor,created_at,finished_at,request_evidence) VALUES(?,?,?,?,?,?,?,?,?,?)",UUID.randomUUID().toString(),f.get("id"),f.get("agent_id"),command,action,state,actor,Instant.now().toString(),state.equals("pending")?null:Instant.now().toString(),com.alinksec.common.util.JsonUtils.write(Map.of("path",f.get("path"),"sha256",f.get("sha256"),"quarantine_id",f.get("quarantine_id"),"status",f.get("status"))));
     }
-
-    /** 加白：写全局白名单、同步 Agent 策略，并将 finding 状态置 4。 */
-    private void addWhitelist(List<Map<String, Object>> findings, Long operatedBy) {
-        String marks = findings.stream().map(f -> String.valueOf(f.get("id")))
-                .reduce((a, b) -> a + "," + b).orElse("");
-        for (Map<String, Object> f : findings) {
-            // hash 型白名单（跨路径全局生效）
-            jdbc.update("""
-                    INSERT INTO t_virus_whitelist (type, value, remark, created_by)
-                    VALUES ('hash', ?, ?, ?)
-                    """, f.get("sha256"), "检出记录加白: " + f.get("path"), operatedBy);
-        }
-        jdbc.update("UPDATE t_virus_finding SET status = 4 WHERE id IN (" + marks + ")");
-        policyStore.rebuild();
-        log.info("病毒检出已加白: findings={}", findings.size());
+    private void insertWhitelist(String type,String value,String remark,Long actor) {
+        if(jdbc.queryForObject("SELECT count(*) FROM t_virus_whitelist WHERE type=? AND value=?",Integer.class,type,value)>0) return;
+        if(jdbc.queryForObject("SELECT count(*) FROM t_virus_whitelist",Integer.class)>=1000) throw new IllegalArgumentException("白名单已达到1000条上限");
+        jdbc.update("INSERT INTO t_virus_whitelist(type,value,remark,created_by) VALUES(?,?,?,?)",type,value,remark,actor);
     }
-
-    /** 新增白名单（管理入口：hash 或 path 型） */
-    @Transactional
-    public void addWhitelistEntry(String type, String value, String remark, Long operatedBy) {
-        if (!"hash".equals(type) && !"path".equals(type)) {
-            throw new IllegalArgumentException("白名单类型仅支持 hash / path");
-        }
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("白名单值不能为空");
-        }
-        if ("hash".equals(type) && !value.matches("(?i)[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("hash 白名单需为 64 位十六进制 SHA256");
-        }
-        jdbc.update("INSERT INTO t_virus_whitelist (type, value, remark, created_by) VALUES (?, ?, ?, ?)",
-                type, value, remark, operatedBy);
-        policyStore.rebuild();
+    @Transactional public void addWhitelistEntry(String type,String value,String remark,Long actor) {
+        VirusExecution.lock(jdbc); VirusExecution.actor(jdbc,actor);
+        if(!"hash".equals(type) && !"path".equals(type) || remark!=null && remark.length()>255) throw new IllegalArgumentException("白名单类型或说明无效");
+        value="hash".equals(type)?VirusExecution.hash(value):VirusExecution.path(value);
+        if(type.equals("path") && (value.equals("/") || value.matches("^[A-Za-z]:[\\\\/]$"))) throw new IllegalArgumentException("不能将整盘加入路径白名单");
+        insertWhitelist(type,value,remark,actor); policies.rebuild();
     }
-
-    /** 删除白名单 */
-    @Transactional
-    public void removeWhitelist(long id) {
-        int rows = jdbc.update("DELETE FROM t_virus_whitelist WHERE id = ?", id);
-        if (rows == 0) {
-            throw new IllegalArgumentException("白名单记录不存在");
-        }
-        policyStore.rebuild();
+    @Transactional public void removeWhitelist(long id) { removeWhitelist(id,null); }
+    @Transactional public void removeWhitelist(long id,Long actor) {
+        VirusExecution.lock(jdbc); VirusExecution.actor(jdbc,actor);
+        if(jdbc.update("DELETE FROM t_virus_whitelist WHERE id=?",id)!=1) throw new IllegalArgumentException("白名单记录不存在");
+        policies.rebuild();
+    }
+    @Transactional public Map<String,Object> updateRealtime(boolean enabled,String action,Long actor) {
+        VirusExecution.lock(jdbc); VirusExecution.actor(jdbc,actor);
+        if(!Set.of("alert_only","quarantine").contains(action)) throw new IllegalArgumentException("周期检测仅支持告警或隔离");
+        jdbc.update("UPDATE t_virus_state SET realtime_enabled=?,realtime_action=?,revision=revision+1 WHERE id=1",enabled?1:0,action);
+        policies.rebuild(); return Map.of("enabled",enabled,"action",action,"state","policy_committed");
     }
 }

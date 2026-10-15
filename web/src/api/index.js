@@ -320,6 +320,7 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
     const isolationStatus = ISOLATION_STATUS[Number(h.isolation_status)] || 'normal'
     return {
       agentId: h.agent_id,
+      virusExecutionContract: Number(h.virus_execution_contract || 0),
       host: h.hostname,
       ip: h.ip || '—',
       os: OS[h.os_type]?.(h.os_version) || h.os_version || '—',
@@ -590,7 +591,7 @@ export async function fetchPortFindings(riskyOnly) {
 
 export async function fetchAgentsForSelect() {
   const hosts = await fetchAllHosts()
-  return hosts.map((h) => ({ id: h.agentId, name: h.host || h.agentId, ip: h.ip }))
+  return hosts.map((h) => ({ id: h.agentId, name: h.host || h.agentId, ip: h.ip, virusExecutionContract: h.virusExecutionContract }))
 }
 
 /* ---------------- 病毒 ---------------- */
@@ -610,12 +611,13 @@ export async function fetchVirus(status) {
       version: db?.db_version || '未导入',
       updated: fmtTime(db?.imported_at),
       hashCount: Number(db?.hash_count || 0).toLocaleString(),
-      yaraCount: Number(db?.rule_count || 0).toLocaleString(),
+      ruleCount: Number(db?.rule_count || 0).toLocaleString(),
     },
     stats: {
       findings30d: Number(stats?.findings30d || 0),
       quarantined: Number(stats?.quarantined || 0),
-      todo: Number((findings?.list || []).filter((f) => Number(f.status) === 0).length),
+      todo: Number(stats?.todo || 0),
+      realtime: stats?.realtime || {},
     },
     findings: (findings?.list || []).map((f) => ({
       id: f.id,
@@ -629,6 +631,13 @@ export async function fetchVirus(status) {
       sha256: f.sha256,
       size: f.size,
       time: fmtTime(f.created_at),
+      quarantineId: f.quarantine_id || '',
+      actionError: f.action_error || '',
+      pending: Number(f.pending_actions || 0) > 0,
+      lastActionState: f.last_action_state || '',
+      lastActionError: f.last_action_error || '',
+      whitelisted: Number(f.hash_whitelisted || 0) > 0,
+      executionSupported: Number(f.virus_execution_contract || 0) === 2,
     })),
   }
 }
@@ -656,6 +665,10 @@ export async function pushVirusDb() {
 export async function fetchVirusTasks() {
   return get('/api/virus/tasks?page=1&size=50')
 }
+
+export const fetchVirusTaskEvidence = id => get(`/api/virus/tasks/${id}/evidence`)
+export const fetchVirusActionHistory = id => get(`/api/virus/findings/${id}/history`)
+export const updateVirusRealtime = (enabled, action) => post('/api/virus/realtime', { enabled, action })
 
 export async function fetchVirusWhitelist() {
   return get('/api/virus/whitelist')

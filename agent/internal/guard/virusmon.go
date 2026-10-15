@@ -1,11 +1,11 @@
-// virusmon 病毒实时防护（docs/05 §1.5）：
-// 复用速率监测的树快照 diff——新增/修改文件在窗口内做 L1 哈希比对（准实时），
-// 检出即隔离 + RptSecurityEvent(type=virus, critical)。
-// 引擎由 comm 注入（virusscan.Engine.CheckAndQuarantine），guard 不直接依赖 virusscan 包
-// （避免隔离/取证循环依赖；未注入或特征库未安装时静默跳过）。
+// Periodic metadata snapshots are independent from decoy monitoring.
+// Only new or changed files within the declared snapshot/read budgets are checked.
 package guard
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/proto"
@@ -14,17 +14,93 @@ import (
 const (
 	ruleVirusID   = "PR-0012" // docs/03 内置规则：病毒实时防护
 	ruleVirusName = "病毒实时防护"
-	virusSweepMax = 200       // 单窗口检查文件数上限（防窗口内海量落盘拖垮 IO）
+	virusSweepMax = 200 // 单窗口检查文件数上限（防窗口内海量落盘拖垮 IO）
 )
 
 // VirusCheckFunc 单文件检查回调：命中返回 finding（已隔离/告警），干净返回 nil
 type VirusCheckFunc func(path string) *proto.VirusFinding
 
-// SetVirusEngine comm 启动时注入（实时防护开关由特征库安装状态天然决定）
+// SetVirusEngine 由 comm 启动时注入；周期策略和特征库可用性分别检查。
 func (g *Guard) SetVirusEngine(check VirusCheckFunc) {
 	g.mu.Lock()
 	g.virusCheck = check
 	g.mu.Unlock()
+}
+
+func (g *Guard) SetVirusRoots(roots []string, enabled func() bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.virusTrees = append([]string(nil), roots...)
+	g.virusEnabled = enabled
+	g.virusPrev = map[string]treeSnapshot{}
+}
+func (g *Guard) virusLoop() {
+	g.mu.Lock()
+	roots := append([]string(nil), g.virusTrees...)
+	enabled := g.virusEnabled
+	g.mu.Unlock()
+	if enabled != nil && !enabled() {
+		return
+	}
+	var changes []string
+	remaining := snapMaxEntries
+	deadline := time.Now().Add(2 * time.Second)
+	for _, root := range roots {
+		if remaining <= 0 || time.Now().After(deadline) {
+			break
+		}
+		current := virusSnapshot(root, &remaining, deadline)
+		g.mu.Lock()
+		previous, ok := g.virusPrev[root]
+		g.virusPrev[root] = current
+		g.mu.Unlock()
+		if ok {
+			diff := diffSnapshot(previous, current)
+			changes = append(changes, diff.Modified...)
+			changes = append(changes, diff.Created...)
+		}
+	}
+	g.virusSweep(changes)
+}
+
+// Read directories in small chunks; budget includes directories and rejected
+// entries so a tree of empty directories cannot evade the work limit.
+func virusSnapshot(root string, remaining *int, deadline time.Time) treeSnapshot {
+	snap := treeSnapshot{}
+	var walk func(string, int)
+	walk = func(path string, depth int) {
+		if depth > snapMaxDepth || *remaining <= 0 || time.Now().After(deadline) {
+			return
+		}
+		*remaining--
+		st, err := os.Lstat(path)
+		if err != nil || st.Mode()&os.ModeSymlink != 0 {
+			return
+		}
+		if st.Mode().IsRegular() {
+			snap[filepath.ToSlash(path)] = fileEntry{Size: st.Size(), Mtime: st.ModTime().UnixNano(), Ext: strings.ToLower(filepath.Ext(path))}
+			return
+		}
+		if !st.IsDir() || depth > 0 && strings.HasPrefix(st.Name(), ".") {
+			return
+		}
+		dir, err := os.Open(path)
+		if err != nil {
+			return
+		}
+		defer dir.Close()
+		for *remaining > 0 && time.Now().Before(deadline) {
+			entries, err := dir.ReadDir(128)
+			for _, entry := range entries {
+				walk(filepath.Join(path, entry.Name()), depth+1)
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+	walk(root, 0)
+	return snap
 }
 
 // virusSweep 窗口 diff 文件批量检查：Modified + Created（改名为新路径的加密产物也覆盖）
@@ -39,7 +115,11 @@ func (g *Guard) virusSweep(paths []string) {
 		paths = paths[:virusSweepMax]
 	}
 	var hits []*proto.VirusFinding
+	deadline := time.Now().Add(2 * time.Second)
 	for _, p := range paths {
+		if time.Now().After(deadline) {
+			break
+		}
 		if f := check(p); f != nil {
 			hits = append(hits, f)
 		}
@@ -53,11 +133,13 @@ func (g *Guard) virusSweep(paths []string) {
 			RuleId:   ruleVirusID,
 			RuleName: ruleVirusName,
 			Type:     "virus",
-			Severity: proto.Severity_SEV_CRITICAL,
+			Severity: f.GetSeverity(),
 			Detail: mustJSON(map[string]any{
 				"source": "realtime_guard", "name": f.GetName(),
 				"path": f.GetPath(), "sha256": f.GetSha256(),
-				"action": f.GetActionTaken(),
+				"action":        f.GetActionTaken(),
+				"quarantine_id": f.GetQuarantineId(), "action_error": f.GetActionError(),
+				"engine": f.GetEngine(), "size": f.GetSize(), "execution_contract": 2,
 			}),
 			EventTs: time.Now().UnixMilli(),
 		}

@@ -21,7 +21,7 @@ public class LibraryProperties {
     public void setWorkDir(String value) { workDir = value; }
     public long getMaxDownloadBytes() { return maxDownloadBytes; }
     public void setMaxDownloadBytes(long value) { maxDownloadBytes = value; }
-    public int getMaxHashes() { return maxHashes; }
+    public int getMaxHashes() { return Math.min(maxHashes,250_000); }
     public void setMaxHashes(int value) { maxHashes = value; }
     public int getMaxCvesPerImport() { return maxCvesPerImport; }
     public void setMaxCvesPerImport(int value) { maxCvesPerImport = value; }

@@ -49,7 +49,7 @@ public class HostQueryService {
         pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT a.agent_id, a.hostname, a.ip, a.os_type, a.os_version, a.kernel, a.arch,
-                       a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,
+                       a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,a.virus_execution_contract,a.virus_db_version,
                        a.isolation_status, a.isolation_command_id, a.isolation_error, a.isolation_updated_at,
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
                        (SELECT count(*) FROM t_asset_port p WHERE p.agent_id = a.agent_id) AS port_count,
@@ -77,7 +77,7 @@ public class HostQueryService {
                 SELECT agent_id, hostname, ip, os_type, os_version, kernel, arch, agent_version,
                        machine_id, status, protect_enabled, policy_version, last_heartbeat, created_at,
                        isolation_status, isolation_command_id, isolation_error, isolation_updated_at,
-                       distro_id, distro_version, software_inventory_source, software_identity_error, package_repair_contract,
+                       distro_id, distro_version, software_inventory_source, software_identity_error, package_repair_contract,virus_execution_contract,virus_db_version,
                        software_collection_status, software_collection_error, software_attempted_at, software_succeeded_at
                 FROM t_agent WHERE agent_id = ? AND status <> 4
                 """, agentId);

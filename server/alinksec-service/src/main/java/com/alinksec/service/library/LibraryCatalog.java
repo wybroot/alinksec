@@ -98,6 +98,7 @@ public class LibraryCatalog {
                     """);
             if (ruleRows.size() > 2000) throw new IllegalArgumentException("合并规则数量超过上限");
             Files.writeString(rules, JsonUtils.write(Map.of("rules", ruleRows.stream().map(r -> JsonUtils.read((String) r.get("document"))).toList())));
+            if(Files.size(rules)>2L<<20 || Files.size(hashes)+Files.size(rules)>(64L<<20)-(64L<<10)) throw new IllegalArgumentException("合并特征超过Agent规则或解压容量，保留原版本");
             if (!allowEmpty && hashCount == 0 && ruleRows.isEmpty()) throw new IllegalArgumentException("拒绝发布空特征库");
             String fingerprint = SignaturePackage.sha256(hashes) + SignaturePackage.sha256(rules);
             var state = jdbc.queryForList("SELECT cursor,version FROM t_security_feed_state WHERE source_id = '_signature-release'");

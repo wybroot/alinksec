@@ -31,6 +31,26 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/virus")
 public class VirusController {
+    public record WhitelistRequest(String type,String value,String remark) {}
+    public record RealtimeRequest(Boolean enabled,String action) {}
+    private static String text(com.fasterxml.jackson.databind.JsonNode body,String field,boolean optional) {
+        var value=body.get(field);
+        if(optional && (value==null || value.isNull())) return null;
+        if(value==null || !value.isTextual()) throw new IllegalArgumentException(field+" 必须为文本");
+        return value.textValue();
+    }
+    private static List<String> texts(com.fasterxml.jackson.databind.JsonNode body,String field,boolean optional) {
+        var values=body.get(field);
+        if(optional && (values==null || values.isNull())) return List.of();
+        if(values==null || !values.isArray() || values.size()>500) throw new IllegalArgumentException(field+" 必须为有界数组");
+        var list=new java.util.ArrayList<String>();
+        for(var value:values) { if(!value.isTextual()) throw new IllegalArgumentException(field+" 成员必须为文本"); list.add(value.textValue()); }
+        return list;
+    }
+    private static Long actor(HttpServletRequest request) {
+        if(!(request.getAttribute("uid") instanceof Number n)) throw new IllegalArgumentException("检测操作需要登录账号");
+        return n.longValue();
+    }
 
     private final VirusQueryService query;
     private final VirusTaskService taskService;
@@ -50,29 +70,23 @@ public class VirusController {
 
     /** 创建病毒扫描任务：mode 1快速 2全盘 3自定义（paths） */
     @PostMapping("/tasks")
-    public ApiResult<Map<String, Object>> createTask(@RequestBody Map<String, Object> body,
+    public ApiResult<Map<String, Object>> createTask(@RequestBody com.fasterxml.jackson.databind.JsonNode body,
                                                      HttpServletRequest request) {
-        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
-        @SuppressWarnings("unchecked")
-        List<String> agentIds = (List<String>) body.getOrDefault("agentIds", List.of());
-        int mode = body.get("mode") instanceof Number m ? m.intValue() : VirusTaskService.MODE_QUICK;
-        @SuppressWarnings("unchecked")
-        List<String> paths = (List<String>) body.getOrDefault("paths", List.of());
-        String name = (String) body.get("name");
-        long taskId = taskService.createTask(name, agentIds, mode, paths, uid);
+        var mode=body.get("mode");
+        if(mode!=null && (!mode.isIntegralNumber() || !mode.canConvertToInt())) throw new IllegalArgumentException("mode 必须为整数");
+        long taskId = taskService.createTask(text(body,"name",true),texts(body,"agentIds",false),mode==null?1:mode.intValue(),texts(body,"paths",true),actor(request));
         return ApiResult.ok(Map.of("taskId", taskId));
     }
 
     /** 检出处置：action = quarantine / delete / restore / whitelist */
     @PostMapping("/findings/actions")
-    public ApiResult<Map<String, Object>> act(@RequestBody Map<String, Object> body,
+    public ApiResult<Map<String, Object>> act(@RequestBody com.fasterxml.jackson.databind.JsonNode body,
                                               HttpServletRequest request) {
-        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
-        @SuppressWarnings("unchecked")
-        List<Number> ids = (List<Number>) body.getOrDefault("findingIds", List.of());
-        String action = String.valueOf(body.get("action"));
-        List<Long> findingIds = ids.stream().map(Number::longValue).toList();
-        return ApiResult.ok(actionService.act(findingIds, action, uid));
+        var values=body.path("findingIds");
+        if(!values.isArray() || values.isEmpty() || values.size()>32) throw new IllegalArgumentException("findingIds 需要1至32个整数");
+        var ids=new java.util.ArrayList<Long>();
+        for(var value:values) { if(!value.isIntegralNumber() || !value.canConvertToLong()) throw new IllegalArgumentException("检出编号必须为整数"); ids.add(value.longValue()); }
+        return ApiResult.ok(actionService.act(ids,text(body,"action",false),actor(request)));
     }
 
     /** 导入特征库包（zip：manifest.json + hashes.txt），成功后自动推送全部 Agent */
@@ -109,21 +123,29 @@ public class VirusController {
 
     /** 新增白名单（type = hash / path） */
     @PostMapping("/whitelist")
-    public ApiResult<Void> addWhitelist(@RequestBody Map<String, Object> body,
+    public ApiResult<Void> addWhitelist(@RequestBody WhitelistRequest body,
                                         HttpServletRequest request) {
-        Long uid = request.getAttribute("uid") instanceof Number n ? n.longValue() : null;
-        actionService.addWhitelistEntry(String.valueOf(body.get("type")),
-                String.valueOf(body.get("value")), (String) body.get("remark"), uid);
+        actionService.addWhitelistEntry(body.type(),body.value(),body.remark(),actor(request));
         return ApiResult.ok(null);
     }
 
     @DeleteMapping("/whitelist/{id}")
-    public ApiResult<Void> removeWhitelist(@PathVariable long id) {
-        actionService.removeWhitelist(id);
+    public ApiResult<Void> removeWhitelist(@PathVariable long id,HttpServletRequest request) {
+        actionService.removeWhitelist(id,actor(request));
         return ApiResult.ok(null);
     }
 
     /* ---------- 查询 ---------- */
+
+    @PostMapping("/realtime")
+    public ApiResult<Map<String,Object>> realtime(@RequestBody com.fasterxml.jackson.databind.JsonNode body,HttpServletRequest request) {
+        if(!body.path("enabled").isBoolean()) throw new IllegalArgumentException("周期防护开关必须为布尔值");
+        return ApiResult.ok(actionService.updateRealtime(body.path("enabled").booleanValue(),text(body,"action",false),actor(request)));
+    }
+    @GetMapping("/tasks/{id}/evidence")
+    public ApiResult<List<Map<String,Object>>> taskEvidence(@PathVariable long id) { return ApiResult.ok(query.taskEvidence(id)); }
+    @GetMapping("/findings/{id}/history")
+    public ApiResult<List<Map<String,Object>>> history(@PathVariable long id) { return ApiResult.ok(query.actionHistory(id)); }
 
     @GetMapping("/tasks")
     public ApiResult<Map<String, Object>> tasks(@RequestParam(defaultValue = "1") int page,
