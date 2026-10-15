@@ -42,6 +42,9 @@ func (d *cmdDedup) Put(cmdID string, ack *pb.RptAck) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if el, ok := d.items[cmdID]; ok {
+		if terminal(d.acks[cmdID]) && !terminal(ack) {
+			return
+		}
 		d.acks[cmdID] = ack
 		d.order.MoveToBack(el)
 		return

@@ -65,7 +65,9 @@ type Client struct {
 	// 特征库更新单飞：下载安装互斥（避免并发替换 db 目录）
 	sigBusy atomic.Bool
 	// 配置修复单飞：文件写入互斥（避免并发改同一配置文件）
-	fixBusy atomic.Bool
+	fixBusy         atomic.Bool
+	upgradeBusy     atomic.Bool
+	upgradeContract uint32
 
 	// 勒索诱饵防护引擎（本地响应，事件经 reportSecurityEvent 上报）
 	grd *guard.Guard
@@ -82,14 +84,15 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 		return nil, fmt.Errorf("初始化离线队列: %w", err)
 	}
 	c := &Client{
-		cfg:            cfg,
-		workDir:        workDir,
-		state:          st,
-		queue:          q,
-		dedup:          newCmdDedup(1000),
-		log:            log,
-		collectTrigger: make(chan []string, 2),
-		pendingReports: make(chan *pb.Report, 4),
+		cfg:             cfg,
+		workDir:         workDir,
+		state:           st,
+		queue:           q,
+		dedup:           newCmdDedup(1000),
+		upgradeContract: upgrade.ExecutionContract(),
+		log:             log,
+		collectTrigger:  make(chan []string, 2),
+		pendingReports:  make(chan *pb.Report, 4),
 	}
 	// 平台热下发策略优先于本地 agent.yml（重启后仍生效，直至下次同步覆盖）
 	c.loadPersistedPolicy(cfg)
@@ -284,6 +287,11 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 	c.setChannelActive(true)
 	defer c.setChannelActive(false)
 	generation := c.channelObservation().Session
+	defer func() {
+		if err := upgrade.Disconnected(c.workDir, generation); err != nil {
+			c.log.Error("clear upgrade channel confirmation", "err", err)
+		}
+	}()
 
 	sendCh := make(chan *pb.Report, 256)
 	sendErr := make(chan error, 1)
@@ -342,11 +350,23 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelClient, sendCh <-chan *pb.Report, generation uint64) error {
 	ticker := time.NewTicker(c.cfg.HeartbeatInterval)
 	defer ticker.Stop()
+	upgradeTick := time.NewTicker(time.Second)
+	defer upgradeTick.Stop()
+	upgradeResults := map[string]string{}
 	drained := false
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-upgradeTick.C:
+			if upgrade.CandidatePending(c.workDir) {
+				if err := c.sendReport(stream, c.buildHeartbeat(), generation); err != nil {
+					return err
+				}
+			}
+			if err := c.sendUpgradeResults(stream, generation, upgradeResults); err != nil {
+				return err
+			}
 		case <-ticker.C:
 			if err := c.sendReport(stream, c.buildHeartbeat(), generation); err != nil {
 				return fmt.Errorf("发送心跳: %w", err)
@@ -390,6 +410,11 @@ func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report, 
 	err := stream.Send(r)
 	if err == nil {
 		c.noteChannelActivity(generation, true)
+		if r.GetHeartbeat() != nil {
+			if readyErr := upgrade.MarkReady(c.workDir, identity.AgentVersion, generation); readyErr != nil {
+				c.log.Error("upgrade startup confirmation failed", "err", readyErr)
+			}
+		}
 	}
 	return err
 }
@@ -445,6 +470,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			PolicyVersion:          c.state.PolicyVersion,
 			GuardStatus:            guardStatus,
 			VirusExecutionContract: 2,
+			UpgradeContract:        c.upgradeContract,
 			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
 		}},
 	}
@@ -464,6 +490,18 @@ func (c *Client) wrapAck(a *pb.RptAck) *pb.Report {
 func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx context.Context) []*pb.RptAck {
 	if cmd.GetCmdId() == "" {
 		return nil
+	}
+	if cmd.GetAgentUpgrade() != nil {
+		result, pending, err := upgrade.CommandState(c.workDir, cmd.GetCmdId())
+		if err != nil {
+			return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		}
+		if result != nil {
+			return []*pb.RptAck{upgradeAck(*result)}
+		}
+		if pending {
+			return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_RECEIVED, Message: "upgrade startup or rollback pending"}}
+		}
 	}
 	// 幂等：已处理过的指令直接重发上次 ACK
 	if prev := c.dedup.Get(cmd.GetCmdId()); prev != nil {
@@ -533,12 +571,25 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 	case *pb.Command_ProtectAction:
 		return c.executeProtectAction(p.ProtectAction, received)
 	case *pb.Command_AgentUpgrade:
-		// 灰度升级（docs/01 §6.4）：校验替换成功即 DONE，随后进程退出由 systemd/SCM 拉起新版本
-		msg, err := upgrade.Apply(c.workDir, p.AgentUpgrade.GetDownloadUrl(), p.AgentUpgrade.GetSha256(), p.AgentUpgrade.GetVersion())
-		if err != nil {
-			return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		if p.AgentUpgrade.GetExecutionContract() != 1 || c.upgradeContract != 1 {
+			return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "native upgrade watchdog contract 1 is required"}}
 		}
-		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Code: 0, Message: msg}}
+		if !c.upgradeBusy.CompareAndSwap(false, true) {
+			return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "another upgrade is being prepared"}}
+		}
+		go func() {
+			defer c.upgradeBusy.Store(false)
+			message, err := upgrade.Apply(c.workDir, p.AgentUpgrade.GetDownloadUrl(), p.AgentUpgrade.GetSha256(), p.AgentUpgrade.GetVersion(), cmd.GetCmdId())
+			ack := &pb.RptAck{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_RECEIVED, Message: message}
+			if err != nil {
+				ack.Stage = pb.RptAck_FAILED
+				ack.Code = 1
+				ack.Message = err.Error()
+			}
+			c.dedup.Put(cmd.GetCmdId(), ack)
+			c.pushReport(c.wrapAck(ack))
+		}()
+		return []*pb.RptAck{received}
 	case *pb.Command_AgentControl:
 		acks := []*pb.RptAck{received}
 		done := func(msg string) *pb.RptAck {
@@ -549,6 +600,9 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		}
 		switch p.AgentControl.GetAction() {
 		case pb.CmdAgentControl_RESTART:
+			if c.upgradeBusy.Load() || upgrade.Pending(c.workDir) {
+				return []*pb.RptAck{received, fail("upgrade or rollback pending; restart is deferred until completion")}
+			}
 			// ACK 先行，2s 后自退出由 systemd/SCM 拉起（与升级同模式）
 			go func() {
 				time.Sleep(2 * time.Second)

@@ -54,7 +54,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V012__patch_applicability_review.sql",
                 "db/common/V013__vulnerability_remediation_state.sql",
                 "db/common/V014__security_source_governance.sql",
-                "db/common/V015__detection_execution_evidence.sql"
+                "db/common/V015__detection_execution_evidence.sql",
+                "db/common/V016__agent_upgrade_watchdog.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

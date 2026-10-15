@@ -276,6 +276,8 @@ offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
   → 失败（启动超时 60s 由 watchdog 判定）→ 自动回滚旧版本并上报失败事件
 ```
 
+原生服务条件、健康确认、独立看护、自动回退与旧 Agent 兼容边界见 [Agent 升级看护](55-Agent升级看护与自动回退.md)。
+
 ### 7.2 自我保护
 
 | 项 | 实现 |

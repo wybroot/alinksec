@@ -122,6 +122,7 @@ message CmdAgentUpgrade {
   string version       = 1;
   string download_url  = 2;  // MinIO 预签名 URL
   string sha256        = 3;
+  uint32 execution_contract = 4; // 1: independent watchdog and durable startup/rollback outcome
 }
 
 message CmdCollectNow {
@@ -220,6 +221,7 @@ message RptHeartbeat {
   string guard_status    = 7;   // guard 引擎运行状态（normal/degraded）
   string db_version      = 8;   // 病毒特征库本地版本（落后于平台当前版本即触发 CmdSignatureUpdate）
   uint32 virus_execution_contract = 9;
+  uint32 upgrade_contract = 10; // 1 only while running under a supported native service manager
 }
 
 message RptMetricsBatch {
