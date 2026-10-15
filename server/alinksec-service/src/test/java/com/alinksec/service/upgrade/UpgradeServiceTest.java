@@ -42,7 +42,7 @@ class UpgradeServiceTest {
     }
 
     private void host(String id, int os, String arch) {
-        when(jdbc.queryForList(anyString(), eq(id))).thenReturn(List.of(Map.of("os_type", os, "arch", arch)));
+        when(jdbc.queryForList(anyString(), eq(id))).thenReturn(List.of(Map.of("os_type", os, "arch", arch, "upgrade_contract", 1)));
     }
 
     @ParameterizedTest
@@ -54,6 +54,20 @@ class UpgradeServiceTest {
         when(tokens.issue("host-1", "agent-upgrade", "agent.bin")).thenReturn("token");
         assertEquals(1, service().dispatch(1L, List.of("host-1"), null).get("dispatched"));
         verify(commands).dispatch(eq("host-1"), any(Command.Builder.class), isNull());
+    }
+
+    @Test
+    void dispatchPreservesVersionBuildMetadataInDownloadQuery() {
+        String key = "1.2.3+build-linux-amd64.bin";
+        when(jdbc.queryForMap(anyString(), eq(1L))).thenReturn(Map.of(
+                "platform", "linux-amd64", "version", "1.2.3+build", "package_key", key, "sha256", "a".repeat(64)));
+        host("host-1", 1, "amd64");
+        when(tokens.issue("host-1", "agent-upgrade", key)).thenReturn("token");
+        service().dispatch(1L, List.of("host-1"), null);
+        var sent = org.mockito.ArgumentCaptor.forClass(Command.Builder.class);
+        verify(commands).dispatch(eq("host-1"), sent.capture(), isNull());
+        assertEquals("https://127.0.0.1:8443/api/upgrade/download?packageKey=1.2.3%2Bbuild-linux-amd64.bin&token=token",
+                sent.getValue().getAgentUpgrade().getDownloadUrl());
     }
 
     @ParameterizedTest
@@ -81,5 +95,32 @@ class UpgradeServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service().upload(new ByteArrayInputStream(new byte[0]), "0.0.2", "linux-armv7", "", null));
         verifyNoInteractions(jdbc, commands, tokens);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0", "2", "-1"})
+    void unsupportedWatchdogRejectsWholeBatchBeforeDispatch(int contract) {
+        packageFor("linux-amd64");
+        host("ready",1,"amd64");
+        when(jdbc.queryForList(anyString(),eq("legacy"))).thenReturn(List.of(Map.of("os_type",1,"arch","amd64","upgrade_contract",contract)));
+        assertThrows(IllegalArgumentException.class,()->service().dispatch(1L,List.of("ready","legacy"),null));
+        verifyNoInteractions(commands,tokens);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"../escape","/absolute","..\\escape"," version","a/b"})
+    void unsafeVersionIsRejectedBeforeFilesystemOrDatabase(String version) {
+        assertThrows(IllegalArgumentException.class,()->service().upload(new ByteArrayInputStream(new byte[0]),version,"linux-amd64","",null));
+        verifyNoInteractions(jdbc,commands,tokens);
+    }
+
+    @Test void uploadCannotOverwriteAnExistingArtifact(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root) throws Exception {
+        var props=new AlinkSecProperties();props.getUpgrade().setStorageDir(root.toString());
+        var original=root.resolve("1.0-linux-amd64.bin");java.nio.file.Files.writeString(original,"original bytes");
+        when(jdbc.queryForObject(anyString(),eq(Integer.class),eq("1.0"),eq("linux-amd64"))).thenReturn(0);
+        var service=new UpgradeService(jdbc,commands,props,tokens);
+        assertThrows(java.io.IOException.class,()->service.upload(new ByteArrayInputStream("replacement".getBytes()),"1.0","linux-amd64","",null));
+        assertEquals("original bytes",java.nio.file.Files.readString(original));
+        try(var files=java.nio.file.Files.list(root)) { assertEquals(1,files.count()); }
     }
 }

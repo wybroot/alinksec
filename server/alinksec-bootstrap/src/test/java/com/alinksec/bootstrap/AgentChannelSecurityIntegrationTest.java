@@ -200,6 +200,29 @@ class AgentChannelSecurityIntegrationTest {
     }
 
     @Test
+    void upgradeCapabilityIsReplacedByCurrentAuthenticatedConnection() throws Exception {
+        EnrollResponse agent=enroll();
+        Stream ready=connect(agent);
+        ready.requests.onNext(report(agent.getAgentId()).setHeartbeat(RptHeartbeat.newBuilder()
+                .setAgentVersion("watchdog-ready").setPolicyVersion(policy.currentVersion()).setUpgradeContract(1)).build());
+        await(()->jdbc.queryForObject("SELECT upgrade_contract FROM t_agent WHERE agent_id=?",Integer.class,agent.getAgentId())==1);
+        var upgrade=com.alinksec.proto.CmdAgentUpgrade.newBuilder().setExecutionContract(1).setVersion("test")
+                .setDownloadUrl("https://localhost:8443/api/upgrade/download?packageKey=capability-fixture.bin&token=test");
+        String first=commands.dispatch(agent.getAgentId(),Command.newBuilder().setAgentUpgrade(upgrade),null);
+        assertEquals(first,ready.nextCommand().getCmdId());
+        ack(ready,agent.getAgentId(),first,RptAck.Stage.RECEIVED);
+        ready.requests.onCompleted();ready.finished.get(5,TimeUnit.SECONDS);
+        await(()->connections.onlineCount()==0);
+        String pending=commands.dispatch(agent.getAgentId(),Command.newBuilder().setAgentUpgrade(upgrade),null);
+        assertEquals(CommandRepository.ST_PENDING,commandStatus(pending));
+        Stream legacy=connect(agent);heartbeat(legacy,agent.getAgentId());
+        assertEquals(0,jdbc.queryForObject("SELECT upgrade_contract FROM t_agent WHERE agent_id=?",Integer.class,agent.getAgentId()));
+        assertEquals(CommandRepository.ST_FAILED,commandStatus(pending));
+        assertTrue(jdbc.queryForObject("SELECT result FROM t_command WHERE cmd_id=?",String.class,pending).contains("升级看护契约失效"));
+        assertTrue(legacy.received.stream().noneMatch(Command::hasAgentUpgrade));
+    }
+
+    @Test
     void approvesAndDispatchesCoveredPackagesAndAcceptsOnlyOwnedPendingResults() throws Exception {
         EnrollResponse first = enroll();
         EnrollResponse second = enroll();

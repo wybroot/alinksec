@@ -47,6 +47,7 @@ public class HeartbeatService {
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
         agentRepository.heartbeat(agentId, hb.getAgentVersion(), hb.getPolicyVersion());
         agentRepository.virusContract(agentId,hb.getVirusExecutionContract(),hb.getDbVersion());
+        agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
 
         String current = policyStore.currentVersion();
         if (!current.equals(hb.getPolicyVersion())) {

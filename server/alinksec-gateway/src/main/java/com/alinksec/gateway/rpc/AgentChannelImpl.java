@@ -58,6 +58,8 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                                 .withDescription("agent_id 与证书不匹配").asRuntimeException());
                         return;
                     }
+                    if (report.hasHeartbeat()) registry.upgradeContract(authenticatedAgentId,responseObserver,
+                            report.getHeartbeat().getUpgradeContract());
                     dispatcher.dispatch(authenticatedAgentId, report);
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);
@@ -92,7 +94,13 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 }
                 authenticatedAgentId = report.getAgentId();
                 authenticated = true;
+                // Capability belongs to this authenticated connection. A
+                // previous, newer Agent may have been downgraded while offline.
+                agentRepository.upgradeContract(authenticatedAgentId,
+                        report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
                 registry.register(authenticatedAgentId, responseObserver);
+                if (report.hasHeartbeat()) registry.upgradeContract(authenticatedAgentId,responseObserver,
+                        report.getHeartbeat().getUpgradeContract());
                 commandService.deliverPending(authenticatedAgentId);
                 return true;
             }

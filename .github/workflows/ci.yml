@@ -48,6 +48,24 @@ jobs:
           path: agent/alinksec-agent-windows-amd64.exe
           if-no-files-found: error
           retention-days: 14
+      - name: Check actual Windows upgrade, watchdog restart and automatic rollback
+        run: |
+          go build -trimpath -o alinksec-upgrade-broken.exe ./internal/upgrade/testdata/broken
+          go test -v -count=1 -timeout=4m -run '^TestNativeUpgradeLifecycle$' ./cmd/agent
+        working-directory: agent
+        env:
+          ALINKSEC_UPGRADE_NATIVE_REQUIRED: 'true'
+          ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
+          ALINKSEC_UPGRADE_BROKEN_BIN: ${{ github.workspace }}/agent/alinksec-upgrade-broken.exe
+          ALINKSEC_UPGRADE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/upgrade-native/result.json
+      - name: Retain native Windows upgrade evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-validation-windows-amd64
+          path: .tmp/upgrade-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   build-and-test:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
@@ -269,6 +287,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - name: Check actual systemd upgrade, watchdog restart and automatic rollback
+        run: bash deploy/tests/agent-upgrade-native.sh
+      - name: Retain native Linux upgrade evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-validation-linux-${{ matrix.arch }}
+          path: .tmp/upgrade-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - run: docker compose config -q
         working-directory: deploy/docker
       - run: docker compose build
@@ -461,7 +489,7 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "15"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "16"
           test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "59"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
@@ -497,7 +525,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,UpgradeWatchdogIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:

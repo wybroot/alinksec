@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -20,13 +22,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Agent 灰度升级（docs/01 §6.4）：
  * 上传升级包（sha256 服务端核算）→ 选定主机下发 CmdAgentUpgrade
  * → Agent 限速下载校验替换 → 退出由 systemd/SCM 拉起新版本 → 心跳上报新版本。
- * 旧版本 Agent 侧保留 .old，可人工回滚。
+ * 独立看护确认新进程健康，失败自动恢复旧版本；仅支持声明升级契约 1 的原生服务。
  */
 @Service
 public class UpgradeService {
@@ -54,11 +55,22 @@ public class UpgradeService {
             throw new IllegalArgumentException("version 与 platform 必填（如 1.2.0 / linux-amd64）");
         }
         requirePlatform(platform);
+        if (!version.matches("[A-Za-z0-9][A-Za-z0-9._+\\-]{0,127}")) {
+            throw new IllegalArgumentException("version 必须是最多128字符的安全版本标识");
+        }
         Path dir = Path.of(props.getUpgrade().getStorageDir());
         Files.createDirectories(dir);
-        Path tmp = dir.resolve("upload-" + UUID.randomUUID() + ".pkg");
-        Files.copy(in, tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Path tmp = Files.createTempFile(dir,"upload-",".pkg");
+        Path destination=dir.resolve(version+"-"+platform+".bin");
+        boolean moved=false, saved=false;
         try {
+            try(var output=Files.newOutputStream(tmp)) {
+                byte[] buffer=new byte[8192];long total=0;int count;
+                while((count=in.read(buffer))!=-1) {
+                    total+=count;if(total>128L*1024*1024) throw new IllegalArgumentException("Agent升级包不能超过128MiB");
+                    output.write(buffer,0,count);
+                }
+            }
             Integer exists = jdbc.queryForObject(
                     "SELECT count(*) FROM t_agent_upgrade_package WHERE version = ? AND platform = ?",
                     Integer.class, version, platform);
@@ -67,16 +79,24 @@ public class UpgradeService {
             }
             String sha256 = sha256(tmp);
             String packageKey = version + "-" + platform + ".bin";
-            Files.move(tmp, dir.resolve(packageKey), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            // CREATE_NEW performs the existence check and creation atomically;
+            // a plain move can race another publisher's destination check.
+            try(var output=Files.newOutputStream(destination,java.nio.file.StandardOpenOption.CREATE_NEW,
+                    java.nio.file.StandardOpenOption.WRITE)) {
+                moved=true;
+                Files.copy(tmp,output);
+            }
             jdbc.update("""
                     INSERT INTO t_agent_upgrade_package (version, platform, package_key, sha256, size, notes, uploaded_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, version, platform, packageKey, sha256, Files.size(dir.resolve(packageKey)),
                     notes, uploadedBy);
+            saved=true;
             log.info("升级包已上传: version={} platform={} sha256={}", version, platform, sha256);
             return Map.of("version", version, "platform", platform, "sha256", sha256);
         } finally {
-            Files.deleteIfExists(tmp);
+            try { Files.deleteIfExists(tmp); }
+            finally { if(moved && !saved) Files.deleteIfExists(destination); }
         }
     }
 
@@ -95,11 +115,14 @@ public class UpgradeService {
         // Validate every target before creating any command in a mixed-architecture batch.
         for (String agentId : agentIds) {
             List<Map<String, Object>> hosts = jdbc.queryForList(
-                    "SELECT os_type, arch FROM t_agent WHERE agent_id = ? AND status <> 4", agentId);
+                    "SELECT os_type, arch, upgrade_contract FROM t_agent WHERE agent_id = ? AND status <> 4 AND deleted=false", agentId);
             if (hosts.isEmpty()) {
                 throw new IllegalArgumentException("升级目标主机不存在: " + agentId);
             }
             Map<String, Object> host = hosts.get(0);
+            if (!(host.get("upgrade_contract") instanceof Number capability) || capability.intValue()!=1) {
+                throw new IllegalArgumentException("主机未声明原生升级看护能力，请先人工更新 Agent 并作为 systemd/SCM 服务启动: " + agentId);
+            }
             String target = hostPlatform(((Number) host.get("os_type")).intValue(), (String) host.get("arch"));
             if (!platform.equals(target)) {
                 throw new IllegalArgumentException("升级包平台 " + platform + " 与主机 " + agentId
@@ -111,6 +134,7 @@ public class UpgradeService {
                     .setVersion((String) pkg.get("version"))
                     .setDownloadUrl(downloadUrl(agentId, (String) pkg.get("package_key")))
                     .setSha256((String) pkg.get("sha256"))
+                    .setExecutionContract(1)
                     .build();
             commandService.dispatch(agentId, Command.newBuilder().setAgentUpgrade(cmd), operatedBy);
         }
@@ -162,7 +186,7 @@ public class UpgradeService {
 
     private String downloadUrl(String agentId, String packageKey) {
         String base = props.getUpgrade().getDownloadBaseUrl().replaceAll("/+$", "");
-        return base + "/api/upgrade/download?packageKey=" + packageKey
+        return base + "/api/upgrade/download?packageKey=" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8)
                 + "&token=" + downloadTokens.issue(agentId, "agent-upgrade", packageKey);
     }
 

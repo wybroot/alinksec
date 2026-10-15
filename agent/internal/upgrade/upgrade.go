@@ -1,6 +1,5 @@
 // Package upgrade Agent 自升级（docs/01 §6.4）：
-// 限速下载 → SHA256 校验 → 落盘 .new → 原子替换（旧版本保留 .old，启动失败可人工回滚）
-// → 退出进程由服务管理器拉起新版本（Linux systemd Restart=always / Windows SCM 恢复策略）。
+// 独立 systemd/SCM 看护 → 校验替换 → 新版本健康确认或自动恢复旧版本。
 package upgrade
 
 import (
@@ -8,8 +7,10 @@ import (
 	"crypto/sha256"
 	"debug/buildinfo"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,80 +21,231 @@ import (
 
 const chunkSize = 256 << 10 // 256KB/20ms ≈ 12.5MB/s 限速（避开 virusscan 全速，升级更温和）
 
-// Apply 执行升级：下载校验 + 替换 + 触发重启。返回给平台的完成消息。
-// 成功路径下进程即将退出，调用方应立即回 DONE ACK。
-func Apply(workDir, downloadURL, wantSHA, version string) (string, error) {
-	if downloadURL == "" || wantSHA == "" {
-		return "", fmt.Errorf("download_url/sha256 为空")
+// Apply stages one upgrade and starts an independent native recovery service.
+// Success here means accepted, not healthy: the watchdog emits the final result.
+func Apply(workDir, downloadURL, wantSHA, version, commandID string) (string, error) {
+	if downloadURL == "" || !validHash(wantSHA) || version == "" || len(version) > 128 || commandID == "" || len(commandID) > 256 {
+		return "", fmt.Errorf("invalid upgrade download, SHA256, version or command identity")
+	}
+	absolute, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", err
+	}
+	workDir, err = filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("定位当前二进制失败: %w", err)
+		return "", err
 	}
-	exe, _ = filepath.EvalSymlinks(exe)
-	newPath := exe + ".new"
-	oldPath := exe + ".old"
-
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", err
+	}
+	m := nativeManager{}
+	if err := m.verify(exe); err != nil {
+		return "", err
+	}
+	unlock, err := lockUpgrade(workDir)
+	if err != nil {
+		return "", err
+	}
+	locked := true
+	defer func() {
+		if locked {
+			unlock()
+		}
+	}()
+	if current, err := loadTransaction(workDir); err == nil {
+		if current.Phase != "finished" {
+			return "", fmt.Errorf("an upgrade or rollback is already pending")
+		}
+		if err := m.remove(helperPath(workDir, current.ID), workDir); err != nil {
+			return "", err
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	results, err := Outcomes(workDir)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range results {
+		if r.CommandID == commandID {
+			return "", fmt.Errorf("upgrade command already completed")
+		}
+	}
+	if len(results) >= maxResults {
+		return "", fmt.Errorf("upgrade result archive is full; retain records externally before removing reviewed results")
+	}
+	for _, r := range results {
+		if r.Complete {
+			os.Remove(helperPath(workDir, r.ID))
+			os.Remove(readyPath(workDir, r.ID))
+			os.Remove(filepath.Dir(helperPath(workDir, r.ID)))
+		}
+	}
+	id, err := newID()
+	if err != nil {
+		return "", err
+	}
+	if err := privateDir(filepath.Join(upgradeDir(workDir), id)); err != nil {
+		return "", err
+	}
+	prepared := false
+	defer func() {
+		if !prepared {
+			os.RemoveAll(filepath.Join(upgradeDir(workDir), id))
+		}
+	}()
+	if err := privateDir(filepath.Join(upgradeDir(workDir), "results")); err != nil {
+		return "", err
+	}
+	newPath := exe + ".upgrade-" + id + ".new"
 	if err := downloadLimited(workDir, downloadURL, newPath); err != nil {
-		os.Remove(newPath)
-		return "", fmt.Errorf("下载失败: %w", err)
+		var requestError *url.Error
+		if errors.As(err, &requestError) {
+			return "", fmt.Errorf("download upgrade: %s: %w", requestError.Op, requestError.Err)
+		}
+		return "", fmt.Errorf("download upgrade: %w", err)
 	}
+	defer os.Remove(newPath)
 	if err := verifySHA256(newPath, wantSHA); err != nil {
-		os.Remove(newPath)
 		return "", err
 	}
 	if err := verifyPlatform(newPath, runtime.GOOS, runtime.GOARCH); err != nil {
-		os.Remove(newPath)
 		return "", err
 	}
-	// 权限对齐当前可执行文件（Windows 忽略）
-	if info, err := os.Stat(exe); err == nil {
-		_ = os.Chmod(newPath, info.Mode())
-	}
-	// 保留旧版本用于回滚
-	_ = os.Remove(oldPath)
-	if err := os.Rename(exe, oldPath); err != nil {
-		os.Remove(newPath)
-		return "", fmt.Errorf("备份当前二进制失败: %w", err)
-	}
-	if err := os.Rename(newPath, exe); err != nil {
-		_ = os.Rename(oldPath, exe) // 回滚
-		os.Remove(newPath)
-		return "", fmt.Errorf("替换二进制失败: %w", err)
-	}
-	// Windows：运行中 exe 可 rename 不可删，.old 保留至下次升级；Linux 同理由本函数清理
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0) // 退出 → systemd/SCM 自动拉起新版本（docs §6.2 自愈）
-	}()
-	return fmt.Sprintf("upgraded %s -> %s, restarting (%s)", currentVersionHint(), version, runtime.GOOS), nil
-}
-
-// Rollback 回滚到上一版本（人工触发场景：新版本启动失败后由运维执行 <exe>.old 交换）
-func Rollback() (string, error) {
-	exe, err := os.Executable()
+	info, err := os.Stat(exe)
 	if err != nil {
 		return "", err
 	}
-	oldPath := exe + ".old"
-	if _, err := os.Stat(oldPath); err != nil {
-		return "", fmt.Errorf("无旧版本备份")
-	}
-	bad := exe + ".bad"
-	_ = os.Remove(bad)
-	_ = os.Rename(exe, bad)
-	if err := os.Rename(oldPath, exe); err != nil {
-		_ = os.Rename(bad, exe)
+	if err := os.Chmod(newPath, info.Mode().Perm()); err != nil {
 		return "", err
 	}
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(0)
-	}()
-	return "rolled back to previous version, restarting", nil
+	oldHash, err := fileSHA256(exe)
+	if err != nil {
+		return "", err
+	}
+	if err := copyHelper(exe, helperPath(workDir, id)); err != nil {
+		return "", err
+	}
+	originalStarted, err := processStarted(os.Getpid())
+	if err != nil {
+		return "", err
+	}
+	tx := &transaction{ID: id, CommandID: commandID, Executable: exe, OldHash: oldHash, NewHash: wantSHA, Version: version, OriginalPID: os.Getpid(), OriginalStarted: originalStarted, Deadline: time.Now().Add(startupTimeout), Phase: "prepared"}
+	if err := writeJSON(statePath(workDir), tx); err != nil {
+		return "", err
+	}
+	prepared = true
+	unlock()
+	locked = false
+	abort := func(cause error) (string, error) {
+		release, e := lockUpgrade(workDir)
+		if e != nil {
+			return "", errors.Join(cause, e)
+		}
+		_, e = finish(workDir, tx, Outcome{Message: "upgrade preparation failed; original Agent unchanged: " + cause.Error()}, time.Now())
+		release()
+		cleanup := m.remove(helperPath(workDir, id), workDir)
+		return "", errors.Join(cause, e, cleanup)
+	}
+	if err := m.install(helperPath(workDir, id), workDir); err != nil {
+		return abort(err)
+	}
+	readyDeadline := time.Now().Add(10 * time.Second)
+	for {
+		var ready string
+		if err := readJSON(readyPath(workDir, id), &ready); err == nil && ready == id {
+			break
+		}
+		if time.Now().After(readyDeadline) {
+			return abort(fmt.Errorf("independent upgrade watchdog did not become ready"))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	unlock, err = lockUpgrade(workDir)
+	if err != nil {
+		return "", err
+	}
+	locked = true
+	current, err := loadTransaction(workDir)
+	if err != nil {
+		return "", err
+	}
+	if current.ID != id || current.Phase != "prepared" || !time.Now().Before(current.Deadline) {
+		return "", fmt.Errorf("upgrade preparation expired or changed")
+	}
+	// Journal pending before either rename; recovery handles interruption at each
+	// file boundary, including a temporarily absent executable.
+	tx.Phase = "pending"
+	if err := writeJSON(statePath(workDir), tx); err != nil {
+		return "", err
+	}
+	oldPath := exe + ".old"
+	if old, err := os.Lstat(oldPath); err == nil {
+		if !old.Mode().IsRegular() {
+			return "", fmt.Errorf("old Agent path is not a regular file")
+		}
+		if err := os.Remove(oldPath); err != nil {
+			return "", err
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := moveExecutable(exe, oldPath); err != nil {
+		return "", fmt.Errorf("backup Agent: %w", err)
+	}
+	if err := moveExecutable(newPath, exe); err != nil {
+		return "", errors.Join(fmt.Errorf("replace Agent: %w", err), moveExecutable(oldPath, exe))
+	}
+	unlock()
+	locked = false
+	go func() { time.Sleep(time.Second); os.Exit(0) }()
+	return "upgrade accepted; waiting for new Agent startup and watchdog confirmation", nil
 }
 
-func currentVersionHint() string { return "current" }
+func copyHelper(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, io.LimitReader(in, (256<<20)+1))
+	if err == nil {
+		err = out.Sync()
+	}
+	if e := out.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		return err
+	}
+	want, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	return verifySHA256(dst, want)
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 
 // Reject a mislabeled package before replacing the running Agent.
 func verifyPlatform(path, wantOS, wantArch string) error {
@@ -126,21 +278,39 @@ func downloadLimited(workDir, url, dst string) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	f, err := os.Create(dst)
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	complete := false
+	defer func() {
+		f.Close()
+		if !complete {
+			os.Remove(dst)
+		}
+	}()
 	buf := make([]byte, chunkSize)
+	total := 0
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			total += n
+			if total > 128<<20 {
+				return fmt.Errorf("upgrade package exceeds 128 MiB")
+			}
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				return werr
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
 		if rerr == io.EOF {
+			if err := f.Sync(); err != nil {
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+			complete = true
 			return nil
 		}
 		if rerr != nil {
@@ -150,6 +320,9 @@ func downloadLimited(workDir, url, dst string) error {
 }
 
 func verifySHA256(path, want string) error {
+	if !validHash(want) {
+		return fmt.Errorf("invalid expected SHA256")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err

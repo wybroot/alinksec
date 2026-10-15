@@ -269,12 +269,14 @@ offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
 ### 7.1 升级流程
 
 ```
-收到 CmdAgentUpgrade → 后台 goroutine 限速下载（2MB/s，不抢占业务）
-  → SHA256 校验 → 新二进制写入 {workdir}/agent.new
-  → 备份当前二进制 → 原子 rename + 重启服务（kardianos/service Restart）
-  → 启动后心跳上报新版本
-  → 失败（启动超时 60s 由 watchdog 判定）→ 自动回滚旧版本并上报失败事件
+收到契约 1 的 CmdAgentUpgrade → 后台限速下载、SHA256 与平台校验
+  → 复制旧版本为独立 systemd/SCM 看护，等待就绪
+  → 持久化事务 → 旧版本备份 → 候选原子替换 → 退出，由原服务重新启动
+  → 候选完成初始化，目标版本/摘要/进程身份一致，同一 mTLS 通道连续心跳至少 5 秒
+  → 看护持久化最终成功；60 秒启动期限内未确认则恢复旧版本并回传失败事件
 ```
+
+原生服务条件、健康确认、独立看护、自动回退与旧 Agent 兼容边界见 [Agent 升级看护](55-Agent升级看护与自动回退.md)。
 
 ### 7.2 自我保护
 

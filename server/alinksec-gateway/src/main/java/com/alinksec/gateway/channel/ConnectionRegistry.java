@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Agent 在线连接注册表：agent_id → 下行 stream。
@@ -19,14 +20,15 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionRegistry.class);
 
-    private final Map<String, StreamObserver<Command>> streams = new ConcurrentHashMap<>();
+    private record Connection(StreamObserver<Command> stream, AtomicInteger upgradeContract) { }
+    private final Map<String, Connection> streams = new ConcurrentHashMap<>();
 
     public void register(String agentId, StreamObserver<Command> stream) {
-        StreamObserver<Command> old = streams.put(agentId, stream);
+        Connection old = streams.put(agentId, new Connection(stream,new AtomicInteger()));
         if (old != null) {
             log.info("重复建流，踢掉旧连接: agent={}", agentId);
             try {
-                old.onCompleted();
+                old.stream().onCompleted();
             } catch (Exception ignored) {
             }
         }
@@ -35,24 +37,31 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
 
     public void unregister(String agentId, StreamObserver<Command> stream) {
         // 只在仍是本人注册时移除（避免新连接被旧连接的 onCompleted 回调误删）
-        streams.remove(agentId, stream);
+        streams.computeIfPresent(agentId,(id,current)->current.stream()==stream?null:current);
         log.info("Agent 下线: agent={} online={}", agentId, streams.size());
     }
 
     @Override
     public boolean send(String agentId, Command command) {
-        StreamObserver<Command> stream = streams.get(agentId);
-        if (stream == null) {
+        Connection connection = streams.get(agentId);
+        if (connection == null) {
             return false;
         }
+        if (command.hasAgentUpgrade() && (command.getAgentUpgrade().getExecutionContract()!=1
+                || connection.upgradeContract().get()!=1)) return false;
         try {
-            stream.onNext(command);
+            connection.stream().onNext(command);
             return true;
         } catch (Exception e) {
             log.warn("指令写入失败: agent={} err={}", agentId, e.getMessage());
-            streams.remove(agentId, stream);
+            streams.remove(agentId, connection);
             return false;
         }
+    }
+
+    public void upgradeContract(String agentId,StreamObserver<Command> stream,int contract) {
+        Connection current=streams.get(agentId);
+        if(current!=null && current.stream()==stream) current.upgradeContract().set(contract==1?1:0);
     }
 
     public int onlineCount() {

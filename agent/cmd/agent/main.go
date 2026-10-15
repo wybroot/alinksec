@@ -19,6 +19,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/guard"
 	"github.com/alinksec/alinksec-agent/internal/identity"
+	"github.com/alinksec/alinksec-agent/internal/upgrade"
 )
 
 func main() {
@@ -34,6 +35,12 @@ func main() {
 		err = cmdInstall(os.Args[2:])
 	case "uninstall":
 		err = cmdUninstall(os.Args[2:])
+	case "upgrade-watchdog":
+		fs := flag.NewFlagSet("upgrade-watchdog", flag.ContinueOnError)
+		workDir := fs.String("workdir", defaultWorkDir(), "pending upgrade work directory")
+		if err = fs.Parse(os.Args[2:]); err == nil {
+			err = upgrade.RunWatchdog(*workDir)
+		}
 	case "version", "--version":
 		fmt.Println("alinksec-agent " + identity.AgentVersion)
 	case "-h", "--help", "help":
@@ -174,6 +181,9 @@ func cmdUninstall(args []string) error {
 		return fmt.Errorf("卸载口令不匹配")
 	case now > st.UninstallExpire:
 		return fmt.Errorf("卸载口令已过期（布防后 15 分钟内有效），请重新申请")
+	}
+	if err := upgrade.CheckRemoval(*workDir); err != nil {
+		return err
 	}
 	// 一次性消费：先清口令再执行，中途失败不可重放
 	st.UninstallToken, st.UninstallExpire = "", 0
