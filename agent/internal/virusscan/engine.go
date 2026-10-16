@@ -29,15 +29,29 @@ type cacheEntry struct {
 	ModSec int64 `json:"m"`
 }
 type Engine struct {
-	mu        sync.Mutex
-	db        *SigDB
-	cache     map[string]cacheEntry
-	whitelist []whitelistEntry
-	log       *slog.Logger
+	mu           sync.Mutex
+	db           *SigDB
+	cache        map[string]cacheEntry
+	whitelist    []whitelistEntry
+	log          *slog.Logger
+	policyReader func() ([]byte, error)
 }
 
 func NewEngine(workDir string, log *slog.Logger) *Engine {
-	return &Engine{db: LoadDB(workDir), cache: map[string]cacheEntry{}, whitelist: loadWhitelist(workDir), log: log}
+	return NewEngineWithPolicyReader(workDir, log, nil)
+}
+
+// NewEngineWithPolicyReader uses the pinned snapshot from construction onward.
+// It must not open the editable policy, even while initializing the whitelist.
+func NewEngineWithPolicyReader(workDir string, log *slog.Logger, reader func() ([]byte, error)) *Engine {
+	e := &Engine{db: LoadDB(workDir), cache: map[string]cacheEntry{}, log: log, policyReader: reader}
+	if reader != nil {
+		data, err := reader()
+		e.whitelist = parseWhitelist(data, err)
+	} else {
+		e.whitelist = loadWhitelist(workDir)
+	}
+	return e
 }
 func (e *Engine) Scan(taskID string, mode pb.CmdVirusScan_Mode, paths []string, workDir string) *pb.RptVirusResult {
 	return e.ScanCommand(context.Background(), &pb.CmdVirusScan{TaskId: taskID, Mode: mode, Paths: paths, ExecutionContract: 2}, workDir)

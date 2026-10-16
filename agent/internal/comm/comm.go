@@ -24,6 +24,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/baseline"
 	"github.com/alinksec/alinksec-agent/internal/collector"
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/configguard"
 	"github.com/alinksec/alinksec-agent/internal/fixer"
 	"github.com/alinksec/alinksec-agent/internal/guard"
 	"github.com/alinksec/alinksec-agent/internal/identity"
@@ -38,12 +39,13 @@ import (
 
 // Client Agent 通信客户端：注册 + 主通道双向流
 type Client struct {
-	cfg     *config.Config
-	workDir string
-	state   *State
-	queue   *OfflineQueue
-	dedup   *cmdDedup
-	log     *slog.Logger
+	cfg         *config.Config
+	workDir     string
+	state       *State
+	queue       *OfflineQueue
+	dedup       *cmdDedup
+	log         *slog.Logger
+	configStore *configguard.Store
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
@@ -79,6 +81,12 @@ type Client struct {
 
 // New 创建通信客户端（加载本地状态与离线队列）
 func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) {
+	return NewProtected(cfg, workDir, log, nil)
+}
+
+// NewProtected binds the production client to the pinned configuration store.
+// New remains available for in-memory protocol/unit fixtures.
+func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *configguard.Store) (*Client, error) {
 	st, err := LoadState(workDir)
 	if err != nil {
 		return nil, fmt.Errorf("加载本地状态: %w", err)
@@ -89,6 +97,7 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	}
 	c := &Client{
 		cfg:             cfg,
+		configStore:     store,
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
@@ -99,7 +108,9 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 		pendingReports:  make(chan *pb.Report, 4),
 	}
 	// 平台热下发策略优先于本地 agent.yml（重启后仍生效，直至下次同步覆盖）
-	c.loadPersistedPolicy(cfg)
+	if err := c.loadPersistedPolicy(cfg); err != nil {
+		return nil, err
+	}
 	c.grd = guard.New(&cfg.Decoy, cfg.ProcessRules, workDir, log, c.reportSecurityEvent)
 	c.grd.SetServerAddr(cfg.ServerAddr)
 	c.isolationContract = isolation.ExecutionContract()
@@ -113,27 +124,53 @@ func New(cfg *config.Config, workDir string, log *slog.Logger) (*Client, error) 
 	}
 	c.grd.UpdateProtection(cfg.FileRules, cfg.LoginRules)
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
-	vEngine := virusscan.NewEngine(workDir, log)
+	vEngine := c.newVirusEngine()
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
 		return vEngine.CheckRealtime(path, workDir)
 	})
-	c.grd.SetVirusRoots(virusscan.QuickScanRoots(), func() bool { enabled, _ := virusscan.RealtimePolicy(workDir); return enabled })
+	c.grd.SetVirusRoots(virusscan.QuickScanRoots(), func() bool { enabled, _ := vEngine.RealtimePolicy(workDir); return enabled })
 	return c, nil
 }
 
 // loadPersistedPolicy 读工作目录 policy.json（最近一次 PolicySync 全量快照）覆盖 decoy 配置段
-func (c *Client) loadPersistedPolicy(cfg *config.Config) {
-	b, err := os.ReadFile(filepath.Join(c.workDir, "policy.json"))
-	if err != nil {
-		return
+func (c *Client) loadPersistedPolicy(cfg *config.Config) error {
+	if c.configStore != nil {
+		b, version, ready := c.configStore.Policy()
+		if ready {
+			if len(b) > 0 {
+				if err := c.applyPolicyJson(string(b), false); err != nil {
+					return err
+				}
+			}
+			c.state.PolicyVersion = version
+			return nil
+		}
+		// One-time legacy migration, before the first protected process starts.
+		b, err := configguard.ReadFile(filepath.Join(c.workDir, "policy.json"), configguard.MaxPolicyBytes)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cannot migrate policy snapshot: %w", err)
+		}
+		if len(b) > 0 {
+			if err := c.applyPolicyJson(string(b), false); err != nil {
+				return err
+			}
+		}
+		return c.configStore.SetPolicy(b, c.state.PolicyVersion)
 	}
-	c.applyPolicyJson(string(b), false)
+	b, err := os.ReadFile(filepath.Join(c.workDir, "policy.json"))
+	if err == nil {
+		_ = c.applyPolicyJson(string(b), false)
+	}
+	return nil
 }
 
 // applyPolicyJson applies a complete policy snapshot. It validates and persists
 // the snapshot before changing the running configuration, so a failed sync does
 // not replace the last known-good local policy.
-func (c *Client) applyPolicyJson(js string, hot bool) error {
+func (c *Client) applyPolicyJson(js string, hot bool, version ...string) error {
+	if len(js) > configguard.MaxPolicyBytes {
+		return fmt.Errorf("policy exceeds 1 MiB")
+	}
 	var p struct {
 		Decoy        *config.DecoyConfig   `json:"decoy"`
 		ProcessRules *[]config.ProcessRule `json:"process_rules"`
@@ -161,12 +198,22 @@ func (c *Client) applyPolicyJson(js string, hot bool) error {
 		return err
 	}
 	if hot { // 快照落盘，重启后仍生效直至下次同步
-		path := filepath.Join(c.workDir, "policy.json")
-		if err := os.WriteFile(path+".tmp", []byte(js), 0600); err != nil {
-			return fmt.Errorf("持久化 policy_json: %w", err)
-		}
-		if err := os.Rename(path+".tmp", path); err != nil {
-			return fmt.Errorf("替换 policy_json: %w", err)
+		if c.configStore != nil {
+			v := c.state.PolicyVersion
+			if len(version) > 0 {
+				v = version[0]
+			}
+			if err := c.configStore.SetPolicy([]byte(js), v); err != nil {
+				return err
+			}
+		} else {
+			path := filepath.Join(c.workDir, "policy.json")
+			if err := os.WriteFile(path+".tmp", []byte(js), 0600); err != nil {
+				return fmt.Errorf("持久化 policy_json: %w", err)
+			}
+			if err := os.Rename(path+".tmp", path); err != nil {
+				return fmt.Errorf("替换 policy_json: %w", err)
+			}
 		}
 	}
 	if p.Decoy != nil {
@@ -249,6 +296,9 @@ func (c *Client) EnsureEnrolled(ctx context.Context) error {
 
 // Run 主循环：建流 → 收发 → 断线指数退避重连（协议设计 §5）
 func (c *Client) Run(ctx context.Context) error {
+	if c.configStore != nil {
+		go c.watchConfiguration(ctx)
+	}
 	if c.grd != nil {
 		go c.grd.Run(ctx)
 	}
@@ -374,6 +424,7 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 	defer upgradeTick.Stop()
 	upgradeResults := map[string]string{}
 	isolationResults := map[string]string{}
+	configResults := map[string]bool{}
 	isolationState := ""
 	drained := false
 	for {
@@ -381,6 +432,9 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-upgradeTick.C:
+			if err := c.sendConfigEvents(stream, generation, configResults); err != nil {
+				return err
+			}
 			if err := c.sendIsolationState(stream, generation, &isolationState); err != nil {
 				return err
 			}
@@ -562,10 +616,16 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 	switch p := cmd.GetPayload().(type) {
 	case *pb.Command_PolicySync:
 		if policy := p.PolicySync.GetPolicyJson(); policy != "" {
-			if err := c.applyPolicyJson(policy, true); err != nil {
+			if err := c.applyPolicyJson(policy, true, p.PolicySync.GetPolicyVersion()); err != nil {
 				c.log.Error("策略同步失败", "policy_version", p.PolicySync.GetPolicyVersion(), "err", err)
 				return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1,
 					Message: "apply policy: " + err.Error()}}
+			}
+		}
+		if p.PolicySync.GetPolicyJson() == "" && c.configStore != nil {
+			data, _, _ := c.configStore.Policy()
+			if err := c.configStore.SetPolicy(data, p.PolicySync.GetPolicyVersion()); err != nil {
+				return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "persist policy version failed"}}
 			}
 		}
 		c.state.PolicyVersion = p.PolicySync.GetPolicyVersion()
@@ -834,7 +894,7 @@ func (c *Client) executeVirusScan(vs *pb.CmdVirusScan, received *pb.RptAck) []*p
 	go func() {
 		defer c.virusBusy.Store(false)
 		start := time.Now()
-		engine := virusscan.NewEngine(c.workDir, c.log)
+		engine := c.newVirusEngine()
 		result := engine.ScanCommand(context.Background(), vs, c.workDir)
 		stage, code, msg := pb.RptAck_DONE, int32(0),
 			fmt.Sprintf("virus task %s: files=%d findings=%d quarantined=%d in %s",

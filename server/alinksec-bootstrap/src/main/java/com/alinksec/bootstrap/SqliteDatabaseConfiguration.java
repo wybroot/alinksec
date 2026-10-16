@@ -56,7 +56,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V014__security_source_governance.sql",
                 "db/common/V015__detection_execution_evidence.sql",
                 "db/common/V016__agent_upgrade_watchdog.sql",
-                "db/common/V017__host_isolation_lease.sql"
+                "db/common/V017__host_isolation_lease.sql",
+                "db/common/V018__agent_config_event_receipt.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

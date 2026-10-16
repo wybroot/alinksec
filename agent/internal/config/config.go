@@ -2,8 +2,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -99,19 +103,47 @@ func (d *DecoyConfig) Normalize() {
 
 // Load 从文件加载配置并填充默认值
 func Load(path string) (*Config, error) {
-	c := &Config{}
+	var b []byte
 	if path != "" {
-		b, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("读取配置 %s: %w", path, err)
 		}
-		if err := yaml.Unmarshal(b, c); err != nil {
-			return nil, fmt.Errorf("解析配置 %s: %w", path, err)
+		defer f.Close()
+		b, err = io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("读取配置失败")
+		}
+	}
+	return Parse(b)
+}
+
+const MaxConfigBytes = 64 << 10
+
+// Parse bounds and validates configuration without including credential values in errors.
+func Parse(b []byte) (*Config, error) {
+	if len(b) > MaxConfigBytes {
+		return nil, fmt.Errorf("配置超过 64 KiB")
+	}
+	c := &Config{}
+	if len(b) != 0 {
+		d := yaml.NewDecoder(bytes.NewReader(b))
+		d.KnownFields(true)
+		if err := d.Decode(c); err != nil {
+			return nil, fmt.Errorf("配置 YAML 无效或包含未知字段")
+		}
+		if err := d.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("配置必须为单份 YAML 文档")
 		}
 	}
 	// 默认值
 	if c.ServerAddr == "" {
 		c.ServerAddr = "127.0.0.1:9443"
+	}
+	host, port, err := net.SplitHostPort(c.ServerAddr)
+	n, pErr := strconv.Atoi(port)
+	if err != nil || host == "" || pErr != nil || n < 1 || n > 65535 {
+		return nil, fmt.Errorf("server_addr 必须为有效的 host:port")
 	}
 	if c.HeartbeatInterval <= 0 {
 		c.HeartbeatInterval = 10 * time.Second
@@ -124,31 +156,7 @@ func Load(path string) (*Config, error) {
 	}
 	c.Decoy.Normalize()
 	if err := ValidateProtection(c.FileRules, c.LoginRules); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("配置中的防护规则无效")
 	}
 	return c, nil
-}
-
-// WriteExample install 子命令落盘配置
-func WriteExample(path, serverAddr, enrollToken, enrollCAFile string) error {
-	c := &Config{ServerAddr: serverAddr, EnrollToken: enrollToken, EnrollCAFile: enrollCAFile}
-	b, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0600)
-}
-
-// ClearEnrollToken removes the bootstrap credential after the Agent has received its client certificate.
-func ClearEnrollToken(path string) error {
-	c, err := Load(path)
-	if err != nil {
-		return err
-	}
-	c.EnrollToken = ""
-	b, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0600)
 }

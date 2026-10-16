@@ -50,8 +50,7 @@ public class SecurityEventService {
             return;
         }
 
-        String alertNo = "ALT-" + System.currentTimeMillis() + "-"
-                + Integer.toHexString(fingerprint.hashCode() & 0xffffff);
+        String alertNo = "ALT-" + java.util.UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO t_alert (alert_no, agent_id, rule_id, event_type, severity, title, detail, action_taken)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -85,6 +84,9 @@ public class SecurityEventService {
     private String fingerprint(RptSecurityEvent event, String detailJson) {
         String base = event.getType() + ":" + event.getRuleId();
         try {
+            if(event.getType().equals("self_defense") && event.getRuleId().equals("agent-config-integrity")) {
+                return base+":"+JsonUtils.read(detailJson).path("id").asText();
+            }
             if(event.getType().equals("self_defense") && event.getRuleId().equals("host-isolation-lease")) {
                 var detail=JsonUtils.read(detailJson);
                 return base+":"+detail.path("id").asText()+":"+detail.path("phase").asText();

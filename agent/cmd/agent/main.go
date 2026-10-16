@@ -16,6 +16,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/comm"
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/configguard"
 	"github.com/alinksec/alinksec-agent/internal/guard"
 	"github.com/alinksec/alinksec-agent/internal/identity"
 	"github.com/alinksec/alinksec-agent/internal/isolation"
@@ -35,6 +36,8 @@ func main() {
 		err = cmdInstall(os.Args[2:])
 	case "uninstall":
 		err = cmdUninstall(os.Args[2:])
+	case "config":
+		err = cmdConfig(os.Args[2:])
 	case "upgrade-watchdog":
 		fs := flag.NewFlagSet("upgrade-watchdog", flag.ContinueOnError)
 		workDir := fs.String("workdir", defaultWorkDir(), "pending upgrade work directory")
@@ -73,6 +76,8 @@ func usage() {
                                                           写入配置并完成注册
   alinksec-agent uninstall --token <口令>  [--workdir <dir>]
                                                           需平台先布防口令（15min 有效一次性）
+  alinksec-agent config apply --from <path> [--workdir <dir>] [--config <path>]
+                                                          停止服务后提交合法本地配置变更
 
 默认工作目录:
   Linux   /var/lib/alinksec-agent
@@ -106,16 +111,20 @@ func cmdRun(args []string) error {
 		*cfgPath = *workDir + string(os.PathSeparator) + "agent.yml"
 	}
 	return runManaged(func(ctx context.Context) error {
-		cfg, err := config.Load(*cfgPath)
+		store, cfg, err := configguard.Open(*workDir, *cfgPath)
 		if err != nil {
 			return err
 		}
-		client, err := comm.New(cfg, *workDir, log)
+		defer store.Close()
+		client, err := comm.NewProtected(cfg, *workDir, log, store)
 		if err != nil {
 			return err
 		}
 		if err := client.EnsureEnrolled(ctx); err != nil {
 			return fmt.Errorf("注册失败: %w", err)
+		}
+		if err := store.ClearEnrollToken(); err != nil {
+			return fmt.Errorf("清除可信配置注册码: %w", err)
 		}
 		log.Info("agent 启动", "agent_id", client.AgentID(), "server", cfg.ServerAddr)
 		return client.Run(ctx)
@@ -137,28 +146,62 @@ func cmdInstall(args []string) error {
 		return fmt.Errorf("--server、--token 与 --ca-file 必填")
 	}
 	log := newLogger()
-	if err := os.MkdirAll(*workDir, 0750); err != nil {
-		return err
-	}
 	cfgPath := *workDir + string(os.PathSeparator) + "agent.yml"
-	if err := config.WriteExample(cfgPath, *server, *token, *caFile); err != nil {
-		return fmt.Errorf("写入配置: %w", err)
-	}
-	cfg, err := config.Load(cfgPath)
+	store, cfg, err := configguard.Create(*workDir, cfgPath, &config.Config{ServerAddr: *server, EnrollToken: *token, EnrollCAFile: *caFile})
 	if err != nil {
 		return err
 	}
-	client, err := comm.New(cfg, *workDir, log)
+	defer store.Close()
+	client, err := comm.NewProtected(cfg, *workDir, log, store)
 	if err != nil {
 		return err
 	}
 	if err := client.EnsureEnrolled(context.Background()); err != nil {
 		return fmt.Errorf("注册失败: %w", err)
 	}
-	if err := config.ClearEnrollToken(cfgPath); err != nil {
-		log.Warn("注册成功，但未能从配置文件清除注册码", "error", err)
+	if err := store.ClearEnrollToken(); err != nil {
+		return fmt.Errorf("注册已完成但清除注册码失败，请重试 run: %w", err)
 	}
 	fmt.Printf("安装完成：agent_id=%s\n配置: %s\n启动服务或运行 alinksec-agent run\n", client.AgentID(), cfgPath)
+	return nil
+}
+
+func cmdConfig(args []string) error {
+	if len(args) == 0 || args[0] != "apply" {
+		return fmt.Errorf("用法: config apply --from <新配置> [--workdir <dir>] [--config <原路径>]；先停止 Agent 服务")
+	}
+	fs := flag.NewFlagSet("config apply", flag.ContinueOnError)
+	from := fs.String("from", "", "新配置文件路径")
+	work := fs.String("workdir", defaultWorkDir(), "工作目录")
+	path := fs.String("config", "", "原配置路径（默认 <workdir>/agent.yml）")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *from == "" || fs.NArg() != 0 {
+		return fmt.Errorf("--from 必填，不支持额外参数")
+	}
+	if *path == "" {
+		*path = *work + string(os.PathSeparator) + "agent.yml"
+	}
+	if _, err := os.Lstat(*work + string(os.PathSeparator) + "config-integrity.enabled"); err != nil {
+		return fmt.Errorf("尚未建立可信配置，请先 install 或首次 run")
+	}
+	data, err := configguard.ReadFile(*from, config.MaxConfigBytes)
+	if err != nil {
+		return fmt.Errorf("读取候选配置失败: %w", err)
+	}
+	if _, err := config.Parse(data); err != nil {
+		return err
+	}
+	store, _, err := configguard.Open(*work, *path)
+	if err != nil {
+		return fmt.Errorf("无法锁定配置，请确认服务已停止且可信记录完整: %w", err)
+	}
+	defer store.Close()
+	if err := store.ReplaceAgent(data); err != nil {
+		return err
+	}
+	fmt.Println("可信配置已提交；启动 Agent 服务后生效。平台策略仍由管理端下发。")
 	return nil
 }
 

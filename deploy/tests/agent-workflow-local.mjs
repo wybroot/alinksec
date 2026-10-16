@@ -38,6 +38,9 @@ async function command(exe, args, options = {}) {
 async function agentFile(container, file) {
   return command('docker', ['exec', container, 'cat', `${agentStateRoot}/${file}`])
 }
+async function agentFileExists(container, file) {
+  return command('docker', ['exec', container, 'test', '-e', `${agentStateRoot}/${file}`]).then(() => true, () => false)
+}
 async function port(host) {
   const listener = net.createServer()
   await new Promise((ok, fail) => { listener.once('error', fail); listener.listen(0, host, ok) })
@@ -148,7 +151,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
     '-e', `ALINKSEC_TEST_WORKDIR=${agentStateRoot}`,
     '-e', `ALINKSEC_TEST_SERVER=${accessHost}:${grpcPort}`, '-e', `ALINKSEC_TEST_TOKEN=${enrollment.token}`, image])
   containers.push(container)
-  await until(() => existsSync(join(dir, 'work/state.yml')), 'Actual Agent did not enroll')
+  await until(() => agentFileExists(container, 'state.yml'), 'Actual Agent did not enroll')
   const id = (await agentFile(container, 'state.yml')).match(/^agent_id: (.+)$/m)?.[1]
   assert.match(id, /^[\da-f-]{36}$/)
   const agent = { id, dir, fixtures, container, workDir:agentStateRoot }
@@ -172,7 +175,7 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
 async function baselineRuntimeWorkflow(agent) {
   await command('docker',['exec',agent.container,'chown','root:root','/work'])
   await command('docker',['exec',agent.container,'chown','-R','root:root','/work/virus'])
-  await command('docker',['exec',agent.container,'chmod','0755','/work','/work/virus','/work/virus/db'])
+  await command('docker',['exec',agent.container,'chmod','0755','/work/virus','/work/virus/db'])
   const document=JSON.parse(readFileSync(join(repo,'deploy/baseline/packages/agent-runtime/linux-baseline.json')))
   document.code='NATIVE-AGENT-RUNTIME'
   const form=new FormData();form.set('file',new Blob([JSON.stringify(document)],{type:'application/json'}),'baseline.json')
@@ -258,7 +261,7 @@ try {
   }})
   if(process.env.ALINKSEC_SMOKE_DETECTION_ONLY==='true') { await detection();passed=true }
   else {
-  await until(() => existsSync(join(first.dir, 'work/policy.json')), 'Initial policy was not applied')
+  await until(() => agentFileExists(first.container, 'policy.json'), 'Initial policy was not applied')
   await api('/api/protect/rules/PR-0010', { enabled: true, actions: ['alert'], match: { dirs: ['/work/decoys'], count_per_dir: 2 } }, 'PUT')
   await until(async () => JSON.parse(await agentFile(first.container, 'policy.json')).decoy.enabled === true,
     'Enabled policy did not reach Agent')
@@ -281,8 +284,8 @@ try {
   const rejectedResult=await rejectedIsolation.json()
   assert.notEqual(rejectedResult.code,0)
   assert.match(rejectedResult.msg,/原生 Agent 隔离契约/)
-  assert.equal(existsSync(join(first.dir,'work/isolated.json')),false)
-  assert.equal(existsSync(join(first.dir,'work/isolation/current.json')),false)
+  assert.equal(await agentFileExists(first.container,'isolated.json'),false)
+  assert.equal(await agentFileExists(first.container,'isolation/current.json'),false)
   console.log('ok - foreground/container Agents reject isolation without an independent native recovery service')
   await stopAgent(first)
   const second = await makeAgent('second')
@@ -393,7 +396,12 @@ try {
 } finally {
   let cleanupFailed = false
   for (const id of containers) {
-    try { writeFileSync(join(root, `${id.slice(0, 12)}.log`), await command('docker', ['logs', id])) } catch {}
+    try {
+      const diagnostic = await exec('docker', ['logs', id], {encoding:'utf8',timeout:30_000,maxBuffer:1024*1024})
+      const output = diagnostic.stdout + diagnostic.stderr
+      writeFileSync(join(root, `${id.slice(0, 12)}.log`), output)
+      if (!passed) console.error(`Agent ${id.slice(0, 12)} output:\n${output.split('\n').slice(-40).join('\n')}`)
+    } catch {}
     try { await exec('docker', ['rm', '-f', id], { timeout: 30_000 }) } catch { cleanupFailed = true }
   }
   if (proxy) await new Promise(ok => proxy.close(ok))

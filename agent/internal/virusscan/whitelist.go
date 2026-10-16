@@ -18,6 +18,9 @@ type whitelistEntry struct {
 
 func loadWhitelist(workDir string) []whitelistEntry {
 	data, err := readVirusPolicy(workDir)
+	return parseWhitelist(data, err)
+}
+func parseWhitelist(data []byte, err error) []whitelistEntry {
 	if err != nil {
 		return nil
 	}
@@ -44,6 +47,12 @@ func readVirusPolicy(workDir string) ([]byte, error) {
 }
 func RealtimePolicy(workDir string) (bool, bool) {
 	data, err := readVirusPolicy(workDir)
+	return parseRealtimePolicy(data, err)
+}
+func parseRealtimePolicy(data []byte, err error) (bool, bool) {
+	if len(data) == 0 && err == nil {
+		return true, true
+	}
 	if os.IsNotExist(err) {
 		return true, true
 	}
@@ -64,8 +73,15 @@ func RealtimePolicy(workDir string) (bool, bool) {
 	}
 	return p.Virus.Enabled, p.Virus.Action == "quarantine"
 }
+func (e *Engine) RealtimePolicy(workDir string) (bool, bool) {
+	if e.policyReader != nil {
+		data, err := e.policyReader()
+		return parseRealtimePolicy(data, err)
+	}
+	return RealtimePolicy(workDir)
+}
 func (e *Engine) CheckRealtime(path, workDir string) *pb.VirusFinding {
-	enabled, quarantine := RealtimePolicy(workDir)
+	enabled, quarantine := e.RealtimePolicy(workDir)
 	if !enabled {
 		return nil
 	}
@@ -79,7 +95,12 @@ func (e *Engine) refresh(workDir string) {
 		e.db = db
 		e.cache = map[string]cacheEntry{}
 	}
-	e.whitelist = loadWhitelist(workDir)
+	if e.policyReader != nil {
+		data, err := e.policyReader()
+		e.whitelist = parseWhitelist(data, err)
+	} else {
+		e.whitelist = loadWhitelist(workDir)
+	}
 }
 
 func (e *Engine) whitelisted(path, hash string) bool {

@@ -538,6 +538,40 @@ class AgentChannelSecurityIntegrationTest {
     }
 
     @Test
+    void persistentConfigurationEventsSurviveReconnectAndTransportExpiryWithoutRecounting() throws Exception {
+        var agent=enroll();var stream=connect(agent);heartbeat(stream,agent.getAgentId());
+        String id="c".repeat(32),eventId=id+"-config-event";
+        var event=com.alinksec.proto.RptSecurityEvent.newBuilder().setType("self_defense")
+                .setRuleId("agent-config-integrity").setRuleName("Agent 配置防篡改")
+                .setSeverity(com.alinksec.proto.Severity.SEV_HIGH).setActionTaken("trusted_config_in_use")
+                .setDetail(JsonUtils.write(Map.of("id",id,"file","agent.yml","path","/private/agent.yml",
+                        "reason","missing_or_unsafe_file","action","trusted_config_in_use","shadow","blocked")));
+        stream.requests.onNext(report(agent.getAgentId()).setReportId(eventId).setSecurityEvent(event).build());
+        heartbeat(stream,agent.getAgentId());
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_agent_config_event_receipt WHERE agent_id=?",Integer.class,agent.getAgentId()));
+        String key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest((agent.getAgentId()+"\0"+eventId).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        reportIds.add(key);
+        assertEquals(1,jdbc.update("DELETE FROM t_report_dedup WHERE report_id=?",key));
+        var next=connect(agent);heartbeat(next,agent.getAgentId());
+        next.requests.onNext(report(agent.getAgentId()).setReportId(eventId).setSecurityEvent(event).build());
+        heartbeat(next,agent.getAgentId());
+        assertEquals(1,jdbc.queryForObject("SELECT count FROM t_alert WHERE agent_id=? AND rule_id='agent-config-integrity'",Integer.class,agent.getAgentId()));
+        assertEquals("trusted_config_in_use",jdbc.queryForObject("SELECT action_taken FROM t_alert WHERE agent_id=? AND rule_id='agent-config-integrity'",String.class,agent.getAgentId()));
+        var detail=JsonUtils.read(jdbc.queryForObject("SELECT detail FROM t_alert WHERE agent_id=? AND rule_id='agent-config-integrity'",String.class,agent.getAgentId()));
+        assertEquals("blocked",detail.path("shadow").asText());
+        assertEquals("self_defense:agent-config-integrity:"+id,detail.path("fingerprint").asText());
+
+        // Stable IDs are scoped to the authenticated Agent, not the raw ID alone.
+        var other=enroll();var otherStream=connect(other);heartbeat(otherStream,other.getAgentId());
+        otherStream.requests.onNext(report(other.getAgentId()).setReportId(eventId).setSecurityEvent(event).build());
+        heartbeat(otherStream,other.getAgentId());
+        assertEquals(1,jdbc.queryForObject("SELECT count FROM t_alert WHERE agent_id=? AND rule_id='agent-config-integrity'",Integer.class,other.getAgentId()));
+        reportIds.add(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest((other.getAgentId()+"\0"+eventId).getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+    }
+
+    @Test
     void rejectsForeignAckEnvelopeAndKeepsVictimConnectionUsable() throws Exception {
         EnrollResponse attacker = enroll();
         EnrollResponse victim = enroll();
