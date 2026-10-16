@@ -290,8 +290,10 @@ offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
 |----|------|
 | 崩溃拉起 | systemd Restart=always（RestartSec=5）；Windows 服务恢复策略（失败 5000ms 重启，无限次） |
 | 防卸载 | 卸载子命令需 `--uninstall-token`（平台动态生成，5min 有效） |
-| 配置防篡改 | agent.yml 哈希自校验，异常时用内嵌默认值并上报事件 |
+| 配置防篡改 | agent.yml 与平台策略使用私有可信留存和 SHA256 检查；异常恢复可信配置、保留管理连接与证书并持久上报事件 |
 | 资源红线 | RSS 上限 100MB（超出时自动收缩缓存并自检报告）；CPU 由采集频率自适应（连续 5min 超 3% 自动降频并上报） |
+
+配置首次信任、合法改配、离线及重启恢复和权限边界见 [配置防篡改](57-Agent配置防篡改与可信恢复.md)。
 
 ## 8. 资源约束指标（验收红线）
 

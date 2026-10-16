@@ -86,9 +86,7 @@ func TestNativeIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, contents, 0600); err != nil {
-		t.Fatal(err)
-	}
+	applyNativeConfig(t, binary, work, contents)
 	certificate, err := os.ReadFile(filepath.Join(work, "certs", "client.crt"))
 	if err != nil {
 		t.Fatal(err)

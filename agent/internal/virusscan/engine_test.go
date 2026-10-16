@@ -112,3 +112,27 @@ func TestPathWhitelistDoesNotMatchSiblingPrefix(t *testing.T) {
 		t.Fatal("directory whitelist did not match child")
 	}
 }
+
+func TestPinnedPolicyReaderRejectsUnapprovedDisableAndWhitelist(t *testing.T) {
+	work := t.TempDir()
+	file := filepath.Join(t.TempDir(), "harmless-pinned-policy.txt")
+	data := []byte("harmless pinned policy fixture")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(data)
+	testDB(t, work, "v-pinned", hex.EncodeToString(hash[:]))
+	untrusted, _ := json.Marshal(map[string]any{"virus_realtime": map[string]any{"enabled": false, "action": "alert_only"}, "virus_whitelist": []whitelistEntry{{Type: "path", Value: filepath.Dir(file)}}})
+	if err := os.WriteFile(filepath.Join(work, "policy.json"), untrusted, 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngineWithPolicyReader(work, slog.New(slog.NewTextHandler(io.Discard, nil)), func() ([]byte, error) {
+		return []byte(`{"virus_realtime":{"enabled":true,"action":"alert_only"},"virus_whitelist":[]}`), nil
+	})
+	if found := engine.CheckRealtime(file, work); found == nil || found.ActionTaken != "alert_only" {
+		t.Fatalf("shadow bypassed periodic detection: %+v", found)
+	}
+	if found := engine.Scan("pinned-scan", pb.CmdVirusScan_CUSTOM, []string{file}, work); len(found.Findings) != 1 {
+		t.Fatal("shadow bypassed on-demand scan")
+	}
+}

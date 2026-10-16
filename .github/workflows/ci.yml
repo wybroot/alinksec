@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
@@ -78,6 +78,22 @@ jobs:
         with:
           name: isolation-validation-windows-amd64
           path: .tmp/isolation-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Check actual Windows configuration tampering, offline restart and durable replay
+        run: go test -v -count=1 -timeout=3m -run '^TestConfigIntegrityLifecycle$' ./cmd/agent
+        working-directory: agent
+        env:
+          ALINKSEC_CONFIG_NATIVE_REQUIRED: 'true'
+          ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
+          ALINKSEC_CONFIG_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/config-native/result.json
+      - name: Retain native Windows configuration evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-validation-windows-amd64
+          path: .tmp/config-native/result.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -283,7 +299,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/guard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
+        run: go test -race ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |
@@ -323,6 +339,16 @@ jobs:
         with:
           name: isolation-validation-linux-${{ matrix.arch }}
           path: .tmp/isolation-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check actual systemd configuration tampering, offline restart and durable replay
+        run: bash deploy/tests/agent-config-native.sh
+      - name: Retain native Linux configuration evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-validation-linux-${{ matrix.arch }}
+          path: .tmp/config-native/result.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

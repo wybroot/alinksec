@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -30,6 +31,19 @@ import (
 	"testing"
 	"time"
 )
+
+func applyNativeConfig(t *testing.T, binary, work string, contents []byte) {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(work), "approved-config.yml")
+	if err := os.WriteFile(path, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, binary, "config", "apply", "--from", path, "--workdir", work).CombinedOutput(); err != nil {
+		t.Fatalf("approve native configuration: %v\n%s", err, out)
+	}
+}
 
 func nativeOSType() pb.OsType {
 	if runtime.GOOS == "windows" {
@@ -51,14 +65,17 @@ type scmReport struct {
 type scmFixture struct {
 	pb.UnimplementedEnrollServiceServer
 	pb.UnimplementedAgentChannelServer
-	response     *pb.EnrollResponse
-	enrollments  atomic.Uint32
-	sessionCount atomic.Uint32
-	connections  chan scmConnection
-	reports      chan scmReport
-	pending      []scmReport
-	packages     sync.Map
-	downloadURL  string
+	response       *pb.EnrollResponse
+	enrollments    atomic.Uint32
+	sessionCount   atomic.Uint32
+	connections    chan scmConnection
+	reports        chan scmReport
+	pending        []scmReport
+	packages       sync.Map
+	downloadURL    string
+	denyChannels   atomic.Bool
+	disconnect     chan struct{}
+	activeChannels atomic.Int32
 }
 
 func (s *scmFixture) Enroll(_ context.Context, request *pb.EnrollRequest) (*pb.EnrollResponse, error) {
@@ -69,6 +86,11 @@ func (s *scmFixture) Enroll(_ context.Context, request *pb.EnrollRequest) (*pb.E
 }
 
 func (s *scmFixture) Channel(stream pb.AgentChannel_ChannelServer) error {
+	if s.denyChannels.Load() {
+		return status.Error(codes.Unavailable, "fixture transport unavailable")
+	}
+	s.activeChannels.Add(1)
+	defer s.activeChannels.Add(-1)
 	remote, ok := peer.FromContext(stream.Context())
 	if !ok {
 		return status.Error(codes.Unauthenticated, "missing TLS identity")
@@ -109,6 +131,8 @@ func (s *scmFixture) Channel(stream pb.AgentChannel_ChannelServer) error {
 	}()
 	for {
 		select {
+		case <-s.disconnect:
+			return status.Error(codes.Unavailable, "fixture transport disconnected")
 		case command := <-connection.commands:
 			if err := stream.Send(command); err != nil {
 				return err
@@ -192,7 +216,7 @@ func newSCMFixture(t *testing.T, root string) (*scmFixture, string, string) {
 		t.Fatal(err)
 	}
 	fixture := &scmFixture{response: &pb.EnrollResponse{AgentId: agentID, ClientCert: clientPEM, ClientKey: clientKeyPEM, CaCert: string(caPEM)},
-		connections: make(chan scmConnection, 8), reports: make(chan scmReport, 256)}
+		connections: make(chan scmConnection, 8), reports: make(chan scmReport, 256), disconnect: make(chan struct{}, 1)}
 	downloads := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		value, ok := fixture.packages.Load(r.URL.Path)
 		if !ok {

@@ -66,14 +66,14 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasVirusResult() || isolationOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+        if(report.hasVirusResult() || isolationOutcome(report) || configOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
             virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
-        if((report.hasVirusResult() || isolationOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if((report.hasVirusResult() || isolationOutcome(report) || configOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
@@ -86,6 +86,20 @@ public class ReportDispatcher {
             case ACK -> commandService.onAck(agentId, report.getAck());
             case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
             case SECURITY_EVENT -> {
+                if(configOutcome(report)) {
+                    var event=report.getSecurityEvent();
+                    var detail=com.alinksec.common.util.JsonUtils.read(event.getDetail());
+                    String id=detail.path("id").asText();
+                    if(event.getDetail().length()>8192 || !id.matches("[0-9a-f]{32}")
+                            || !report.getReportId().equals(id+"-config-event")
+                            || !java.util.Set.of("agent.yml","policy.json","trusted_state","marker").contains(detail.path("file").asText())
+                            || !event.getActionTaken().equals("trusted_config_in_use")
+                            || !detail.path("action").asText().equals(event.getActionTaken())
+                            || !java.util.Set.of("restored","blocked","unapproved_file_ignored","memory_snapshot_retained").contains(detail.path("shadow").asText()))
+                        throw new IllegalArgumentException("invalid persistent configuration event identity");
+                    if(jdbc.update("INSERT INTO t_agent_config_event_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
+                            agentId,report.getReportId(),event.getDetail())==0) return;
+                }
                 if(isolationOutcome(report)) {
                     var detail=com.alinksec.common.util.JsonUtils.read(report.getSecurityEvent().getDetail());
                     String id=detail.path("id").asText(),phase=detail.path("phase").asText();
@@ -111,6 +125,11 @@ public class ReportDispatcher {
     private static boolean isolationOutcome(com.alinksec.proto.Report report) {
         return report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("self_defense")
                 && report.getSecurityEvent().getRuleId().equals("host-isolation-lease");
+    }
+
+    private static boolean configOutcome(com.alinksec.proto.Report report) {
+        return report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("self_defense")
+                && report.getSecurityEvent().getRuleId().equals("agent-config-integrity");
     }
 
     /** 去重表 SETNX 语义：插入成功 = 首次见到 */

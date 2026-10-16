@@ -73,9 +73,7 @@ func TestNativeWindowsService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, contents, 0600); err != nil {
-		t.Fatal(err)
-	}
+	applyNativeConfig(t, binary, work, contents)
 	certPath := filepath.Join(work, "certs", "client.crt")
 	certificate, err := os.ReadFile(certPath)
 	if err != nil {

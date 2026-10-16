@@ -5,5 +5,5 @@ if [ ! -f "$agent_workdir/certs/client.crt" ]; then
   /fixtures/alinksec-agent install --server "$ALINKSEC_TEST_SERVER" \
     --token "$ALINKSEC_TEST_TOKEN" --ca-file /fixtures/ca.crt --workdir "$agent_workdir"
 fi
-cp /fixtures/agent.yml "$agent_workdir/agent.yml"
+/fixtures/alinksec-agent config apply --from /fixtures/agent.yml --workdir "$agent_workdir"
 exec /fixtures/alinksec-agent run --workdir "$agent_workdir"
