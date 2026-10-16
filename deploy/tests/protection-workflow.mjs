@@ -1,21 +1,29 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 
 // The caller supplies one disposable Agent and its existing platform connection.
 export async function protectionWorkflow({ api, command, until, agent, alerts, restart, sourceIP = '198.51.100.23', probe, pass = console.log }) {
-  const work = join(agent.dir, 'work'), fixture = agent.fixtures
+  const fixture = agent.fixtures
   const originals = (await api('/api/protect/rules')).filter(r => ['PR-0002','PR-0003'].includes(r.rule_id))
   assert.equal(originals.length,2)
-  const containerPath = '/work/protected-test/config', file = join(work,'protected-test/config')
-  mkdirSync(join(work,'protected-test'),{recursive:true})
-  writeFileSync(file,'ORIGINAL\n',{mode:0o640})
+  const containerPath = '/work/protected-test/config'
   const baselineKey = createHash('sha256').update('PR-0002\0'+containerPath).digest('hex')
   const baseline = '/work/file-protection/'+baselineKey+'.json'
   const dex = (...args) => command('docker',['exec',agent.container,...args])
+  // The work directory belongs to the root Agent and is private to it. Docker
+  // copy also supports the mutation performed while the container is stopped.
+  async function writeProtected(content, path=containerPath) {
+    const input = join(fixture,'protected-input')
+    writeFileSync(input,content,{mode:0o640})
+    await command('docker',['cp',input,`${agent.container}:${path}`])
+  }
+  const readProtected = (path=containerPath) => dex('base64','-w','0',path).then(value=>Buffer.from(value,'base64').toString('utf8'))
+  await dex('mkdir','-p','/work/protected-test')
+  await writeProtected('ORIGINAL\n')
   const exists = path => dex('test','-e',path).then(()=>true,()=>false)
   const state = async path => JSON.parse(await dex('cat','/work/'+path))
   async function rule(id, body, field) {
@@ -48,47 +56,47 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
     await rule('PR-0002',fileBody,'file_rules')
     await until(()=>exists(baseline),'File baseline not captured')
     let before = await count('file_tamper')
-    writeFileSync(file,'ALERT ONLY\n')
+    await writeProtected('ALERT ONLY\n')
     const alerted = await newEvent('file_tamper',before,'alert_only')
-    assert.equal(readFileSync(file,'utf8'),'ALERT ONLY\n')
+    assert.equal(await readProtected(),'ALERT ONLY\n')
     assert.ok(!alerted.detail.includes('ORIGINAL') && !alerted.detail.includes('ALERT ONLY'),'Event leaked file contents')
     before = await count('file_tamper'); await delay(6000); assert.equal(await count('file_tamper'),before)
     pass('file change alert, content privacy and repeated-change suppression')
 
     before = await count('file_tamper'); fileBody.actions=['alert','restore']; await rule('PR-0002',fileBody,'file_rules')
     await newEvent('file_tamper',before,'restored')
-    assert.equal(readFileSync(file,'utf8'),'ORIGINAL\n')
+    assert.equal(await readProtected(),'ORIGINAL\n')
     assert.equal(await dex('stat','-c','%a',containerPath),'640')
     for (const mutation of ['delete','symlink']) {
       before = await count('file_tamper')
       await dex('rm','-f',containerPath)
       if (mutation==='symlink') {
-        writeFileSync(join(work,'outside'),'OUTSIDE\n')
+        await writeProtected('OUTSIDE\n','/work/outside')
         await dex('ln','-s','/work/outside',containerPath)
       }
       await newEvent('file_tamper',before,'restored')
-      assert.equal(readFileSync(file,'utf8'),'ORIGINAL\n')
-      if (mutation==='symlink') assert.equal(readFileSync(join(work,'outside'),'utf8'),'OUTSIDE\n')
+      assert.equal(await readProtected(),'ORIGINAL\n')
+      if (mutation==='symlink') assert.equal(await readProtected('/work/outside'),'OUTSIDE\n')
     }
     before = await count('file_tamper'); await command('docker',['stop','--timeout','5',agent.container])
-    writeFileSync(file,'CHANGED DURING RESTART\n'); await restart()
-    await newEvent('file_tamper',before,'restored'); assert.equal(readFileSync(file,'utf8'),'ORIGINAL\n')
+    await writeProtected('CHANGED DURING RESTART\n'); await restart()
+    await newEvent('file_tamper',before,'restored'); assert.equal(await readProtected(),'ORIGINAL\n')
     pass('real file restoration preserves permissions, replaces symlink safely and survives Agent restart')
 
     await rule('PR-0002',{enabled:false},'file_rules'); await until(async()=>!await exists(baseline),'Disabled baseline not removed')
-    before = await count('file_tamper'); writeFileSync(file,'APPROVED\n'); await delay(6000)
+    before = await count('file_tamper'); await writeProtected('APPROVED\n'); await delay(6000)
     assert.equal(await count('file_tamper'),before)
     await rule('PR-0002',{enabled:true},'file_rules'); await until(()=>exists(baseline),'Fresh baseline not captured')
-    writeFileSync(file,'TAMPERED\n'); await newEvent('file_tamper',before,'restored'); assert.equal(readFileSync(file,'utf8'),'APPROVED\n')
+    await writeProtected('TAMPERED\n'); await newEvent('file_tamper',before,'restored'); assert.equal(await readProtected(),'APPROVED\n')
     pass('disabled file rule permits approved changes and re-enabling captures a fresh baseline')
 
     before = await count('file_tamper')
     await dex('mv','/work/protected-test','/work/protected-test-original')
-    mkdirSync(join(work,'protected-test'))
-    writeFileSync(file,'UNRELATED\n')
+    await dex('mkdir','/work/protected-test')
+    await writeProtected('UNRELATED\n')
     const replaced = await newEvent('file_tamper',before,'restore_failed')
     assert.equal(JSON.parse(replaced.detail).change,'parent_changed')
-    assert.equal(readFileSync(file,'utf8'),'UNRELATED\n')
+    assert.equal(await readProtected(),'UNRELATED\n')
     pass('replaced parent directory refuses restoration without changing unrelated contents')
 
     await rule('PR-0003',loginBody,'login_rules')
