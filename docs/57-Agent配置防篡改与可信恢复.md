@@ -50,6 +50,8 @@ alinksec-agent config apply --from /admin/agent-new.yml --workdir /var/lib/alink
 
 本地真实 Agent 进程已通过 13 项：CA 验证注册、注册码清除、合法离线改配、认证策略留存、在线配置和策略恢复、断网事件落盘、坏配置及缺失策略下重启、稳定 ID 补传、证书保留、运行中改配拒绝、无效改配脱敏、合法变更重启生效。
 
-配置与通信测试另覆盖同长度/mtime 篡改、链接目标保留、权限变化、可信记录丢失/损坏拒绝重新学习、运行中恢复、并发策略提交、持久写入失败重试、周期/主动检测白名单绕过。CI 增加 Linux amd64/arm64 真实 systemd 和 Windows amd64 SCM 场景，必须输出完成后的原生产物。最终 CI 和合并验收记录完成后补齐。
+配置与通信测试另覆盖同长度/mtime 篡改、链接及硬链接目标保留、FIFO 有界拒绝、权限变化、可信记录丢失/损坏拒绝重新学习、运行中恢复、并发策略提交、持久写入失败重试、64 事件淘汰和极端路径转义容量。病毒引擎从构造开始使用可信策略，FIFO 副本不会阻塞初始化，也不能利用副本关闭周期检测或扩大主动检测白名单。Windows 原生检查覆盖记录所有者、DACL 恢复以及设备/UNC/备用流路径拒绝。
+
+功能提交 `d4c61fd1c8e3455fd38292408082431148abe6fe` 的 [完整 CI38832986135](https://github.com/wybroot/alinksec/actions/runs/38832986135) 四作业全部通过。Linux amd64、arm64 的真实 systemd 与 Windows amd64 的真实 SCM 配置场景各 13 项，既有升级回退各 7 项和隔离撤销各 11 项原生产物均已逐份核对。双架构完整后端、Go、并发、真实 Agent、生产页面及双数据库部署恢复回归通过；PostgreSQL 单独完成 70 项后端集成与 16 项迁移/备份检查。两架构生产隔离页面各 6 项及维护恢复产物已核对。
 
 系统语义参考：[Linux open](https://man7.org/linux/man-pages/man2/open.2.html)、[Windows CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)、[Windows reparse points](https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points)。
