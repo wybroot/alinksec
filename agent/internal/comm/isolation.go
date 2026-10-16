@@ -97,6 +97,16 @@ func (c *Client) sendIsolationResults(stream pb.AgentChannel_ChannelClient, sess
 		c.log.Error("read persistent isolation outcomes", "err", err)
 		return nil
 	}
+	active := make(map[string]bool, len(leases)*3)
+	for _, l := range leases {
+		active[l.CommandID], active[l.RestoreCommandID] = true, true
+		active[l.ID+"-"+l.Phase] = true
+	}
+	for key := range seen {
+		if !active[key] {
+			delete(seen, key)
+		}
+	}
 	for _, l := range leases {
 		for _, cmd := range []string{l.CommandID, l.RestoreCommandID} {
 			if cmd == "" || len(cmd) > 6 && cmd[:6] == "local-" {

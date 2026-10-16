@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/alinksec/alinksec-agent/internal/resources"
+
 	"gopkg.in/yaml.v3"
 )
 
 // Config Agent 运行配置（工作目录下 agent.yml，可用 --config 覆盖）
 type Config struct {
+	Resources resources.Config `yaml:"resources"`
 	// 服务端 gRPC 地址（host:port）
 	ServerAddr string `yaml:"server_addr"`
 	// 注册码（首次安装使用，注册成功后证书落盘即不再依赖）
@@ -155,6 +158,10 @@ func Parse(b []byte) (*Config, error) {
 		c.CollectInterval = 6 * time.Hour
 	}
 	c.Decoy.Normalize()
+	c.Resources = c.Resources.Defaults()
+	if err := c.Resources.Validate(); err != nil {
+		return nil, err
+	}
 	if err := ValidateProtection(c.FileRules, c.LoginRules); err != nil {
 		return nil, fmt.Errorf("配置中的防护规则无效")
 	}

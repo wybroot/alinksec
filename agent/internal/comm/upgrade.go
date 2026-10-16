@@ -24,6 +24,15 @@ func (c *Client) sendUpgradeResults(stream pb.AgentChannel_ChannelClient, genera
 		c.log.Error("read persistent upgrade results", "err", err)
 		return nil
 	}
+	active := make(map[string]bool, len(results))
+	for _, result := range results {
+		active[result.ID] = true
+	}
+	for key := range seen {
+		if !active[key] {
+			delete(seen, key)
+		}
+	}
 	for _, result := range results {
 		data, _ := json.Marshal(result)
 		digest := sha256.Sum256(data)

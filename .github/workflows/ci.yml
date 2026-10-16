@@ -24,8 +24,22 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/resources ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
+      - name: Check native Windows resource feedback and recovery
+        run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
+        working-directory: agent
+        env:
+          ALINKSEC_RESOURCE_NATIVE_REQUIRED: 'true'
+          ALINKSEC_RESOURCE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/resource-native/result.json
+      - name: Retain native Windows resource evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-validation-windows-amd64
+          path: .tmp/resource-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Build native Windows Agent
         run: go build -trimpath -ldflags "-s -w" -o alinksec-agent-windows-amd64.exe ./cmd/agent
         working-directory: agent
@@ -224,6 +238,20 @@ jobs:
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
           ALINKSEC_PACKAGE_REPAIR_NATIVE_REQUIRED: 'true'
+      - name: Check native Linux resource feedback and recovery
+        run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
+        working-directory: agent
+        env:
+          ALINKSEC_RESOURCE_NATIVE_REQUIRED: 'true'
+          ALINKSEC_RESOURCE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/resource-native/result.json
+      - name: Retain native Linux resource evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-validation-linux-${{ matrix.arch }}
+          path: .tmp/resource-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check native protected local identity files and redacted evidence
         working-directory: agent
         run: |
@@ -299,7 +327,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
+        run: go test -race ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |

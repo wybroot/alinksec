@@ -93,7 +93,6 @@ func (e *Engine) refresh(workDir string) {
 	db := LoadDB(workDir)
 	if e.db != db {
 		e.db = db
-		e.cache = map[string]cacheEntry{}
 	}
 	if e.policyReader != nil {
 		data, err := e.policyReader()

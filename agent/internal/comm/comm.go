@@ -31,6 +31,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/logcollect"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/resources"
 	"github.com/alinksec/alinksec-agent/internal/scan"
 	"github.com/alinksec/alinksec-agent/internal/sysmetrics"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
@@ -46,12 +47,14 @@ type Client struct {
 	dedup       *cmdDedup
 	log         *slog.Logger
 	configStore *configguard.Store
+	resources   *resources.Governor
+	bulkBusy    atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
 	collectTrigger              chan []string
 	pendingReports              chan *pb.Report
-	lastCollectAt               time.Time
+	lastCollectAt               atomic.Int64
 	reportMu                    sync.Mutex
 	channelActive               bool
 	channelSession              uint64
@@ -98,6 +101,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	c := &Client{
 		cfg:             cfg,
 		configStore:     store,
+		resources:       resources.New(cfg.Resources),
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
@@ -296,6 +300,7 @@ func (c *Client) EnsureEnrolled(ctx context.Context) error {
 
 // Run 主循环：建流 → 收发 → 断线指数退避重连（协议设计 §5）
 func (c *Client) Run(ctx context.Context) error {
+	go c.resourceLoop(ctx)
 	if c.configStore != nil {
 		go c.watchConfiguration(ctx)
 	}
@@ -426,7 +431,7 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 	isolationResults := map[string]string{}
 	configResults := map[string]bool{}
 	isolationState := ""
-	drained := false
+	nextDrain := time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -475,12 +480,17 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 				return fmt.Errorf("发送 Report: %w", err)
 			}
 		default:
-			// 发送空闲且尚未补传 → 限速补传离线队列
-			if !drained {
-				if err := c.drainQueue(stream, generation); err != nil {
+			// One queued report per turn; control timers run between records.
+			if !time.Now().Before(nextDrain) {
+				sent, err := c.drainQueue(stream, generation)
+				if err != nil {
 					return err
 				}
-				drained = true
+				delay := time.Second
+				if sent {
+					delay = time.Second / time.Duration(max(1, c.cfg.DrainRatePerSec))
+				}
+				nextDrain = time.Now().Add(delay)
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -501,35 +511,22 @@ func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report, 
 	return err
 }
 
-// drainQueue 补传离线队列（限速：DrainRatePerSec；未发出条目重新入队）
-func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uint64) error {
-	reports, err := c.queue.PopAll()
+// drainQueue sends one record, retaining failed sends on disk.
+func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uint64) (bool, error) {
+	r, err := c.queue.Peek()
 	if err != nil {
 		c.log.Error("读取离线队列失败", "err", err)
-		return nil // 队列读取失败不拆连接，下轮重试
+		return false, nil
 	}
-	if len(reports) == 0 {
-		return nil
+	if r == nil {
+		return false, nil
 	}
-	interval := time.Second / time.Duration(c.cfg.DrainRatePerSec)
-	sent := 0
-	for i, r := range reports {
-		if err := c.sendReport(stream, r, generation); err != nil {
-			break
-		}
-		sent = i + 1
-		time.Sleep(interval)
+	if err := c.sendReport(stream, r, generation); err != nil {
+		c.queue.Release()
+		return false, err
 	}
-	for _, r := range reports[sent:] {
-		if qerr := c.queue.Push(r); qerr != nil {
-			c.log.Error("离线队列回写失败", "err", qerr)
-		}
-	}
-	if sent < len(reports) {
-		return fmt.Errorf("补传中断，%d/%d 已发出", sent, len(reports))
-	}
-	c.log.Info("离线队列补传完成", "count", len(reports))
-	return nil
+	c.queue.TryAck()
+	return true, nil
 }
 
 // buildHeartbeat 构造心跳 Report
@@ -636,24 +633,21 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Code: 0,
 			Message: "policy version " + c.state.PolicyVersion}}
 	case *pb.Command_CollectNow:
-		// 同步执行采集（采集耗时秒级，指令频率极低），完成后经当前连接直接上报
-		names := p.CollectNow.GetCollectorNames()
-		start := time.Now()
-		snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
-		r := &pb.Report{
-			AgentId:  c.state.AgentID,
-			ReportId: newUUID(),
-			Ts:       time.Now().UnixMilli(),
-			Payload:  &pb.Report_Asset{Asset: snap},
+		if !c.beginBulk() {
+			return c.resourceBusy(received)
 		}
-		select {
-		case sendCh <- r:
-		case <-sctx.Done():
-		}
-		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Code: 0,
-			Message: fmt.Sprintf("collected sw=%d ports=%d accounts=%d disks=%d in %s",
-				len(snap.GetSoftware()), len(snap.GetPorts()),
-				len(snap.GetAccounts()), len(snap.GetDisks()), time.Since(start).Round(time.Millisecond))}}
+		names := append([]string(nil), p.CollectNow.GetCollectorNames()...)
+		go func() {
+			defer c.bulkBusy.Store(false)
+			start := time.Now()
+			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
+			c.lastCollectAt.Store(start.UnixNano())
+			c.pushReport(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(), Payload: &pb.Report_Asset{Asset: snap}})
+			ack := &pb.RptAck{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Message: fmt.Sprintf("collected sw=%d ports=%d accounts=%d disks=%d in %s", len(snap.GetSoftware()), len(snap.GetPorts()), len(snap.GetAccounts()), len(snap.GetDisks()), time.Since(start).Round(time.Millisecond))}
+			c.dedup.Put(cmd.GetCmdId(), ack)
+			c.pushReport(c.wrapAck(ack))
+		}()
+		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_RUNNING, Message: "asset collection running"}}
 	case *pb.Command_BaselineCheck:
 		return c.executeBaselineCheck(p.BaselineCheck, received)
 	case *pb.Command_VulnScan:
@@ -805,7 +799,11 @@ func (c *Client) executeProtectAction(pa *pb.CmdProtectAction, received *pb.RptA
 // pendingReports 上报结果与终态 ACK（断线期间阻塞缓冲，重连后补发）。
 func (c *Client) executeBaselineCheck(bc *pb.CmdBaselineCheck, received *pb.RptAck) []*pb.RptAck {
 	cmdID := received.GetCmdId()
+	if !c.beginBulk() {
+		return c.resourceBusy(received)
+	}
 	if !c.baselineBusy.CompareAndSwap(false, true) {
+		c.bulkBusy.Store(false)
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 2,
 			Message: "已有基线核查任务执行中，请稍后重试"}}
 	}
@@ -813,6 +811,7 @@ func (c *Client) executeBaselineCheck(bc *pb.CmdBaselineCheck, received *pb.RptA
 		Message: fmt.Sprintf("baseline task %s running, %d items", bc.GetTaskId(), len(bc.GetItems()))}
 	go func() {
 		defer c.baselineBusy.Store(false)
+		defer c.bulkBusy.Store(false)
 		start := time.Now()
 		result := baseline.RunWithRuntime(bc.GetTaskId(), bc.GetItems(), c.log, c.baselineRuntime())
 		failed := 0
@@ -848,7 +847,11 @@ func (c *Client) executeBaselineCheck(bc *pb.CmdBaselineCheck, received *pb.RptA
 // 与基线核查同模式异步执行 —— 立即回 RECEIVED+RUNNING，完成后上报结果与终态 ACK。
 func (c *Client) executeVulnScan(vs *pb.CmdVulnScan, received *pb.RptAck) []*pb.RptAck {
 	cmdID := received.GetCmdId()
+	if !c.beginBulk() {
+		return c.resourceBusy(received)
+	}
 	if !c.scanBusy.CompareAndSwap(false, true) {
+		c.bulkBusy.Store(false)
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 2,
 			Message: "已有扫描任务执行中，请稍后重试"}}
 	}
@@ -857,6 +860,7 @@ func (c *Client) executeVulnScan(vs *pb.CmdVulnScan, received *pb.RptAck) []*pb.
 			vs.GetTaskId(), vs.GetIncludeWeakPassword(), vs.GetIncludePortService())}
 	go func() {
 		defer c.scanBusy.Store(false)
+		defer c.bulkBusy.Store(false)
 		start := time.Now()
 		result := scan.Run(vs.GetTaskId(), vs.GetIncludeWeakPassword(), vs.GetIncludePortService(), c.log)
 		finalAck := &pb.RptAck{CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
@@ -884,7 +888,11 @@ func (c *Client) executeVulnScan(vs *pb.CmdVulnScan, received *pb.RptAck) []*pb.
 // 检出默认隔离（docs/05 §1.4），结果经 pendingReports 上报 + 终态 ACK。
 func (c *Client) executeVirusScan(vs *pb.CmdVirusScan, received *pb.RptAck) []*pb.RptAck {
 	cmdID := received.GetCmdId()
+	if !c.beginBulk() {
+		return c.resourceBusy(received)
+	}
 	if !c.virusBusy.CompareAndSwap(false, true) {
+		c.bulkBusy.Store(false)
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 2,
 			Message: "已有病毒扫描任务执行中，请稍后重试"}}
 	}
@@ -893,6 +901,8 @@ func (c *Client) executeVirusScan(vs *pb.CmdVirusScan, received *pb.RptAck) []*p
 			vs.GetTaskId(), vs.GetMode().String(), len(vs.GetPaths()), virusscan.LocalVersion(c.workDir))}
 	go func() {
 		defer c.virusBusy.Store(false)
+		defer c.bulkBusy.Store(false)
+		defer c.resources.BeginScan()()
 		start := time.Now()
 		engine := c.newVirusEngine()
 		result := engine.ScanCommand(context.Background(), vs, c.workDir)
@@ -1110,26 +1120,35 @@ const minCollectGap = 10 * time.Minute
 // collectLoop 周期采集：定时全量 + triggerCollect 即时触发；产物经 pendingReports 由活跃连接发出
 func (c *Client) collectLoop(ctx context.Context) {
 	// 启动延迟：给首个连接留出建立时间，避免首采产物在断线期占满缓冲
-	timer := time.NewTimer(15 * time.Second)
-	defer timer.Stop()
-	ticker := time.NewTicker(c.cfg.CollectInterval)
+	initialAt := time.Now().Add(15 * time.Second)
+	nextAttempt := initialAt
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
-			c.triggerCollect(nil)
 		case <-ticker.C:
-			c.triggerCollect(nil)
+			if time.Now().Before(nextAttempt) {
+				continue
+			}
+			last := c.lastCollectAt.Load()
+			if last == 0 && time.Now().After(initialAt) || last != 0 && time.Since(time.Unix(0, last)) >= c.resources.Interval(c.cfg.CollectInterval) {
+				c.triggerCollect(nil)
+				nextAttempt = time.Now().Add(time.Minute)
+			}
 		case names := <-c.collectTrigger:
 			if c.collectPaused.Load() {
 				c.log.Info("采集已暂停（CmdAgentControl.PAUSE_COLLECT），跳过本轮")
 				continue
 			}
+			if !c.beginBulk() {
+				continue
+			}
 			start := time.Now()
 			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
-			c.lastCollectAt = start
+			c.bulkBusy.Store(false)
+			c.lastCollectAt.Store(start.UnixNano())
 			c.pushReport(&pb.Report{
 				AgentId:  c.state.AgentID,
 				ReportId: newUUID(),
@@ -1142,7 +1161,7 @@ func (c *Client) collectLoop(ctx context.Context) {
 
 // triggerCollect 非阻塞触发采集（空 names = 全部）；距上次采集不足 minCollectGap 时跳过
 func (c *Client) triggerCollect(names []string) {
-	if time.Since(c.lastCollectAt) < minCollectGap {
+	if last := c.lastCollectAt.Load(); last != 0 && time.Since(time.Unix(0, last)) < c.resources.Interval(minCollectGap) {
 		return
 	}
 	select {
@@ -1166,8 +1185,10 @@ func (c *Client) metricsLoop(ctx context.Context) {
 			return
 		case <-fast.C:
 			c.pushMetrics(sysmetrics.CollectFast(c.log))
+			fast.Reset(c.resources.Interval(10 * time.Second))
 		case <-slow.C:
 			c.pushMetrics(sysmetrics.CollectSlow(c.log))
+			slow.Reset(c.resources.Interval(60 * time.Second))
 		}
 	}
 }
