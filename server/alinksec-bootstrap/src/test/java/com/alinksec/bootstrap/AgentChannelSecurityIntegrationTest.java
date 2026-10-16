@@ -91,8 +91,61 @@ class AgentChannelSecurityIntegrationTest {
     @Autowired com.alinksec.service.scan.VulnMatchService matcher;
     @Autowired PatchRepoService patches;
     @Autowired ProtectRuleService rules;
+    @Autowired com.alinksec.service.config.DatabaseDialect database;
 
     private final List<ManagedChannel> channels = new ArrayList<>();
+
+    @ParameterizedTest
+    @ValueSource(strings = {"baseline", "scan"})
+    void resourceBusyReceiptFinishesOnlyTheOwnedActiveBulkTask(String kind) throws Exception {
+        var owner = enroll(); var other = enroll();
+        Stream owned = connect(owner), foreign = connect(other);
+        heartbeat(owned, owner.getAgentId()); heartbeat(foreign, other.getAgentId());
+        String table = kind.equals("baseline") ? "t_baseline_task" : "t_scan_task";
+        List<Long> fixtures = new ArrayList<>();
+        try {
+            long task = resourceTask(kind, owner.getAgentId()); fixtures.add(task);
+            String cmd = resourceCommand(kind, task, owner.getAgentId(), owned);
+            ack(foreign, other.getAgentId(), cmd, RptAck.Stage.FAILED); heartbeat(foreign, other.getAgentId());
+            assertEquals(1, jdbc.queryForObject("SELECT status FROM " + table + " WHERE id=?", Integer.class, task));
+            owned.requests.onNext(report(owner.getAgentId()).setAck(RptAck.newBuilder().setCmdId(cmd)
+                    .setStage(RptAck.Stage.FAILED).setCode(2).setMessage("background work busy; retry later")).build());
+            heartbeat(owned, owner.getAgentId());
+            assertEquals(CommandRepository.ST_FAILED, commandStatus(cmd));
+            assertEquals(3, jdbc.queryForObject("SELECT status FROM " + table + " WHERE id=?", Integer.class, task));
+            assertEquals(25, jdbc.queryForObject("SELECT progress FROM " + table + " WHERE id=?", Integer.class, task));
+            assertNotNull(jdbc.queryForObject("SELECT CAST(finished_at AS TEXT) FROM " + table + " WHERE id=?", String.class, task));
+            ack(owned, owner.getAgentId(), cmd, RptAck.Stage.DONE); heartbeat(owned, owner.getAgentId());
+            assertEquals(3, jdbc.queryForObject("SELECT status FROM " + table + " WHERE id=?", Integer.class, task));
+            for (int terminal : List.of(2,4)) {
+                long finished = resourceTask(kind, owner.getAgentId()); fixtures.add(finished);
+                jdbc.update("UPDATE " + table + " SET status=? WHERE id=?", terminal, finished);
+                String late = resourceCommand(kind, finished, owner.getAgentId(), owned);
+                ack(owned, owner.getAgentId(), late, RptAck.Stage.FAILED); heartbeat(owned, owner.getAgentId());
+                assertEquals(terminal, jdbc.queryForObject("SELECT status FROM " + table + " WHERE id=?", Integer.class, finished));
+            }
+            long unrelated = resourceTask(kind, other.getAgentId()); fixtures.add(unrelated);
+            String wrongScope = resourceCommand(kind, unrelated, owner.getAgentId(), owned);
+            ack(owned, owner.getAgentId(), wrongScope, RptAck.Stage.FAILED); heartbeat(owned, owner.getAgentId());
+            assertEquals(1, jdbc.queryForObject("SELECT status FROM " + table + " WHERE id=?", Integer.class, unrelated));
+        } finally { for (long id : fixtures) jdbc.update("DELETE FROM " + table + " WHERE id=?", id); }
+    }
+
+    private long resourceTask(String kind, String agent) {
+        String scope = JsonUtils.write(Map.of("agent_ids", List.of(agent)));
+        if (kind.equals("baseline")) return jdbc.queryForObject("INSERT INTO t_baseline_task(task_no,scope,template_ids,status,progress) VALUES (?,?,?,1,25) RETURNING id",
+                Long.class, "resource-" + UUID.randomUUID(), scope, database.encodeLongList(List.of()));
+        return jdbc.queryForObject("INSERT INTO t_scan_task(task_no,type,scope,status,progress) VALUES (?,2,?,1,25) RETURNING id",
+                Long.class, "resource-" + UUID.randomUUID(), scope);
+    }
+
+    private String resourceCommand(String kind, long task, String agent, Stream stream) throws Exception {
+        var builder = Command.newBuilder();
+        if (kind.equals("baseline")) builder.setBaselineCheck(com.alinksec.proto.CmdBaselineCheck.newBuilder().setTaskId(Long.toString(task)));
+        else builder.setVulnScan(com.alinksec.proto.CmdVulnScan.newBuilder().setTaskId(Long.toString(task)));
+        String id = commands.dispatch(agent, builder, null);
+        assertEquals(id, stream.nextCommand().getCmdId()); return id;
+    }
     private final List<String> agentIds = new ArrayList<>();
     private final List<String> enrollTokens = new ArrayList<>();
     private final List<String> reportIds = new ArrayList<>();
