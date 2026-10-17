@@ -2,8 +2,8 @@ package comm
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,12 +20,16 @@ type OfflineQueue struct {
 	mu             sync.Mutex
 	path           string
 	lastCompaction time.Time
+	offset         int64
+	peekEnd        int64
+	peeked         *pb.Report
 }
 
 const (
-	compactEvery  = 5 * time.Minute
-	maxQueueBytes = 500 << 20      // 环形容量上限 500MB
-	maxEntryAge   = 24 * time.Hour // 单条最长保留 24h
+	compactEvery   = 5 * time.Minute
+	maxQueueBytes  = 500 << 20 // 环形容量上限 500MB
+	maxRecordBytes = 4 << 20
+	maxEntryAge    = 24 * time.Hour // 单条最长保留 24h
 )
 
 // NewOfflineQueue 在工作目录下创建队列文件
@@ -49,6 +53,10 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 	if err != nil {
 		_ = f.Close()
 		return fmt.Errorf("序列化 Report: %w", err)
+	}
+	if len(line)+1 > maxRecordBytes {
+		_ = f.Close()
+		return fmt.Errorf("report exceeds 4MiB queue limit")
 	}
 	w := bufio.NewWriter(f)
 	if _, err := w.Write(append(line, '\n')); err != nil {
@@ -77,88 +85,175 @@ func (q *OfflineQueue) compactLocked() error {
 	if st.Size() <= maxQueueBytes && !needsAgeSweep {
 		return nil
 	}
-	b, err := os.ReadFile(q.path)
-	if err != nil {
-		return err
+	// A peeked record's byte position remains stable until Ack/Release.
+	if q.peeked != nil {
+		return nil
 	}
 	cutoff := now.Add(-maxEntryAge).UnixMilli()
-	// 第一遍：剔除超龄行，统计存活字节
-	var lines [][]byte
-	total := 0
-	droppedExpired := false
-	for _, line := range bytes.Split(b, []byte{'\n'}) {
-		if len(line) == 0 {
-			continue
+	visit := func(fn func([]byte) error) error {
+		f, err := os.Open(q.path)
+		if err != nil {
+			return err
 		}
-		r := &pb.Report{}
-		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(line, r); err == nil && r.Ts > 0 && r.Ts < cutoff {
-			droppedExpired = true
-			continue // 超龄：丢弃
+		defer f.Close()
+		if _, err = f.Seek(q.offset, io.SeekStart); err != nil {
+			return err
 		}
-		lines = append(lines, line)
-		total += len(line) + 1
+		sc := queueScanner(f)
+		for sc.Scan() {
+			line := sc.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			r := new(pb.Report)
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(line, r); err != nil {
+				continue
+			}
+			if r.Ts > 0 && r.Ts < cutoff {
+				continue
+			}
+			if err := fn(line); err != nil {
+				return err
+			}
+		}
+		return sc.Err()
 	}
-	// 第二遍：超容量时从最旧侧丢到 90% 配额（保留最新数据）
-	budget := maxQueueBytes * 9 / 10
-	drop := total - budget
-	i := 0
-	for drop > 0 && i < len(lines) {
-		drop -= len(lines[i]) + 1
-		i++
+	var total int64
+	if err := visit(func(line []byte) error { total += int64(len(line) + 1); return nil }); err != nil {
+		return err
 	}
-	if i == 0 && !droppedExpired {
+	if q.offset == 0 && total == st.Size() && total <= maxQueueBytes {
 		q.lastCompaction = now
 		return nil
 	}
-	var kept []byte
-	for ; i < len(lines); i++ {
-		kept = append(kept, lines[i]...)
-		kept = append(kept, '\n')
-	}
+	drop := max(int64(0), total-maxQueueBytes*9/10)
 	tmp := q.path + ".tmp"
-	if err := os.WriteFile(tmp, kept, 0600); err != nil {
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	w := bufio.NewWriterSize(out, 64<<10)
+	err = visit(func(line []byte) error {
+		if drop > 0 {
+			drop -= int64(len(line) + 1)
+			return nil
+		}
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+		return w.WriteByte('\n')
+	})
+	if err == nil {
+		err = w.Flush()
+	}
+	if err == nil {
+		err = out.Sync()
+	}
+	closeErr := out.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, q.path); err != nil {
 		return err
 	}
+	q.offset = 0
 	q.lastCompaction = now
 	return nil
 }
 
-// PopAll 取出全部待补传 Report（文件读入后清空；发送失败由调用方重新 Push）
-func (q *OfflineQueue) PopAll() ([]*pb.Report, error) {
-	q.mu.Lock()
+func queueScanner(r io.Reader) *bufio.Scanner {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), maxRecordBytes)
+	return sc
+}
+
+// Peek loads one bounded record. Ack advances only after successful Send. A
+// restart may replay acknowledged records before the last compaction; stable
+// report IDs provide at-least-once delivery without holding the backlog in RAM.
+func (q *OfflineQueue) Peek() (*pb.Report, error) {
+	if !q.mu.TryLock() {
+		return nil, nil
+	}
 	defer q.mu.Unlock()
+	if q.peeked != nil {
+		return q.peeked, nil
+	}
 	f, err := os.Open(q.path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	defer f.Close()
-	var out []*pb.Report
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 4*1024*1024), 4*1024*1024) // 单条上限 4MB（协议设计 §4）
-	for sc.Scan() {
+	if _, err = f.Seek(q.offset, io.SeekStart); err != nil {
+		f.Close()
+		return nil, err
+	}
+	sc := queueScanner(f)
+	end := q.offset
+	for skipped := 0; skipped < 64 && sc.Scan(); skipped++ {
 		line := sc.Bytes()
-		if len(line) == 0 {
+		end += int64(len(line) + 1)
+		r := new(pb.Report)
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(line, r); err != nil || r.Ts > 0 && r.Ts < time.Now().Add(-maxEntryAge).UnixMilli() {
+			q.offset = end
 			continue
 		}
-		r := &pb.Report{}
-		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(line, r); err != nil {
-			continue // 脏行跳过，不阻塞补传
+		q.peeked, q.peekEnd = r, end
+		f.Close()
+		return r, nil
+	}
+	err = sc.Err()
+	closeErr := f.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	st, err := os.Stat(q.path)
+	if err != nil {
+		return nil, err
+	}
+	if q.offset >= st.Size() {
+		if err := os.Truncate(q.path, 0); err != nil {
+			return nil, err
 		}
-		out = append(out, r)
+		q.offset = 0
 	}
-	if err := sc.Err(); err != nil {
-		return out, err
+	return nil, nil
+}
+
+func (q *OfflineQueue) Ack() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.peeked != nil {
+		q.offset = q.peekEnd
+		q.peeked = nil
 	}
-	if err := os.Truncate(q.path, 0); err != nil && !os.IsNotExist(err) {
-		return out, err
+}
+
+// TryAck yields to append/compaction rather than blocking control traffic.
+// A contended acknowledgement is retried by resending the same stable report.
+func (q *OfflineQueue) TryAck() bool {
+	if !q.mu.TryLock() {
+		return false
 	}
-	return out, nil
+	defer q.mu.Unlock()
+	if q.peeked != nil {
+		q.offset = q.peekEnd
+		q.peeked = nil
+	}
+	return true
+}
+func (q *OfflineQueue) Release() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.peeked = nil
 }
 
 // Len 待补传条数（诊断用）
@@ -176,7 +271,7 @@ func (q *OfflineQueue) Len() int {
 	}
 	defer f.Close()
 	n := 0
-	sc := bufio.NewScanner(f)
+	sc := queueScanner(f)
 	for sc.Scan() {
 		if len(sc.Bytes()) > 0 {
 			n++

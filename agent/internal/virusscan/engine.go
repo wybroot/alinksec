@@ -20,22 +20,22 @@ import (
 
 const maxFileSize int64 = 500 << 20
 const ioLimitRate int64 = 10 << 20
-const cacheMaxEntries = 200_000
 const scanCoverage = "SHA256 of regular files <=500MiB; internal rules inspect first 2MiB of eligible files <=50MiB; symlinks, special files, virtual/container filesystems and Agent work directory excluded; archives not expanded"
 
-// File metadata never proves unchanged content; legacy caches cannot bypass reads.
-type cacheEntry struct {
-	Size   int64 `json:"s"`
-	ModSec int64 `json:"m"`
-}
 type Engine struct {
 	mu           sync.Mutex
 	db           *SigDB
-	cache        map[string]cacheEntry
 	whitelist    []whitelistEntry
 	log          *slog.Logger
 	policyReader func() ([]byte, error)
+	ioBudget     func(context.Context, int) error
 }
+
+// SetIOBudget must be called before publishing an engine. Active scans use
+// their own immutable callback; the shared governor coordinates other engines.
+func (e *Engine) SetIOBudget(wait func(context.Context, int) error) { e.ioBudget = wait }
+
+type ioBudgetKey struct{}
 
 func NewEngine(workDir string, log *slog.Logger) *Engine {
 	return NewEngineWithPolicyReader(workDir, log, nil)
@@ -44,7 +44,7 @@ func NewEngine(workDir string, log *slog.Logger) *Engine {
 // NewEngineWithPolicyReader uses the pinned snapshot from construction onward.
 // It must not open the editable policy, even while initializing the whitelist.
 func NewEngineWithPolicyReader(workDir string, log *slog.Logger, reader func() ([]byte, error)) *Engine {
-	e := &Engine{db: LoadDB(workDir), cache: map[string]cacheEntry{}, log: log, policyReader: reader}
+	e := &Engine{db: LoadDB(workDir), log: log, policyReader: reader}
 	if reader != nil {
 		data, err := reader()
 		e.whitelist = parseWhitelist(data, err)
@@ -101,6 +101,9 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
+	if e.ioBudget != nil {
+		ctx = context.WithValue(ctx, ioBudgetKey{}, e.ioBudget)
+	}
 	roots := cmd.GetPaths()
 	switch cmd.GetMode() {
 	case pb.CmdVirusScan_QUICK:
@@ -111,7 +114,7 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 	if len(roots) == 0 || len(roots) > 64 {
 		return fail("invalid_roots")
 	}
-	seen := map[string]bool{}
+	seen := map[[32]byte]bool{}
 	visited := uint32(0)
 	var walk func(string, string, int) error
 	walk = func(path, scope string, depth int) error {
@@ -119,12 +122,15 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 			return errScanBudget
 		}
 		visited++
+		if e.ioBudget != nil && e.ioBudget(ctx, 4096) != nil {
+			return errScanBudget
+		}
 		abs, err := filepath.Abs(path)
 		if err != nil || !utf8.ValidString(abs) {
 			scanFailure(r, path, "invalid_path")
 			return nil
 		}
-		key := pathKey(abs)
+		key := sha256.Sum256([]byte(pathKey(abs)))
 		if seen[key] {
 			return nil
 		}
@@ -371,10 +377,16 @@ func readSnapshotScoped(ctx context.Context, path string, maxSize int64, budget 
 		return s, fmt.Errorf("invalid regular file")
 	}
 	h := sha256.New()
-	buf := make([]byte, 64<<10)
+	buf := acquireReadBuffer()
+	defer releaseReadBuffer(buf)
+	s.head = make([]byte, 0, min(s.info.Size(), ruleHeadBytes))
 	started := time.Now()
 	for {
 		if ctx.Err() != nil {
+			return s, errScanBudget
+		}
+		wait, _ := ctx.Value(ioBudgetKey{}).(func(context.Context, int) error)
+		if wait != nil && wait(ctx, len(buf)) != nil {
 			return s, errScanBudget
 		}
 		n, err := f.Read(buf)
@@ -388,7 +400,7 @@ func readSnapshotScoped(ctx context.Context, path string, maxSize int64, budget 
 				count := min(n, ruleHeadBytes-len(s.head))
 				s.head = append(s.head, buf[:count]...)
 			}
-			if limited {
+			if limited && wait == nil {
 				delay := time.Duration(s.bytesRead)*time.Second/time.Duration(ioLimitRate) - time.Since(started)
 				if delay > 0 {
 					timer := time.NewTimer(delay)

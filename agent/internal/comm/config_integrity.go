@@ -28,7 +28,17 @@ func (c *Client) sendConfigEvents(stream pb.AgentChannel_ChannelClient, generati
 	if c.configStore == nil {
 		return nil
 	}
-	for _, event := range c.configStore.Events() {
+	events := c.configStore.Events()
+	active := make(map[string]bool, len(events))
+	for _, event := range events {
+		active[event.ID] = true
+	}
+	for key := range sent {
+		if !active[key] {
+			delete(sent, key)
+		}
+	}
+	for _, event := range events {
 		if sent[event.ID] {
 			continue
 		}
@@ -44,8 +54,12 @@ func (c *Client) sendConfigEvents(stream pb.AgentChannel_ChannelClient, generati
 }
 
 func (c *Client) newVirusEngine() *virusscan.Engine {
+	var engine *virusscan.Engine
 	if c.configStore != nil {
-		return virusscan.NewEngineWithPolicyReader(c.workDir, c.log, func() ([]byte, error) { data, _, _ := c.configStore.Policy(); return data, nil })
+		engine = virusscan.NewEngineWithPolicyReader(c.workDir, c.log, func() ([]byte, error) { data, _, _ := c.configStore.Policy(); return data, nil })
+	} else {
+		engine = virusscan.NewEngine(c.workDir, c.log)
 	}
-	return virusscan.NewEngine(c.workDir, c.log)
+	engine.SetIOBudget(c.resources.WaitIO)
+	return engine
 }
