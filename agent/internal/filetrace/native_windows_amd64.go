@@ -442,7 +442,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if !hasThread {
 			tid = uint64(r.ThreadID)
 		}
-		owner, ownerErr := writer(uint32(tid), r.PID, r.Timestamp)
+		owner, ownerErr := fileOpener(uint32(tid), r.PID, r.Timestamp)
 		opened := openedFile{path: path, at: r.Timestamp, owner: owner}
 		if ownerErr != nil {
 			opened.identityError = ownerErr.Error()
@@ -475,9 +475,10 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if identityErr != nil {
 			identityError = "operation thread: " + identityErr.Error()
 		}
-		// Cross-process shared handles and unverified opens cannot establish a
-		// trusted path-to-writer binding. Do not trust a payload PID alone.
-		if id != opened.owner {
+		// Cache writes can use a file object opened by the system or collector.
+		// Only those independently verified, trusted openers may differ from the
+		// native operation process. Other shared handles remain untrusted.
+		if !opened.accepts(id) {
 			if opened.identityError != "" {
 				identityError = "file opener: " + opened.identityError
 			} else if identityError == "" {
@@ -569,30 +570,42 @@ func image(h windows.Handle) (string, error) {
 	}
 	return windows.UTF16ToString(b[:n]), nil
 }
-func writer(tid, emitter uint32, at uint64) (Identity, error) {
-	var id Identity
+func (f openedFile) accepts(id Identity) bool {
+	if f.identityError != "" || f.owner.PID == 0 || id.PID <= 4 || id.PID == uint32(os.Getpid()) || id.Created == 0 || id.Image == "" {
+		return false
+	}
+	return f.owner == id || f.owner.PID == 4 || f.owner.PID == uint32(os.Getpid())
+}
+
+// Verify the actual native owner and lifetime of the event's issuing thread.
+// A payload thread ID alone never establishes event provenance.
+func issuingProcess(tid, emitter uint32, at uint64) (uint32, error) {
 	thread, err := windows.OpenThread(windows.THREAD_QUERY_LIMITED_INFORMATION, false, tid)
 	if err != nil {
-		return id, err
+		return 0, err
 	}
 	defer windows.CloseHandle(thread)
 	var c, e, k, u windows.Filetime
 	r, _, err := threadTimes.Call(uintptr(thread), uintptr(unsafe.Pointer(&c)), uintptr(unsafe.Pointer(&e)), uintptr(unsafe.Pointer(&k)), uintptr(unsafe.Pointer(&u)))
 	if r == 0 {
-		return id, err
+		return 0, err
 	}
 	if uint64(c.HighDateTime)<<32|uint64(c.LowDateTime) > at {
-		return id, fmt.Errorf("thread reused")
+		return 0, fmt.Errorf("thread reused")
 	}
 	pid, _, _ := threadPID.Call(uintptr(thread))
-	// Cache-manager/system writes cannot establish an original user writer.
-	if pid <= 4 || uint32(pid) == uint32(os.Getpid()) {
-		return id, fmt.Errorf("writer context unavailable")
+	if pid == 0 {
+		return 0, fmt.Errorf("thread process unavailable")
 	}
 	if emitter != uint32(pid) && emitter != 4 && emitter != 0xffffffff {
-		return id, fmt.Errorf("event source does not match issuing thread")
+		return 0, fmt.Errorf("event source does not match issuing thread")
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	return uint32(pid), nil
+}
+
+func processInstance(pid uint32, at uint64) (Identity, error) {
+	var id Identity
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return id, err
 	}
@@ -606,6 +619,31 @@ func writer(tid, emitter uint32, at uint64) (Identity, error) {
 		return id, err
 	}
 	return Identity{PID: uint32(pid), Created: birth, Image: exe}, nil
+}
+
+func fileOpener(tid, emitter uint32, at uint64) (Identity, error) {
+	pid, err := issuingProcess(tid, emitter, at)
+	if err != nil {
+		return Identity{}, err
+	}
+	if pid == 4 {
+		// The System PID is fixed for the lifetime of this boot. Native thread
+		// ownership above verifies this trusted source without opening System.
+		return Identity{PID: 4}, nil
+	}
+	return processInstance(pid, at)
+}
+
+func writer(tid, emitter uint32, at uint64) (Identity, error) {
+	pid, err := issuingProcess(tid, emitter, at)
+	if err != nil {
+		return Identity{}, err
+	}
+	// System/collector file activity never identifies an actionable writer.
+	if pid <= 4 || pid == uint32(os.Getpid()) {
+		return Identity{}, fmt.Errorf("writer context unavailable")
+	}
+	return processInstance(pid, at)
 }
 
 // Terminate rechecks creation time AND image using the same handle that is

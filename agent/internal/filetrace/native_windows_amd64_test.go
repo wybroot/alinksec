@@ -61,3 +61,39 @@ func TestWriterRequiresMatchingEventSourceAndProcessLifetime(t *testing.T) {
 		t.Fatal("pre-creation event timestamp accepted")
 	}
 }
+
+func TestFileObjectOwnerTrustBoundary(t *testing.T) {
+	writer := Identity{PID: uint32(os.Getpid()) + 100, Created: 100, Image: `C:\writer.exe`}
+	for _, owner := range []Identity{writer, {PID: 4}, {PID: uint32(os.Getpid()), Created: 50, Image: `C:\agent.exe`}} {
+		if !(openedFile{owner: owner}).accepts(writer) {
+			t.Fatalf("verified ordinary/system/collector owner rejected: %+v", owner)
+		}
+	}
+	reused := writer
+	reused.Created++
+	for _, opened := range []openedFile{{}, {owner: reused}, {owner: Identity{PID: writer.PID + 1, Created: 100, Image: writer.Image}}, {owner: Identity{PID: 4}, identityError: "unverified native source"}} {
+		if opened.accepts(writer) {
+			t.Fatalf("unverified, reused or unrelated owner accepted: %+v", opened)
+		}
+	}
+	if (openedFile{owner: Identity{PID: 4}}).accepts(Identity{}) {
+		t.Fatal("trusted opener bypassed writer identity verification")
+	}
+}
+
+func TestCollectorOpenRequiresNativeSourceAndCannotIdentifyWriter(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	tid, pid := windows.GetCurrentThreadId(), uint32(os.Getpid())
+	at := uint64(time.Now().UnixNano()/100) + 116444736000000000
+	owner, err := fileOpener(tid, pid, at)
+	if err != nil || owner.PID != pid || owner.Created == 0 || owner.Image == "" {
+		t.Fatalf("collector opener: %+v %v", owner, err)
+	}
+	if _, err := fileOpener(tid, pid+100, at); err == nil {
+		t.Fatal("forged opener event source accepted")
+	}
+	if _, err := writer(tid, pid, at); err == nil {
+		t.Fatal("collector treated as actionable writer")
+	}
+}
