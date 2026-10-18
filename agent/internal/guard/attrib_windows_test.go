@@ -221,7 +221,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	add("closed_handle_writer_terminated_newer_process_preserved", map[string]any{"event": event, "writerPID": writer.Process.Pid, "unrelatedPID": newer.Process.Pid})
 
 	path = filepath.Join(root, "read.dat")
-	os.WriteFile(path, []byte("read-only"), 0600)
+	writeSyncedRansomFixture(t, path, "read-only")
 	time.Sleep(1200 * time.Millisecond)
 	since = time.Now()
 	reader := child("read", path)
@@ -262,9 +262,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	add("excluded_writer_not_terminated", map[string]any{"event": event})
 
 	path = filepath.Join(root, "rename.dat")
-	if err := os.WriteFile(path, []byte("rename-source"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeSyncedRansomFixture(t, path, "rename-source")
 	time.Sleep(1200 * time.Millisecond)
 	since = time.Now()
 	renamer := child("rename_only", path)

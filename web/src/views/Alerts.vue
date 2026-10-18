@@ -29,7 +29,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-dialog :model-value="!!evidence" title="Windows 勒索进程归因证据" width="min(680px, 94vw)" @close="evidence = null">
+    <el-dialog :model-value="!!evidence" title="Windows 勒索进程归因证据" width="min(680px, 94vw)" top="5vh" style="max-height:90vh;overflow-y:auto" @close="evidence = null">
       <RansomAttribution v-if="evidence" :detail="evidence.detail" :action="evidence.action" />
     </el-dialog>
   </div>
