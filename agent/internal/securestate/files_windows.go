@@ -12,6 +12,21 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// Keep a stable snapshot while permitting a writer to atomically replace the
+// pathname. os.Open omits FILE_SHARE_DELETE on Windows and can make concurrent
+// journal writes fail with a sharing violation.
+func openRecord(path string) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 func protectDirectory(path string) error {
 	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
 	if err != nil {

@@ -409,3 +409,20 @@ func TestPolicyWithdrawalStillRemovesFiltersWhenDiskFails(t *testing.T) {
 		t.Fatal(e.Status())
 	}
 }
+
+func TestClockRollbackWithdrawsInsteadOfExtendingPersistedBlock(t *testing.T) {
+	e, r, f, at := fixture(t)
+	addFailures(t, r, *at, 2, "192.0.2.8")
+	e.Poll()
+	if len(f.blocks) != 1 {
+		t.Fatal("fixture")
+	}
+	*at = at.Add(-time.Second)
+	fw := &fakeFirewall{blocks: map[string]Block{}}
+	again := newEngine(filepath.Dir(e.path), e.server, e.log, r, fw)
+	again.now = e.now
+	again.Update([]config.LoginRule{testRule()})
+	if len(fw.blocks) != 0 || len(again.s.Blocks) != 0 {
+		t.Fatal("clock rollback extended block")
+	}
+}

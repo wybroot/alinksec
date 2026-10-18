@@ -537,7 +537,7 @@ func (e *Engine) reconcile() error {
 				break
 			}
 		}
-		valid := rule != nil && slices.Contains(rule.Actions, "block_ip") && slices.Equal(rule.Match.WindowsPorts, b.Ports) && !trusted(netip.MustParseAddr(b.IP), rule.Match.TrustedIPs) && b.Expires > now && b.Created <= now+30000 && b.Expires-now <= 3600000 && b.Expires-b.Created <= int64(rule.Match.BlockDurationSec)*1000
+		valid := rule != nil && slices.Contains(rule.Actions, "block_ip") && slices.Equal(rule.Match.WindowsPorts, b.Ports) && !trusted(netip.MustParseAddr(b.IP), rule.Match.TrustedIPs) && b.Expires > now && b.Created <= now && b.Expires-now <= 3600000 && b.Expires-b.Created <= int64(rule.Match.BlockDurationSec)*1000
 		action := "blocked_ip"
 		var err error
 		if !valid {

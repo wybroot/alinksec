@@ -40,7 +40,7 @@ func ReadJSONLimit(path string, value any, limit int64) error {
 	if !info.Mode().IsRegular() || info.Size() > limit {
 		return fmt.Errorf("invalid recovery record")
 	}
-	f, err := os.Open(path)
+	f, err := openRecord(path)
 	if err != nil {
 		return err
 	}
