@@ -36,6 +36,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/sysmetrics"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"github.com/alinksec/alinksec-agent/internal/virusscan"
+	"github.com/alinksec/alinksec-agent/internal/windowslogin"
 )
 
 // Client Agent 通信客户端：注册 + 主通道双向流
@@ -79,7 +80,8 @@ type Client struct {
 	isolationChallenge isolationChallenge
 
 	// 勒索诱饵防护引擎（本地响应，事件经 reportSecurityEvent 上报）
-	grd *guard.Guard
+	grd          *guard.Guard
+	windowsLogin *windowslogin.Engine
 }
 
 // New 创建通信客户端（加载本地状态与离线队列）
@@ -127,6 +129,10 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		}
 	}
 	c.grd.UpdateProtection(cfg.FileRules, cfg.LoginRules)
+	c.windowsLogin = windowslogin.New(workDir, cfg.ServerAddr, log)
+	if c.windowsLogin != nil {
+		c.windowsLogin.Update(cfg.LoginRules)
+	}
 	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
 	vEngine := c.newVirusEngine()
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
@@ -228,6 +234,9 @@ func (c *Client) applyPolicyJson(js string, hot bool, version ...string) error {
 	if c.grd != nil {
 		c.grd.UpdateProtection(files, logins)
 	}
+	if c.windowsLogin != nil {
+		c.windowsLogin.Update(logins)
+	}
 	if p.ProcessRules != nil {
 		c.cfg.ProcessRules = append([]config.ProcessRule(nil), (*p.ProcessRules)...)
 	}
@@ -300,6 +309,16 @@ func (c *Client) EnsureEnrolled(ctx context.Context) error {
 
 // Run 主循环：建流 → 收发 → 断线指数退避重连（协议设计 §5）
 func (c *Client) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	ctx = runCtx
+	if c.windowsLogin != nil {
+		go func() {
+			if err := c.windowsLogin.Run(ctx); err != nil {
+				cancel(err)
+			}
+		}()
+	}
 	go c.resourceLoop(ctx)
 	if c.configStore != nil {
 		go c.watchConfiguration(ctx)
@@ -313,16 +332,16 @@ func (c *Client) Run(ctx context.Context) error {
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
 		err := c.runChannelOnce(ctx)
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
 		c.log.Warn("主通道断开，退避重连", "err", err, "backoff", backoff)
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-time.After(jitter(backoff)):
 		}
 		backoff *= 2
@@ -384,6 +403,14 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				return
 			}
 			c.noteChannelActivity(generation, false)
+			if receipt := cmd.GetWindowsLoginReceipt(); receipt != nil {
+				if c.windowsLogin != nil {
+					if err := c.windowsLogin.Receipt(receipt.GetEventIds()); err != nil {
+						c.log.Error("Windows login receipt persistence", "err", err)
+					}
+				}
+				continue
+			}
 			if echo := cmd.GetIsolationConfirm(); echo != nil {
 				c.confirmIsolation(echo, generation)
 				continue
@@ -430,6 +457,7 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 	upgradeResults := map[string]string{}
 	isolationResults := map[string]string{}
 	configResults := map[string]bool{}
+	windowsLoginResults := map[string]time.Time{}
 	isolationState := ""
 	nextDrain := time.Time{}
 	for {
@@ -437,6 +465,9 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-upgradeTick.C:
+			if err := c.sendWindowsLoginEvents(stream, generation, windowsLoginResults); err != nil {
+				return err
+			}
 			if err := c.sendConfigEvents(stream, generation, configResults); err != nil {
 				return err
 			}
@@ -550,6 +581,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			GuardStatus:            guardStatus,
 			VirusExecutionContract: 2,
 			WeakPasswordContract:   scan.WeakPasswordContract(),
+			WindowsLoginContract:   windowslogin.ExecutionContract(),
+			WindowsLoginStatus:     c.windowsLoginStatus(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,
 			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate

@@ -25,11 +25,19 @@ func PrivateDir(path string) error {
 }
 
 func ReadJSON(path string, value any) error {
+	return ReadJSONLimit(path, value, 65536)
+}
+
+// ReadJSONLimit admits larger bounded journals without relaxing recovery records.
+func ReadJSONLimit(path string, value any, limit int64) error {
+	if limit < 1 || limit > 4<<20 {
+		return fmt.Errorf("invalid record limit")
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > 65536 {
+	if !info.Mode().IsRegular() || info.Size() > limit {
 		return fmt.Errorf("invalid recovery record")
 	}
 	f, err := os.Open(path)
@@ -37,7 +45,7 @@ func ReadJSON(path string, value any) error {
 		return err
 	}
 	defer f.Close()
-	d := json.NewDecoder(io.LimitReader(f, 65537))
+	d := json.NewDecoder(io.LimitReader(f, limit+1))
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
 		return err
@@ -49,12 +57,19 @@ func ReadJSON(path string, value any) error {
 }
 
 func WriteJSON(path string, value any) error {
+	return WriteJSONLimit(path, value, 65536)
+}
+
+func WriteJSONLimit(path string, value any, limit int) error {
+	if limit < 1 || limit > 4<<20 {
+		return fmt.Errorf("invalid record limit")
+	}
 	b, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if len(b) > 65536 {
-		return fmt.Errorf("recovery record exceeds 64 KiB")
+	if len(b) > limit {
+		return fmt.Errorf("recovery record exceeds %d bytes", limit)
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".record-*")
 	if err != nil {

@@ -66,14 +66,14 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+        if(report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
             virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
-        if((report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if((report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
@@ -86,6 +86,7 @@ public class ReportDispatcher {
             case ACK -> commandService.onAck(agentId, report.getAck());
             case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
             case SECURITY_EVENT -> {
+                if(com.alinksec.service.protect.WindowsLoginService.outcome(report) && !com.alinksec.service.protect.WindowsLoginService.accept(jdbc,agentId,report)) return;
                 if(configOutcome(report)) {
                     var event=report.getSecurityEvent();
                     var detail=com.alinksec.common.util.JsonUtils.read(event.getDetail());

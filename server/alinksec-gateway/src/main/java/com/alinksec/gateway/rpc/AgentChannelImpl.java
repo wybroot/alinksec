@@ -75,7 +75,16 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                                 registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setIsolationConfirm(CmdIsolationConfirm.newBuilder()
                                         .setLeaseId(pulse.getLeaseId()).setNonce(pulse.getNonce())).build());
                             }
-                        } else dispatcher.dispatch(authenticatedAgentId, report);
+                        } else {
+                            dispatcher.dispatch(authenticatedAgentId, report);
+                            // dispatch returns only after its alert + receipt transaction commits.
+                            if(com.alinksec.service.protect.WindowsLoginService.outcome(report)) {
+                                String id=report.getReportId();
+                                if(!id.matches("[0-9a-f]{64}-windows-login"))throw new IllegalArgumentException("invalid login receipt");
+                                registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder()
+                                        .setWindowsLoginReceipt(com.alinksec.proto.CmdWindowsLoginReceipt.newBuilder().addEventIds(id.substring(0,64))).build());
+                            }
+                        }
                     });
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);

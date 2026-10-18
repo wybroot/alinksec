@@ -58,7 +58,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V016__agent_upgrade_watchdog.sql",
                 "db/common/V017__host_isolation_lease.sql",
                 "db/common/V018__agent_config_event_receipt.sql",
-                "db/common/V019__weak_password_coverage.sql"
+                "db/common/V019__weak_password_coverage.sql",
+                "db/common/V020__windows_login_protection.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

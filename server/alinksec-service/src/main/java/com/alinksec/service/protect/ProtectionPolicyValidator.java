@@ -29,6 +29,17 @@ final class ProtectionPolicyValidator {
             integer(config, "max_file_bytes", 1, 1048576, 1048576);
             return;
         }
+        int windows = integer(config, "windows_contract", 0, 1, 0);
+        if (windows == 1) {
+            require(strings(config,"platforms",2).equals(java.util.List.of("windows")), "Windows 登录规则必须明确限定 Windows");
+            require(!config.has("ssh_ports"), "Windows 登录规则不能包含 SSH 端口");
+            ports(config,"windows_ports");
+            if(config.has("windows_logon_types")) {
+                var types=config.get("windows_logon_types");
+                require(types.isArray() && !types.isEmpty() && types.size()<=2,"Windows 登录类型数量无效");
+                for(var value:types) require(value.isIntegralNumber() && value.canConvertToInt() && (value.asInt()==3 || value.asInt()==10),"Windows 登录类型仅支持 3、10");
+            }
+        } else require(!config.has("windows_ports") && !config.has("windows_logon_types"), "Windows 参数需要契约 1");
         integer(config, "window_sec", 1, 3600, 300);
         integer(config, "failure_threshold", 2, 100, 5);
         integer(config, "cooldown_sec", 1, 86400, 300);
@@ -49,6 +60,13 @@ final class ProtectionPolicyValidator {
         if (!zone.equals("Local")) {
             require(ZoneId.getAvailableZoneIds().contains(zone), "时区必须为 IANA 名称或 UTC");
         }
+    }
+
+    private static void ports(JsonNode config,String key) {
+        if(!config.has(key)) return;
+        var ports=config.get(key);
+        require(ports.isArray() && !ports.isEmpty() && ports.size()<=16,"端口数量无效");
+        for(var port:ports) require(port.isIntegralNumber() && port.canConvertToInt() && port.asInt()>=1 && port.asInt()<=65535,"TCP 端口无效");
     }
 
     private static int integer(JsonNode config, String key, int min, int max, int fallback) {

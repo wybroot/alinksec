@@ -116,7 +116,7 @@ func (m *loginMonitor) update(rules []config.LoginRule) {
 	}
 	m.rules = map[string]config.LoginRule{}
 	for _, rule := range rules {
-		if rule.Enabled && platformMatches(rule.Match.Platforms) {
+		if rule.Enabled && rule.Match.WindowsContract == 0 && platformMatches(rule.Match.Platforms) {
 			rule.Match = rule.Match.Defaults()
 			m.rules[rule.ID] = rule
 		}

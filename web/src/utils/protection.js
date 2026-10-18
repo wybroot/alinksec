@@ -10,10 +10,11 @@ export function fileProtectionPayload(rule, form) {
   return { enabled: Boolean(form.enabled), actions: form.restore ? ['alert', 'restore'] : ['alert'], match: { ...rule.match, paths } }
 }
 
-export function loginProtectionPayload(rule, form) {
+function loginPayload(rule, form, windows = false) {
+  const portLabel = windows ? 'Windows 登录 TCP 端口' : 'SSH 端口'
   const ports = tokens(form.ports).map(x => /^\d+$/.test(x) ? Number(x) : NaN)
-  if (!ports.length || ports.length > 16) throw new Error('请输入 1 至 16 个 SSH 端口')
-  ports.forEach(x => integer(x, 1, 65535, 'SSH 端口'))
+  if (!ports.length || ports.length > 16) throw new Error(`请输入 1 至 16 个${portLabel}`)
+  ports.forEach(x => integer(x, 1, 65535, portLabel))
   const trusted = tokens(form.trusted), users = tokens(form.users)
   if (trusted.length > 128 || users.length > 64) throw new Error('信任来源或排除账户超过上限')
   if (!String(form.timezone || '').trim()) throw new Error('请选择时区')
@@ -24,3 +25,19 @@ export function loginProtectionPayload(rule, form) {
     allowed_start_hour: integer(form.start, 0, 23, '起始小时'), allowed_end_hour: integer(form.end, 0, 24, '结束小时'), timezone: form.timezone.trim(),
   } }
 }
+
+export function loginProtectionPayload(rule, form) { return loginPayload(rule, form) }
+
+export function windowsLoginProtectionPayload(rule, form) {
+  if (rule?.match?.windows_contract !== 1 || JSON.stringify(rule.match.platforms) !== '["windows"]') throw new Error('Windows 登录规则范围无效')
+  const types = [...new Set(form.types || [])]
+  if (!types.length || types.length > 2 || types.some(x => ![3, 10].includes(x))) throw new Error('请选择网络登录或远程交互登录')
+  const result = loginPayload(rule, form, true)
+  result.match.windows_ports = result.match.ssh_ports
+  delete result.match.ssh_ports
+  result.match.windows_logon_types = types
+  return result
+}
+
+export const windowsLoginStateLabel = state => ({ starting: '启动中', disabled: '规则已停用', polling: '正在监测', behind: '正在追赶日志', degraded: '覆盖不完整', failed: '监测失败', unsupported: 'Agent 不支持', offline: '主机离线或禁用', stale: '心跳已过期', stalled: '日志采集停滞', unknown: '状态未知' }[state] || '状态未知')
+export const windowsLoginIssueLabel = issue => ({ journal_invalid: '本地状态损坏或无法访问', persist_failed: '本地状态保存失败', audit_query_failed: '无法查询登录审计策略', security_read_failed: '无法读取 Security 日志', event_query_failed: '登录事件查询或解析失败', event_order_invalid: '事件顺序异常', log_gap: '日志已清空或覆盖，检测计数已重置', block_failed: '来源封禁失败', firewall_cleanup_failed: '过滤器清理失败，需要重启 Agent', audit_disabled: '成功或失败登录审计未启用', backlog: '日志尚未追平', event_buffer_full: '未确认告警缓冲区已满，等待平台回执', event_retention_exceeded: '本地事件保留已超限' }[issue] || issue || '—')

@@ -36,18 +36,21 @@ type LoginRule struct {
 }
 
 type LoginMatch struct {
-	Platforms        []string `yaml:"platforms" json:"platforms"`
-	WindowSec        int      `yaml:"window_sec" json:"window_sec"`
-	FailureThreshold int      `yaml:"failure_threshold" json:"failure_threshold"`
-	CooldownSec      int      `yaml:"cooldown_sec" json:"cooldown_sec"`
-	BlockDurationSec int      `yaml:"block_duration_sec" json:"block_duration_sec"`
-	SSHPorts         []int    `yaml:"ssh_ports" json:"ssh_ports"`
-	TrustedIPs       []string `yaml:"trusted_ips" json:"trusted_ips"`
-	UserExclude      []string `yaml:"user_exclude" json:"user_exclude"`
-	OffHoursEnabled  bool     `yaml:"off_hours_enabled" json:"off_hours_enabled"`
-	AllowedStartHour int      `yaml:"allowed_start_hour" json:"allowed_start_hour"`
-	AllowedEndHour   int      `yaml:"allowed_end_hour" json:"allowed_end_hour"`
-	Timezone         string   `yaml:"timezone" json:"timezone"`
+	WindowsContract   int      `yaml:"windows_contract" json:"windows_contract,omitempty"`
+	WindowsPorts      []int    `yaml:"windows_ports" json:"windows_ports,omitempty"`
+	WindowsLogonTypes []int    `yaml:"windows_logon_types" json:"windows_logon_types,omitempty"`
+	Platforms         []string `yaml:"platforms" json:"platforms"`
+	WindowSec         int      `yaml:"window_sec" json:"window_sec"`
+	FailureThreshold  int      `yaml:"failure_threshold" json:"failure_threshold"`
+	CooldownSec       int      `yaml:"cooldown_sec" json:"cooldown_sec"`
+	BlockDurationSec  int      `yaml:"block_duration_sec" json:"block_duration_sec"`
+	SSHPorts          []int    `yaml:"ssh_ports" json:"ssh_ports"`
+	TrustedIPs        []string `yaml:"trusted_ips" json:"trusted_ips"`
+	UserExclude       []string `yaml:"user_exclude" json:"user_exclude"`
+	OffHoursEnabled   bool     `yaml:"off_hours_enabled" json:"off_hours_enabled"`
+	AllowedStartHour  int      `yaml:"allowed_start_hour" json:"allowed_start_hour"`
+	AllowedEndHour    int      `yaml:"allowed_end_hour" json:"allowed_end_hour"`
+	Timezone          string   `yaml:"timezone" json:"timezone"`
 }
 
 func (m FileMatch) Limit() int64 {
@@ -58,6 +61,14 @@ func (m FileMatch) Limit() int64 {
 }
 
 func (m LoginMatch) Defaults() LoginMatch {
+	if m.WindowsContract == 1 {
+		if len(m.WindowsPorts) == 0 {
+			m.WindowsPorts = []int{3389}
+		}
+		if len(m.WindowsLogonTypes) == 0 {
+			m.WindowsLogonTypes = []int{3, 10}
+		}
+	}
 	if m.WindowSec == 0 {
 		m.WindowSec = 300
 	}
@@ -102,8 +113,33 @@ func ValidateProtection(files []FileRule, logins []LoginRule) error {
 			return err
 		}
 	}
+	loginIDs := map[string]bool{}
 	for _, rule := range logins {
+		if loginIDs[rule.ID] || len(rule.Name) > 512 {
+			return fmt.Errorf("登录规则标识重复或名称过长")
+		}
+		loginIDs[rule.ID] = true
 		m := rule.Match.Defaults()
+		if m.WindowsContract != 0 && m.WindowsContract != 1 {
+			return fmt.Errorf("不支持的 Windows 登录契约")
+		}
+		if m.WindowsContract == 1 {
+			if len(m.Platforms) != 1 || m.Platforms[0] != "windows" || len(rule.Match.SSHPorts) != 0 || len(m.WindowsPorts) > 16 || len(m.WindowsLogonTypes) > 2 {
+				return fmt.Errorf("Windows 登录规则范围无效")
+			}
+			for _, p := range m.WindowsPorts {
+				if p < 1 || p > 65535 {
+					return fmt.Errorf("Windows 登录端口无效")
+				}
+			}
+			for _, t := range m.WindowsLogonTypes {
+				if t != 3 && t != 10 {
+					return fmt.Errorf("Windows 登录类型仅支持 3、10")
+				}
+			}
+		} else if len(m.WindowsPorts) != 0 || len(m.WindowsLogonTypes) != 0 {
+			return fmt.Errorf("Windows 登录参数需要契约 1")
+		}
 		if !validRuleID(rule.ID) || m.WindowSec < 1 || m.WindowSec > 3600 || m.FailureThreshold < 2 || m.FailureThreshold > 100 || m.CooldownSec < 1 || m.CooldownSec > 86400 || m.BlockDurationSec < 5 || m.BlockDurationSec > 3600 || len(m.SSHPorts) > 16 || len(m.TrustedIPs) > 128 || len(m.UserExclude) > 64 {
 			return fmt.Errorf("登录规则 %s 的阈值、窗口或封禁参数无效", rule.ID)
 		}

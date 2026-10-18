@@ -33,15 +33,17 @@ public class HeartbeatService {
     private final AlinkSecProperties props;
     private final PolicyStoreService policyStore;
     private final VirusDbService virusDbService;
+    private final com.alinksec.service.protect.WindowsLoginService windowsLogin;
 
     public HeartbeatService(AgentRepository agentRepository, CommandService commandService,
                             AlinkSecProperties props, PolicyStoreService policyStore,
-                            VirusDbService virusDbService) {
+                            VirusDbService virusDbService, com.alinksec.service.protect.WindowsLoginService windowsLogin) {
         this.agentRepository = agentRepository;
         this.commandService = commandService;
         this.props = props;
         this.policyStore = policyStore;
         this.virusDbService = virusDbService;
+        this.windowsLogin = windowsLogin;
     }
 
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
@@ -50,6 +52,8 @@ public class HeartbeatService {
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
         agentRepository.isolationContract(agentId,hb.getIsolationContract());
         agentRepository.weakPasswordContract(agentId,hb.getWeakPasswordContract());
+
+        windowsLogin.heartbeat(agentId,hb);
 
         String current = policyStore.currentVersion();
         if (!current.equals(hb.getPolicyVersion())) {
