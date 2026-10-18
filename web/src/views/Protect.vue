@@ -93,7 +93,7 @@ import WindowsLoginProtection from '../components/WindowsLoginProtection.vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
 import { fetchProtect, fetchProtectRules, updateProtectRule } from '../api'
-import { sevType, sevLabel } from '../utils/format'
+import { sevType, sevLabel, actionLabel } from '../utils/format'
 import { fileProtectionPayload, loginProtectionPayload } from '../utils/protection'
 
 const cards = ref([])
@@ -126,7 +126,6 @@ const actionsLevel = (actions) => {
 }
 
 const msg = (t, type = 'success') => ElMessage({ message: t, type, duration: 1800 })
-const actionLabel = action => ({ alert_only: '仅告警', restored: '已恢复文件', restore_failed: '恢复失败', blocked_ip: '已执行限时封禁', block_expired: '封禁意图已失效', block_failed: '封禁失败', killed: '已结束进程', isolated: '已隔离主机' }[action] || action || '仅告警')
 
 // 加载 PR-0010 内置规则 → 表单
 onMounted(async () => {

@@ -1,9 +1,52 @@
 package filetrace
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestConcurrentCapturePolicyAndEvidence(t *testing.T) {
+	m := New(t.TempDir())
+	m.native = healthy{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	var workers sync.WaitGroup
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		for range 100 {
+			m.Configure([]string{`C:\data`}, 10*time.Second)
+			m.Configure(nil, 10*time.Second)
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for range 100 {
+			m.observe(Write{Path: `C:\data\one`, At: time.Now(), Process: Identity{PID: 10, Created: 100, Image: `C:\writer.exe`}})
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for range 100 {
+			r := m.Lookup([]string{`C:\data\one`}, time.Now().Add(-time.Second))
+			if r.Status == "attributed" && r.Process == nil {
+				t.Error("attribution without process identity")
+			}
+			_ = m.RecentWrites()
+		}
+	}()
+	workers.Wait()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("capture did not stop")
+	}
+}
 
 type healthy struct{}
 

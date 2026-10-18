@@ -121,6 +121,7 @@ type winTrace struct {
 	counts    [32]atomic.Uint64
 	mapped    atomic.Uint64
 	completed atomic.Uint64
+	lastSweep time.Time
 }
 
 func newNative(m *Monitor, workDir string) native { return &winTrace{m: m, workDir: workDir} }
@@ -407,7 +408,11 @@ func (s *winTrace) onEvent(r *eventRecord) {
 	if r.ID != 12 && r.ID != 30 && r.ID != 14 && r.ID != 16 && r.ID != 19 && r.ID != 24 {
 		return
 	}
-	obj, ok := number(r, "FileObject")
+	var obj uint64
+	var ok bool
+	if r.ID != 24 {
+		obj, ok = number(r, "FileObject")
+	}
 	switch r.ID {
 	case 12, 30: // Create includes the canonical file name, also for read opens.
 		if !ok {
@@ -492,7 +497,8 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		}
 	}
 	// Completion loss must not grow storage or associate a recycled IRP.
-	if len(s.pending) > 0 {
+	if len(s.pending) > 0 && time.Since(s.lastSweep) >= time.Second {
+		s.lastSweep = time.Now()
 		for irp, w := range s.pending {
 			if time.Since(w.at) > 5*time.Second {
 				delete(s.pending, irp)
@@ -583,6 +589,9 @@ func Terminate(id Identity) error {
 		return fmt.Errorf("process identity changed")
 	}
 	var critical uint32
+	if err := criticalProcess.Find(); err != nil {
+		return fmt.Errorf("critical process protection unavailable: %w", err)
+	}
 	r, _, e := criticalProcess.Call(uintptr(h), uintptr(unsafe.Pointer(&critical)))
 	if r == 0 {
 		return fmt.Errorf("cannot verify critical process protection: %w", e)
