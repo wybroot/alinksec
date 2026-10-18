@@ -49,6 +49,7 @@ public class HeartbeatService {
         agentRepository.virusContract(agentId,hb.getVirusExecutionContract(),hb.getDbVersion());
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
         agentRepository.isolationContract(agentId,hb.getIsolationContract());
+        agentRepository.weakPasswordContract(agentId,hb.getWeakPasswordContract());
 
         String current = policyStore.currentVersion();
         if (!current.equals(hb.getPolicyVersion())) {

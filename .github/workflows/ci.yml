@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/resources ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Check native Windows resource feedback and recovery
         run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
@@ -200,6 +200,7 @@ jobs:
           ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
           ALINKSEC_DETECTION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/detection-capabilities-fixtures
           ALINKSEC_ISOLATION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/isolation-console-fixtures
+          ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
         working-directory: server
       - name: Check source governance with captured database lifecycle responses
         working-directory: web
@@ -207,6 +208,9 @@ jobs:
       - name: Check detection evidence and acknowledged file states with database lifecycle responses
         working-directory: web
         run: node test/detection-capabilities-browser.mjs
+      - name: Check weak-password coverage and redacted history with database responses
+        working-directory: web
+        run: node test/weak-password-browser.mjs
       - name: Check isolation console with captured database lifecycle states
         working-directory: web
         run: node test/isolation-browser.mjs
@@ -249,6 +253,19 @@ jobs:
         with:
           name: resource-validation-linux-${{ matrix.arch }}
           path: .tmp/resource-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check native offline password hashes and bounded coverage
+        working-directory: agent
+        run: |
+          go test -c -o ../.tmp/weakpwd-native.test ./internal/scan
+          sudo env ALINKSEC_WEAKPWD_NATIVE_REQUIRED=true ALINKSEC_WEAKPWD_EVIDENCE_FILE="$GITHUB_WORKSPACE/.tmp/weakpwd-native/result.json" ../.tmp/weakpwd-native.test -test.v -test.run '^TestNativeWeakPasswordHashes$'
+      - name: Retain native weak-password evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: weakpwd-validation-linux-${{ matrix.arch }}
+          path: .tmp/weakpwd-native/result.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -327,7 +344,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/virusscan
+        run: go test -race ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |
@@ -419,6 +436,8 @@ jobs:
             .tmp/source-governance-browser
             .tmp/source-governance-fixtures
             .tmp/isolation-browser
+            .tmp/weakpwd-browser
+            .tmp/weakpwd-fixtures
             .tmp/isolation-console-fixtures
             .tmp/detection-capabilities-browser
             .tmp/detection-capabilities-fixtures
@@ -574,8 +593,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "18"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "61"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "19"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "62"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -610,7 +629,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,UpgradeWatchdogIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,UpgradeWatchdogIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -620,6 +639,7 @@ jobs:
           ALINKSEC_GOVERNANCE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/source-governance-fixtures
           ALINKSEC_DETECTION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/detection-capabilities-fixtures
           ALINKSEC_ISOLATION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/isolation-console-fixtures
+          ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -628,5 +648,6 @@ jobs:
           path: |
             .tmp/source-governance-fixtures
             .tmp/detection-capabilities-fixtures
+            .tmp/weakpwd-fixtures
           include-hidden-files: true
           if-no-files-found: error

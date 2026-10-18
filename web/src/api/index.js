@@ -822,3 +822,5 @@ export async function handleAlert(id, remark) {
 export const fetchPatchReviewContext = (id, cveId) => get(`/api/fix/patches/${id}/review-context?cveId=${encodeURIComponent(cveId)}`)
 export const reviewPatch = (id, body) => post(`/api/fix/patches/${id}/reviews`, body)
 export const revokePatchReview = (id, reviewId, note) => post(`/api/fix/patches/${id}/reviews/${encodeURIComponent(reviewId)}/revoke`, { note })
+
+export async function fetchScanCoverage(page = 1) { return get(`/api/vuln/scan-coverage?page=${page}&size=20`) }

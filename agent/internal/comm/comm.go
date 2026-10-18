@@ -549,6 +549,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			PolicyVersion:          c.state.PolicyVersion,
 			GuardStatus:            guardStatus,
 			VirusExecutionContract: 2,
+			WeakPasswordContract:   scan.WeakPasswordContract(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,
 			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
@@ -847,6 +848,9 @@ func (c *Client) executeBaselineCheck(bc *pb.CmdBaselineCheck, received *pb.RptA
 // 与基线核查同模式异步执行 —— 立即回 RECEIVED+RUNNING，完成后上报结果与终态 ACK。
 func (c *Client) executeVulnScan(vs *pb.CmdVulnScan, received *pb.RptAck) []*pb.RptAck {
 	cmdID := received.GetCmdId()
+	if vs.GetExecutionContract() != 1 || vs.GetIncludeWeakPassword() && vs.GetWeakDictionaryVersion() != scan.DictionaryVersion {
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "不支持的安全扫描契约或字典版本，请更新平台和 Agent"}}
+	}
 	if !c.beginBulk() {
 		return c.resourceBusy(received)
 	}
@@ -862,11 +866,25 @@ func (c *Client) executeVulnScan(vs *pb.CmdVulnScan, received *pb.RptAck) []*pb.
 		defer c.scanBusy.Store(false)
 		defer c.bulkBusy.Store(false)
 		start := time.Now()
-		result := scan.Run(vs.GetTaskId(), vs.GetIncludeWeakPassword(), vs.GetIncludePortService(), c.log)
+		defer c.resources.BeginScan()()
+		result := scan.RunWithPacer(vs.GetTaskId(), vs.GetIncludeWeakPassword(), vs.GetIncludePortService(), c.log, func(ctx context.Context) error {
+			timer := time.NewTimer(c.resources.Interval(20 * time.Millisecond))
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		})
+		result.CommandId = cmdID
 		finalAck := &pb.RptAck{CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
 			Message: fmt.Sprintf("scan task %s: weak_pwd=%d port_service=%d in %s",
 				vs.GetTaskId(), len(result.GetWeakPasswords()), len(result.GetPortServices()),
 				time.Since(start).Round(time.Millisecond))}
+		if status := result.GetWeakPasswordCoverage().GetStatus(); status != "complete" && status != "not_requested" || result.GetPortStatus() == "failed" {
+			finalAck.Stage, finalAck.Code, finalAck.Message = pb.RptAck_FAILED, 1, "安全扫描未完整完成，请查看逐主机覆盖结果"
+		}
 		// 终态 ACK 先落 dedup：服务端重推指令时直接回终态，不重复扫描
 		c.dedup.Put(cmdID, finalAck)
 		c.pushReport(&pb.Report{

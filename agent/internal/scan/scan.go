@@ -5,6 +5,8 @@
 package scan
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"syscall"
@@ -18,16 +20,39 @@ import (
 
 // Run 执行扫描：includeWeakPwd / includePortService 由指令参数决定
 func Run(taskID string, includeWeakPwd, includePortService bool, log *slog.Logger) *pb.RptScanResult {
-	result := &pb.RptScanResult{TaskId: taskID}
+	return RunWithPacer(taskID, includeWeakPwd, includePortService, log, nil)
+}
+
+func RunWithPacer(taskID string, includeWeakPwd, includePortService bool, log *slog.Logger, pace func(context.Context) error) *pb.RptScanResult {
+	if pace == nil {
+		pace = func(ctx context.Context) error {
+			timer := time.NewTimer(20 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result := &pb.RptScanResult{TaskId: taskID, ExecutionContract: 1, WeakPasswordCoverage: &pb.WeakPasswordCoverage{Status: "not_requested"}, PortStatus: "not_requested"}
 	if includeWeakPwd {
 		start := time.Now()
-		result.WeakPasswords = detectWeakPasswords(log)
+		result.WeakPasswords, result.WeakPasswordCoverage = detectWeakPasswords(ctx, pace)
 		log.Info("弱口令检测完成", "findings", len(result.GetWeakPasswords()),
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	if includePortService {
 		start := time.Now()
-		result.PortServices = detectPortServices(log)
+		var err error
+		result.PortServices, err = detectPortServices(log)
+		result.PortStatus = "complete"
+		if err != nil {
+			result.PortStatus = "failed"
+		}
 		risky := 0
 		for _, p := range result.GetPortServices() {
 			if p.GetRisky() {
@@ -44,17 +69,17 @@ func Run(taskID string, includeWeakPwd, includePortService bool, log *slog.Logge
 
 // riskyPorts 高危端口清单（docs/04 §4.3：Windows RPC/SMB 与常见远控）
 var riskyPorts = map[uint32]string{
-	135: "Windows RPC 端点映射（蠕虫/勒索常用入口）",
-	137: "NetBIOS 名称服务（信息泄露）",
-	138: "NetBIOS 数据报服务（信息泄露）",
-	139: "NetBIOS 会话服务（SMB，历史漏洞密集）",
-	445: "SMB 直连（EternalBlue/WannaCry 传播途径）",
-	593: "RPC over HTTP（暴露面）",
-	1025: "RPC 动态端口（远控常用）",
-	3127: "MyDoom 后门端口",
-	4444: "Metasploit 默认反向 Shell 端口",
-	5900: "VNC 远程桌面（弱口令高发）",
-	6379: "Redis 未授权访问高发端口",
+	135:   "Windows RPC 端点映射（蠕虫/勒索常用入口）",
+	137:   "NetBIOS 名称服务（信息泄露）",
+	138:   "NetBIOS 数据报服务（信息泄露）",
+	139:   "NetBIOS 会话服务（SMB，历史漏洞密集）",
+	445:   "SMB 直连（EternalBlue/WannaCry 传播途径）",
+	593:   "RPC over HTTP（暴露面）",
+	1025:  "RPC 动态端口（远控常用）",
+	3127:  "MyDoom 后门端口",
+	4444:  "Metasploit 默认反向 Shell 端口",
+	5900:  "VNC 远程桌面（弱口令高发）",
+	6379:  "Redis 未授权访问高发端口",
 	11211: "Memcached 未授权访问（UDP 反射放大）",
 	27017: "MongoDB 未授权访问高发端口",
 }
@@ -73,11 +98,11 @@ var fingerprints = map[uint32]string{
 }
 
 // detectPortServices 监听端口 → 服务指纹 + 高危标记（与 collector 端口采集同源，被动识别）
-func detectPortServices(log *slog.Logger) []*pb.PortServiceFinding {
+func detectPortServices(log *slog.Logger) ([]*pb.PortServiceFinding, error) {
 	conns, err := net.Connections("inet")
 	if err != nil {
 		log.Error("端口识别失败", "err", err)
-		return nil
+		return nil, err
 	}
 	seen := map[string]bool{} // "proto:port:proc" 去重
 	nameCache := map[int32]string{}
@@ -106,6 +131,9 @@ func detectPortServices(log *slog.Logger) []*pb.PortServiceFinding {
 		if r, ok := riskyPorts[port]; ok {
 			risky, reason = true, r
 		}
+		if len(findings) >= 4096 {
+			return nil, fmt.Errorf("port finding limit exceeded")
+		}
 		findings = append(findings, &pb.PortServiceFinding{
 			Port:        port,
 			Protocol:    proto,
@@ -115,7 +143,7 @@ func detectPortServices(log *slog.Logger) []*pb.PortServiceFinding {
 			RiskyReason: reason,
 		})
 	}
-	return findings
+	return findings, nil
 }
 
 // procName pid → 进程名（带缓存）

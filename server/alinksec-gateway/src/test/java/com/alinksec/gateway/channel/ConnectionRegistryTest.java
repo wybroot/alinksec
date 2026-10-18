@@ -7,6 +7,18 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ConnectionRegistryTest {
+    @Test void weakPasswordCapabilityCannotCarryAcrossReplacementOrOldHeartbeats() {
+        var registry=new ConnectionRegistry();
+        @SuppressWarnings("unchecked") StreamObserver<Command> first=mock(StreamObserver.class),second=mock(StreamObserver.class);
+        var scan=Command.newBuilder().setVulnScan(CmdVulnScan.newBuilder().setIncludeWeakPassword(true).setExecutionContract(1)).build();
+        registry.register("agent",first);assertFalse(registry.send("agent",scan));
+        registry.weakPasswordContract("agent",first,1);assertTrue(registry.send("agent",scan));
+        registry.register("agent",second);registry.weakPasswordContract("agent",first,1);
+        assertFalse(registry.send("agent",scan));verifyNoInteractions(second);
+        registry.weakPasswordContract("agent",second,1);assertTrue(registry.send("agent",scan));
+        registry.weakPasswordContract("agent",second,0);assertFalse(registry.send("agent",scan));
+    }
+
     @Test void isolationCapabilityAndEchoAreBoundToTheCurrentStream() {
         var registry=new ConnectionRegistry();
         @SuppressWarnings("unchecked") StreamObserver<Command> first=mock(StreamObserver.class),second=mock(StreamObserver.class);

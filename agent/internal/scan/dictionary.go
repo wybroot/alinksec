@@ -1,0 +1,113 @@
+package scan
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"strings"
+)
+
+// Changes to this bounded product dictionary require a new version.
+const DictionaryVersion = "linux-common-v1"
+const dictionaryText = `123456
+password
+123456789
+12345678
+12345
+1234567
+1234567890
+qwerty
+abc123
+password1
+111111
+123123
+admin
+letmein
+welcome
+monkey
+dragon
+football
+iloveyou
+sunshine
+master
+1234
+123
+000000
+654321
+666666
+888888
+121212
+7777777
+princess
+login
+welcome1
+admin123
+root
+toor
+test
+test123
+guest
+changeme
+default
+secret
+passw0rd
+Password
+Password1
+Password123
+Password123!
+P@ssw0rd
+P@ssw0rd!
+Admin123
+Admin123!
+qwerty123
+qwertyuiop
+asdfgh
+asdfghjkl
+zxcvbnm
+1q2w3e4r
+1qaz2wsx
+zaq12wsx
+qazwsx
+trustno1
+superman
+baseball
+shadow
+whatever
+hello
+hello123
+freedom
+computer
+internet
+service
+support
+oracle
+mysql
+postgres
+redis
+ubuntu
+debian
+centos
+linux
+redhat
+root123
+root1234
+root123456
+123qwe
+123abc
+11111111
+222222
+333333
+444444
+555555
+999999
+112233
+123321
+123456a
+123456abc
+password123
+password1234
+welcome123
+temp123
+changeit`
+
+var dictionary = strings.Split(dictionaryText, "\n")
+var DictionarySHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(dictionaryText)))

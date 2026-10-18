@@ -17,7 +17,7 @@ import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.UUID;
 
 /**
  * 安全扫描任务编排（docs/04 §4）：弱口令 + 端口服务（Agent 执行）+ 漏洞比对（服务端执行）。
@@ -60,24 +60,25 @@ public class ScanTaskService {
                            boolean includeVuln, Long createdBy) {
         agentIds = agentIds == null ? List.of()
                 : agentIds.stream().filter(a -> a != null && !a.isBlank()).distinct().toList();
-        if (agentIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择扫描目标主机");
+        if (agentIds.isEmpty() || agentIds.size()>100) {
+            throw new IllegalArgumentException("请选择 1–100 台扫描目标主机");
         }
         if (!includeWeakPassword && !includePortService && !includeVuln) {
             throw new IllegalArgumentException("请至少选择一项扫描内容");
         }
         int exists = jdbc.queryForObject(
-                "SELECT count(*) FROM t_agent WHERE agent_id IN ("
+                "SELECT count(*) FROM t_agent WHERE deleted=false AND status NOT IN (3,4) AND agent_id IN ("
                         + DatabaseDialect.placeholders(agentIds.size()) + ")",
                 Integer.class, agentIds.toArray());
         if (exists != agentIds.size()) {
             throw new IllegalArgumentException("部分主机不存在或已删除，请刷新后重选");
         }
 
+        if(name!=null && name.length()>128) throw new IllegalArgumentException("任务名称不能超过 128 字符");
         int type = (includeVuln ? TYPE_VULN : 0) | (includeWeakPassword ? TYPE_WEAK_PWD : 0)
                 | (includePortService ? TYPE_PORT : 0);
         String taskNo = "SC" + LocalDateTime.now().format(NO_FMT)
-                + ThreadLocalRandom.current().nextInt(100, 1000);
+                + UUID.randomUUID().toString().substring(0,8);
         long taskId = jdbc.queryForObject(
                 "INSERT INTO t_scan_task (task_no, name, type, scope, status, created_by) "
                         + "VALUES (?, ?, ?, ?, 1, ?) RETURNING id",
@@ -100,19 +101,22 @@ public class ScanTaskService {
                 }
             }
         }
-        // 弱口令 / 端口服务：下发指令由 Agent 执行（无 agent 侧内容时直接完成）
         if (includeWeakPassword || includePortService) {
             for (String agentId : agentIds) {
-                commandService.dispatch(agentId, Command.newBuilder()
-                        .setVulnScan(CmdVulnScan.newBuilder()
-                                .setTaskId(String.valueOf(taskId))
-                                .setIncludeWeakPassword(includeWeakPassword)
-                                .setIncludePortService(includePortService)),
-                        createdBy);
+                boolean capable = !includeWeakPassword || jdbc.queryForObject(
+                    "SELECT count(*) FROM t_agent WHERE agent_id=? AND os_type=1 AND weak_password_contract=1", Integer.class, agentId)==1;
+                jdbc.update("INSERT INTO t_scan_task_agent(task_id,agent_id,state,weak_status) VALUES(?,?,?,?)",
+                    taskId,agentId,capable?"pending":"unsupported",includeWeakPassword?(capable?"pending":"unsupported"):"not_requested");
+                if (!capable) continue;
+                String command = commandService.dispatchAfterCommit(agentId, Command.newBuilder()
+                    .setVulnScan(CmdVulnScan.newBuilder().setTaskId(String.valueOf(taskId))
+                        .setIncludeWeakPassword(includeWeakPassword).setIncludePortService(includePortService)
+                        .setExecutionContract(1).setWeakDictionaryVersion(includeWeakPassword?ScanResultService.DICTIONARY_VERSION:"")),createdBy);
+                jdbc.update("UPDATE t_scan_task_agent SET command_id=? WHERE task_id=? AND agent_id=?",command,taskId,agentId);
             }
+            ScanResultService.advanceProgress(jdbc,taskId);
         } else {
-            jdbc.update("UPDATE t_scan_task SET status = 2, progress = 100, finished_at = CURRENT_TIMESTAMP "
-                    + "WHERE id = ?", taskId);
+            jdbc.update("UPDATE t_scan_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=?",taskId);
         }
         log.info("安全扫描任务已下发: task_id={} task_no={} agents={} type={}",
                 taskId, taskNo, agentIds.size(), type);
@@ -121,14 +125,15 @@ public class ScanTaskService {
 
     /** 任务超时兜底：执行中超 30 分钟 → 部分失败（已收结果保留） */
     @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
+    @Transactional
     public void sweepTimeout() {
-        int rows = jdbc.update("""
-                UPDATE t_scan_task SET status = 3, finished_at = CURRENT_TIMESTAMP
-                WHERE status = 1 AND created_at < ?
-                """, database.timestampBefore(Duration.ofMinutes(30)));
-        if (rows > 0) {
-            log.warn("扫描任务超时置部分失败: count={}", rows);
+        var expired=jdbc.queryForList("SELECT id FROM t_scan_task WHERE status=1 AND created_at<? ORDER BY id LIMIT 100",Long.class,database.timestampBefore(Duration.ofMinutes(30)));
+        for(long task:expired) {
+            // Same parent/member lock order as result acceptance and ACKs.
+            if(jdbc.update("UPDATE t_scan_task SET status=3,finished_at=CURRENT_TIMESTAMP WHERE id=? AND status=1",task)!=1)continue;
+            jdbc.update("UPDATE t_scan_task_agent SET state='timeout',weak_status=CASE WHEN weak_status='pending' THEN 'failed' ELSE weak_status END WHERE task_id=? AND state='pending'",task);
+            if(jdbc.queryForObject("SELECT count(*) FROM t_scan_task_agent WHERE task_id=?",Integer.class,task)>0)
+                jdbc.update("UPDATE t_scan_task SET progress=100 WHERE id=?",task);
         }
     }
-
 }

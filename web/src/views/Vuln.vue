@@ -58,6 +58,8 @@
         </el-tab-pane>
 
         <el-tab-pane label="弱口令" name="weakpwd">
+          <WeakPasswordCoverage v-if="tab === 'weakpwd'" />
+          <p style="margin-top:20px">历史风险发现（不代表当前口令状态）</p>
           <el-table :data="weakpwds" stripe>
             <el-table-column prop="host" label="主机" width="160" />
             <el-table-column prop="account" label="账户" width="140" />
@@ -102,11 +104,11 @@
       </el-form-item>
       <el-form-item label="扫描内容">
         <el-checkbox v-model="scanForm.includeVuln">漏洞比对（服务端 CVE 库 × 软件快照）</el-checkbox><br />
-        <el-checkbox v-model="scanForm.includeWeakPassword">弱口令检测（本机离线，无在线爆破）</el-checkbox><br />
+        <el-checkbox v-model="scanForm.includeWeakPassword">Linux 弱口令（本地有限字典离线核对）</el-checkbox><br />
         <el-checkbox v-model="scanForm.includePortService">端口服务识别（高危端口标记）</el-checkbox>
       </el-form-item>
       <el-alert type="info" :closable="false" show-icon
-        title="漏洞比对即时完成；弱口令与端口服务由 Agent 执行后自动上报，稍候刷新查看结果" />
+        title="Linux 弱口令仅核对本地 shadow 的 100 项内置字典，不回传口令。不支持的目标会显示未覆盖，该目标的 Agent 扫描不下发；请到弱口令页核对逐主机覆盖。" />
     </el-form>
     <template #footer>
       <el-button @click="scanDlg = false">取消</el-button>
@@ -189,6 +191,7 @@ import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createSca
 import { sevType, sevLabel } from '../utils/format'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 import VulnerabilityHistory from '../components/VulnerabilityHistory.vue'
+import WeakPasswordCoverage from '../components/WeakPasswordCoverage.vue'
 import VulnerabilityCoverage from '../components/VulnerabilityCoverage.vue'
 
 const tab = ref('vuln')
