@@ -14,6 +14,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/scan"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"google.golang.org/grpc/metadata"
 )
@@ -133,7 +134,7 @@ func TestReconnectAdvertisesUpgradeCapabilityBeforeBacklog(t *testing.T) {
 			if err := c.sendLoop(ctx, stream, make(chan *pb.Report), 0); err == nil {
 				t.Fatal("missing backlog transport failure")
 			}
-			if len(stream.reports) != 1 || stream.reports[0].GetHeartbeat().GetUpgradeContract() != 1 {
+			if len(stream.reports) != 1 || stream.reports[0].GetHeartbeat().GetUpgradeContract() != 1 || stream.reports[0].GetHeartbeat().GetWeakPasswordContract() != scan.WeakPasswordContract() {
 				t.Fatalf("first report did not establish upgrade capability: %v", stream.reports)
 			}
 			remaining, err := c.queue.PopAll()

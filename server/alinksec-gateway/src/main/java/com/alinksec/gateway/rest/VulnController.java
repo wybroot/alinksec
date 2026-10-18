@@ -77,6 +77,12 @@ public class VulnController {
         return ApiResult.ok(query.weakpwdFindings(page, Math.min(size, 100)));
     }
 
+    @GetMapping("/scan-coverage")
+    public ApiResult<Map<String,Object>> scanCoverage(@RequestParam(required=false) String agentId,
+        @RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(query.scanCoverage(agentId,Math.max(1,page),Math.max(1,Math.min(100,size))));
+    }
+
     @GetMapping("/stats")
     public ApiResult<Map<String, Object>> stats() {
         return ApiResult.ok(query.stats());

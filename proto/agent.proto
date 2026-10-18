@@ -97,6 +97,8 @@ message CmdVulnScan {
   string task_id = 1;
   bool include_weak_password = 2;     // 弱口令/空口令检测
   bool include_port_service  = 3;     // 端口服务识别
+  uint32 execution_contract = 4;      // 1: bounded offline scan and explicit coverage
+  string weak_dictionary_version = 5; // fixed built-in dictionary identity
 }
 
 message CmdPolicySync {
@@ -231,6 +233,7 @@ message RptHeartbeat {
   uint32 virus_execution_contract = 9;
   uint32 upgrade_contract = 10; // 1 only while running under a supported native service manager
   uint32 isolation_contract = 11; // 1 only with supported native keeper and firewall backend
+  uint32 weak_password_contract = 12; // 1 on Linux; zero on unsupported platforms
 }
 
 message RptIsolationState {
@@ -351,6 +354,24 @@ message RptScanResult {
   repeated VulnFinding      vulns          = 2;
   repeated WeakPwdFinding   weak_passwords = 3;
   repeated PortServiceFinding port_services = 4;
+  uint32 execution_contract = 5;
+  WeakPasswordCoverage weak_password_coverage = 6;
+  string port_status = 7; // complete / failed / not_requested
+  string command_id = 8; // binds evidence to the dispatched task command
+}
+
+message WeakPasswordCoverage {
+  string status = 1; // complete / partial / failed / unsupported / not_requested
+  string dictionary_version = 2;
+  string dictionary_sha256 = 3;
+  uint32 accounts_seen = 4;
+  uint32 accounts_checked = 5;
+  uint32 accounts_excluded = 6;
+  uint32 accounts_unsupported = 7;
+  uint32 accounts_failed = 8;
+  uint32 candidates_tested = 9;
+  uint64 duration_ms = 10;
+  repeated string issues = 11; // fixed reason codes only; never hashes or passwords
 }
 
 message VulnFinding {
@@ -361,7 +382,7 @@ message VulnFinding {
 
 message WeakPwdFinding {
   string account = 1; string type = 2;   // system_empty / system_weak / uid0_nonroot
-  string password = 3;                   // system_weak 命中时回传明文（离线字典命中，取证展示）
+  string password = 3 [deprecated = true]; // reserved for wire compatibility; never send or persist credentials
 }
 
 message PortServiceFinding {

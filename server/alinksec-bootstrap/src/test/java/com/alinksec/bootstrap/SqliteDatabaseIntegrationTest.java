@@ -160,7 +160,11 @@ class SqliteDatabaseIntegrationTest {
                 INSERT INTO t_scan_task(task_no, type, scope, status)
                 VALUES ('SC-LIVE', 7, ?, 1) RETURNING id
                 """, Long.class, scope);
+        jdbc.update("INSERT INTO t_scan_task_agent(task_id,agent_id,command_id) VALUES(?,?,'fixture-command')",scanTask,"agent-scan-1");
         new ScanResultService(jdbc).onResult("agent-scan-1", RptScanResult.newBuilder()
+                .setCommandId("fixture-command").setExecutionContract(1).setPortStatus("complete")
+                .setWeakPasswordCoverage(com.alinksec.proto.WeakPasswordCoverage.newBuilder().setStatus("complete")
+                    .setDictionaryVersion(ScanResultService.DICTIONARY_VERSION).setDictionarySha256(ScanResultService.DICTIONARY_SHA256).setAccountsSeen(1).setAccountsChecked(1))
                 .setTaskId(String.valueOf(scanTask))
                 .addWeakPasswords(WeakPwdFinding.newBuilder()
                         .setAccount("empty-test").setType("system_empty"))
@@ -203,11 +207,11 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(61, jdbc.queryForObject("""
+        assertEquals(62, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(18, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(19, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));

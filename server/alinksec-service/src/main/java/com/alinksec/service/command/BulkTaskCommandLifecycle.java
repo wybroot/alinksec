@@ -15,6 +15,13 @@ public class BulkTaskCommandLifecycle implements CommandLifecycleListener {
 
     public BulkTaskCommandLifecycle(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    @Override public Command prepareDelivery(String agent,Command command) {
+        if(command.hasVulnScan() && command.getVulnScan().getExecutionContract()==1 && command.getVulnScan().getIncludeWeakPassword()
+            && jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE agent_id=? AND os_type=1 AND weak_password_contract=1 AND deleted=false AND status NOT IN (3,4)",Integer.class,agent)!=1)
+            throw new IllegalStateException("目标不再支持 Linux 本地弱口令字典检测，请更新 Agent 后重试");
+        return command;
+    }
+
     @Override
     public void onTerminal(String agent, String commandId, TerminalState state, String message) {
         if (state == TerminalState.DONE) return;
@@ -42,6 +49,13 @@ public class BulkTaskCommandLifecycle implements CommandLifecycleListener {
             for (var id : ids) if (id.isTextual() && agent.equals(id.asText())) member = true;
             if (!member) return;
         } catch (RuntimeException invalid) { return; }
+        if(command.hasVulnScan()) {
+            jdbc.update("UPDATE t_scan_task SET progress=progress WHERE id=?",task);
+            int updated=jdbc.update("UPDATE t_scan_task_agent SET state=?,weak_status=CASE WHEN weak_status='pending' THEN 'failed' ELSE weak_status END WHERE task_id=? AND agent_id=? AND command_id=? AND state='pending' AND evidence_sha256=''",state==TerminalState.TIMEOUT?"timeout":"failed",task,agent,commandId);
+            if(updated>0 || jdbc.queryForObject("SELECT count(*) FROM t_scan_task_agent WHERE task_id=?",Integer.class,task)>0) {
+                com.alinksec.service.scan.ScanResultService.advanceProgress(jdbc,task);return;
+            }
+        }
         jdbc.update("UPDATE " + table + " SET status=3,finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN (0,1)", task);
     }
 }

@@ -102,6 +102,26 @@ public class VulnQueryService {
         return result;
     }
 
+    /** Historical findings and coverage are separate: no findings is not a pass. */
+    public Map<String,Object> scanCoverage(String agentId,int page,int size) {
+        String condition=agentId==null || agentId.isBlank()?"":" WHERE m.agent_id=?";
+        var args=new ArrayList<Object>();if(!condition.isEmpty())args.add(agentId);
+        long total=jdbc.queryForObject("SELECT count(*) FROM t_scan_task_agent m JOIN t_scan_task t ON t.id=m.task_id"+condition,Long.class,args.toArray());
+        args.add(size);args.add((page-1)*size);
+        var rows=jdbc.queryForList("SELECT m.*,a.hostname,t.task_no,t.created_at,t.type FROM t_scan_task_agent m JOIN t_scan_task t ON t.id=m.task_id LEFT JOIN t_agent a ON a.agent_id=m.agent_id"+condition+" ORDER BY t.id DESC,m.agent_id LIMIT ? OFFSET ?",args.toArray());
+        for(var row:rows) {
+            String evidence=String.valueOf(row.get("evidence"));
+            if(evidence.isBlank()) row.put("coverage",Map.of());
+            else {
+                var coverage=com.alinksec.common.util.JsonUtils.read(evidence);
+                if(coverage.isObject()) ((com.fasterxml.jackson.databind.node.ObjectNode)coverage).remove("findings");
+                row.put("coverage",coverage);
+            }
+            row.remove("evidence");
+        }
+        return Map.of("list",rows,"total",total);
+    }
+
     /** 端口服务发现（含高危标记） */
     public Map<String, Object> portFindings(Boolean risky, String agentId,
                                             String keyword, int page, int size) {

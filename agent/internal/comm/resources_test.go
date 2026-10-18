@@ -47,7 +47,7 @@ func TestResourcePressureKeepsControlAndOfflineEvents(t *testing.T) {
 	for _, acks := range [][]*pb.RptAck{
 		c.executeCommand(&pb.Command{CmdId: "collect", Payload: &pb.Command_CollectNow{CollectNow: &pb.CmdCollectNow{}}}, make(chan *pb.Report), context.Background()),
 		c.executeBaselineCheck(&pb.CmdBaselineCheck{}, &pb.RptAck{CmdId: "baseline"}),
-		c.executeVulnScan(&pb.CmdVulnScan{}, &pb.RptAck{CmdId: "vuln"}),
+		c.executeVulnScan(&pb.CmdVulnScan{ExecutionContract: 1}, &pb.RptAck{CmdId: "vuln"}),
 		c.executeVirusScan(&pb.CmdVirusScan{}, &pb.RptAck{CmdId: "virus"}),
 	} {
 		if len(acks) != 2 || acks[1].Stage != pb.RptAck_FAILED || acks[1].Code != 2 {

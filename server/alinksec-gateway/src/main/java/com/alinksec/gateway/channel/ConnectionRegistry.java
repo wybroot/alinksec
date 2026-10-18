@@ -22,7 +22,7 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
 
     private static final class Connection {
         final StreamObserver<Command> stream;
-        final AtomicInteger upgradeContract=new AtomicInteger(),isolationContract=new AtomicInteger();
+        final AtomicInteger upgradeContract=new AtomicInteger(),isolationContract=new AtomicInteger(),weakPasswordContract=new AtomicInteger();
         final java.util.concurrent.locks.ReentrantReadWriteLock identity=new java.util.concurrent.locks.ReentrantReadWriteLock();
         final Object output=new Object();
         volatile boolean closed;
@@ -82,6 +82,8 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
         }
         synchronized(connection.output) {
         if(streams.get(agentId)!=connection || connection.closed || expected!=null && connection.stream()!=expected) return false;
+        if (command.hasVulnScan() && command.getVulnScan().getIncludeWeakPassword()
+                && (command.getVulnScan().getExecutionContract()!=1 || connection.weakPasswordContract.get()!=1)) return false;
         if (command.hasAgentUpgrade() && (command.getAgentUpgrade().getExecutionContract()!=1
                 || connection.upgradeContract().get()!=1)) return false;
         if (command.hasProtectAction() && command.getProtectAction().getAction()==com.alinksec.proto.CmdProtectAction.Action.ISOLATE_HOST
@@ -106,6 +108,13 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
         Connection current=streams.get(agentId);
         if(current!=null) synchronized(current.output) {
             if(streams.get(agentId)==current && current.stream()==stream) current.upgradeContract().set(contract==1?1:0);
+        }
+    }
+
+    public void weakPasswordContract(String agentId,StreamObserver<Command> stream,int contract) {
+        Connection current=streams.get(agentId);
+        if(current!=null) synchronized(current.output) {
+            if(streams.get(agentId)==current && current.stream()==stream) current.weakPasswordContract.set(contract==1?1:0);
         }
     }
 

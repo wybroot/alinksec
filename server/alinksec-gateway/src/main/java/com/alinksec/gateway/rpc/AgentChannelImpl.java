@@ -64,6 +64,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                     }
                     registry.withCurrent(authenticatedAgentId,responseObserver,()-> {
                         if (report.hasHeartbeat()) {
+                            registry.weakPasswordContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getWeakPasswordContract());
                             registry.upgradeContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getUpgradeContract());
                             registry.isolationContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getIsolationContract());
                         }
@@ -111,6 +112,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 authenticated = true;
                 // Capability belongs to this authenticated connection. A
                 // previous, newer Agent may have been downgraded while offline.
+                agentRepository.weakPasswordContract(authenticatedAgentId, report.hasHeartbeat()?report.getHeartbeat().getWeakPasswordContract():0);
                 agentRepository.upgradeContract(authenticatedAgentId,
                         report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
                 agentRepository.isolationContract(authenticatedAgentId,
@@ -120,6 +122,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                         report.getHeartbeat().getUpgradeContract());
                 if (report.hasHeartbeat()) registry.isolationContract(authenticatedAgentId,responseObserver,
                         report.getHeartbeat().getIsolationContract());
+                if (report.hasHeartbeat()) registry.weakPasswordContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getWeakPasswordContract());
                 commandService.deliverPending(authenticatedAgentId);
                 return true;
             }
