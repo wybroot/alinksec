@@ -115,15 +115,20 @@ func Replace(src, dst string) error {
 		Name   [1]uint16
 	}
 	var header renameInfo
-	size := int(unsafe.Offsetof(header.Name)) + (len(name)-1)*2
+	// SetFileInformationByHandle requires a NUL-terminated Win32 pathname,
+	// although FileNameLength excludes that terminator.
+	size := int(unsafe.Offsetof(header.Name)) + len(name)*2
 	buffer := make([]byte, size)
 	info := (*renameInfo)(unsafe.Pointer(&buffer[0]))
 	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
 	info.Length = uint32((len(name) - 1) * 2)
-	copy(unsafe.Slice(&info.Name[0], len(name)-1), name[:len(name)-1])
+	copy(unsafe.Slice(&info.Name[0], len(name)), name)
 	err = windows.SetFileInformationByHandle(h, windows.FileRenameInfoEx, &buffer[0], uint32(size))
 	if err == nil {
-		return windows.FlushFileBuffers(h)
+		if err := windows.FlushFileBuffers(h); err != nil {
+			return fmt.Errorf("flush renamed record: %w", err)
+		}
+		return nil
 	}
 	closeErr := windows.CloseHandle(h)
 	h = windows.InvalidHandle
@@ -131,7 +136,7 @@ func Replace(src, dst string) error {
 		return errors.Join(err, closeErr)
 	}
 	if !errors.Is(err, windows.ERROR_INVALID_PARAMETER) && !errors.Is(err, windows.ERROR_NOT_SUPPORTED) {
-		return err
+		return fmt.Errorf("rename record: %w", err)
 	}
 	// Older filesystems use the existing atomic operation. Retry short sharing
 	// conflicts without deleting the destination or claiming an unsaved commit.
