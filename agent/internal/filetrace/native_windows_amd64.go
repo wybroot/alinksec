@@ -97,13 +97,15 @@ type traceOwner struct {
 	Created uint64 `json:"created"`
 }
 type pendingWrite struct {
-	writes []Write
-	object uint64
-	at     time.Time
+	writes  []Write
+	object  uint64
+	emitter uint32
+	at      time.Time
 }
 type openedFile struct {
-	path string
-	at   uint64
+	path  string
+	at    uint64
+	owner Identity
 }
 type winTrace struct {
 	m         *Monitor
@@ -399,7 +401,7 @@ func (s *winTrace) dosPath(path string) string {
 }
 
 func (s *winTrace) onEvent(r *eventRecord) {
-	if r.Provider != fileProvider {
+	if r.Provider != fileProvider || r.Flags&0x10c != 0 { // Manifest records only; no classic/string/WPP records.
 		return
 	}
 	if r.ID < 32 {
@@ -434,7 +436,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			s.m.fail("file_object_capacity_exceeded")
 			return
 		}
-		s.objects[obj] = openedFile{path: path, at: r.Timestamp}
+		tid, hasThread := number(r, "IssuingThreadId", "ThreadId")
+		if !hasThread {
+			tid = uint64(r.ThreadID)
+		}
+		owner, _ := writer(uint32(tid), r.PID, r.Timestamp)
+		s.objects[obj] = openedFile{path: path, at: r.Timestamp, owner: owner}
 		s.mapped.Add(1)
 	case 14:
 		if old, found := s.objects[obj]; ok && found && r.Timestamp >= old.at {
@@ -457,7 +464,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			return
 		}
 		at := filetime(r.Timestamp)
-		id, _ := writer(uint32(tid), r.Timestamp)
+		id, _ := writer(uint32(tid), r.PID, r.Timestamp)
+		// Cross-process shared handles and unverified opens cannot establish a
+		// trusted path-to-writer binding. Do not trust a payload PID alone.
+		if id != opened.owner {
+			id = Identity{}
+		}
 		if len(s.pending) >= maxWrites {
 			s.m.fail("pending_write_capacity_exceeded")
 			return
@@ -466,7 +478,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if r.ID != 16 {
 			operation = "rename"
 		}
-		pending := pendingWrite{writes: []Write{{Path: opened.path, At: at, Process: id, Operation: operation}}, object: obj, at: time.Now()}
+		pending := pendingWrite{writes: []Write{{Path: opened.path, At: at, Process: id, Operation: operation}}, object: obj, emitter: r.PID, at: time.Now()}
 		s.pending[irp] = pending
 	case 24:
 		irp, found := number(r, "Irp")
@@ -478,6 +490,9 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			return
 		}
 		delete(s.pending, irp)
+		if r.PID != 4 && r.PID != 0xffffffff && r.PID != pending.emitter && (len(pending.writes) == 0 || r.PID != pending.writes[0].Process.PID) {
+			return
+		}
 		if len(pending.writes) == 0 || filetime(r.Timestamp).Before(pending.writes[0].At) || filetime(r.Timestamp).Sub(pending.writes[0].At) > 5*time.Second {
 			return
 		}
@@ -530,7 +545,7 @@ func image(h windows.Handle) (string, error) {
 	}
 	return windows.UTF16ToString(b[:n]), nil
 }
-func writer(tid uint32, at uint64) (Identity, error) {
+func writer(tid, emitter uint32, at uint64) (Identity, error) {
 	var id Identity
 	thread, err := windows.OpenThread(windows.THREAD_QUERY_LIMITED_INFORMATION, false, tid)
 	if err != nil {
@@ -549,6 +564,9 @@ func writer(tid uint32, at uint64) (Identity, error) {
 	// Cache-manager/system writes cannot establish an original user writer.
 	if pid <= 4 || uint32(pid) == uint32(os.Getpid()) {
 		return id, fmt.Errorf("writer context unavailable")
+	}
+	if emitter != uint32(pid) && emitter != 4 && emitter != 0xffffffff {
+		return id, fmt.Errorf("event source does not match issuing thread")
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
