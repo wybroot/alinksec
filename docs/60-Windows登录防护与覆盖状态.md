@@ -12,7 +12,7 @@ Agent 每 5 秒通过 Windows Event Log API 查询本机 Security 通道中 Micr
 
 ## 检测、响应与恢复
 
-失败次数按规则和来源 IP 在配置窗口内累计，账户按 `DOMAIN\\account` 不区分大小写完整匹配排除项；IP/CIDR 信任项支持 IPv4、IPv6。支持时区、跨午夜允许时段与成功登录的异常时段告警。成功登录始终仅告警。
+失败次数按规则和来源 IP 在配置窗口内累计，账户按 `DOMAIN\account` 不区分大小写完整匹配排除项；IP/CIDR 信任项支持 IPv4、IPv6。支持时区、跨午夜允许时段与成功登录的异常时段告警。成功登录始终仅告警。
 
 封禁使用动态 WFP 会话，只限制该来源进入配置 TCP 端口，默认 3389，可按需配置 445 等端口。事件不提供服务端目标端口，所以这些端口是响应范围，不是事件所属服务的证明。封禁不修改现有防火墙配置、默认动作或其他管理员规则。管理服务 IP 被排除，管理域名解析失败时只上报封禁失败。动态过滤器在进程退出时由 Windows 撤销；运行期间由独立单调计时器按原到期时间撤销，不依赖事件读取循环。撤回规则、增加信任来源、修改端口或缩短有效时长会解除不再匹配的封禁。WFP 清理失败会报告故障并让 Agent 主循环退出，由原生服务恢复配置重启以清理动态对象。
 
@@ -25,5 +25,11 @@ Agent 每 5 秒通过 Windows Event Log API 查询本机 Security 通道中 Micr
 心跳携带 Windows 登录执行契约和有界覆盖 JSON。平台按主机显示正在监测、追赶、审核未开启、读取/保存/封禁失败、日志缺口、旧版不支持、离线、过期和采集停滞。策略保存或同步 ACK 只证明配置接收；实际状态以主机覆盖信息为准。当前封禁数仅展示有效的近期状态。状态接口按 Windows 主机分页，最多每页 100 条；只读角色不能修改规则。
 
 本模块的自动验证包含跨平台 XML/状态机测试、原生 Windows Security 4625 与审核查询、WFP 双栈过滤器、独立到期和进程退出清理、双数据库事务与回执去重，以及桌面/手机页面配置和失败重试。Windows CI 在其提供的 Windows 系统上执行；其他 Windows 版本和真实远程 RDP/SMB 客户端仍需现场验收。原生同机网卡 TCP 探测单独报告是否可用，不将内核本机回环旁路当作远程拦截证据。
+
+2026-10-18 原生验收：实现提交 `7077a17` 的 [Windows CI](https://github.com/wybroot/alinksec/actions/runs/39121271482/job/117657206393) 在 Windows Server 2025 Datacenter 10.0.26100 amd64（runner 镜像 `windows-2025-vs2026`，版本 `20261007.264.1`）通过全部 7 项登录防护检查。产物 `windows-login-validation-windows-amd64/result.json` 确认真实 LogonUser 失败产生 Security 4625、系统成功/失败审核查询、原生记录锚点与前向读取、IPv4/IPv6 入站来源/TCP/端口精确过滤器、独立到期、进程终止撤销动态过滤器及私有原子状态文件。同机非回环网卡 TCP 探测的 `supported`、`blocked`、`restored` 均为 true；该流量证据仅适用于同机探测范围。
+
+同轮 Windows 通用回归还覆盖持有旧文件时更新状态文件：旧句柄继续读取原快照，新路径读取新快照；旧式读取句柄配合 MoveFileEx 的对照场景仍能重现共享冲突。写入使用保留读者的原子重命名，失败不会先删除现有状态。
+
+最终实现与部署测试提交 `85114ac` 的 [CI39122682760](https://github.com/wybroot/alinksec/actions/runs/39122682760) 四作业全部通过，原始产物已下载并验收：Windows 登录原生 7 项、Linux amd64/arm64 的 Windows 登录页面各 5 项，三平台配置/升级/隔离/资源各 13/7/11/8 项，以及双架构 PostgreSQL/SQLite 的完整维护、中断恢复与既有服务身份保留。Windows 原生同机 TCP 探测再次确认封禁和恢复，双架构页面均无脚本错误和意外写请求。PostgreSQL 应用角色下包含 Windows 登录事务与覆盖检查；本地相关 Java 30 项、前端单元 11 项及 Agent 全包和相关 race 检查也通过。桌面与手机截图已检查。
 
 参考：[4625 事件字段](https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625)、[EvtQuery 线程与句柄要求](https://learn.microsoft.com/en-us/windows/win32/api/winevt/nf-winevt-evtquery)、[WFP 动态会话生命周期](https://learn.microsoft.com/en-us/windows/win32/fwp/object-management)、[AuditQuerySystemPolicy](https://learn.microsoft.com/en-us/windows/win32/api/ntsecapi/nf-ntsecapi-auditquerysystempolicy)。
