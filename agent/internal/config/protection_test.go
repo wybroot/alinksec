@@ -21,3 +21,23 @@ func TestProtectionPolicyValidationRejectsUnsafeAndUnboundedRules(t *testing.T) 
 		}
 	}
 }
+
+func TestWindowsLoginRequiresExplicitScopeAndContract(t *testing.T) {
+	rule := LoginRule{ID: "win", Enabled: true, Match: LoginMatch{WindowsContract: 1, Platforms: []string{"windows"}}, Actions: []string{"alert", "block_ip"}}
+	if err := ValidateProtection(nil, []LoginRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range []LoginMatch{
+		{WindowsContract: 2, Platforms: []string{"windows"}},
+		{WindowsContract: 1, Platforms: []string{"windows", "linux"}},
+		{WindowsContract: 1, Platforms: []string{"windows"}, SSHPorts: []int{22}},
+		{WindowsContract: 1, Platforms: []string{"windows"}, WindowsPorts: []int{0}},
+		{WindowsContract: 1, Platforms: []string{"windows"}, WindowsLogonTypes: []int{2}},
+		{WindowsPorts: []int{3389}},
+	} {
+		rule.Match = match
+		if err := ValidateProtection(nil, []LoginRule{rule}); err == nil {
+			t.Fatalf("accepted %+v", match)
+		}
+	}
+}

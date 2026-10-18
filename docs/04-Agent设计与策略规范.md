@@ -65,7 +65,7 @@ agent/
 | 软件清单 | 24h 或 dpkg/rpm 数据库 mtime 变更触发 | rpm -qa --qf / dpkg-query -l | 注册表 Uninstall 键枚举 |
 | 账户清单 | 24h | /etc/passwd、/etc/shadow（需 root） | Win32_UserAccount + SAM 状态 |
 | 容器/本机工作负载 | 随资产快照（默认 6h） | Docker CLI 只读清点；本机 `kubectl` 按 `spec.nodeName` 只读清点 | 本期不采集 |
-| 登录日志 | 实时 tail | /var/log/secure（inotify）+ wtmp/btmp 增量解析 | Windows Event Log（Security 4624/4625/4720）订阅 |
+| 登录日志 | 增量读取 | /var/log/secure、/var/log/auth.log | 原生 Event Log API 每 5 秒查询 Security 4624/4625，限定远程类型 3/10；见 [Windows 登录说明](60-Windows登录防护与覆盖状态.md) |
 | 文件完整性 | 事件驱动 | inotify（目录递归 watch） | ReadDirectoryChangesW |
 
 进程快照包含 PID、进程名、所属用户、可执行文件路径、命令行和 RSS。命令行在 Agent 本机脱敏后才上报：
@@ -221,14 +221,14 @@ rules:
 
 ### 5.4 登录防护实现
 
-- 解析登录失败事件（Linux: secure tail + btmp 解析；Windows: 4625 事件订阅）。
-- 内存滑动窗口计数 `{src_ip: [timestamps]}`，超阈值且不在白名单 → 封禁。
+- Linux 增量读取 OpenSSH Failed/Accepted 日志；Windows 通过原生 Event Log API 读取具有效远程来源的 Security 4624/4625，按字段名解析 XML。Windows 规则独立、默认停用，首次启用从当前日志建立基线。
+- 按规则和来源 IP 统计滑动窗口，信任来源和排除账户不参与计数；超阈值告警，显式选择 `block_ip` 才限时封禁。成功登录只参与异常时段告警。
 - **封禁落地**：
 
-| 平台 | 优先级顺序 |
+| 平台 | 当前落地 |
 |------|-----------|
-| Linux | firewalld（rich rule）→ nftables set → iptables（探测可用性后选择） |
-| Windows | Windows 防火墙出站/入站规则（WFP COM 接口） |
+| Linux | 独立 iptables/ip6tables 链，只限制指定来源进入 SSH TCP 端口；见 [Linux 防护说明](11-登录与文件防护.md) |
+| Windows | 原生动态 WFP 入站过滤器，精确限定来源 IP、TCP 与配置端口；独立计时到期、进程退出撤销，持久化意图与告警回执；见 [Windows 登录说明](60-Windows登录防护与覆盖状态.md) |
 
 - 封禁规则持久化本地（重启不丢失），`t_block_ip` 到期后由服务端下发解封或 Agent 定时自查过期。
 

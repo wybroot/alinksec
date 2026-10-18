@@ -79,6 +79,7 @@ message Command {
     CmdSignatureUpdate signature_update = 19;
     CmdVulnFix       vuln_fix       = 20;
     CmdIsolationConfirm isolation_confirm = 21; // ephemeral echo on this authenticated stream; no cmd_id/ACK
+    CmdWindowsLoginReceipt windows_login_receipt = 22; // committed event receipt; no cmd_id/ACK
   }
 }
 
@@ -234,6 +235,8 @@ message RptHeartbeat {
   uint32 upgrade_contract = 10; // 1 only while running under a supported native service manager
   uint32 isolation_contract = 11; // 1 only with supported native keeper and firewall backend
   uint32 weak_password_contract = 12; // 1 on Linux; zero on unsupported platforms
+  uint32 windows_login_contract = 13; // 1: bounded Security XML reader and dynamic WFP blocks
+  string windows_login_status = 14; // bounded JSON coverage; policy ACK does not prove coverage
 }
 
 message RptIsolationState {
@@ -469,4 +472,8 @@ message FixResultItem {
   bool   verified = 4;       // 修复后复核（重跑 check / 重扫 CVE）是否通过
   bool   reboot_required = 5;
   string log = 6;
+}
+
+message CmdWindowsLoginReceipt {
+  repeated string event_ids = 1; // at most 64 SHA-256 journal identities
 }

@@ -66,6 +66,13 @@ public class PolicyStoreService {
                   '["alert"]', 3, true, true)
                 ON CONFLICT(rule_id) DO NOTHING
                 """);
+        jdbc.update("""
+                INSERT INTO t_protect_rule(rule_id, name, type, match, actions, severity, enabled, built_in)
+                VALUES ('PR-0004', 'Windows 登录防护', 'login',
+                  '{"platforms":["windows"],"windows_contract":1,"window_sec":300,"failure_threshold":5,"cooldown_sec":300,"block_duration_sec":600,"windows_ports":[3389],"windows_logon_types":[3,10],"trusted_ips":[],"user_exclude":[],"off_hours_enabled":false,"allowed_start_hour":8,"allowed_end_hour":20,"timezone":"Local"}',
+                  '["alert"]', 3, false, true)
+                ON CONFLICT(rule_id) DO NOTHING
+                """);
     }
 
     /** 当前策略版本（"vN"；t_protect_rule 变更 → rebuild 递增） */

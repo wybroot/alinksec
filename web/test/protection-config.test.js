@@ -22,3 +22,18 @@ test('login editor sends bounded numeric values and preserves hidden platform se
   for (const invalid of [{ports:''},{ports:'22;443'},{ports:'65536'},{threshold:1},{duration:3601},{timezone:''},{window:null}]) assert.throws(()=>loginProtectionPayload(rule,{...form,...invalid}))
   assert.deepEqual(loginProtectionPayload(rule,{...form,block:false}).actions,['alert'])
 })
+
+test('Windows login editor uses an explicit independent contract and port scope', async () => {
+  const { windowsLoginProtectionPayload, windowsLoginStateLabel, windowsLoginIssueLabel } = await import('../src/utils/protection.js')
+  const rule = { match: { windows_contract: 1, platforms: ['windows'] } }
+  const form = { enabled: true, block: true, types: [3, 10], threshold: 5, window: 300, cooldown: 300, duration: 600, ports: '3389,445', trusted: '192.0.2.1', users: 'LAB\\backup', offHours: true, start: 8, end: 20, timezone: 'UTC' }
+  const body = windowsLoginProtectionPayload(rule, form)
+  assert.deepEqual(body.match.windows_ports, [3389, 445])
+  assert.deepEqual(body.match.windows_logon_types, [3, 10])
+  assert.equal(body.match.windows_contract, 1)
+  assert.equal(body.match.ssh_ports, undefined)
+  for (const bad of [{ types: [] }, { types: [2] }, { ports: '0' }, { ports: '3389;445' }]) assert.throws(() => windowsLoginProtectionPayload(rule, { ...form, ...bad }))
+  assert.throws(() => windowsLoginProtectionPayload({ match: { platforms: ['linux'] } }, form))
+  assert.equal(windowsLoginStateLabel('unsupported'), 'Agent 不支持')
+  assert.match(windowsLoginIssueLabel('event_buffer_full'), /回执/)
+})

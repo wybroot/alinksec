@@ -54,4 +54,21 @@ class AgentChannelImplTest {
         assertEquals(Status.Code.PERMISSION_DENIED,
                 Status.fromThrowable(error.getValue()).getCode());
     }
+    @Test void loginReceiptIsSentOnlyAfterSuccessfulAuthenticatedDispatch() {
+        var dispatcher=mock(ReportDispatcher.class);var agents=mock(AgentRepository.class);var registry=new ConnectionRegistry();
+        var agent=mock(AgentEntity.class);when(agent.status()).thenReturn(AgentEntity.STATUS_ONLINE);when(agents.findByAgentId("agent-a")).thenReturn(Optional.of(agent));
+        @SuppressWarnings("unchecked") StreamObserver<Command> responses=mock(StreamObserver.class);
+        var channel=new AgentChannelImpl(dispatcher,agents,registry,mock(CommandService.class),mock(com.alinksec.service.protect.IsolationLeaseService.class)).channel(responses);
+        String id="a".repeat(64);var report=Report.newBuilder().setAgentId("agent-a").setReportId(id+"-windows-login")
+                .setSecurityEvent(com.alinksec.proto.RptSecurityEvent.newBuilder().setType("login_crack")).build();
+        org.mockito.Mockito.doThrow(new IllegalStateException("transaction failed")).when(dispatcher).dispatch("agent-a",report);
+        Context.current().withValue(AgentAuthInterceptor.AGENT_ID_KEY,"agent-a").run(()->channel.onNext(report));
+        verify(responses,never()).onNext(any());
+        org.mockito.Mockito.doNothing().when(dispatcher).dispatch("agent-a",report);
+        Context.current().withValue(AgentAuthInterceptor.AGENT_ID_KEY,"agent-a").run(()->channel.onNext(report));
+        var receipt=org.mockito.ArgumentCaptor.forClass(Command.class);verify(responses).onNext(receipt.capture());
+        assertEquals(java.util.List.of(id),receipt.getValue().getWindowsLoginReceipt().getEventIdsList());
+        assertEquals("",receipt.getValue().getCmdId());
+    }
+
 }

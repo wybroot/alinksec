@@ -25,10 +25,12 @@ public class ProtectController {
 
     private final JdbcTemplate jdbc;
     private final ProtectRuleService protectRuleService;
+    private final com.alinksec.service.protect.WindowsLoginService windowsLogin;
 
-    public ProtectController(JdbcTemplate jdbc, ProtectRuleService protectRuleService) {
+    public ProtectController(JdbcTemplate jdbc, ProtectRuleService protectRuleService, com.alinksec.service.protect.WindowsLoginService windowsLogin) {
         this.jdbc = jdbc;
         this.protectRuleService = protectRuleService;
+        this.windowsLogin = windowsLogin;
     }
 
     /** 内置防护引擎清单（M2 固化：进程/文件/登录/诱饵） */
@@ -40,7 +42,7 @@ public class ProtectController {
                 Map.of("key", "file_tamper", "name", "关键文件防篡改", "desc",
                         "Linux 关键文件内容与权限监控，可按规则自动恢复", "builtin", true),
                 Map.of("key", "login", "name", "登录防护", "desc",
-                        "Linux SSH 爆破与异常时段登录检测，可按规则限时封禁来源", "builtin", true),
+                        "Linux SSH 与 Windows 远程登录检测，可按规则限时封禁来源", "builtin", true),
                 Map.of("key", "decoy", "name", "勒索诱饵防护", "desc",
                         "诱饵文件触碰即阻断加密进程（本地响应）", "builtin", true)));
     }
@@ -53,6 +55,11 @@ public class ProtectController {
                 FROM t_agent WHERE status <> 4
                 ORDER BY protect_enabled DESC, hostname
                 """));
+    }
+
+    @GetMapping("/windows-login-status")
+    public ApiResult<Map<String,Object>> windowsLoginStatus(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize) {
+        return ApiResult.ok(windowsLogin.status(page,pageSize));
     }
 
     /** 防护规则清单（docs/03 t_protect_rule：诱饵 PR-0010 / 加密行为 PR-0011 内置） */

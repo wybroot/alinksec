@@ -15,6 +15,17 @@ import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
 
+    @Test void windowsLoginRulesRequireWriterAndCoverageRequiresAuthentication() throws Exception {
+        for(String role:new String[]{"admin","operator","viewer"}) {
+            var read=request(role);read.setRequestURI("/api/protect/windows-login-status");assertTrue(interceptor().preHandle(read,new MockHttpServletResponse(),new Object()));
+            var write=request(role);write.setMethod("PUT");write.setRequestURI("/api/protect/rules/PR-0004");var response=new MockHttpServletResponse();
+            assertEquals(!role.equals("viewer"),interceptor().preHandle(write,response,new Object()));
+            if(role.equals("viewer"))assertEquals(403,response.getStatus());
+        }
+        var anonymous=new MockHttpServletRequest("GET","/api/protect/windows-login-status");var response=new MockHttpServletResponse();
+        assertFalse(interceptor().preHandle(anonymous,response,new Object()));assertEquals(401,response.getStatus());
+    }
+
     @Test
     void viewerCannotReadAuditLogs() throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();

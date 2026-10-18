@@ -237,6 +237,10 @@ Ransomware decoys and encryption-rate monitoring complement process detection.
 Linux file-integrity rules detect protected-file changes; SSH rules detect
 brute-force attempts and logins outside configured hours. Policies can specify
 trusted sources, excluded accounts, time zones and response actions.
+Windows login protection uses Security 4624/4625 events for remote logon types
+3 and 10, with per-host audit coverage and optional temporary WFP source blocks.
+Its separate rule is disabled by default; see the
+[Windows login guide](docs/60-Windows登录防护与覆盖状态.md) for scope and requirements.
 
 Host isolation and recovery are managed through acknowledged commands, with
 management-address allow rules and persistent isolation state. Firewall behavior

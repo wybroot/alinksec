@@ -72,6 +72,7 @@
         <el-empty v-else description="登录规则未加载" :image-size="48" />
       </section>
     </div>
+    <WindowsLoginProtection :rule="windowsLoginRule" />
     <div class="panel" style="margin-top:16px"><h4>EDR 进程行为规则</h4>
       <el-table v-if="processRules.length" :data="processRules" size="small" v-loading="loading">
         <el-table-column prop="name" label="规则" min-width="150" />
@@ -88,6 +89,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import WindowsLoginProtection from '../components/WindowsLoginProtection.vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
 import { fetchProtect, fetchProtectRules, updateProtectRule } from '../api'
@@ -104,6 +106,7 @@ const decoyExcludes = ref('')
 const processRules = ref([])
 const fileRule = ref(null)
 const loginRule = ref(null)
+const windowsLoginRule = ref(null)
 const fileSaving = ref(false)
 const loginSaving = ref(false)
 const fileForm = reactive({ enabled: false, restore: false, paths: '' })
@@ -123,7 +126,7 @@ const actionsLevel = (actions) => {
 }
 
 const msg = (t, type = 'success') => ElMessage({ message: t, type, duration: 1800 })
-const actionLabel = action => ({ alert_only: '仅告警', restored: '已恢复文件', restore_failed: '恢复失败', blocked_ip: '已封禁来源', block_failed: '封禁失败', killed: '已结束进程', isolated: '已隔离主机' }[action] || action || '仅告警')
+const actionLabel = action => ({ alert_only: '仅告警', restored: '已恢复文件', restore_failed: '恢复失败', blocked_ip: '已执行限时封禁', block_expired: '封禁意图已失效', block_failed: '封禁失败', killed: '已结束进程', isolated: '已隔离主机' }[action] || action || '仅告警')
 
 // 加载 PR-0010 内置规则 → 表单
 onMounted(async () => {
@@ -135,7 +138,8 @@ onMounted(async () => {
     const decoy = (rules || []).find((r) => r.rule_id === 'PR-0010')
     processRules.value = (rules || []).filter((r) => r.type === 'process')
     fileRule.value = (rules || []).find((r) => r.type === 'file_integrity') || null
-    loginRule.value = (rules || []).find((r) => r.type === 'login') || null
+    loginRule.value = (rules || []).find((r) => r.type === 'login' && !r.match?.windows_contract) || null
+    windowsLoginRule.value = (rules || []).find(r => r.type === 'login' && r.match?.windows_contract === 1) || null
     if (fileRule.value) Object.assign(fileForm, { enabled: fileRule.value.enabled, restore: (fileRule.value.actions || []).includes('restore'), paths: (fileRule.value.match?.paths || []).join('\n') })
     if (loginRule.value) {
       const r = loginRule.value, m = r.match || {}

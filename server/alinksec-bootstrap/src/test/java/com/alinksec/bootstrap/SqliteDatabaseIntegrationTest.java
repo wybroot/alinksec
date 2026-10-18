@@ -207,11 +207,11 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(62, jdbc.queryForObject("""
+        assertEquals(64, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(19, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(20, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));
@@ -245,7 +245,8 @@ class SqliteDatabaseIntegrationTest {
         PolicyStoreService policy = new PolicyStoreService(jdbc, mock(CommandService.class));
         policy.init();
         assertEquals(1, JsonUtils.read(policy.contentJson()).path("file_rules").size());
-        assertEquals(1, JsonUtils.read(policy.contentJson()).path("login_rules").size());
+        assertEquals(2, JsonUtils.read(policy.contentJson()).path("login_rules").size());
+        assertEquals(false, jdbc.queryForObject("SELECT enabled FROM t_protect_rule WHERE rule_id='PR-0004'", Boolean.class));
         jdbc.update("UPDATE t_protect_rule SET enabled=false WHERE rule_id='PR-0002'");
         policy.init();
         String version = policy.currentVersion();
