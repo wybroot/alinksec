@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -41,6 +42,10 @@ func TestWindowsRansomHelper(t *testing.T) {
 	if role == "" {
 		t.Skip("child fixture")
 	}
+	// Keep the issuing thread alive until asynchronous ETW consumption finishes.
+	// Production still refuses attribution if a thread exits before validation.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	path := os.Getenv("ALINKSEC_RANSOM_PATH")
 	if role == "capture" {
 		m := filetrace.New(os.Getenv("ALINKSEC_RANSOM_WORK"))

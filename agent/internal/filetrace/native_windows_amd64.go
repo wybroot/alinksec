@@ -103,9 +103,10 @@ type pendingWrite struct {
 	at      time.Time
 }
 type openedFile struct {
-	path  string
-	at    uint64
-	owner Identity
+	path          string
+	at            uint64
+	owner         Identity
+	identityError string
 }
 type winTrace struct {
 	m         *Monitor
@@ -441,8 +442,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if !hasThread {
 			tid = uint64(r.ThreadID)
 		}
-		owner, _ := writer(uint32(tid), r.PID, r.Timestamp)
-		s.objects[obj] = openedFile{path: path, at: r.Timestamp, owner: owner}
+		owner, ownerErr := writer(uint32(tid), r.PID, r.Timestamp)
+		opened := openedFile{path: path, at: r.Timestamp, owner: owner}
+		if ownerErr != nil {
+			opened.identityError = ownerErr.Error()
+		}
+		s.objects[obj] = opened
 		s.mapped.Add(1)
 	case 14:
 		if old, found := s.objects[obj]; ok && found && r.Timestamp >= old.at {
@@ -465,10 +470,19 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			return
 		}
 		at := filetime(r.Timestamp)
-		id, _ := writer(uint32(tid), r.PID, r.Timestamp)
+		id, identityErr := writer(uint32(tid), r.PID, r.Timestamp)
+		identityError := ""
+		if identityErr != nil {
+			identityError = "operation thread: " + identityErr.Error()
+		}
 		// Cross-process shared handles and unverified opens cannot establish a
 		// trusted path-to-writer binding. Do not trust a payload PID alone.
 		if id != opened.owner {
+			if opened.identityError != "" {
+				identityError = "file opener: " + opened.identityError
+			} else if identityError == "" {
+				identityError = "file opener and operation process instances differ"
+			}
 			id = Identity{}
 		}
 		if id.PID == 0 {
@@ -485,7 +499,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if r.ID != 16 {
 			operation = "rename"
 		}
-		pending := pendingWrite{writes: []Write{{Path: opened.path, At: at, Process: id, Operation: operation}}, object: obj, emitter: r.PID, at: time.Now()}
+		pending := pendingWrite{writes: []Write{{Path: opened.path, At: at, Process: id, Operation: operation, IdentityError: identityError}}, object: obj, emitter: r.PID, at: time.Now()}
 		s.pending[irp] = pending
 	case 24:
 		irp, found := number(r, "Irp")

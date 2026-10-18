@@ -23,10 +23,11 @@ type Identity struct {
 }
 
 type Write struct {
-	Path      string    `json:"path"`
-	At        time.Time `json:"at"`
-	Process   Identity  `json:"process"`
-	Operation string    `json:"operation"`
+	Path          string    `json:"path"`
+	At            time.Time `json:"at"`
+	Process       Identity  `json:"process"`
+	Operation     string    `json:"operation"`
+	IdentityError string    `json:"identity_error,omitempty"`
 }
 
 type Result struct {
