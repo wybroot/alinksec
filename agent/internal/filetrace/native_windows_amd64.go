@@ -123,6 +123,7 @@ type winTrace struct {
 	counts    [32]atomic.Uint64
 	mapped    atomic.Uint64
 	completed atomic.Uint64
+	rejected  [4]atomic.Uint64 // Count and last rejected emitter/thread/open-owner PIDs.
 	lastSweep time.Time
 }
 
@@ -470,6 +471,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if id != opened.owner {
 			id = Identity{}
 		}
+		if id.PID == 0 {
+			s.rejected[0].Add(1)
+			s.rejected[1].Store(uint64(r.PID))
+			s.rejected[2].Store(tid)
+			s.rejected[3].Store(uint64(opened.owner.PID))
+		}
 		if len(s.pending) >= maxWrites {
 			s.m.fail("pending_write_capacity_exceeded")
 			return
@@ -524,6 +531,9 @@ func (s *winTrace) onEvent(r *eventRecord) {
 
 func (s *winTrace) counters() map[string]uint64 {
 	out := map[string]uint64{"matched_file_opens": s.mapped.Load(), "completed_modifications": s.completed.Load()}
+	for i, name := range []string{"unverified_operations", "last_unverified_emitter", "last_unverified_thread", "last_unverified_open_owner"} {
+		out[name] = s.rejected[i].Load()
+	}
 	for _, id := range []int{12, 14, 16, 19, 24, 27, 30} {
 		out[fmt.Sprintf("event_%d", id)] = s.counts[id].Load()
 	}

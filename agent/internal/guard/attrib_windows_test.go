@@ -21,6 +21,21 @@ import (
 )
 
 // Controlled file activity only. No malware or unrelated process is targeted.
+func writeSyncedRansomFixture(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWindowsRansomHelper(t *testing.T) {
 	role := os.Getenv("ALINKSEC_RANSOM_HELPER")
 	if role == "" {
@@ -70,9 +85,7 @@ func TestWindowsRansomHelper(t *testing.T) {
 	case "batchrename":
 		for _, name := range []string{"batch01.txt", "batch02.txt"} {
 			file := filepath.Join(path, name)
-			if err := os.WriteFile(file, []byte("modified"), 0600); err != nil {
-				t.Fatal(err)
-			}
+			writeSyncedRansomFixture(t, file, "modified")
 			if err := os.Rename(file, file+".locked"); err != nil {
 				t.Fatal(err)
 			}
@@ -259,9 +272,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	}
 	add("rename_source_attributed_without_write", map[string]any{"attribution": r})
 	for _, name := range []string{"batch01.txt", "batch02.txt"} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("original"), 0600); err != nil {
-			t.Fatal(err)
-		}
+		writeSyncedRansomFixture(t, filepath.Join(root, name), "original")
 	}
 	time.Sleep(1200 * time.Millisecond)
 	g.mu.Lock()
