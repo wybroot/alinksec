@@ -13,9 +13,9 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func (g *Guard) configureAttribution()          {} // Linux attribution remains separate.
-func (g *Guard) runAttribution(context.Context) {}
-func (g *Guard) reportAttributionStatus()       {}
+func (g *Guard) configureAttribution()                 {} // Linux attribution remains separate.
+func (g *Guard) runAttribution(context.Context) func() { return func() {} }
+func (g *Guard) reportAttributionStatus()              {}
 func (g *Guard) attribute(files []string) *suspectProc {
 	if p := attributeByOpenFD(files); p != nil {
 		return p

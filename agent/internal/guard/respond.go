@@ -49,6 +49,10 @@ func (g *Guard) respond(trigger, ruleID, ruleName string, tampered []string, fil
 }
 
 func (g *Guard) respondSince(trigger, ruleID, ruleName string, tampered []string, files []string, since time.Time) *proto.RptSecurityEvent {
+	return g.respondWithAttributionFiles(trigger, ruleID, ruleName, tampered, files, files, since)
+}
+
+func (g *Guard) respondWithAttributionFiles(trigger, ruleID, ruleName string, tampered, files, attributionFiles []string, since time.Time) *proto.RptSecurityEvent {
 	c := g.cur()
 	detail := map[string]any{
 		"trigger":   trigger,
@@ -60,7 +64,7 @@ func (g *Guard) respondSince(trigger, ruleID, ruleName string, tampered []string
 	}
 
 	// ① 归因
-	proc, terminate := g.attributeResponse(files, since, detail)
+	proc, terminate := g.attributeResponse(attributionFiles, since, detail)
 	if proc != nil {
 		detail["process"] = proc
 		if g.excluded(proc.Exe) {

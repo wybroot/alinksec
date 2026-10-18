@@ -160,7 +160,8 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 // Run 主循环：初始投放 → 并行跑健康检查（60s）与速率监测（窗口周期）
 func (g *Guard) Run(ctx context.Context) {
 	g.configureAttribution()
-	g.runAttribution(ctx)
+	stopAttribution := g.runAttribution(ctx)
+	defer stopAttribution()
 	g.initialDeploy()
 
 	healthTick := time.NewTicker(healthInterval)
@@ -319,9 +320,13 @@ func (g *Guard) rateLoop() {
 	// 触发素材：写入文件 + 改名后新文件（归因用）
 	trigPaths = append(trigPaths, merged.Modified...)
 	trigPaths = append(trigPaths, merged.Created...)
+	trigPaths = append(trigPaths, merged.Vanished...)
+	// Kernel rename operations identify the original open file path. Keep
+	// destinations in the change evidence, and attribute the affected sources.
+	attributionPaths := append(append([]string(nil), merged.Modified...), merged.Vanished...)
 	g.log.Error("加密速率行为触发本地响应", "churn", merged.Churn,
 		"renames", merged.Renames, "ext_changes", merged.ExtChanges)
-	ev := g.respondSince("ransom_rate", ruleRateID, ruleRateName, nil, trigPaths, since)
+	ev := g.respondWithAttributionFiles("ransom_rate", ruleRateID, ruleRateName, nil, trigPaths, attributionPaths, since)
 	if g.report != nil {
 		g.report(ev)
 	}

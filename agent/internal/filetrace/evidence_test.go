@@ -77,6 +77,9 @@ func TestPolicyRootsAndRetentionBoundaries(t *testing.T) {
 	if m.Status().Reason != "window_exceeds_retention" {
 		t.Fatal("long window accepted")
 	}
+	if r := m.Lookup([]string{`C:\data\one`}, time.Now()); r.Reason != "window_exceeds_retention" {
+		t.Fatal("lookup erased policy boundary")
+	}
 	m.Configure(nil, 10*time.Second)
 	if m.Status().Status != "disabled" {
 		t.Fatal("disable failed")

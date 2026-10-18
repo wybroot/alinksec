@@ -24,7 +24,7 @@
             <el-button type="primary" size="small" :disabled="!ruleLoaded" @click="saveRule">保存配置</el-button>
           </el-form-item>
         </el-form>
-        <p style="font-size:12px;color:#94a3b8">默认 kill_and_isolate：诱饵被篡改或检测到批量加密行为时，本地立即结束进程并隔离主机（仅放行管控通道），同步上报 critical 事件。</p>
+        <p style="font-size:12px;color:#94a3b8">默认 kill_and_isolate：文件触发后按配置响应并上报告警。Windows 通过内核文件事件关联写入进程；无法核实、存在多个写入者或采集不可用时跳过进程终止，主机隔离仍独立执行。告警中心可查看归因证据。</p>
       </div>
       <div class="panel"><h4>最近拦截记录</h4>
         <el-empty v-if="!blocks.length" description="暂无拦截记录" :image-size="60" />

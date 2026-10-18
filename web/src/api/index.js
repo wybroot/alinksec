@@ -801,6 +801,11 @@ export function protectAction(agentId, action, target, reason) {
 
 /* ---------------- 告警 ---------------- */
 
+function parseAlertDetail(detail) {
+  if (detail && typeof detail === 'object') return detail
+  try { const value=JSON.parse(detail || '{}'); return value && typeof value==='object' ? value : {} } catch { return {} }
+}
+
 export async function fetchAlerts() {
   const data = await get('/api/alerts?page=1&size=100')
   return (data?.list || []).map((a) => ({
@@ -812,6 +817,8 @@ export async function fetchAlerts() {
     time: fmtTime(a.last_time),
     done: Number(a.status) === 2,
     handler: a.handle_remark || '',
+    action: a.action_taken || '',
+    detail: parseAlertDetail(a.detail),
   }))
 }
 

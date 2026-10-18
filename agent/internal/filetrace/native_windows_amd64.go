@@ -97,10 +97,13 @@ type traceOwner struct {
 	Created uint64 `json:"created"`
 }
 type pendingWrite struct {
-	writes  []Write
-	object  uint64
-	renamed string
-	at      time.Time
+	writes []Write
+	object uint64
+	at     time.Time
+}
+type openedFile struct {
+	path string
+	at   uint64
 }
 type winTrace struct {
 	m         *Monitor
@@ -112,7 +115,7 @@ type winTrace struct {
 	done      chan error
 	unlock    func()
 	owner     traceOwner
-	objects   map[uint64]string // Accessed only by the serial ETW callback.
+	objects   map[uint64]openedFile // Accessed only by the serial ETW callback.
 	pending   map[uint64]pendingWrite
 	devices   map[string]string
 	counts    [32]atomic.Uint64
@@ -212,7 +215,7 @@ func (s *winTrace) start() (err error) {
 	if err = apiError("EnableTraceEx2", r); err != nil {
 		return err
 	}
-	s.objects = make(map[uint64]string)
+	s.objects = make(map[uint64]openedFile)
 	s.pending = make(map[uint64]pendingWrite)
 	s.devices = devicePaths()
 	s.key = uintptr(nextSession.Add(1))
@@ -322,7 +325,7 @@ func fileKeywords() (uint64, error) {
 	if e := apiError("TdhEnumerateProviderFieldInformation", r); e != nil {
 		return 0, e
 	}
-	wanted := map[string]bool{"KERNEL_FILE_KEYWORD_FILEIO": false, "KERNEL_FILE_KEYWORD_CREATE": false, "KERNEL_FILE_KEYWORD_WRITE": false, "KERNEL_FILE_KEYWORD_OP_END": false, "KERNEL_FILE_KEYWORD_RENAME_SETLINK_PATH": false}
+	wanted := map[string]bool{"KERNEL_FILE_KEYWORD_FILEIO": false, "KERNEL_FILE_KEYWORD_CREATE": false, "KERNEL_FILE_KEYWORD_WRITE": false, "KERNEL_FILE_KEYWORD_OP_END": false}
 	var bits uint64
 	for i, n := uint32(0), binary.LittleEndian.Uint32(b); i < n; i++ {
 		o := 8 + int(i)*16
@@ -401,13 +404,16 @@ func (s *winTrace) onEvent(r *eventRecord) {
 	if r.ID < 32 {
 		s.counts[r.ID].Add(1)
 	}
-	if r.ID != 12 && r.ID != 30 && r.ID != 14 && r.ID != 16 && r.ID != 19 && r.ID != 27 && r.ID != 24 {
+	if r.ID != 12 && r.ID != 30 && r.ID != 14 && r.ID != 16 && r.ID != 19 && r.ID != 24 {
 		return
 	}
 	obj, ok := number(r, "FileObject")
 	switch r.ID {
 	case 12, 30: // Create includes the canonical file name, also for read opens.
 		if !ok {
+			return
+		}
+		if old, found := s.objects[obj]; found && old.at > r.Timestamp {
 			return
 		}
 		delete(s.objects, obj)
@@ -423,18 +429,18 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			s.m.fail("file_object_capacity_exceeded")
 			return
 		}
-		s.objects[obj] = path
+		s.objects[obj] = openedFile{path: path, at: r.Timestamp}
 		s.mapped.Add(1)
 	case 14:
-		if ok {
+		if old, found := s.objects[obj]; ok && found && r.Timestamp >= old.at {
 			delete(s.objects, obj)
 		} // Close prevents object-address reuse.
-	case 16, 19, 27: // Accept modifying operations only after successful OperationEnd.
+	case 16, 19: // Accept modifying operations only after successful OperationEnd.
 		if !ok {
 			return
 		}
-		path, found := s.objects[obj]
-		if !found {
+		opened, found := s.objects[obj]
+		if !found || r.Timestamp < opened.at {
 			return
 		}
 		irp, found := number(r, "Irp")
@@ -455,18 +461,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if r.ID != 16 {
 			operation = "rename"
 		}
-		pending := pendingWrite{writes: []Write{{Path: path, At: at, Process: id, Operation: operation}}, object: obj, at: time.Now()}
-		if r.ID == 27 {
-			var b [8192]byte
-			if !property(r, "FilePath", b[:]) {
-				return
-			}
-			target := s.dosPath(utf16At(b[:], 0))
-			if s.m.watched(target) {
-				pending.writes = append(pending.writes, Write{Path: target, At: at, Process: id, Operation: operation})
-				pending.renamed = target
-			}
-		}
+		pending := pendingWrite{writes: []Write{{Path: opened.path, At: at, Process: id, Operation: operation}}, object: obj, at: time.Now()}
 		s.pending[irp] = pending
 	case 24:
 		irp, found := number(r, "Irp")
@@ -487,8 +482,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			for _, w := range pending.writes {
 				s.m.observe(w)
 			}
-			if pending.renamed != "" {
-				s.objects[pending.object] = pending.renamed
+			// After rename, the original path must not label later writes through
+			// the same file object. A new open can establish a fresh mapping.
+			if pending.writes[0].Operation == "rename" {
+				if opened, ok := s.objects[pending.object]; ok && !filetime(opened.at).After(pending.writes[0].At) {
+					delete(s.objects, pending.object)
+				}
 			}
 		}
 	}

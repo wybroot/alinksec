@@ -155,20 +155,25 @@ func (m *Monitor) Run(ctx context.Context) {
 		generation := m.generation
 		state := m.status
 		m.mu.Unlock()
-		if running && (!enabled || state != "ready") {
+		if running && (!enabled || state != "ready") && time.Now().After(retry) {
 			if err := m.native.close(); err != nil {
 				m.fail("session_cleanup_failed")
 				retry = time.Now().Add(30 * time.Second)
-			}
-			running = false
-			if state != "starting" && enabled {
-				retry = time.Now().Add(30 * time.Second)
+			} else {
+				running = false
+				if state != "starting" && enabled {
+					retry = time.Now().Add(30 * time.Second)
+				}
 			}
 		}
 		if enabled && !running && time.Now().After(retry) {
 			if err := m.native.start(); err != nil {
 				m.fail("capture_start_failed: " + err.Error())
 				retry = time.Now().Add(30 * time.Second)
+				if err := m.native.close(); err != nil {
+					m.fail("session_cleanup_failed")
+					running = true
+				}
 			} else {
 				m.mu.Lock()
 				if generation != m.generation {
@@ -186,10 +191,10 @@ func (m *Monitor) Run(ctx context.Context) {
 				running = true
 			}
 		}
-		if running {
+		if running && m.Status().Status == "ready" {
 			if err := m.native.check(); err != nil {
 				m.fail("capture_health_failed: " + err.Error())
-				retry = time.Now().Add(30 * time.Second)
+				retry = time.Time{}
 			}
 		}
 		select {

@@ -13,7 +13,12 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func (g *Guard) runAttribution(ctx context.Context) { go g.fileTrace.Run(ctx) }
+func (g *Guard) runAttribution(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { g.fileTrace.Run(ctx); close(done) }()
+	return func() { cancel(); <-done }
+}
 func (g *Guard) reportAttributionStatus() {
 	r := g.fileTrace.Status()
 	key := r.Status + ":" + r.Reason
@@ -68,5 +73,15 @@ func (g *Guard) attributeResponse(files []string, since time.Time, detail map[st
 		detail["attribution"] = r
 		return nil, deny
 	}
-	return sp, func() error { return filetrace.Terminate(*r.Process) }
+	return sp, func() error {
+		c := g.cur()
+		if c.Enabled != nil && !*c.Enabled || c.Response != "kill" && c.Response != "kill_and_isolate" || g.excluded(sp.Exe) {
+			return fmt.Errorf("response policy changed")
+		}
+		latest := g.fileTrace.Lookup(files, since)
+		if latest.Status != "attributed" || latest.Process == nil || *latest.Process != *r.Process {
+			return fmt.Errorf("attribution evidence is no longer valid")
+		}
+		return filetrace.Terminate(*r.Process)
+	}
 }

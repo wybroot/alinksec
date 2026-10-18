@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -324,7 +325,18 @@ func (c *Client) Run(ctx context.Context) error {
 		go c.watchConfiguration(ctx)
 	}
 	if c.grd != nil {
-		go c.grd.Run(ctx)
+		done := make(chan struct{})
+		go func() { c.grd.Run(ctx); close(done) }()
+		if runtime.GOOS == "windows" {
+			defer func() {
+				cancel(nil)
+				select {
+				case <-done:
+				case <-time.After(7 * time.Second):
+					c.log.Warn("Windows 防护退出清理未及时完成，后续启动将核验恢复记录")
+				}
+			}()
+		}
 	}
 	go c.collectLoop(ctx)
 	go c.metricsLoop(ctx)

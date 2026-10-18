@@ -24,7 +24,7 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/windowslogin ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/windowslogin ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Check native Windows resource feedback and recovery
         run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
@@ -231,6 +231,7 @@ jobs:
           ALINKSEC_ISOLATION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/isolation-console-fixtures
           ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
           ALINKSEC_WINDOWS_LOGIN_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-login-fixtures
+          ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-ransom-fixtures
         working-directory: server
       - name: Check source governance with captured database lifecycle responses
         working-directory: web
@@ -241,6 +242,9 @@ jobs:
       - name: Check weak-password coverage and redacted history with database responses
         working-directory: web
         run: node test/weak-password-browser.mjs
+      - name: Check Windows ransomware attribution evidence with captured database responses
+        working-directory: web
+        run: node test/windows-ransom-browser.mjs
       - name: Check Windows login scope and coverage with captured database responses
         working-directory: web
         run: node test/windows-login-browser.mjs
@@ -377,7 +381,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
+        run: go test -race ./internal/filetrace ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
         working-directory: agent
       - name: Build and validate actual Agents serially
         run: |
@@ -471,8 +475,10 @@ jobs:
             .tmp/isolation-browser
             .tmp/weakpwd-browser
             .tmp/windows-login-browser
+            .tmp/windows-ransom-browser
             .tmp/weakpwd-fixtures
             .tmp/windows-login-fixtures
+            .tmp/windows-ransom-fixtures
             .tmp/isolation-console-fixtures
             .tmp/detection-capabilities-browser
             .tmp/detection-capabilities-fixtures
@@ -664,7 +670,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,UpgradeWatchdogIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,UpgradeWatchdogIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -676,6 +682,7 @@ jobs:
           ALINKSEC_ISOLATION_FIXTURE_DIR: ${{ github.workspace }}/.tmp/isolation-console-fixtures
           ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
           ALINKSEC_WINDOWS_LOGIN_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-login-fixtures
+          ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-ransom-fixtures
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -686,5 +693,6 @@ jobs:
             .tmp/detection-capabilities-fixtures
             .tmp/weakpwd-fixtures
             .tmp/windows-login-fixtures
+            .tmp/windows-ransom-fixtures
           include-hidden-files: true
           if-no-files-found: error

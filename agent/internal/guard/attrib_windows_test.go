@@ -16,6 +16,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/filetrace"
+	"github.com/alinksec/alinksec-agent/internal/proto"
 	"golang.org/x/sys/windows"
 )
 
@@ -46,7 +47,7 @@ func TestWindowsRansomHelper(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = f.WriteString("controlled-change\n"); err != nil {
+		if _, err = f.WriteString("change!\n"); err != nil {
 			t.Fatal(err)
 		}
 		if err = f.Sync(); err != nil {
@@ -61,6 +62,20 @@ func TestWindowsRansomHelper(t *testing.T) {
 	case "read":
 		if _, err := os.ReadFile(path); err != nil {
 			t.Fatal(err)
+		}
+	case "rename_only":
+		if err := os.Rename(path, path+".locked"); err != nil {
+			t.Fatal(err)
+		}
+	case "batchrename":
+		for _, name := range []string{"batch01.txt", "batch02.txt"} {
+			file := filepath.Join(path, name)
+			if err := os.WriteFile(file, []byte("modified"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(file, file+".locked"); err != nil {
+				t.Fatal(err)
+			}
 		}
 	case "idle", "capture":
 	default:
@@ -81,7 +96,9 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	enabled := true
 	cfg := &config.DecoyConfig{Enabled: &enabled, Dirs: []string{root}, WatchTrees: []string{root}, Response: "kill", CountPerDir: 1}
 	cfg.Normalize()
-	g := New(cfg, nil, work, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	var events []*proto.RptSecurityEvent
+	g := New(cfg, nil, work, slog.New(slog.NewTextHandler(io.Discard, nil)), func(e *proto.RptSecurityEvent) { events = append(events, e) })
+	g.initialDeploy()
 	g.configureAttribution()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,7 +169,8 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		t.Fatalf("lookup want %s for %s since %s: %+v, counters=%v recent=%+v", want, path, since.Format(time.RFC3339Nano), r, g.fileTrace.Counters(), g.fileTrace.RecentWrites())
 		return r
 	}
-	path := filepath.Join(root, "writer.dat")
+	g.healthLoop() // Establish the first completed detector window after capture starts.
+	path := newDecoyManager(cfg, work).knownDecoys()[0]
 	since := time.Now()
 	writer := child("write", path)
 	newer := child("idle", "")
@@ -167,7 +185,11 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		t.Fatal("identity mismatch was not refused")
 	}
 	add("identity_mismatch_preserves_process", nil)
-	event := g.respondSince("decoy_tampered", ruleDecoyID, ruleDecoyName, []string{path}, []string{path}, since)
+	g.healthLoop()
+	if len(events) == 0 {
+		t.Fatal("decoy health loop did not report tampering")
+	}
+	event := events[len(events)-1]
 	if event.ActionTaken != "killed" {
 		t.Fatalf("response: %s", event.Detail)
 	}
@@ -222,17 +244,47 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	add("excluded_writer_not_terminated", map[string]any{"event": event})
 
 	path = filepath.Join(root, "rename.dat")
+	if err := os.WriteFile(path, []byte("rename-source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
 	since = time.Now()
-	renamer := child("rename", path)
-	r = lookup(path+".locked", since, "attributed")
+	renamer := child("rename_only", path)
+	r = lookup(path, since, "attributed")
 	if int(r.Process.PID) != renamer.Process.Pid {
 		t.Fatalf("wrong rename writer: %+v", r)
 	}
-	add("rename_destination_attributed", map[string]any{"attribution": r})
+	if r.Writes[0].Operation != "rename" {
+		t.Fatalf("not a successful rename operation: %+v", r)
+	}
+	add("rename_source_attributed_without_write", map[string]any{"attribution": r})
+	for _, name := range []string{"batch01.txt", "batch02.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("original"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(1200 * time.Millisecond)
+	g.mu.Lock()
+	rateCfg := *g.cfg
+	rateCfg.RateThreshold = 1
+	rateCfg.ExtChangeRatio = 0.5
+	g.cfg = &rateCfg
+	g.mu.Unlock()
+	g.rateLoop()
+	rateSince := time.Now()
+	batch := child("batchrename", root)
+	lookup(filepath.Join(root, "batch01.txt"), rateSince, "attributed")
+	lookup(filepath.Join(root, "batch02.txt"), rateSince, "attributed")
+	g.rateLoop()
+	event = events[len(events)-1]
+	if event.Type != "ransom_behavior" || event.ActionTaken != "killed" || alive(batch) || !alive(newer) {
+		t.Fatalf("rate detector response: %s", event.Detail)
+	}
+	add("rate_detector_rename_batch_terminates_only_writer", map[string]any{"event": event})
 
 	cancel()
 	<-done
-	event = g.respondSince("decoy_tampered", ruleDecoyID, ruleDecoyName, []string{path}, []string{path + ".locked"}, since)
+	event = g.respondSince("decoy_tampered", ruleDecoyID, ruleDecoyName, []string{path}, []string{path}, since)
 	if event.ActionTaken != "alert_only" || !alive(renamer) {
 		t.Fatal("capture stop used stale writer")
 	}
