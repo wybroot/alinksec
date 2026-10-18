@@ -478,6 +478,9 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			return
 		}
 		delete(s.pending, irp)
+		if len(pending.writes) == 0 || filetime(r.Timestamp).Before(pending.writes[0].At) || filetime(r.Timestamp).Sub(pending.writes[0].At) > 5*time.Second {
+			return
+		}
 		status, found := number(r, "NtStatus", "Status")
 		if found && uint32(status) == 0 {
 			s.completed.Add(1)
@@ -564,7 +567,7 @@ func Terminate(id Identity) error {
 	if id.PID <= 4 || id.PID == uint32(os.Getpid()) || id.Created == 0 || id.Image == "" {
 		return fmt.Errorf("unsafe process identity")
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE, false, id.PID)
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, id.PID)
 	if err != nil {
 		return err
 	}
@@ -588,5 +591,15 @@ func Terminate(id Identity) error {
 	if critical != 0 {
 		return fmt.Errorf("critical process termination refused")
 	}
-	return windows.TerminateProcess(h, 1)
+	if err := windows.TerminateProcess(h, 1); err != nil {
+		return err
+	}
+	wait, err := windows.WaitForSingleObject(h, 1000)
+	if err != nil {
+		return err
+	}
+	if wait != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("process termination not yet confirmed")
+	}
+	return nil
 }

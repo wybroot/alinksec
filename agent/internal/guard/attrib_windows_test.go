@@ -149,7 +149,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		t.Fatalf("lookup want %s: %+v, counters=%v", want, r, g.fileTrace.Counters())
+		t.Fatalf("lookup want %s for %s since %s: %+v, counters=%v recent=%+v", want, path, since.Format(time.RFC3339Nano), r, g.fileTrace.Counters(), g.fileTrace.RecentWrites())
 		return r
 	}
 	path := filepath.Join(root, "writer.dat")

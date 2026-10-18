@@ -4,6 +4,7 @@ package filetrace
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,15 +44,17 @@ type native interface {
 }
 
 type Monitor struct {
-	mu      sync.Mutex
-	roots   []string
-	writes  []Write
-	status  string
-	reason  string
-	since   time.Time
-	window  time.Duration
-	native  native
-	changed chan struct{}
+	mu          sync.Mutex
+	roots       []string
+	writes      []Write
+	status      string
+	reason      string
+	since       time.Time
+	window      time.Duration
+	policyIssue string
+	generation  uint64
+	native      native
+	changed     chan struct{}
 }
 
 func New(workDir string) *Monitor {
@@ -73,15 +76,39 @@ func (m *Monitor) Counters() map[string]uint64 {
 	return map[string]uint64{}
 }
 
+// RecentWrites is a bounded diagnostic snapshot, without an attribution claim.
+func (m *Monitor) RecentWrites() []Write {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	start := len(m.writes) - 20
+	if start < 0 {
+		start = 0
+	}
+	return append([]Write(nil), m.writes[start:]...)
+}
+
 // Configure resets the evidence epoch when policy roots change. Native capture
 // is started only while the ransomware rule is enabled. Retention is bounded.
 func (m *Monitor) Configure(roots []string, window time.Duration) {
 	var normalized []string
+	unique := map[string]bool{}
+	issue := ""
 	for _, p := range roots {
 		p = cleanPath(p)
-		if p != "" && len(normalized) < 64 {
-			normalized = append(normalized, p)
+		if p != "" && (len(p) < 3 || p[1] != ':' || p[2] != '\\') {
+			issue = "unsupported_path"
 		}
+		if p != "" && !unique[p] && len(normalized) < 65 {
+			normalized = append(normalized, p)
+			unique[p] = true
+		}
+	}
+	sort.Strings(normalized)
+	if len(normalized) > 64 {
+		issue = "root_capacity_exceeded"
+	}
+	if window > retention-10*time.Second {
+		issue = "window_exceeds_retention"
 	}
 	m.mu.Lock()
 	if strings.Join(m.roots, "\x00") == strings.Join(normalized, "\x00") && m.window == window {
@@ -89,6 +116,8 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 		return
 	}
 	m.window = window
+	m.generation++
+	m.policyIssue = issue
 	m.roots = normalized
 	m.writes = nil
 	m.since = time.Now()
@@ -97,9 +126,9 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 	if len(normalized) == 0 {
 		m.status = "disabled"
 	}
-	if window > retention-10*time.Second {
+	if issue != "" && len(normalized) > 0 {
 		m.status = "unavailable"
-		m.reason = "window_exceeds_retention"
+		m.reason = issue
 	}
 	m.mu.Unlock()
 	select {
@@ -113,12 +142,17 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 func (m *Monitor) Run(ctx context.Context) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
-	defer m.native.close()
+	defer func() {
+		if err := m.native.close(); err != nil {
+			m.fail("session_cleanup_failed")
+		}
+	}()
 	var retry time.Time
 	running := false
 	for {
 		m.mu.Lock()
-		enabled := len(m.roots) > 0 && m.reason != "window_exceeds_retention"
+		enabled := len(m.roots) > 0 && m.policyIssue == ""
+		generation := m.generation
 		state := m.status
 		m.mu.Unlock()
 		if running && (!enabled || state != "ready") {
@@ -137,6 +171,13 @@ func (m *Monitor) Run(ctx context.Context) {
 				retry = time.Now().Add(30 * time.Second)
 			} else {
 				m.mu.Lock()
+				if generation != m.generation {
+					m.mu.Unlock()
+					if err := m.native.close(); err != nil {
+						m.fail("session_cleanup_failed")
+					}
+					continue
+				}
 				m.status = "ready"
 				m.reason = ""
 				m.since = time.Now()
@@ -212,6 +253,9 @@ func (m *Monitor) observe(w Write) {
 }
 
 func (m *Monitor) Lookup(paths []string, since time.Time) Result {
+	if s := m.Status(); s.Status != "ready" {
+		return s
+	}
 	if err := m.native.check(); err != nil {
 		m.fail("capture_health_failed: " + err.Error())
 	}
