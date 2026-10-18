@@ -103,18 +103,21 @@ type pendingWrite struct {
 	at      time.Time
 }
 type winTrace struct {
-	m        *Monitor
-	workDir  string
-	mu       sync.Mutex // Controller calls, not callbacks.
-	handle   uint64
-	consumer uintptr
-	key      uintptr
-	done     chan error
-	unlock   func()
-	owner    traceOwner
-	objects  map[uint64]string // Accessed only by the serial ETW callback.
-	pending  map[uint64]pendingWrite
-	devices  map[string]string
+	m         *Monitor
+	workDir   string
+	mu        sync.Mutex // Controller calls, not callbacks.
+	handle    uint64
+	consumer  uintptr
+	key       uintptr
+	done      chan error
+	unlock    func()
+	owner     traceOwner
+	objects   map[uint64]string // Accessed only by the serial ETW callback.
+	pending   map[uint64]pendingWrite
+	devices   map[string]string
+	counts    [32]atomic.Uint64
+	mapped    atomic.Uint64
+	completed atomic.Uint64
 }
 
 func newNative(m *Monitor, workDir string) native { return &winTrace{m: m, workDir: workDir} }
@@ -395,6 +398,12 @@ func (s *winTrace) onEvent(r *eventRecord) {
 	if r.Provider != fileProvider {
 		return
 	}
+	if r.ID < 32 {
+		s.counts[r.ID].Add(1)
+	}
+	if r.ID != 12 && r.ID != 30 && r.ID != 14 && r.ID != 16 && r.ID != 19 && r.ID != 27 && r.ID != 24 {
+		return
+	}
 	obj, ok := number(r, "FileObject")
 	switch r.ID {
 	case 12, 30: // Create includes the canonical file name, also for read opens.
@@ -415,6 +424,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			return
 		}
 		s.objects[obj] = path
+		s.mapped.Add(1)
 	case 14:
 		if ok {
 			delete(s.objects, obj)
@@ -470,6 +480,7 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		delete(s.pending, irp)
 		status, found := number(r, "NtStatus", "Status")
 		if found && uint32(status) == 0 {
+			s.completed.Add(1)
 			for _, w := range pending.writes {
 				s.m.observe(w)
 			}
@@ -486,6 +497,14 @@ func (s *winTrace) onEvent(r *eventRecord) {
 			}
 		}
 	}
+}
+
+func (s *winTrace) counters() map[string]uint64 {
+	out := map[string]uint64{"matched_file_opens": s.mapped.Load(), "completed_modifications": s.completed.Load()}
+	for _, id := range []int{12, 14, 16, 19, 24, 27, 30} {
+		out[fmt.Sprintf("event_%d", id)] = s.counts[id].Load()
+	}
+	return out
 }
 func filetime(v uint64) time.Time { return time.Unix(0, int64(v-116444736000000000)*100) }
 func creation(h windows.Handle) (uint64, error) {

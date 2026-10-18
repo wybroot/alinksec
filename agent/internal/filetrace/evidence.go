@@ -17,7 +17,7 @@ const (
 
 type Identity struct {
 	PID     uint32 `json:"pid"`
-	Created uint64 `json:"created_filetime"`
+	Created uint64 `json:"created_filetime,string"`
 	Image   string `json:"image"`
 }
 
@@ -64,6 +64,13 @@ func (m *Monitor) Status() Result {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return Result{Source: "windows_kernel_file_etw", Status: m.status, Reason: m.reason}
+}
+
+func (m *Monitor) Counters() map[string]uint64 {
+	if n, ok := m.native.(interface{ counters() map[string]uint64 }); ok {
+		return n.counters()
+	}
+	return map[string]uint64{}
 }
 
 // Configure resets the evidence epoch when policy roots change. Native capture
@@ -219,7 +226,7 @@ func (m *Monitor) Lookup(paths []string, since time.Time) Result {
 		r.Reason = "capture_gap"
 		return r
 	}
-	if len(paths) == 0 || len(paths) > 100 {
+	if len(paths) == 0 || len(paths) > maxObjects {
 		r.Reason = "invalid_file_set"
 		return r
 	}

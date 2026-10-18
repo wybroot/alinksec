@@ -26,6 +26,20 @@ func TestWindowsRansomHelper(t *testing.T) {
 		t.Skip("child fixture")
 	}
 	path := os.Getenv("ALINKSEC_RANSOM_PATH")
+	if role == "capture" {
+		m := filetrace.New(os.Getenv("ALINKSEC_RANSOM_WORK"))
+		m.Configure([]string{path}, 10*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go m.Run(ctx)
+		deadline := time.Now().Add(8 * time.Second)
+		for m.Status().Status != "ready" && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if m.Status().Status != "ready" {
+			t.Fatalf("child capture: %+v", m.Status())
+		}
+	}
 	switch role {
 	case "write", "rename":
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
@@ -48,7 +62,7 @@ func TestWindowsRansomHelper(t *testing.T) {
 		if _, err := os.ReadFile(path); err != nil {
 			t.Fatal(err)
 		}
-	case "idle":
+	case "idle", "capture":
 	default:
 		t.Fatal("unknown fixture role")
 	}
@@ -101,7 +115,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		exe, _ := os.Executable()
 		ready := filepath.Join(t.TempDir(), "ready")
 		cmd := exec.Command(exe, "-test.run=^TestWindowsRansomHelper$")
-		cmd.Env = append(os.Environ(), "ALINKSEC_RANSOM_HELPER="+role, "ALINKSEC_RANSOM_PATH="+path, "ALINKSEC_RANSOM_READY="+ready)
+		cmd.Env = append(os.Environ(), "ALINKSEC_RANSOM_HELPER="+role, "ALINKSEC_RANSOM_PATH="+path, "ALINKSEC_RANSOM_READY="+ready, "ALINKSEC_RANSOM_WORK="+work)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +149,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		t.Fatalf("lookup want %s: %+v", want, r)
+		t.Fatalf("lookup want %s: %+v, counters=%v", want, r, g.fileTrace.Counters())
 		return r
 	}
 	path := filepath.Join(root, "writer.dat")
@@ -241,6 +255,33 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	stop2()
 	<-done2
 	add("normal_restart_releases_owned_session", nil)
+	orphan := child("capture", root)
+	if err := orphan.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for alive(orphan) && time.Now().Before(deadline) {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if alive(orphan) {
+		t.Fatal("capture owner did not exit")
+	}
+	m = filetrace.New(work)
+	m.Configure([]string{root}, 10*time.Second)
+	ctx3, stop3 := context.WithCancel(context.Background())
+	defer stop3()
+	done3 := make(chan struct{})
+	go func() { m.Run(ctx3); close(done3) }()
+	deadline = time.Now().Add(8 * time.Second)
+	for m.Status().Status != "ready" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if m.Status().Status != "ready" {
+		t.Fatalf("orphan recovery failed: %+v", m.Status())
+	}
+	stop3()
+	<-done3
+	add("crashed_owner_session_recovered", nil)
 	result := map[string]any{"platform": "windows", "arch": "amd64", "contract": 1, "checks": checks, "osVersion": fmt.Sprintf("%+v", windows.RtlGetVersion())}
 	if dst := os.Getenv("ALINKSEC_RANSOM_EVIDENCE_FILE"); dst != "" {
 		if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
