@@ -15,7 +15,7 @@ import (
 )
 
 /* 触发响应链（docs/05 §2.3，本地立即执行，不依赖服务端在线）：
- * ① 归因（Linux /proc/<pid>/fd 反查；Windows 启发式最近进程）
+ * ① 归因（Linux /proc/<pid>/fd；Windows 内核文件 ETW 与进程实例）
  * ② kill 涉事进程（含进程链取证）
  * ③ 主机隔离（response=kill_and_isolate 时）
  * ④ 证据快照（进程链 + 变更文件前 100）
@@ -45,6 +45,10 @@ type processLineage struct {
 
 // respond 执行响应链，产出安全事件
 func (g *Guard) respond(trigger, ruleID, ruleName string, tampered []string, files []string) *proto.RptSecurityEvent {
+	return g.respondSince(trigger, ruleID, ruleName, tampered, files, time.Now().Add(-healthInterval))
+}
+
+func (g *Guard) respondSince(trigger, ruleID, ruleName string, tampered []string, files []string, since time.Time) *proto.RptSecurityEvent {
 	c := g.cur()
 	detail := map[string]any{
 		"trigger":   trigger,
@@ -56,22 +60,24 @@ func (g *Guard) respond(trigger, ruleID, ruleName string, tampered []string, fil
 	}
 
 	// ① 归因
-	proc := g.attribute(files)
+	proc, terminate := g.attributeResponse(files, since, detail)
 	if proc != nil {
 		detail["process"] = proc
 		if g.excluded(proc.Exe) {
 			// 排除清单命中（备份/杀毒类）：降级为仅告警，避免误杀备份作业
 			g.log.Warn("触发进程在排除清单，降级为仅告警", "exe", proc.Exe)
 			detail["excluded_exe"] = proc.Exe
-			return g.buildEvent(ruleID, ruleName, detail, "alert_only", nil)
+			c.Response = "alert_only"
 		}
 	}
 
 	// ② kill
 	actionTaken := "alert_only"
 	if proc != nil && (c.Response == "kill" || c.Response == "kill_and_isolate") {
-		if killed := KillProcess(proc.Pid); killed {
+		if err := terminate(); err == nil {
 			actionTaken = "killed"
+		} else {
+			detail["kill_error"] = err.Error()
 		}
 	}
 
@@ -138,14 +144,6 @@ func (g *Guard) excluded(exe string) bool {
 }
 
 /* ---- 归因 ---- */
-
-// attribute 反查写入者：优先平台实现（Linux /proc/*/fd），回退最近活跃进程启发式
-func (g *Guard) attribute(files []string) *suspectProc {
-	if p := attributeByOpenFD(files); p != nil {
-		return p
-	}
-	return attributeByRecency(g.excluded)
-}
 
 // takeForensics captures the implicated process and up to eight parent
 // processes. This keeps the attribution evidence local, bounded, and useful

@@ -55,6 +55,20 @@ jobs:
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
+      - name: Check native Windows ransomware writer attribution and safe response
+        run: go test -v -count=1 -timeout=2m -run '^TestNativeWindowsRansomAttribution$' ./internal/guard
+        working-directory: agent
+        env:
+          ALINKSEC_RANSOM_NATIVE_REQUIRED: 'true'
+          ALINKSEC_RANSOM_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/windows-ransom-native/result.json
+      - name: Retain native Windows ransomware attribution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ransom-validation-windows-amd64
+          path: .tmp/windows-ransom-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Retain validated native Windows Agent
         uses: actions/upload-artifact@v4
         with:
