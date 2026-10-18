@@ -25,7 +25,11 @@ func TestLegacyReaderReproducesWindowsReplacementSharingFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer old.Close()
-	err = WriteJSON(path, map[string]int{"revision": 2})
+	tmp := filepath.Join(dir, "replacement.json")
+	if err := os.WriteFile(tmp, []byte(`{"revision":2}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err = move(tmp, path, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 		t.Fatalf("legacy open did not reproduce native sharing conflict: %v", err)
 	}

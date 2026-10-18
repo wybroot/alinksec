@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -81,6 +82,66 @@ func move(src, dst string, flags uint32) error {
 }
 func SyncDirectory(string) error { return nil }
 func Replace(src, dst string) error {
-	return move(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	// MoveFileEx rejects an existing open destination even with share-delete.
+	// FileRenameInfoEx explicitly preserves readers of the old file while new
+	// opens see the replacement. Both files remain in the same private directory.
+	abs, err := filepath.Abs(dst)
+	if err != nil {
+		return err
+	}
+	name, err := windows.UTF16FromString(abs)
+	if err != nil {
+		return err
+	}
+	source, err := windows.UTF16PtrFromString(src)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(source, windows.DELETE|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_WRITE_THROUGH, 0)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if h != windows.InvalidHandle {
+			windows.CloseHandle(h)
+		}
+	}()
+	type renameInfo struct {
+		Flags  uint32
+		Root   windows.Handle
+		Length uint32
+		Name   [1]uint16
+	}
+	var header renameInfo
+	size := int(unsafe.Offsetof(header.Name)) + (len(name)-1)*2
+	buffer := make([]byte, size)
+	info := (*renameInfo)(unsafe.Pointer(&buffer[0]))
+	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
+	info.Length = uint32((len(name) - 1) * 2)
+	copy(unsafe.Slice(&info.Name[0], len(name)-1), name[:len(name)-1])
+	err = windows.SetFileInformationByHandle(h, windows.FileRenameInfoEx, &buffer[0], uint32(size))
+	if err == nil {
+		return windows.FlushFileBuffers(h)
+	}
+	closeErr := windows.CloseHandle(h)
+	h = windows.InvalidHandle
+	if closeErr != nil {
+		return errors.Join(err, closeErr)
+	}
+	if !errors.Is(err, windows.ERROR_INVALID_PARAMETER) && !errors.Is(err, windows.ERROR_NOT_SUPPORTED) {
+		return err
+	}
+	// Older filesystems use the existing atomic operation. Retry short sharing
+	// conflicts without deleting the destination or claiming an unsaved commit.
+	deadline := time.Now().Add(time.Second)
+	for {
+		err = move(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+		if err == nil || (!errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_ACCESS_DENIED)) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 func Move(src, dst string) error { return move(src, dst, windows.MOVEFILE_WRITE_THROUGH) }
