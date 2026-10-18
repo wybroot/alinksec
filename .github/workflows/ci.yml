@@ -260,7 +260,7 @@ jobs:
         working-directory: agent
         run: |
           go test -c -o ../.tmp/weakpwd-native.test ./internal/scan
-          sudo env ALINKSEC_WEAKPWD_NATIVE_REQUIRED=true ALINKSEC_WEAKPWD_EVIDENCE_FILE="$GITHUB_WORKSPACE/.tmp/weakpwd-native/result.json" ../.tmp/weakpwd-native.test -test.v -test.run '^TestNativeWeakPasswordHashes$'
+          sudo env ALINKSEC_WEAKPWD_NATIVE_REQUIRED=true ALINKSEC_WEAKPWD_EVIDENCE_FILE="$GITHUB_WORKSPACE/.tmp/weakpwd-native/result.json" ../.tmp/weakpwd-native.test -test.v
       - name: Retain native weak-password evidence
         uses: actions/upload-artifact@v4
         with:

@@ -81,7 +81,13 @@ class WeakPasswordIntegrationTest {
         assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_weakpwd_finding WHERE task_id=?",Integer.class,id));assertEquals(2,number("status",id));
     }
     @Test void legacyResultIsUnsupportedAndCannotPersistPassword(){
-        long id=task(List.of(a));accept(a,report(id,a,true).toBuilder().setExecutionContract(0).build());assertEquals(3,number("status",id));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_weakpwd_finding WHERE task_id=?",Integer.class,id));
+        long id=task(List.of(a));accept(a,report(id,a,true).toBuilder().setExecutionContract(0).clearCommandId().build());assertEquals(3,number("status",id));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_weakpwd_finding WHERE task_id=?",Integer.class,id));
+    }
+    @Test void unsupportedLegacyReceiptCannotBeOverwrittenByLaterModernEvidence(){
+        long id=task(List.of(a));accept(a,report(id,a,true).toBuilder().setExecutionContract(0).clearCommandId().build());
+        accept(a,report(id,a,true));assertEquals(3,number("status",id));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_weakpwd_finding WHERE task_id=?",Integer.class,id));
+        assertFalse(JsonUtils.write(query.scanCoverage(null,1,100)).contains("PUBLIC-SYNTHETIC-SECRET"));
     }
     @Test void failedCommandFinishesOnlyItsMemberAndLateEvidenceCannotReopenTask(){
         long id=task(List.of(a,b));var lifecycle=new com.alinksec.service.command.BulkTaskCommandLifecycle(jdbc);

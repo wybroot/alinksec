@@ -33,12 +33,17 @@ public class ScanResultService {
         if(members.size()!=1)return;
         var member=members.get(0);
         if(!String.valueOf(member.get("evidence_sha256")).isEmpty())return;
-        if(!result.getCommandId().equals(member.get("command_id")) || result.getCommandId().isBlank())return;
         int type=((Number)member.get("type")).intValue();boolean weak=(type&2)!=0,port=(type&4)!=0;
         if(result.getExecutionContract()!=1) {
-            jdbc.update("UPDATE t_scan_task_agent SET state='unsupported',weak_status=?,received_at=? WHERE task_id=? AND agent_id=?",weak?"unsupported":"not_requested",Instant.now().toString(),task,agent);
+            // Older Agents cannot echo command_id. A member may report only
+            // unsupported failure in that format, never findings or a pass.
+            if(String.valueOf(member.get("command_id")).isBlank() || !"pending".equals(member.get("state"))
+                || !result.getCommandId().isBlank() && !result.getCommandId().equals(member.get("command_id")))return;
+            jdbc.update("UPDATE t_scan_task_agent SET state='unsupported',weak_status=?,evidence=?,evidence_sha256=?,received_at=? WHERE task_id=? AND agent_id=?",weak?"unsupported":"not_requested",
+                "{\"status\":\"unsupported\",\"issues\":[\"legacy_agent\"]}","9587af51dd11d6d9e45aef2d6371697f9d4748415ef97ab0d7050e978f85efeb",Instant.now().toString(),task,agent);
             advanceProgress(jdbc,task);return;
         }
+        if(!result.getCommandId().equals(member.get("command_id")) || result.getCommandId().isBlank())return;
         var c=result.getWeakPasswordCoverage();
         if(result.getSerializedSize()>2<<20 || result.getWeakPasswordsCount()>maxFindings() || result.getPortServicesCount()>4096 || !STATUSES.contains(c.getStatus()) || c.getIssuesCount()>32 || c.getDurationMs()<0 || c.getDurationMs()>125000 || result.getVulnsCount()!=0)invalid();
         if(weak==c.getStatus().equals("not_requested") || (port?!Set.of("complete","failed").contains(result.getPortStatus()):!result.getPortStatus().equals("not_requested")))invalid();
