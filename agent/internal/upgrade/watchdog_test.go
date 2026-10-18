@@ -45,7 +45,11 @@ func seedTransaction(t *testing.T) (string, *transaction, *fakeManager) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx := &transaction{ID: id, CommandID: "upgrade-command", Executable: exe, OldHash: oldHash, NewHash: newHash, Version: "test-version", OriginalPID: os.Getpid() + 10000, OriginalStarted: started, Deadline: time.Now().Add(time.Minute), Phase: "pending", ReadyPID: os.Getpid(), ReadyStarted: started, ReadyAt: time.Now().Add(-healthyPeriod), LastReadyAt: time.Now()}
+	// These timestamps are persisted without their monotonic component. Derive
+	// the exact healthy boundary from one wall-clock sample so clock adjustments
+	// between separate Now calls cannot create a slightly shorter interval.
+	now := time.Now()
+	tx := &transaction{ID: id, CommandID: "upgrade-command", Executable: exe, OldHash: oldHash, NewHash: newHash, Version: "test-version", OriginalPID: os.Getpid() + 10000, OriginalStarted: started, Deadline: now.Add(time.Minute), Phase: "pending", ReadyPID: os.Getpid(), ReadyStarted: started, ReadyAt: now.Add(-healthyPeriod), LastReadyAt: now}
 	saveTransaction(t, work, tx)
 	return work, tx, &fakeManager{process: os.Getpid()}
 }
@@ -65,13 +69,15 @@ func outcome(t *testing.T, work string) Outcome {
 }
 
 func TestWatchdogRequiresStableCurrentServiceIdentity(t *testing.T) {
-	for _, kind := range []string{"healthy", "too-early", "different-pid", "reused-pid", "original-pid", "expired", "disconnected", "stale-heartbeat"} {
+	for _, kind := range []string{"healthy", "too-early", "just-before-healthy", "different-pid", "reused-pid", "original-pid", "expired", "disconnected", "stale-heartbeat"} {
 		t.Run(kind, func(t *testing.T) {
 			work, tx, m := seedTransaction(t)
 			now := time.Now()
 			switch kind {
 			case "too-early":
 				tx.ReadyAt = now
+			case "just-before-healthy":
+				tx.ReadyAt = tx.LastReadyAt.Add(-healthyPeriod + time.Nanosecond)
 			case "different-pid":
 				m.process = 0
 			case "reused-pid":
@@ -92,7 +98,8 @@ func TestWatchdogRequiresStableCurrentServiceIdentity(t *testing.T) {
 			}
 			if kind == "healthy" {
 				if !finished || !outcome(t, work).Success || m.stops != 0 {
-					t.Fatal("healthy candidate was not confirmed without restarting")
+					started, startErr := processStarted(m.process)
+					t.Fatalf("healthy candidate was not confirmed without restarting: finished=%v stable=%v age=%v started=%d expected=%d startError=%v", finished, tx.LastReadyAt.Sub(tx.ReadyAt), now.Sub(tx.LastReadyAt), started, tx.ReadyStarted, startErr)
 				}
 				return
 			}
