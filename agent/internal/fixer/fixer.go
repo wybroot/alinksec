@@ -9,6 +9,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/baseline"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/windowsupdate"
 )
 
 // FixSpec 服务端下发的 payload JSON（t_baseline_item.fix_spec + check 合并）
@@ -24,6 +25,10 @@ type FixSpec struct {
 func Run(taskID string, fixes []*pb.FixItem, workDir string, log *slog.Logger) *pb.RptFixResult {
 	result := &pb.RptFixResult{TaskId: taskID}
 	for _, f := range fixes {
+		if f.GetType() == pb.FixItem_WINDOWS_UPDATE {
+			result.Results = append(result.Results, windowsupdate.Repair(taskID, f.GetRefId(), f.GetPayload(), workDir))
+			continue
+		}
 		result.Results = append(result.GetResults(), fixOne(f, workDir, log))
 	}
 	return result

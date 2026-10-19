@@ -296,6 +296,7 @@ public class CommandService {
             case VIRUS_ACTION -> "virus_action";
             case SIGNATURE_UPDATE -> "signature_update";
             case VULN_FIX -> "vuln_fix";
+            case WINDOWS_UPDATE_SCAN -> "windows_update_scan";
             default -> "unknown";
         };
     }

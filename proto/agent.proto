@@ -80,6 +80,8 @@ message Command {
     CmdVulnFix       vuln_fix       = 20;
     CmdIsolationConfirm isolation_confirm = 21; // ephemeral echo on this authenticated stream; no cmd_id/ACK
     CmdWindowsLoginReceipt windows_login_receipt = 22; // committed event receipt; no cmd_id/ACK
+    CmdWindowsUpdateScan windows_update_scan = 23;
+    CmdWindowsUpdateReceipt windows_update_receipt = 24; // committed outcomes; no cmd_id/ACK
   }
 }
 
@@ -196,7 +198,7 @@ message CmdVulnFix {
 
 message FixItem {
   string ref_id = 1;              // baseline_item_id 或 vuln_finding_id
-  enum FixType { CONFIG = 0; PACKAGE = 1; }
+  enum FixType { CONFIG = 0; PACKAGE = 1; WINDOWS_UPDATE = 2; }
   FixType type = 2;
   string payload = 3;             // JSON：CONFIG=fix_spec 步骤；PACKAGE=包名/目标版本/仓库地址
 }
@@ -219,6 +221,7 @@ message Report {
     RptVirusResult    virus_result    = 18;
     RptFixResult      fix_result      = 19;
     RptIsolationState isolation_state = 20; // live state only; never offline replay
+    RptWindowsUpdate windows_update = 21;
   }
 }
 
@@ -237,6 +240,7 @@ message RptHeartbeat {
   uint32 weak_password_contract = 12; // 1 on Linux; zero on unsupported platforms
   uint32 windows_login_contract = 13; // 1: bounded Security XML reader and dynamic WFP blocks
   string windows_login_status = 14; // bounded JSON coverage; policy ACK does not prove coverage
+  uint32 windows_update_contract = 15; // 1: pinned WUA updates, durable intent and installed-state verification
 }
 
 message RptIsolationState {
@@ -472,6 +476,21 @@ message FixResultItem {
   bool   verified = 4;       // 修复后复核（重跑 check / 重扫 CVE）是否通过
   bool   reboot_required = 5;
   string log = 6;
+  string execution_evidence = 7; // bounded structured Windows Update identity and native outcome
+}
+
+message CmdWindowsUpdateScan {
+  string scan_id = 1;
+  int64 deadline_unix_ms = 2;
+}
+
+message RptWindowsUpdate {
+  string scan_id = 1;
+  string snapshot = 2; // bounded JSON, contract=1; status/error/host_identity/updates
+}
+
+message CmdWindowsUpdateReceipt {
+  repeated string records = 1; // task-ref-SHA256(execution_evidence) or task-ref-closed; at most 50
 }
 
 message CmdWindowsLoginReceipt {

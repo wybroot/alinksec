@@ -427,10 +427,11 @@ public class FixTaskService {
         Map<String,List<FixItem>> byAgent=new LinkedHashMap<>();
         targets.stream().map(t -> String.valueOf(t.get("agent_id"))).distinct().sorted().forEach(agent -> jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=? AND deleted=false",agent));
         for (var target:targets) {
-            var payload=validation.validate(target);
+            boolean windows="windows_update".equals(target.get("ref_type"));
+            var payload=windows ? new WindowsUpdateValidation(jdbc,database).validate(target) : validation.validate(target);
             payload.remove("validated_patch");
-            payload.put("download_url",""); // Issued after commit, just before the actual delivery attempt.
-            byAgent.computeIfAbsent(String.valueOf(target.get("agent_id")),ignored -> new ArrayList<>()).add(FixItem.newBuilder().setRefId(String.valueOf(target.get("ref_id"))).setType(FixItem.FixType.PACKAGE).setPayload(JsonUtils.write(payload)).build());
+            if(!windows) payload.put("download_url",""); // Issued after commit, just before the actual delivery attempt.
+            byAgent.computeIfAbsent(String.valueOf(target.get("agent_id")),ignored -> new ArrayList<>()).add(FixItem.newBuilder().setRefId(String.valueOf(target.get("ref_id"))).setType(windows?FixItem.FixType.WINDOWS_UPDATE:FixItem.FixType.PACKAGE).setPayload(JsonUtils.write(payload)).build());
         }
         if (byAgent.isEmpty()) throw new IllegalArgumentException("软件包任务没有有效目标");
         for (var entry:byAgent.entrySet()) {

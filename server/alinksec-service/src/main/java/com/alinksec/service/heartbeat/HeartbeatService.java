@@ -52,6 +52,7 @@ public class HeartbeatService {
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
         agentRepository.isolationContract(agentId,hb.getIsolationContract());
         agentRepository.weakPasswordContract(agentId,hb.getWeakPasswordContract());
+        agentRepository.windowsUpdateContract(agentId,hb.getWindowsUpdateContract());
 
         windowsLogin.heartbeat(agentId,hb);
 
