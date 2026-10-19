@@ -19,7 +19,7 @@ const server = createServer((req, res) => {
  createReadStream(file).on('error', () => res.destroy()).pipe(res)
 })
 await new Promise(done => server.listen(0, '127.0.0.1', done))
-let stage = 'discovered', fail = false, failCreate = false, browser
+let stage = 'discovered', fail = false, failCreate = false, browser, activePage
 const errors = [], unexpected = [], checks = [], writes = []
 try {
  async function session(role, id) {
@@ -48,7 +48,7 @@ try {
    else { unexpected.push(path); return route.fulfill({ status: 500, json: { code: 500, msg: 'Unexpected request' } }) }
    return route.fulfill({ json: { code: 0, data } })
   })
-  const page = await context.newPage(); page.on('pageerror', e => errors.push(e.message)); await page.goto(`http://127.0.0.1:${server.address().port}/vuln`)
+  const page = await context.newPage(); activePage = page; page.on('pageerror', e => errors.push(e.message)); await page.goto(`http://127.0.0.1:${server.address().port}/vuln`)
   await page.getByRole('tab', { name: 'Windows 更新', exact: true }).click()
   return { page, context, section: page.getByTestId('windows-updates') }
  }
@@ -73,7 +73,7 @@ try {
  await expect(section.getByText('待指定账号审批', { exact: true })).toBeVisible(); await expect(section.getByRole('button', { name: '审批安装', exact: true })).toHaveCount(0); checks.push('fixed-target-submission-retries-and-designated-approver-boundary')
  await context.close(); await browser.close()
  ;({ page, context, section } = await session('operator', fixture.reviewer))
- await section.getByRole('button', { name: '审批安装', exact: true }).click(); await page.getByRole('dialog', { name: '审批 Windows 更新', exact: true }).getByRole('button', { name: '确定', exact: true }).click()
+ await section.getByRole('button', { name: '审批安装', exact: true }).click(); await page.getByRole('dialog').filter({ hasText: '审批 Windows 更新' }).getByRole('button', { name: '批准安装', exact: true }).click()
  await expect(section.getByText('待重启或复核', { exact: true })).toBeVisible(); await section.getByRole('button', { name: '详情', exact: true }).click()
  const record = page.getByRole('dialog', { name: 'Windows 更新执行记录', exact: true })
  await expect(record.getByText('Windows 更新验收 · 等待重启复核', { exact: true })).toBeVisible(); await expect(record.getByText('需要人工安排系统重启；Agent 将继续复核。', { exact: true })).toBeVisible()
@@ -85,4 +85,9 @@ try {
  await expect(record.getByText('Windows 更新验收 · 复核成功', { exact: true })).toBeVisible(); await page.screenshot({ path: root + '/verified-mobile.png', animations: 'disabled' }); checks.push('approval-pending-reboot-and-later-verification-mobile')
  assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
  writeFileSync(root + '/result.json', JSON.stringify({ passed: true, checks, errors, unexpected, mobileDialog: bounds }, null, 2) + '\n'); console.log('Passed Windows update browser checks:', checks)
+} catch (error) {
+ const body = await activePage?.locator('body').innerText().catch(() => '')
+ await activePage?.screenshot({ path: root + '/failure.png', fullPage: true, animations: 'disabled' }).catch(() => {})
+ writeFileSync(root + '/failure.json', JSON.stringify({ message: error.message, stage, body, errors, unexpected }, null, 2) + '\n')
+ throw error
 } finally { await browser?.close(); await new Promise(done => server.close(done)) }
