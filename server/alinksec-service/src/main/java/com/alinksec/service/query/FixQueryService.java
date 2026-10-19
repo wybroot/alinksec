@@ -27,7 +27,7 @@ public class FixQueryService {
                        t.window_start,t.window_end,t.dispatched_at,t.cancelled_by,t.failure_reason,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id) AS total_records,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status = 1) AS ok_records,
-                       (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status IN (2,3,5)) AS failed_records,
+                       (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status IN (2,3,5,8)) AS failed_records,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id=t.id AND r.status IN (6,7)) AS pending_verification
                 FROM t_fix_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
                 """, size, (page - 1) * size);

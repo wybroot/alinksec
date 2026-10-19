@@ -34,7 +34,7 @@
       <el-table-column prop="task_no" label="任务号" min-width="220" show-overflow-tooltip />
       <el-table-column label="状态" min-width="150"><template #default="{ row }">{{ taskState(row) }}</template></el-table-column>
       <el-table-column prop="approver" label="指定审批账号" min-width="140" />
-      <el-table-column label="操作" width="220"><template #default="{ row }"><el-button link @click="details(row)">详情</el-button><el-button v-if="canApprove(row)" link type="warning" :disabled="busy" @click="approve(row)">审批安装</el-button><el-button v-if="canCancel(row)" link :disabled="busy" @click="cancel(row)">取消</el-button></template></el-table-column>
+      <el-table-column label="操作" width="220"><template #default="{ row }"><el-button link @click="details(row)">详情</el-button><el-button v-if="canApprove(row)" link type="warning" :disabled="busy" @click="approve(row)">审批安装</el-button><el-button v-if="canCancel(row)" link :disabled="busy" @click="cancel(row)">取消</el-button><el-button v-if="Number(row.status) === 5 && ownsTask(row)" link :disabled="busy" @click="endReview(row)">结束复核</el-button></template></el-table-column>
     </el-table></div>
 
     <el-dialog v-model="formVisible" title="Windows 更新安装审批" width="min(620px, calc(100% - 24px))">
@@ -56,7 +56,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { getUser, fetchWindowsUpdateHosts, fetchWindowsUpdateCandidates, scanWindowsUpdates, createWindowsUpdateTask, fetchFixApprovers, fetchFixTasks, fetchFixTaskRecords, approveFixTask, cancelFixTask } from '../api'
+import { getUser, fetchWindowsUpdateHosts, fetchWindowsUpdateCandidates, scanWindowsUpdates, createWindowsUpdateTask, fetchFixApprovers, fetchFixTasks, fetchFixTaskRecords, approveFixTask, cancelFixTask, endWindowsUpdateReview } from '../api'
 const user = getUser(), readOnly = user?.role === 'viewer'
 const hosts = ref([]), total = ref(0), page = ref(1), loading = ref(false), error = ref(''), notice = ref(''), busy = ref(false)
 const selected = ref(null), candidates = ref([]), candidateLoading = ref(false), candidateError = ref(''), tasks = ref([]), taskError = ref('')
@@ -64,11 +64,12 @@ const formVisible = ref(false), target = ref(null), targetAgent = ref(''), appro
 const detailVisible = ref(false), records = ref([]), detailError = ref('')
 const stateLabel = { unknown: '尚未发现', unsupported: 'Agent 未支持', offline: '主机离线', pending: '发现中', complete: '发现完成', failed: '发现失败', stale: '发现已过期' }
 const issueLabel = { unsupported_update: '更新类型不支持', not_security_or_critical: '属于其他更新类别，请人工处理', eula_not_accepted: '许可尚未由本机接受', interactive_or_source_required: '需要交互或安装源', download_size_limit: '超过下载容量上限', scan_expired: '发现任务已过期', command_failed: '指令失败或超时', wua_scan_failed: '原生查询未完成，请检查更新服务、权限和网络' }
-const recordState = { 0: '待执行', 1: '复核成功', 3: '安装失败', 5: '未完成', 6: '等待重启复核', 7: '安装状态待复核' }
+const recordState = { 0: '待执行', 1: '复核成功', 3: '安装失败', 5: '未完成', 6: '等待重启复核', 7: '安装状态待复核', 8: '人工结束复核' }
 const taskState = row => Number(row.status) === 0 && !row.approved ? '待指定账号审批' : ({ 0: '等待维护窗口', 1: '执行中', 2: '复核完成', 3: '部分失败', 4: '已取消', 5: '待重启或复核' }[row.status] || '未知')
 const canCreate = row => selected.value?.state === 'complete' && !selected.value?.coverage?.reboot_required && row.update.eligible && !readOnly
 const canApprove = row => !readOnly && Number(row.status) === 0 && !row.approved && Number(row.approver_id) === Number(user?.id)
 const canCancel = row => !readOnly && Number(row.status) <= 1 && [Number(row.created_by), Number(row.approver_id)].includes(Number(user?.id))
+const ownsTask = row => !readOnly && [Number(row.created_by), Number(row.approver_id)].includes(Number(user?.id))
 async function refresh() {
   if (loading.value) return
   loading.value = true; error.value = ''
@@ -99,6 +100,7 @@ async function submit() {
 async function loadTasks() { taskError.value = ''; try { const data = await fetchFixTasks(); tasks.value = (data.list || []).filter(t => String(t.task_no).startsWith('WU')) } catch (e) { taskError.value = e.message || '任务列表加载失败'; tasks.value = [] } }
 async function approve(row) { busy.value = true; taskError.value = ''; try { await ElMessageBox.confirm('确认批准该精确更新目标，进入维护窗口后执行安装？', '审批 Windows 更新'); await approveFixTask(row.id); notice.value = '已审批，等待派发或维护窗口'; await loadTasks() } catch (e) { if (e !== 'cancel' && e !== 'close') taskError.value = e.message || '审批失败' } finally { busy.value = false } }
 async function cancel(row) { busy.value = true; taskError.value = ''; try { const { value } = await ElMessageBox.prompt('填写取消原因。已送出的安装指令不能撤回。', '取消更新任务', { inputValidator: v => v?.trim().length >= 2 || '至少填写两个字' }); await cancelFixTask(row.id, value); await loadTasks() } catch (e) { if (e !== 'cancel' && e !== 'close') taskError.value = e.message || '取消失败' } finally { busy.value = false } }
+async function endReview(row) { busy.value = true; taskError.value = ''; try { const { value } = await ElMessageBox.prompt('请先人工检查主机。此操作仅结束平台跟踪，不中止后台安装，也不确认更新完成。填写检查与处置说明：', '结束更新复核', { inputValidator: v => v?.trim().length >= 4 || '至少填写四个字的检查说明' }); await endWindowsUpdateReview(row.id, value); await loadTasks() } catch (e) { if (e !== 'cancel' && e !== 'close') taskError.value = e.message || '结束复核失败' } finally { busy.value = false } }
 async function details(row) { detailVisible.value = true; records.value = []; detailError.value = ''; try { const data = await fetchFixTaskRecords(row.id); records.value = data.list || [] } catch (e) { detailError.value = e.message || '执行记录加载失败' } }
 let timer
 onMounted(() => { refresh(); loadTasks(); timer = setInterval(() => { refresh(); loadTasks() }, 15000) })

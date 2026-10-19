@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
 function Hash([string]$value) {
   $sha = [Security.Cryptography.SHA256]::Create()

@@ -48,6 +48,7 @@ export const fetchWindowsUpdateHosts = (page = 1) => get(`/api/fix/windows/hosts
 export const fetchWindowsUpdateCandidates = agentId => get(`/api/fix/windows/candidates?agentId=${encodeURIComponent(agentId)}`)
 export const scanWindowsUpdates = agentIds => post('/api/fix/windows/scans', { agentIds })
 export const createWindowsUpdateTask = data => post('/api/fix/windows/tasks', data)
+export const endWindowsUpdateReview = (id, reason) => post(`/api/fix/windows/tasks/${id}/end-review`, { reason, acknowledged: true })
 const put = (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data) })
 const del = (path) => request(path, { method: 'DELETE' })
 

@@ -16,7 +16,7 @@ function New-Object {
         $search | Add-Member ScriptMethod Search {
           param($criteria)
           if($this.ServerSelection -ne 0 -or $this.CanAutomaticallyUpgradeService){throw 'source overridden'}
-          $u=[pscustomobject]@{Identity=[pscustomobject]@{UpdateID='12345678-1234-1234-1234-123456789abc';RevisionNumber=7};Title='Native worker security fixture';KBArticleIDs=@('1234567');MaxDownloadSize=1024;EulaText='Native fixture license';EulaAccepted=($script:Mode -ne 'eula');Type=1;IsBeta=$false;IsHidden=$false;CanRequireSource=$false;IsDownloaded=$true;InstallationBehavior=[pscustomobject]@{CanRequestUserInput=($script:Mode -eq 'interactive')};Categories=@([pscustomobject]@{CategoryID='0fa1201d-4330-4fa8-8ae9-b877473b6441'})}
+          $u=[pscustomobject]@{Identity=[pscustomobject]@{UpdateID='12345678-1234-1234-1234-123456789abc';RevisionNumber=7};Title='Native worker 安全更新';KBArticleIDs=@('1234567');MaxDownloadSize=1024;EulaText='Native fixture license';EulaAccepted=($script:Mode -ne 'eula');Type=1;IsBeta=$false;IsHidden=$false;CanRequireSource=$false;IsDownloaded=$true;InstallationBehavior=[pscustomobject]@{CanRequestUserInput=($script:Mode -eq 'interactive')};Categories=@([pscustomobject]@{CategoryID='0fa1201d-4330-4fa8-8ae9-b877473b6441'})}
           if($script:Mode -eq 'changed'){$u.Identity.RevisionNumber=8}
           $script:Update=$u
           $count=1

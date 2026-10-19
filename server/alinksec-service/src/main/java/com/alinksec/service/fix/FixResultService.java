@@ -84,7 +84,7 @@ public class FixResultService {
             return; // 仍有主机未回传
         }
         Integer failed = jdbc.queryForObject(
-                "SELECT count(*) FROM t_fix_record WHERE task_id = ? AND status IN (2,3,5)", Integer.class, taskId);
+                "SELECT count(*) FROM t_fix_record WHERE task_id = ? AND status IN (2,3,5,8)", Integer.class, taskId);
         Integer reboot=jdbc.queryForObject("SELECT count(*) FROM t_fix_record WHERE task_id=? AND status IN (6,7)",Integer.class,taskId);
         jdbc.update("""
                 UPDATE t_fix_task SET status = ?, finished_at = CURRENT_TIMESTAMP

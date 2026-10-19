@@ -20,7 +20,10 @@ public class WindowsUpdateController {
     public ApiResult<Map<String,Object>> scan(@RequestBody Scan body,HttpServletRequest request) { return ApiResult.ok(updates.scan(body.agentIds(),uid(request))); }
     @PostMapping("/tasks")
     public ApiResult<Map<String,Object>> task(@RequestBody Task body,HttpServletRequest request) { return ApiResult.ok(updates.createTask(body.items(),body.approver(),body.windowStart(),body.windowEnd(),uid(request))); }
+    @PostMapping("/tasks/{id}/end-review")
+    public ApiResult<Void> endReview(@PathVariable long id,@RequestBody EndReview body,HttpServletRequest request) { updates.endReview(id,uid(request),body.reason(),body.acknowledged());return ApiResult.ok(); }
     public record Scan(List<String> agentIds) { }
     public record Task(List<Map<String,Object>> items,String approver,String windowStart,String windowEnd) { }
+    public record EndReview(String reason,boolean acknowledged) { }
     private static Long uid(HttpServletRequest r) { return r.getAttribute("uid") instanceof Number n?n.longValue():null; }
 }

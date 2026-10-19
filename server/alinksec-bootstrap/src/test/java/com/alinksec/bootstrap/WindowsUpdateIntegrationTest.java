@@ -127,4 +127,15 @@ class WindowsUpdateIntegrationTest {
         assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(agent,bad)));assertEquals(7,state(task));
         tx.executeWithoutResult(s->results.onResult(agent,RptFixResult.newBuilder().setTaskId(String.valueOf(task)).addResults(result(ref,"verified",true,true,false)).build()));assertEquals(1,state(task));
     }
+    @Test void manualClosureRequiresOwnerAndDoesNotClaimInstallationOrReopenOnReplay() throws Exception {
+        long candidate=discover();long task=create(candidate);tx.execute(s->fixes.approve(task,reviewer));take();
+        var r=RptFixResult.newBuilder().setTaskId(String.valueOf(task)).addResults(result(String.valueOf(candidate),"uncertain",false,false,false)).build();
+        tx.executeWithoutResult(s->results.onResult(agent,r));assertEquals(7,state(task));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->updates.endReview(task,viewer,"已人工检查主机",true)));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->updates.endReview(task,creator,"已人工检查主机",false)));
+        tx.executeWithoutResult(s->updates.endReview(task,creator,"人工检查确认目标已被其他更新取代",true));assertEquals(8,state(task));
+        assertEquals(List.of(task+"-"+candidate+"-closed"),WindowsUpdateResult.receipts(jdbc,agent,r));
+        tx.executeWithoutResult(s->results.onResult(agent,RptFixResult.newBuilder().setTaskId(String.valueOf(task)).addResults(result(String.valueOf(candidate),"verified",true,true,false)).build()));
+        assertEquals(8,state(task));assertEquals(3,jdbc.queryForObject("SELECT status FROM t_fix_task WHERE id=?",Integer.class,task));
+    }
 }

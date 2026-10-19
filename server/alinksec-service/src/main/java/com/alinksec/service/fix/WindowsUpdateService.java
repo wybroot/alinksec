@@ -141,6 +141,19 @@ public class WindowsUpdateService implements CommandLifecycleListener {
         Integer n=actor==null?0:jdbc.queryForObject("SELECT count(*) FROM t_user u JOIN t_role r ON r.id=u.role_id WHERE u.id=? AND u.status=1 AND r.name IN ('admin','operator')",Integer.class,actor);
         if(n==null || n!=1) throw new IllegalArgumentException("需要已验证且有修复权限的登录账号");
     }
+
+    @Transactional
+    public void endReview(long task,Long actor,String reason,boolean acknowledged) {
+        requireActor(actor);
+        if(!acknowledged || reason==null || reason.trim().length()<4 || reason.length()>1024) throw new IllegalArgumentException("请确认仅结束平台跟踪，并填写至少四字的人工检查与处置说明");
+        jdbc.update("UPDATE t_fix_task SET status=status WHERE id=?",task);
+        var rows=jdbc.queryForList("SELECT status,created_by,approver_id FROM t_fix_task WHERE id=? AND type=2",task);
+        if(rows.size()!=1 || ((Number)rows.get(0).get("status")).intValue()!=5 || !List.of(((Number)rows.get(0).get("created_by")).longValue(),((Number)rows.get(0).get("approver_id")).longValue()).contains(actor))
+            throw new IllegalArgumentException("只有创建人或指定审批人可结束待复核的 Windows 更新跟踪");
+        int changed=jdbc.update("UPDATE t_fix_record SET status=8,log=log || ?,finished_at=CURRENT_TIMESTAMP WHERE task_id=? AND ref_type='windows_update' AND status IN (6,7)","\n人工结束跟踪（账号 "+actor+"）："+reason.trim()+"；未声明安装完成或中止后台安装。",task);
+        if(changed==0) throw new IllegalArgumentException("没有待复核的 Windows 更新记录");
+        jdbc.update("UPDATE t_fix_task SET status=3,failure_reason=?,finished_at=CURRENT_TIMESTAMP WHERE id=?","人工结束更新复核："+reason.trim(),task);
+    }
     private static OffsetDateTime time(String value) { if(value==null || value.isBlank()) return null; try { return OffsetDateTime.parse(value); } catch(RuntimeException e) { throw new IllegalArgumentException("维护窗口请使用含时区的 ISO 日期时间"); } }
 
     @Override public Command prepareDelivery(String agent,Command cmd) {

@@ -113,8 +113,12 @@ func TestInstallInterruptionOnlyQueriesOnRecovery(t *testing.T) {
 	f.fail = ""
 	f.unknown = false
 	reports := reconcileWith(root, f.run)
-	if len(reports) != 1 || !reports[0].Results[0].Verified || strings.Join(f.calls, ",") != "download,install,verify" {
+	if len(reports) != 1 || reports[0].Results[0].Verified || !reports[0].Results[0].RebootRequired || strings.Join(f.calls, ",") != "download,install,verify" {
 		t.Fatalf("reports=%v calls=%v", reports, f.calls)
+	}
+	f.afterBoot = true
+	if reports = reconcileWith(root, f.run); len(reports) != 1 || !reports[0].Results[0].Verified {
+		t.Fatal(reports)
 	}
 }
 func TestUncertainIntentSurvivesMissingTerminalWrite(t *testing.T) {
@@ -183,5 +187,22 @@ func TestCorruptAndFullRecoveryStateFailsClosed(t *testing.T) {
 	}
 	if repairWith("17", "28", encoded(p), root, f.run).Success || len(f.calls) > 0 {
 		t.Fatal("capacity overflow accepted")
+	}
+}
+
+func TestManualClosureStopsOnlyRecoveryQueries(t *testing.T) {
+	root := t.TempDir()
+	p := fixturePayload()
+	f := &fakeWUA{reboot: true}
+	if r := repairWith("19", "29", encoded(p), root, f.run); !r.RebootRequired {
+		t.Fatal(r)
+	}
+	Receipt(root, []string{"19-29-closed"})
+	if reports := reconcileWith(root, f.run); len(reports) != 0 || len(f.calls) != 3 {
+		t.Fatal(reports, f.calls)
+	}
+	_ = repairWith("19", "29", encoded(p), root, f.run)
+	if len(f.calls) != 3 {
+		t.Fatal("closed target reinstalled")
 	}
 }

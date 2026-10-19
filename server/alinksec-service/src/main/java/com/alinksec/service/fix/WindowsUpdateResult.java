@@ -13,7 +13,7 @@ public final class WindowsUpdateResult {
     private WindowsUpdateResult() { }
     static boolean accept(JdbcTemplate jdbc,String agent,long task,FixResultItem item) {
         var rows=jdbc.queryForList("""
-                SELECT r.status,r.fix_payload,t.status AS task_status,c.status AS command_status
+                SELECT r.status,r.fix_payload,t.status AS task_status,c.status AS command_status,c.sent_at
                 FROM t_fix_record r JOIN t_fix_task t ON t.id=r.task_id
                 LEFT JOIN t_command c ON c.cmd_id=r.command_id AND c.agent_id=r.agent_id
                 WHERE r.task_id=? AND r.agent_id=? AND r.ref_id=? AND r.ref_type='windows_update'
@@ -21,7 +21,7 @@ public final class WindowsUpdateResult {
         if(rows.isEmpty()) return false;
         if(rows.size()!=1) return true;
         var row=rows.get(0); int previous=((Number)row.get("status")).intValue(),ts=((Number)row.get("task_status")).intValue();
-        if(!Set.of(0,6,7).contains(previous) || !Set.of(1,3,5).contains(ts) || !(row.get("command_status") instanceof Number sent) || !Set.of(1,2,3,4).contains(sent.intValue())) return true;
+        if(!Set.of(0,5,6,7).contains(previous) || !Set.of(1,3,5).contains(ts) || row.get("sent_at")==null || !(row.get("command_status") instanceof Number sent) || !Set.of(1,2,3,4,5,6).contains(sent.intValue())) return true;
         if(item.getExecutionEvidence().length()>8192 || item.getLog().length()>8000) throw new IllegalArgumentException("更新结果证据超限");
         var evidence=JsonUtils.read(item.getExecutionEvidence()); var p=JsonUtils.read(String.valueOf(row.get("fix_payload")));
         if(evidence.path("contract").asInt()!=1 || !evidence.path("host_identity").equals(p.path("host_identity"))
@@ -43,8 +43,9 @@ public final class WindowsUpdateResult {
         var receipts=new ArrayList<String>();
         for(var item:result.getResultsList()) {
             if(!item.getRefId().matches("[1-9][0-9]{0,18}") || item.getExecutionEvidence().isBlank() || item.getExecutionEvidence().length()>8192) continue;
-            Integer n=jdbc.queryForObject("SELECT count(*) FROM t_fix_record WHERE task_id=? AND agent_id=? AND ref_id=? AND ref_type='windows_update' AND status<>0 AND execution_evidence=?",Integer.class,Long.parseLong(result.getTaskId()),agent,item.getRefId(),item.getExecutionEvidence());
-            if(n!=null && n==1) {
+            var rows=jdbc.queryForList("SELECT status,execution_evidence FROM t_fix_record WHERE task_id=? AND agent_id=? AND ref_id=? AND ref_type='windows_update' AND status<>0",Long.parseLong(result.getTaskId()),agent,item.getRefId());
+            if(rows.size()==1 && ((Number)rows.get(0).get("status")).intValue()==8) { receipts.add(result.getTaskId()+"-"+item.getRefId()+"-closed"); continue; }
+            if(rows.size()==1 && item.getExecutionEvidence().equals(rows.get(0).get("execution_evidence"))) {
                 try { receipts.add(result.getTaskId()+"-"+item.getRefId()+"-"+HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(item.getExecutionEvidence().getBytes(StandardCharsets.UTF_8)))); }
                 catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
             }

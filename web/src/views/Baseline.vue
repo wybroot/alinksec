@@ -363,7 +363,7 @@ const fixStatusText = (row) => (Number(row.type) === 2 && !row.approved && Numbe
   ? '待审批' : FIX_STATUS[Number(row.status)] || '未知')
 const fixStatusColor = (row) => (Number(row.type) === 2 && !row.approved && Number(row.status) === 0
   ? '#f59e0b' : FIX_STATUS_COLOR[Number(row.status)] || '#64748b')
-const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '未完成', 6: '等待重启复核', 7: '安装状态待复核' }
+const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '未完成', 6: '等待重启复核', 7: '安装状态待复核', 8: '人工结束复核' }
 const FIX_REC_COLOR = { 0: '#94a3b8', 1: '#16a34a', 2: '#f59e0b', 3: '#dc2626', 5: '#f59e0b' }
 
 async function approveTask(row) {

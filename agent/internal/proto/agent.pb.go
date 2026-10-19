@@ -5008,7 +5008,7 @@ type CmdWindowsUpdateReceipt struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Records []string `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"` // task-ref-SHA256(execution_evidence), at most 50
+	Records []string `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"` // task-ref-SHA256(execution_evidence) or task-ref-closed; at most 50
 }
 
 func (x *CmdWindowsUpdateReceipt) Reset() {

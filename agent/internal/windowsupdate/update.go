@@ -88,7 +88,7 @@ type record struct {
 
 func Scan(deadline int64) Snapshot { return scanWith(deadline, nativeRun) }
 func scanWith(deadline int64, run runner) Snapshot {
-	failed := Snapshot{Contract: ExecutionContract(), Status: "failed", Error: "wua_scan_failed", Updates: []Update{}}
+	failed := Snapshot{Contract: int(ExecutionContract()), Status: "failed", Error: "wua_scan_failed", Updates: []Update{}}
 	if ExecutionContract() == 0 {
 		failed.Status = "unsupported"
 		failed.Error = "unsupported_platform"
@@ -203,7 +203,7 @@ func repairWith(task, ref, payload, workDir string, run runner) *pb.FixResultIte
 		result.Log = "下载后维护窗口已结束，未开始安装"
 		return result
 	}
-	rec = record{Task: task, Ref: ref, Pin: pin(p), Payload: p, Phase: "intent", InstallBootID: r.Outcome.BootID}
+	rec = record{Task: task, Ref: ref, Pin: pin(p), Payload: p, Phase: "intent", InstallBootID: r.Outcome.BootID, InstallReboot: true}
 	if securestate.WriteJSON(path, &rec) != nil {
 		result.Log = "安装意图无法持久化，未开始安装"
 		return result
@@ -221,7 +221,11 @@ func repairWith(task, ref, payload, workDir string, run runner) *pb.FixResultIte
 	}
 	rec.Phase = "verify"
 	rec.InstallReboot = r.Outcome.RebootRequired
-	_ = securestate.WriteJSON(path, &rec)
+	if securestate.WriteJSON(path, &rec) != nil {
+		result.Log = "安装结果无法持久化，保留不确定意图；不自动重装"
+		result.ExecutionEvidence = evidence(outcome(p, "uncertain", "journal_write_failed"))
+		return result
+	}
 	return verifyRecord(path, &rec, run)
 }
 func matches(p Payload, r Outcome) bool {
@@ -293,6 +297,9 @@ func reconcileWith(workDir string, run runner) []*pb.RptFixResult {
 			}
 			continue
 		}
+		if rec.Phase == "closed" {
+			continue
+		}
 		if checked >= 4 {
 			break
 		}
@@ -316,12 +323,17 @@ func Receipt(workDir string, receipts []string) {
 	defer unlock()
 	for _, value := range receipts {
 		parts := strings.Split(value, "-")
-		if len(parts) != 3 || !numeric.MatchString(parts[0]) || !numeric.MatchString(parts[1]) || !digest.MatchString(parts[2]) {
+		if len(parts) != 3 || !numeric.MatchString(parts[0]) || !numeric.MatchString(parts[1]) || !(digest.MatchString(parts[2]) || parts[2] == "closed") {
 			continue
 		}
 		path := filepath.Join(dir, parts[0]+"-"+parts[1]+".json")
 		var rec record
-		if securestate.ReadJSON(path, &rec) != nil || rec.Task != parts[0] || rec.Ref != parts[1] || rec.Result == nil || hashEvidence(rec.Result.ExecutionEvidence) != parts[2] {
+		if securestate.ReadJSON(path, &rec) != nil || rec.Task != parts[0] || rec.Ref != parts[1] || rec.Result == nil {
+			continue
+		}
+		if parts[2] == "closed" {
+			rec.Phase = "closed"
+		} else if hashEvidence(rec.Result.ExecutionEvidence) != parts[2] {
 			continue
 		}
 		rec.Receipt = parts[2]
