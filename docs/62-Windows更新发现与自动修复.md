@@ -28,6 +28,8 @@ Agent 重新搜索精确更新身份并核对固定元数据。系统待重启�
 
 验收包括便携执行状态机的中断、重放、损坏记录、容量、修订和重启边界；原生 Windows 检查实际 WUA 接口、默认来源身份、静默属性，以及生产 PowerShell 执行器在受控提供程序下的下载、安装、部分失败、许可和适用性分支。受控提供程序仅存在于测试文件，产品没有切换入口。CI 不对共享或用户主机安装真实系统更新；该验收不等于某个实际厂商补丁已在现场安装成功。真实 WSUS/公网更新与指定补丁安装仍须在相应环境验收。
 
-SQLite/PostgreSQL 集成核对实际审批账号、持久指令、首份发现、非法回报、目标失效、离线重推和重启复核。生产前端使用这些数据库响应检查查看者、创建者、指定审批人、失败重试及桌面和手机页面。完整检查及产物验收结果在完成后补记。
+2026-10-19，[分支 CI 39266836493](https://github.com/wybroot/alinksec/actions/runs/39266836493) 在实现提交 `6b8b73710a141ed58234ede36926f4d1874c26d2` 上的 Windows、Linux amd64、Linux arm64 和 PostgreSQL 四个作业全部通过。SQLite/PostgreSQL 各 8 项集成用例覆盖实际审批账号、持久指令、首份发现、超大不可安装更新、非法回报、目标失效、离线重推、窗口取消、晚到证据、重启及人工复核边界。
+
+Windows 原生证据包含真实 WUA 接口探测及 9 种受控生产执行器结果。两个 Linux 架构各完成 4 个生产页面场景，使用数据库捕获响应验证查看者、创建者、指定审批人、失败重试、待重启及后续复核；桌面更新身份和 390px 手机弹窗已经截图复核。原始结果分别保存在 CI 的 `windows-update-validation-windows-amd64`、`browser-validation-*` 和 `source-governance-postgres` 产物中。同轮还通过原有资源、配置、升级、隔离、登录防护、勒索归因及完整部署维护回归。此后的文档更新不改变该实现提交的产品代码。
 
 接口依据：[WUA 搜索与精确身份](https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdatesearcher-search)、[安装器属性](https://learn.microsoft.com/en-us/windows/win32/wua_sdk/iupdateinstaller-properties)、[静默安装属性](https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdateinstaller2-get_forcequiet)、[WUA 与系统更新编排的适用说明](https://learn.microsoft.com/en-us/windows/win32/wua_sdk/portal-client)。

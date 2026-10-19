@@ -314,5 +314,6 @@ offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
 ## 10. 漏洞修复执行器（fixer，详见 05-扩展能力设计 §3）
 
 - **配置类**：按 `fix_spec` 步骤执行（sysctl_set / file_line_ensure / file_replace / chmod / chown / service_restart / registry_set / audit_rule），事务化：全量备份 → 按序执行 → 复核（重跑 check）→ 失败自动回滚 → 上报 rolled_back；`requires_restart` 服务重启默认仅提示不执行（可配）。
-- **软件包类**：前置检查（磁盘/依赖）→ 临时仓库源安装（yum `--repofrompath` / 临时 sources.list.d，**不污染客户 repo 配置**；Windows 走 MSU `wusa /quiet /norestart` 或 WSUS）→ 修复后自动重扫关联 CVE → 需重启标记 `reboot_required`，**不自动重启主机**。
+- **Linux 软件包类**：前置检查（磁盘/依赖）→ 临时仓库源安装（yum `--repofrompath` / 临时 sources.list.d，**不污染客户 repo 配置**）→ 修复后自动重扫关联 CVE → 需重启标记 `reboot_required`，**不自动重启主机**。
+- **Windows 更新**：使用当前 Windows Update/WSUS 的 WUA 接口发现适用更新，固定 UpdateID、修订与来源证据，经指定账号审批后静默安装；中断后只读复核，不自动重装或重启，结果不直接关闭 CVE。任意上传 MSU 不作为自动安装目标，范围见 [Windows 更新发现与自动修复](62-Windows更新发现与自动修复.md)。
 - **回滚策略**：配置类自动回滚；包类不自动回滚（降级风险大于收益），rpm 环境记录旧版本号供人工降级参考。
