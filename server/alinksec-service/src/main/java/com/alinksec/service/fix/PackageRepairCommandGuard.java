@@ -24,7 +24,12 @@ public class PackageRepairCommandGuard implements CommandLifecycleListener {
     }
 
     @Override public Command prepareDelivery(String agentId,Command command) {
-        if (!command.hasVulnFix() || command.getVulnFix().getFixesList().stream().noneMatch(f -> f.getType()==FixItem.FixType.PACKAGE || f.getType()==FixItem.FixType.WINDOWS_UPDATE)) return command;
+        if (!command.hasVulnFix()) return command;
+        if(command.getVulnFix().getFixesList().stream().noneMatch(f -> f.getType()==FixItem.FixType.PACKAGE || f.getType()==FixItem.FixType.WINDOWS_UPDATE)) {
+            Integer packages=jdbc.queryForObject("SELECT count(*) FROM t_fix_task WHERE CAST(id AS TEXT)=? AND type=2",Integer.class,command.getVulnFix().getTaskId());
+            if(packages!=null && packages>0) throw new IllegalArgumentException("软件包任务不能混入或替换为配置修复");
+            return command;
+        }
         long taskId;
         try { taskId=Long.parseLong(command.getVulnFix().getTaskId()); }
         catch (NumberFormatException e) { throw new IllegalArgumentException("软件包指令缺少有效任务身份"); }

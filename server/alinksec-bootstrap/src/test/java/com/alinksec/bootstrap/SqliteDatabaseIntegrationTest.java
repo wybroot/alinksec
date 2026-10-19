@@ -207,7 +207,7 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(64, jdbc.queryForObject("""
+        assertEquals(66, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));

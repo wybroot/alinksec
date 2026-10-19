@@ -49,7 +49,7 @@
     </el-dialog>
     <el-dialog v-model="detailVisible" title="Windows 更新执行记录" width="min(800px, calc(100% - 24px))">
       <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
-      <article v-for="r in records" :key="r.id" class="record"><h4>{{ r.hostname }} · {{ recordState[r.status] || '未知' }}</h4><p>{{ r.name }}</p><p class="identity">{{ r.code }}</p><p v-if="r.reboot_required">需要人工安排系统重启；Agent 将继续复核。</p><pre>{{ r.log || '尚未回报执行结果' }}</pre></article>
+      <article v-for="r in records" :key="r.id" class="record"><h4>{{ r.hostname }} · {{ recordState[r.status] || '未知' }}</h4><p>{{ r.name }}</p><p class="identity">{{ r.code }}</p><p v-if="r.reboot_required && Number(r.status) !== 8">需要人工安排系统重启；Agent 将继续复核。</p><p v-else-if="r.reboot_required">上次报告需要重启，平台跟踪已由人工结束。</p><pre>{{ r.log || '尚未回报执行结果' }}</pre></article>
     </el-dialog>
   </section>
 </template>

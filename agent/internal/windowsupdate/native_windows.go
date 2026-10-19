@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
@@ -20,7 +21,12 @@ import (
 //go:embed worker.ps1
 var worker string
 
-func ExecutionContract() uint32 { return 1 }
+func ExecutionContract() uint32 {
+	if runtime.GOARCH == "amd64" {
+		return 1
+	}
+	return 0
+}
 
 type limitedBuffer struct {
 	bytes.Buffer

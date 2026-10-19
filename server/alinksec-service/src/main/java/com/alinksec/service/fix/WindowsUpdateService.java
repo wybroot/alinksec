@@ -84,7 +84,7 @@ public class WindowsUpdateService implements CommandLifecycleListener {
     }
     private static Map<String,Object> metadata(JsonNode u) {
         String id=u.path("update_id").asText(),title=u.path("title").asText(),eula=u.path("eula_digest").asText(),reason=u.path("reason").asText();
-        if(!id.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}") || !u.path("revision").canConvertToInt() || u.path("revision").asInt()<1
+        if(!id.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}") || !u.path("revision").isIntegralNumber() || !u.path("revision").canConvertToInt() || u.path("revision").asInt()<1
                 || title.isBlank() || title.length()>512 || !eula.matches("[a-f0-9]{64}") || reason.length()>128 || !u.path("eligible").isBoolean()
                 || !u.path("size").isIntegralNumber() || u.path("size").asLong()<0 || u.path("size").asLong()>4L*1024*1024*1024 || !u.path("kb").isArray() || u.path("kb").size()>32)
             throw new IllegalArgumentException("更新元数据不完整或超限");

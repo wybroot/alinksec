@@ -138,4 +138,23 @@ class WindowsUpdateIntegrationTest {
         tx.executeWithoutResult(s->results.onResult(agent,RptFixResult.newBuilder().setTaskId(String.valueOf(task)).addResults(result(String.valueOf(candidate),"verified",true,true,false)).build()));
         assertEquals(8,state(task));assertEquals(3,jdbc.queryForObject("SELECT status FROM t_fix_task WHERE id=?",Integer.class,task));
     }
+    @Test void maintenanceWindowAndUndeliveredCancellationNeverInstall() throws Exception {
+        long candidate=discover();
+        var created=tx.execute(s->updates.createTask(List.of(Map.of("agentId",agent,"candidateId",candidate)),reviewerName,OffsetDateTime.now().plusMinutes(2).toString(),OffsetDateTime.now().plusMinutes(5).toString(),creator));
+        long task=((Number)created.get("taskId")).longValue();
+        assertEquals("waiting_window",tx.execute(s->fixes.approve(task,reviewer)).get("state"));assertTrue(delivered.isEmpty());
+        tx.execute(s->fixes.cancel(task,creator,"维护计划变更"));assertEquals(4,jdbc.queryForObject("SELECT status FROM t_fix_task WHERE id=?",Integer.class,task));
+        long next=create(candidate);jdbc.update("UPDATE t_fix_task SET window_start=?,window_end=? WHERE id=?",dialect.timestamp(Instant.now().minusSeconds(120)),dialect.timestamp(Instant.now().minusSeconds(60)),next);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->fixes.approve(next,reviewer)));
+        fixes.dispatchWindowReached();assertTrue(delivered.isEmpty());assertEquals(5,state(next));
+    }
+    @Test void sentTimeoutCanRecordLateVerificationAndTamperedCommandsCannotDeliver() throws Exception {
+        long candidate=discover();long task=create(candidate);tx.execute(s->fixes.approve(task,reviewer));Command c=take();
+        var guard=new PackageRepairCommandGuard(jdbc,mock(PatchRepoService.class),dialect);
+        var bad=c.toBuilder().setVulnFix(c.getVulnFix().toBuilder().setFixes(0,c.getVulnFix().getFixes(0).toBuilder().setType(FixItem.FixType.CONFIG))).build();
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->guard.prepareDelivery(agent,bad)));
+        jdbc.update("UPDATE t_fix_task SET started_at=? WHERE id=?",dialect.timestamp(Instant.now().minusSeconds(1900)),task);fixes.sweepTimeout();assertEquals(5,state(task));
+        tx.executeWithoutResult(s->results.onResult(agent,RptFixResult.newBuilder().setTaskId(String.valueOf(task)).addResults(result(String.valueOf(candidate),"verified",true,true,false)).build()));
+        assertEquals(1,state(task));assertEquals(2,jdbc.queryForObject("SELECT status FROM t_fix_task WHERE id=?",Integer.class,task));
+    }
 }
