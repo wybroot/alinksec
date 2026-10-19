@@ -757,5 +757,6 @@ jobs:
             .tmp/windows-login-fixtures
             .tmp/windows-ransom-fixtures
             .tmp/windows-update-fixtures
+            .tmp/file-watch-fixtures
           include-hidden-files: true
           if-no-files-found: error
