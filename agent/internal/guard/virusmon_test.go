@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"fmt"
 	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"io"
@@ -10,6 +11,47 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRecoveryScopeReplacementClosesOldTraversal(t *testing.T) {
+	old, next := t.TempDir(), t.TempDir()
+	for n := 0; n < 40; n++ {
+		if err := os.WriteFile(filepath.Join(old, fmt.Sprint(n)), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newFile := filepath.Join(next, "new-scope.txt")
+	os.WriteFile(newFile, []byte("harmless"), 0600)
+	disabled := false
+	g := New(&config.DecoyConfig{Enabled: &disabled}, nil, t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	seen := map[string]int{}
+	g.SetVirusEngine(func(p string) *pb.VirusFinding { seen[p]++; return nil })
+	g.SetVirusRoots([]string{old}, nil)
+	g.fileEventLoop()
+	if g.virusRecovery == nil {
+		t.Fatal("fixture did not retain old traversal")
+	}
+	g.SetVirusRoots([]string{next}, nil)
+	g.fileEventLoop()
+	if seen[newFile] != 1 {
+		t.Fatal("new scope delayed behind old traversal", seen)
+	}
+	if g.virusRecovery != nil {
+		g.virusRecovery.Close()
+	}
+	enabled := false
+	g.SetVirusRoots([]string{next}, func() bool { return enabled })
+	g.fileEventLoop()
+	late := filepath.Join(next, "created-while-disabled.txt")
+	os.WriteFile(late, nil, 0600)
+	enabled = true
+	g.fileEventLoop()
+	if seen[late] != 1 {
+		t.Fatal("reenabling unchanged watch roots missed disabled-period files")
+	}
+	if g.virusRecovery != nil {
+		g.virusRecovery.Close()
+	}
+}
 
 func TestRecoveryVirusProtectionIndependentOfDecoyAndReportsIdentity(t *testing.T) {
 	root := t.TempDir()

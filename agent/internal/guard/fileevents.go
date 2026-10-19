@@ -3,6 +3,7 @@ package guard
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/filewatch"
@@ -96,6 +97,7 @@ func (g *Guard) fileEventLoop() {
 	}
 	roots, on := g.virusRoots()
 	if !on {
+		g.virusRunning = false
 		g.eventPending = nil
 		if g.virusRecovery != nil {
 			g.virusRecovery.Close()
@@ -105,6 +107,15 @@ func (g *Guard) fileEventLoop() {
 		g.watchRecovery = false
 		g.watchMu.Unlock()
 		return
+	}
+	if !g.virusRunning || !slices.Equal(roots, g.virusScope) {
+		if g.virusRecovery != nil {
+			g.virusRecovery.Close()
+			g.virusRecovery = nil
+		}
+		g.virusRescan = true
+		g.virusScope = append([]string(nil), roots...)
+		g.virusRunning = true
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	count := 0

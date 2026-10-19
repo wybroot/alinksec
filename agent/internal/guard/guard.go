@@ -60,6 +60,8 @@ type Guard struct {
 	eventPending   []string // Run goroutine only; unprocessed work survives read budgets
 	virusRecovery  *filewatch.Sweep
 	virusRescan    bool
+	virusRunning   bool
+	virusScope     []string
 	watchMu        sync.Mutex // recovery status is also read by heartbeat
 	watchRecovery  bool
 	watchIssue     string

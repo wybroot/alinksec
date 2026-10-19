@@ -105,16 +105,21 @@ func SafePath(path string) bool {
 
 func (m *Monitor) Update(roots []Root) {
 	next := make([]Root, 0, len(roots))
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	for _, r := range roots {
 		if !filepath.IsAbs(r.Path) {
 			continue
 		}
 		r.Path = filepath.Clean(r.Path)
 		id := key(r.Path) + fmtBool(r.Recursive)
-		if !seen[id] {
+		if index, ok := seen[id]; ok {
+			// Case aliases must not make policy snapshots depend on map order.
+			if r.Path < next[index].Path {
+				next[index] = r
+			}
+		} else {
+			seen[id] = len(next)
 			next = append(next, r)
-			seen[id] = true
 		}
 	}
 	sort.Slice(next, func(i, j int) bool {

@@ -6,12 +6,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+func TestWindowsCaseAliasesDoNotResetPendingWork(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path identity")
+	}
+	root := t.TempDir()
+	a, b := Root{strings.ToUpper(root), true}, Root{strings.ToLower(root), true}
+	m := New()
+	m.Update([]Root{a, b})
+	m.Drain(MaxPending)
+	m.observe(fsnotify.Event{Name: filepath.Join(root, "queued.txt"), Op: fsnotify.Write})
+	m.Update([]Root{b, a})
+	if m.Status().Pending != 1 {
+		t.Fatal("equivalent policy cleared pending work")
+	}
+}
 
 type failingRegistrar struct{ fail bool }
 
