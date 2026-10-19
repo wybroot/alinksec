@@ -4,6 +4,7 @@ package filewatch
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -392,6 +393,9 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 				}
 			}
 			if err != nil {
+				if err != io.EOF {
+					issue = "directory_unreadable"
+				}
 				break
 			}
 		}
