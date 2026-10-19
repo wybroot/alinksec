@@ -33,7 +33,12 @@ jobs:
           ALINKSEC_RESOURCE_NATIVE_REQUIRED: 'true'
           ALINKSEC_RESOURCE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/resource-native/result.json
       - name: Check native Windows file events, guard dispatch and recovery
-        run: go test -v -count=1 -timeout=2m -run '^TestNativeFileEvents$' ./internal/guard
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Native file events fresh process $attempt/3"
+            go test -v -count=1 -timeout=2m -run '^TestNativeFileEvents$' ./internal/guard
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
         working-directory: agent
         env:
           ALINKSEC_FILE_WATCH_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/file-watch-native/result.json
@@ -426,7 +431,11 @@ jobs:
         run: go test -race ./internal/windowsupdate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
         working-directory: agent
       - name: Check native Linux file events, guard dispatch and recovery
-        run: go test -v -count=1 -timeout=2m -run '^TestNativeFileEvents$' ./internal/guard
+        run: |
+          for attempt in 1 2 3; do
+            echo "Native file events fresh process $attempt/3"
+            go test -v -count=1 -timeout=2m -run '^TestNativeFileEvents$' ./internal/guard
+          done
         working-directory: agent
         env:
           ALINKSEC_FILE_WATCH_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/file-watch-native/result.json

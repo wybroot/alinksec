@@ -49,14 +49,17 @@ type Batch struct {
 }
 
 type Monitor struct {
-	mu       sync.Mutex
-	roots    []Root
-	pending  map[string]string
-	rescan   bool
-	topology bool
-	revision uint64
-	status   Status
-	wake     chan struct{}
+	mu           sync.Mutex
+	roots        []Root
+	pending      map[string]string
+	rescan       bool
+	topology     bool
+	revision     uint64
+	active       map[string]bool
+	invalidated  map[string]bool
+	resetWatches bool
+	status       Status
+	wake         chan struct{}
 }
 
 func New() *Monitor {
@@ -67,7 +70,7 @@ func New() *Monitor {
 	if runtime.GOOS == "windows" {
 		backend = "ReadDirectoryChangesW"
 	}
-	return &Monitor{pending: map[string]string{}, wake: make(chan struct{}, 1), status: Status{State: "starting", Backend: backend}}
+	return &Monitor{pending: map[string]string{}, active: map[string]bool{}, invalidated: map[string]bool{}, wake: make(chan struct{}, 1), status: Status{State: "starting", Backend: backend}}
 }
 
 func key(p string) string {
@@ -179,6 +182,9 @@ func (m *Monitor) observe(e fsnotify.Event) {
 	if e.Has(fsnotify.Create | fsnotify.Remove | fsnotify.Rename) {
 		m.topology = true
 	}
+	if e.Has(fsnotify.Remove|fsnotify.Rename) && m.active[key(e.Name)] {
+		m.invalidated[key(e.Name)] = true
+	}
 	if !inScope(e.Name, m.roots) {
 		return
 	}
@@ -210,6 +216,7 @@ func (m *Monitor) gap(issue string) {
 	defer m.mu.Unlock()
 	m.rescan = true
 	m.topology = true
+	m.resetWatches = true
 	m.status.Gaps++
 	m.status.State = "degraded"
 	m.status.Issue = issue
@@ -322,12 +329,17 @@ func (m *Monitor) Run(ctx context.Context) {
 type registrar interface {
 	Add(string) error
 	Remove(string) error
+	WatchList() []string
 }
 
 func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string]os.FileInfo) {
 	m.mu.Lock()
 	roots := append([]Root(nil), m.roots...)
 	rev := m.revision
+	invalidated := m.invalidated
+	m.invalidated = map[string]bool{}
+	resetWatches := m.resetWatches
+	m.resetWatches = false
 	m.topology = false
 	m.mu.Unlock()
 	wanted := map[string]os.FileInfo{}
@@ -406,8 +418,12 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 		walk(r.Path, 0, r.Recursive)
 	}
 	changed := false
+	registered := map[string]bool{}
+	for _, p := range w.WatchList() {
+		registered[key(p)] = true
+	}
 	for p, old := range watched {
-		if cur, ok := wanted[p]; !ok || !os.SameFile(old, cur) {
+		if cur, ok := wanted[p]; resetWatches || !ok || !os.SameFile(old, cur) || invalidated[key(p)] || !registered[key(p)] {
 			_ = w.Remove(p)
 			delete(watched, p)
 			changed = true
@@ -441,6 +457,10 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 	}
 	m.status.Roots = len(roots)
 	m.status.Watches = len(watched)
+	m.active = map[string]bool{}
+	for p := range watched {
+		m.active[key(p)] = true
+	}
 	m.status.LastSync = time.Now().UnixMilli()
 	if rev != m.revision {
 		m.topology = true

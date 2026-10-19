@@ -31,20 +31,36 @@ func TestWindowsCaseAliasesDoNotResetPendingWork(t *testing.T) {
 	}
 }
 
-type failingRegistrar struct{ fail bool }
+type failingRegistrar struct {
+	fail  bool
+	paths map[string]bool
+	adds  int
+}
 
-func (w *failingRegistrar) Add(string) error {
+func (w *failingRegistrar) Add(path string) error {
 	if w.fail {
 		return errors.New("controlled registration failure")
 	}
+	if w.paths == nil {
+		w.paths = map[string]bool{}
+	}
+	w.paths[path] = true
+	w.adds++
 	return nil
 }
-func (w *failingRegistrar) Remove(string) error { return nil }
+func (w *failingRegistrar) Remove(path string) error { delete(w.paths, path); return nil }
+func (w *failingRegistrar) WatchList() []string {
+	var paths []string
+	for p := range w.paths {
+		paths = append(paths, p)
+	}
+	return paths
+}
 
 func TestRegistrationFailureIsVisibleAndRecoveryRequestsRescan(t *testing.T) {
 	m := New()
 	m.Update([]Root{{t.TempDir(), true}})
-	w := &failingRegistrar{true}
+	w := &failingRegistrar{fail: true}
 	watched := map[string]os.FileInfo{}
 	m.reconcile(context.Background(), w, watched)
 	if s := m.Status(); s.State != "degraded" || s.Issue != "watch_add_failed" || !m.Drain(10).Rescan {
@@ -54,6 +70,34 @@ func TestRegistrationFailureIsVisibleAndRecoveryRequestsRescan(t *testing.T) {
 	m.reconcile(context.Background(), w, watched)
 	if s := m.Status(); s.State != "watching" || s.Watches < 1 || !m.Drain(10).Rescan {
 		t.Fatal(s)
+	}
+}
+
+func TestRemovedNativeWatchIsReinstalledEvenWhenDirectoryIdentityMatches(t *testing.T) {
+	root := t.TempDir()
+	m := New()
+	m.Update([]Root{{root, true}})
+	w := &failingRegistrar{}
+	watched := map[string]os.FileInfo{}
+	m.reconcile(context.Background(), w, watched)
+	m.Drain(MaxPending)
+	before := w.adds
+	delete(w.paths, root) // automatic kernel watch removal, unchanged stat identity
+	m.reconcile(context.Background(), w, watched)
+	if w.adds <= before || !w.paths[root] || !m.Drain(MaxPending).Rescan {
+		t.Fatal("detached native watch was trusted")
+	}
+	before = w.adds
+	m.observe(fsnotify.Event{Name: root, Op: fsnotify.Remove})
+	m.reconcile(context.Background(), w, watched)
+	if w.adds <= before || !m.Drain(MaxPending).Rescan {
+		t.Fatal("directory removal did not invalidate reused identity")
+	}
+	before = w.adds
+	m.gap("kernel_overflow_or_error")
+	m.reconcile(context.Background(), w, watched)
+	if w.adds <= before || !m.Drain(MaxPending).Rescan {
+		t.Fatal("kernel gap retained possibly stale native watches")
 	}
 }
 

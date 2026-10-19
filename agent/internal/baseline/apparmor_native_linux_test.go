@@ -47,7 +47,7 @@ func TestNativeAppArmor(t *testing.T) {
 	initial := read()
 	initialProfiles, _ := parseAppArmorProfiles(initial.Values["profiles"])
 	if initial.Values["enabled"] != "Y\n" || initial.Values["mode"] != "enforce" || initialProfiles[name] != "" {
-		t.Fatal("enabled enforcing root view and unused unique fixture name required")
+		t.Fatalf("enabled enforcing root view and unused unique fixture name required: enabled=%q mode=%q fixture_exists=%t", initial.Values["enabled"], initial.Values["mode"], initialProfiles[name] != "")
 	}
 	loaded := false
 	t.Cleanup(func() {
