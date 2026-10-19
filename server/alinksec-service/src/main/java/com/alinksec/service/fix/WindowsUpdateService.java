@@ -86,10 +86,10 @@ public class WindowsUpdateService implements CommandLifecycleListener {
         String id=u.path("update_id").asText(),title=u.path("title").asText(),eula=u.path("eula_digest").asText(),reason=u.path("reason").asText();
         if(!id.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}") || !u.path("revision").isIntegralNumber() || !u.path("revision").canConvertToInt() || u.path("revision").asInt()<1
                 || title.isBlank() || title.length()>512 || !eula.matches("[a-f0-9]{64}") || reason.length()>128 || !u.path("eligible").isBoolean()
-                || !u.path("size").isIntegralNumber() || u.path("size").asLong()<0 || u.path("size").asLong()>4L*1024*1024*1024 || !u.path("kb").isArray() || u.path("kb").size()>32)
+                || !u.path("size").isIntegralNumber() || !u.path("size").canConvertToLong() || u.path("size").asLong()<0 || !u.path("kb").isArray() || u.path("kb").size()>32)
             throw new IllegalArgumentException("更新元数据不完整或超限");
         var kb=new ArrayList<String>(); for(var k:u.path("kb")) { if(!k.isTextual() || !k.asText().matches("[0-9]{4,12}") || kb.contains(k.asText())) throw new IllegalArgumentException("无效 KB 集合"); kb.add(k.asText()); }
-        if(u.path("eligible").asBoolean() && (kb.isEmpty() || !reason.isEmpty())) throw new IllegalArgumentException("更新适用性声明不一致");
+        if(u.path("eligible").asBoolean() && (kb.isEmpty() || !reason.isEmpty() || u.path("size").asLong()>4L*1024*1024*1024)) throw new IllegalArgumentException("更新适用性声明不一致");
         return Map.of("update_id",id,"revision",u.path("revision").asInt(),"title",title,"eula_digest",eula,"reason",reason,"eligible",u.path("eligible").asBoolean(),"size",u.path("size").asLong(),"kb",kb);
     }
 

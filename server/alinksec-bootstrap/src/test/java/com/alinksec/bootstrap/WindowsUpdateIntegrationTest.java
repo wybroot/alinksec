@@ -98,6 +98,18 @@ class WindowsUpdateIntegrationTest {
         assertEquals(0,jdbc.queryForObject("SELECT status FROM t_vuln_finding WHERE agent_id=? AND cve_id='CVE-2099-1234567'",Integer.class,agent));capture("verified");
         String output=System.getenv("ALINKSEC_WINDOWS_UPDATE_BROWSER_FIXTURES");if(output!=null&&!output.isBlank()){Path dir=Path.of(output);Files.createDirectories(dir);Files.writeString(dir.resolve("workflow.json"),JsonUtils.write(Map.of("stages",stages,"agent",agent,"creator",creator,"reviewer",reviewer,"viewer",viewer,"reviewerName",reviewerName)));}
     }
+    @Test void oversizeIneligibleUpdatesDoNotDiscardOtherApplicableUpdates() throws Exception {
+        Command c=scan();String id=c.getWindowsUpdateScan().getScanId();
+        var large=new LinkedHashMap<>(update(8));large.put("size",5L*1024*1024*1024);large.put("eligible",false);large.put("reason","download_size_limit");
+        var doc=new LinkedHashMap<>(snapshot(7));doc.put("updates",List.of(update(7),large));
+        var overflow=new LinkedHashMap<>(large);overflow.put("size",new java.math.BigInteger("18446744073709551616"));doc.put("updates",List.of(overflow));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->updates.onSnapshot(agent,RptWindowsUpdate.newBuilder().setScanId(id).setSnapshot(JsonUtils.write(doc)).build())));
+        doc.put("updates",List.of(update(7),large));
+        tx.executeWithoutResult(s->updates.onSnapshot(agent,RptWindowsUpdate.newBuilder().setScanId(id).setSnapshot(JsonUtils.write(doc)).build()));
+        var candidates=updates.candidates(agent);assertEquals(2,candidates.size());
+        long allowed=((Number)candidates.get(0).get("id")).longValue(),blocked=((Number)candidates.get(1).get("id")).longValue();
+        assertThrows(IllegalArgumentException.class,()->create(blocked));assertTrue(create(allowed)>0);
+    }
     @Test void firstScanEvidenceOwnsTheTargetAndNewFailuresInvalidateOldCoverage() throws Exception {
         Command c=scan();String id=c.getWindowsUpdateScan().getScanId();
         tx.executeWithoutResult(s->updates.onSnapshot(other,RptWindowsUpdate.newBuilder().setScanId(id).setSnapshot(JsonUtils.write(snapshot(7))).build()));assertTrue(updates.candidates(agent).isEmpty());

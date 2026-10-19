@@ -146,6 +146,7 @@ func TestInvalidExpiredAndChangedTargetsNeverInstall(t *testing.T) {
 		{name: "expired", edit: func(p *Payload) { p.Deadline = 1 }},
 		{name: "unknown_contract", edit: func(p *Payload) { p.Contract = 0 }},
 		{name: "interactive", edit: func(p *Payload) { p.Update.Eligible = false; p.Update.Reason = "interactive_or_source_required" }},
+		{name: "oversize_eligible", edit: func(p *Payload) { p.Update.Size = 5 << 30 }},
 		{name: "query_injection", edit: func(p *Payload) { p.Update.ID = "x' or IsInstalled=0" }},
 		{name: "changed_revision", edit: func(p *Payload) {}, mutate: true},
 	}
@@ -164,6 +165,21 @@ func TestInvalidExpiredAndChangedTargetsNeverInstall(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIneligibleLargeUpdateRemainsVisibleButCannotInstall(t *testing.T) {
+	p := fixturePayload()
+	p.Update.Size = 5 << 30
+	p.Update.Title = strings.Repeat("安全", 200)
+	p.Update.Eligible = false
+	p.Update.Reason = "download_size_limit"
+	if !validUpdate(p.Update) {
+		t.Fatal("ineligible discovery metadata rejected")
+	}
+	f := &fakeWUA{}
+	if repairWith("20", "30", encoded(p), t.TempDir(), f.run).Success || len(f.calls) != 0 {
+		t.Fatal("ineligible update reached native execution")
 	}
 }
 func TestCorruptAndFullRecoveryStateFailsClosed(t *testing.T) {

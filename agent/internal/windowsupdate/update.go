@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/securestate"
@@ -119,7 +120,7 @@ func scanWith(deadline int64, run runner) Snapshot {
 	return s
 }
 func validUpdate(u Update) bool {
-	if !guid.MatchString(u.ID) || u.Revision < 1 || u.Revision > 2147483647 || len(u.Title) < 1 || len(u.Title) > 512 || len(u.KB) > 32 || u.Size < 0 || u.Size > 4<<30 || !digest.MatchString(u.Eula) || len(u.Reason) > 128 {
+	if !guid.MatchString(u.ID) || u.Revision < 1 || u.Revision > 2147483647 || len(u.Title) < 1 || utf8.RuneCountInString(u.Title) > 512 || len(u.KB) > 32 || u.Size < 0 || !digest.MatchString(u.Eula) || len(u.Reason) > 128 {
 		return false
 	}
 	for _, kb := range u.KB {
@@ -127,7 +128,7 @@ func validUpdate(u Update) bool {
 			return false
 		}
 	}
-	return !u.Eligible || (len(u.KB) > 0 && u.Reason == "")
+	return !u.Eligible || (len(u.KB) > 0 && u.Reason == "" && u.Size <= 4<<30)
 }
 func pin(p Payload) string {
 	p.Deadline = 0
