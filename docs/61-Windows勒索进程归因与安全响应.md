@@ -32,6 +32,15 @@ Windows amd64 Agent 在勒索防护启用时创建自有实时 ETW 会话，订�
 
 ## 验证
 
-实现仍在原生验证中，尚未宣称完成模块验收。CI 保留 `windows-ransom-validation-windows-amd64` 原始 JSON，验证关闭文件句柄后的写入者关联、无关/只读/多写入者/排除进程保护、实例不符拒绝终止、原路径成功重命名及速率检测批量改名、采集停止、正常重启和所有者崩溃恢复。SQLite/PostgreSQL 的告警保存、聚合、回滚重传及基于数据库响应的生产页面流程分别验证。
+2026-10-19 完成限定范围的模块验收。完整 CI：[CI39196235924](https://github.com/wybroot/alinksec/actions/runs/39196235924)（提交 `6ee165a`）；Windows amd64 在原生系统上连续三次执行以下 10 个受控场景，原始记录为 `windows-ransom-validation-windows-amd64/result.json`：
+
+- 已关闭文件句柄的写入者能关联并终止，较新启动的无关进程存活。
+- 只读和无关进程、多写入者、排除进程、创建时间不符时均拒绝终止。
+- 仅改名关联原路径，批量写入与改名通过实际速率检测只终止关联写入者。
+- 停止采集后旧证据失效，正常重启释放会话，所有者崩溃后只恢复自有会话。
+
+原生单元测试另行验证事件来源与实际线程归属、进程/线程时间、普通共享对象与系统/Agent 缓存对象的信任边界。Linux amd64/arm64 的 Go 完整测试与竞态检查、现有 Agent 生命周期回归、SQLite/PostgreSQL 的告警保存/身份聚合/事务回滚重传，以及两个架构的生产页面检查均通过。手机检查展开文件证据并测量实际内容面板，验证横向与纵向边界；归因结果、完整实例字符串、查看者权限、操作员入口和失败重试均已核对。原生最高级别 `SEV_CRITICAL=5` 正确显示为“严重”，纳入严重筛选、总览和大屏统计；现有控制台 1–4 级映射保持兼容。截图保存在对应 `browser-validation-*` 产物。
+
+本机约 2 GiB 的构建和浏览器尝试触发资源限制后停止；上述完整前端和跨平台验收以相同提交的 CI 为准，未提高本地内存上限。
 
 接口依据：[ETW 会话属性](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties)、[TDH 属性读取](https://learn.microsoft.com/en-us/windows/win32/api/tdh/nf-tdh-tdhgetproperty)、[线程所属进程](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocessidofthread)、[进程时间](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)。
