@@ -1,10 +1,6 @@
 package guard
 
-import (
-	"path/filepath"
-	"strings"
-	"time"
-)
+import "time"
 
 /* 加密速率行为监测（docs/05 §2.1 触发②）：
  * 受监听目录树滑动窗口内快照对比 —— 写入/重命名文件数 > 阈值 且
