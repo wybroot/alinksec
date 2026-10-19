@@ -65,6 +65,7 @@ func TestAppArmorRuntimeStatesAndRedaction(t *testing.T) {
 		pass, errorWant  bool
 	}{
 		{"all_enforce", "mode", "enforce", true, false},
+		{"all_enforce_with_parameter_newline", "mode", "enforce\n", true, false},
 		{"global_complain", "mode", "complain", false, false},
 		{"global_kill", "mode", "kill", false, false},
 		{"global_unconfined", "mode", "unconfined", false, false},
