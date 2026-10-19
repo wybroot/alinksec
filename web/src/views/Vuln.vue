@@ -57,6 +57,9 @@
           </el-table>
         </el-tab-pane>
 
+        <el-tab-pane label="Windows 更新" name="windows-update">
+          <WindowsUpdates v-if="tab === 'windows-update'" />
+        </el-tab-pane>
         <el-tab-pane label="弱口令" name="weakpwd">
           <WeakPasswordCoverage v-if="tab === 'weakpwd'" />
           <p style="margin-top:20px">历史风险发现（不代表当前口令状态）</p>
@@ -193,6 +196,7 @@ import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 import VulnerabilityHistory from '../components/VulnerabilityHistory.vue'
 import WeakPasswordCoverage from '../components/WeakPasswordCoverage.vue'
 import VulnerabilityCoverage from '../components/VulnerabilityCoverage.vue'
+import WindowsUpdates from '../components/WindowsUpdates.vue'
 
 const tab = ref('vuln')
 const vulns = ref([])

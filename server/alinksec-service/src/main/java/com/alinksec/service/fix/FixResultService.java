@@ -39,17 +39,18 @@ public class FixResultService {
         jdbc.update("UPDATE t_fix_task SET status=status WHERE id=?",taskId);
         jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=?",agentId);
         for (FixResultItem item : result.getResultsList()) {
+            if(WindowsUpdateResult.accept(jdbc,agentId,taskId,item)) continue;
             int status = item.getSuccess() ? 1 : (item.getRolledBack() ? 2 : 3);
             boolean unverifiedSuccess = item.getSuccess() && !item.getVerified();
             int updated = jdbc.update("""
-                    UPDATE t_fix_record SET status = CASE WHEN ref_type='vuln_finding' AND ? THEN 3 ELSE ? END,
+                    UPDATE t_fix_record SET reboot_required=?,verified=?,status = CASE WHEN ref_type='vuln_finding' AND ? THEN 3 ELSE ? END,
                       log = CASE WHEN ref_type='vuln_finding' AND ? THEN ? ELSE ? END, finished_at = CURRENT_TIMESTAMP
                     WHERE task_id = ? AND agent_id = ? AND ref_id = ? AND status = 0
                       AND EXISTS (SELECT 1 FROM t_fix_task t WHERE t.id = ? AND t.status = 1)
                       AND (ref_type <> 'vuln_finding' OR EXISTS (
                         SELECT 1 FROM t_command c WHERE c.cmd_id=t_fix_record.command_id
                           AND c.agent_id=t_fix_record.agent_id AND c.status IN (1,2,3,4)))
-                    """, unverifiedSuccess, status, unverifiedSuccess,
+                    """,item.getRebootRequired()?1:0,item.getVerified()?1:0, unverifiedSuccess, status, unverifiedSuccess,
                     truncate("未确认安装后身份及完整版本，不标记漏洞已修复。\n" + item.getLog()), truncate(item.getLog()),
                     taskId, agentId, item.getRefId(), taskId);
             if (updated == 0) {
@@ -84,10 +85,11 @@ public class FixResultService {
         }
         Integer failed = jdbc.queryForObject(
                 "SELECT count(*) FROM t_fix_record WHERE task_id = ? AND status IN (2,3,5)", Integer.class, taskId);
+        Integer reboot=jdbc.queryForObject("SELECT count(*) FROM t_fix_record WHERE task_id=? AND status IN (6,7)",Integer.class,taskId);
         jdbc.update("""
                 UPDATE t_fix_task SET status = ?, finished_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 1
-                """, failed != null && failed > 0 ? 3 : 2, taskId);
+                WHERE id = ? AND status IN (1,3,5)
+                """, reboot!=null && reboot>0 ? 5 : failed != null && failed > 0 ? 3 : 2, taskId);
     }
 
     private static String truncate(String s) {

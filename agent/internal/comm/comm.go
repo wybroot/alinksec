@@ -38,6 +38,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"github.com/alinksec/alinksec-agent/internal/virusscan"
 	"github.com/alinksec/alinksec-agent/internal/windowslogin"
+	"github.com/alinksec/alinksec-agent/internal/windowsupdate"
 )
 
 // Client Agent 通信客户端：注册 + 主通道双向流
@@ -73,12 +74,14 @@ type Client struct {
 	// 特征库更新单飞：下载安装互斥（避免并发替换 db 目录）
 	sigBusy atomic.Bool
 	// 配置修复单飞：文件写入互斥（避免并发改同一配置文件）
-	fixBusy            atomic.Bool
-	upgradeBusy        atomic.Bool
-	upgradeContract    uint32
-	isolationContract  uint32
-	isolationMu        sync.Mutex
-	isolationChallenge isolationChallenge
+	fixBusy                  atomic.Bool
+	windowsUpdateBusy        atomic.Bool
+	windowsUpdateReconcileAt atomic.Int64
+	upgradeBusy              atomic.Bool
+	upgradeContract          uint32
+	isolationContract        uint32
+	isolationMu              sync.Mutex
+	isolationChallenge       isolationChallenge
 
 	// 勒索诱饵防护引擎（本地响应，事件经 reportSecurityEvent 上报）
 	grd          *guard.Guard
@@ -415,6 +418,10 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				return
 			}
 			c.noteChannelActivity(generation, false)
+			if receipt := cmd.GetWindowsUpdateReceipt(); receipt != nil {
+				windowsupdate.Receipt(c.workDir, receipt.GetRecords())
+				continue
+			}
 			if receipt := cmd.GetWindowsLoginReceipt(); receipt != nil {
 				if c.windowsLogin != nil {
 					if err := c.windowsLogin.Receipt(receipt.GetEventIds()); err != nil {
@@ -574,6 +581,7 @@ func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uin
 
 // buildHeartbeat 构造心跳 Report
 func (c *Client) buildHeartbeat() *pb.Report {
+	c.reconcileWindowsUpdates()
 	s := identity.Sample()
 	guardStatus := "normal"
 	if c.grd != nil && c.grd.Isolated() {
@@ -595,6 +603,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),
+			WindowsUpdateContract:  windowsupdate.ExecutionContract(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,
 			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
@@ -706,6 +715,8 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return c.executeSignatureUpdate(p.SignatureUpdate, received, sctx)
 	case *pb.Command_VulnFix:
 		return c.executeVulnFix(p.VulnFix, received)
+	case *pb.Command_WindowsUpdateScan:
+		return c.executeWindowsUpdateScan(p.WindowsUpdateScan, received)
 	case *pb.Command_ProtectAction:
 		return c.executeProtectAction(p.ProtectAction, received)
 	case *pb.Command_AgentUpgrade:

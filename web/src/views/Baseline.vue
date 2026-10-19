@@ -357,13 +357,13 @@ async function submitFix() {
 
 /* ---------------- 修复任务记录 ---------------- */
 
-const FIX_STATUS = { 0: '待执行', 1: '执行中', 2: '已完成', 3: '部分失败', 4: '已取消' }
+const FIX_STATUS = { 0: '待执行', 1: '执行中', 2: '已完成', 3: '部分失败', 4: '已取消', 5: '待重启或复核' }
 const FIX_STATUS_COLOR = { 0: '#94a3b8', 1: '#2563eb', 2: '#16a34a', 3: '#dc2626', 4: '#64748b' }
 const fixStatusText = (row) => (Number(row.type) === 2 && !row.approved && Number(row.status) === 0
   ? '待审批' : FIX_STATUS[Number(row.status)] || '未知')
 const fixStatusColor = (row) => (Number(row.type) === 2 && !row.approved && Number(row.status) === 0
   ? '#f59e0b' : FIX_STATUS_COLOR[Number(row.status)] || '#64748b')
-const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '未完成' }
+const FIX_REC_STATUS = { 0: '待执行', 1: '修复成功', 2: '失败已回滚', 3: '失败未回滚', 5: '未完成', 6: '等待重启复核', 7: '安装状态待复核' }
 const FIX_REC_COLOR = { 0: '#94a3b8', 1: '#16a34a', 2: '#f59e0b', 3: '#dc2626', 5: '#f59e0b' }
 
 async function approveTask(row) {

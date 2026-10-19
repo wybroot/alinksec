@@ -24,7 +24,7 @@ public class PackageRepairCommandGuard implements CommandLifecycleListener {
     }
 
     @Override public Command prepareDelivery(String agentId,Command command) {
-        if (!command.hasVulnFix() || command.getVulnFix().getFixesList().stream().noneMatch(f -> f.getType()==FixItem.FixType.PACKAGE)) return command;
+        if (!command.hasVulnFix() || command.getVulnFix().getFixesList().stream().noneMatch(f -> f.getType()==FixItem.FixType.PACKAGE || f.getType()==FixItem.FixType.WINDOWS_UPDATE)) return command;
         long taskId;
         try { taskId=Long.parseLong(command.getVulnFix().getTaskId()); }
         catch (NumberFormatException e) { throw new IllegalArgumentException("软件包指令缺少有效任务身份"); }
@@ -49,10 +49,18 @@ public class PackageRepairCommandGuard implements CommandLifecycleListener {
         if (!now.isBefore(deadline)) throw new IllegalArgumentException("任务或维护窗口已经过期，停止派发和重推");
         var rebuilt=command.getVulnFix().toBuilder().clearFixes();
         for (var item:command.getVulnFix().getFixesList()) {
-            if (item.getType()!=FixItem.FixType.PACKAGE) throw new IllegalArgumentException("软件包任务不能混入配置修复");
-            var records=jdbc.queryForList("SELECT status FROM t_fix_record WHERE task_id=? AND agent_id=? AND ref_id=? AND ref_type='vuln_finding' AND command_id=?",taskId,agentId,item.getRefId(),command.getCmdId());
+            boolean windows=item.getType()==FixItem.FixType.WINDOWS_UPDATE;
+            if (item.getType()!=FixItem.FixType.PACKAGE && !windows) throw new IllegalArgumentException("软件包任务不能混入配置修复");
+            var records=jdbc.queryForList("SELECT status,fix_payload FROM t_fix_record WHERE task_id=? AND agent_id=? AND ref_id=? AND ref_type=? AND command_id=?",taskId,agentId,item.getRefId(),windows?"windows_update":"vuln_finding",command.getCmdId());
             if (records.size()!=1) throw new IllegalArgumentException("指令目标与持久化任务不一致");
             if (((Number)records.get(0).get("status")).intValue()!=0) continue;
+            if(windows) {
+                var payload=new WindowsUpdateValidation(jdbc,database).validate(Map.of("agent_id",agentId,"ref_id",item.getRefId(),"fix_payload",records.get(0).get("fix_payload")));
+                var supplied=new java.util.LinkedHashMap<>(com.alinksec.common.util.JsonUtils.read(item.getPayload(),Map.class)); supplied.remove("dispatch_deadline_unix_ms");
+                if(!payload.equals(supplied)) throw new IllegalArgumentException("更新指令与审批目标不一致");
+                payload.put("dispatch_deadline_unix_ms",deadline.toEpochMilli());
+                rebuilt.addFixes(item.toBuilder().setPayload(JsonUtils.write(payload))); continue;
+            }
             var payload=validation.validate(Map.of("agent_id",agentId,"ref_id",item.getRefId(),"fix_payload",item.getPayload()));
             @SuppressWarnings("unchecked") var patch=(Map<String,Object>)payload.remove("validated_patch");
             var pin=(Map<?,?>)payload.get("patch_review");

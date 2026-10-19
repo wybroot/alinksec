@@ -95,6 +95,10 @@ public class AgentRepository {
         jdbc.update("UPDATE t_agent SET weak_password_contract=? WHERE agent_id=?",contract==1?1:0,agentId);
     }
 
+    public void windowsUpdateContract(String agentId,int contract) {
+        jdbc.update("UPDATE t_agent SET windows_update_contract=? WHERE agent_id=?",contract==1?1:0,agentId);
+    }
+
     public void isolationContract(String agentId,int contract) {
         jdbc.update("UPDATE t_agent SET isolation_contract=? WHERE agent_id=?",contract==1?1:0,agentId);
     }

@@ -77,6 +77,10 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                             }
                         } else {
                             dispatcher.dispatch(authenticatedAgentId, report);
+                            if(report.hasFixResult()) {
+                                var receipts=dispatcher.windowsUpdateReceipts(authenticatedAgentId,report.getFixResult());
+                                if(!receipts.isEmpty()) registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setWindowsUpdateReceipt(com.alinksec.proto.CmdWindowsUpdateReceipt.newBuilder().addAllRecords(receipts)).build());
+                            }
                             // dispatch returns only after its alert + receipt transaction commits.
                             if(com.alinksec.service.protect.WindowsLoginService.outcome(report)) {
                                 String id=report.getReportId();
@@ -122,6 +126,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 // Capability belongs to this authenticated connection. A
                 // previous, newer Agent may have been downgraded while offline.
                 agentRepository.weakPasswordContract(authenticatedAgentId, report.hasHeartbeat()?report.getHeartbeat().getWeakPasswordContract():0);
+                agentRepository.windowsUpdateContract(authenticatedAgentId,report.hasHeartbeat()?report.getHeartbeat().getWindowsUpdateContract():0);
                 agentRepository.upgradeContract(authenticatedAgentId,
                         report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
                 agentRepository.isolationContract(authenticatedAgentId,
