@@ -56,7 +56,12 @@ jobs:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
       - name: Check native Windows ransomware writer attribution and safe response
-        run: go test -v -count=3 -timeout=3m -run '^TestNativeWindowsRansomAttribution$' ./internal/guard
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Native ransomware attribution fresh process $attempt/3"
+            go test -v -count=1 -timeout=3m -run '^TestNativeWindowsRansomAttribution$' ./internal/guard
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
         working-directory: agent
         env:
           ALINKSEC_RANSOM_NATIVE_REQUIRED: 'true'

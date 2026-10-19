@@ -216,7 +216,10 @@ func (s *winTrace) start() (err error) {
 	if e != nil {
 		return e
 	}
-	r, _, _ = enableTrace.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&fileProvider)), 1, 4, uintptr(keywords), 0, 0, 0)
+	// A zero timeout returns before provider configuration completes. Do not
+	// publish a ready evidence epoch while the initial file opens can still be
+	// missed. Bound the wait; a timeout follows the normal unavailable/retry path.
+	r, _, _ = enableTrace.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&fileProvider)), 1, 4, uintptr(keywords), 0, 5000, 0)
 	if err = apiError("EnableTraceEx2", r); err != nil {
 		return err
 	}

@@ -22,6 +22,8 @@ Windows amd64 Agent 在勒索防护启用时创建自有实时 ETW 会话，订�
 
 自有会话名称随机且与工作目录绑定，所有权记录和锁使用私有恢复目录。正常关闭释放会话；异常退出后，下一实例只有核实旧所有者已退出或 PID 已被复用，才清理该记录对应的会话。记录损坏、旧所有者仍存在或无法核验时拒绝接管，并报告采集不可用。
 
+启动时等待文件事件提供程序配置完成后才建立就绪证据窗口，等待最多 5 秒；配置超时按采集不可用处理并清理会话，不将异步配置请求已提交视为就绪。
+
 启动、关闭和异常状态通过 `windows-ransom-attribution` 自保护事件及 Agent 日志记录。它是发生时的状态历史，不代表逐主机当前覆盖证明，也不能据此把旧 Agent、离线主机或尚未收到状态的主机视为已覆盖。
 
 ## 告警证据
@@ -32,7 +34,7 @@ Windows amd64 Agent 在勒索防护启用时创建自有实时 ETW 会话，订�
 
 ## 验证
 
-2026-10-19 完成限定范围的模块验收。完整 CI：[CI39196235924](https://github.com/wybroot/alinksec/actions/runs/39196235924)（提交 `6ee165a`）；Windows amd64 在原生系统上连续三次执行以下 10 个受控场景，原始记录为 `windows-ransom-validation-windows-amd64/result.json`：
+2026-10-19 完成限定范围的模块验收。完整 CI：[CI39202280506](https://github.com/wybroot/alinksec/actions/runs/39202280506)（提交 `408f2c5`）；Windows amd64 在三个独立测试进程中分别执行以下 10 个受控场景，原始记录为 `windows-ransom-validation-windows-amd64/result.json`：
 
 - 已关闭文件句柄的写入者能关联并终止，较新启动的无关进程存活。
 - 只读和无关进程、多写入者、排除进程、创建时间不符时均拒绝终止。
@@ -41,6 +43,8 @@ Windows amd64 Agent 在勒索防护启用时创建自有实时 ETW 会话，订�
 
 原生单元测试另行验证事件来源与实际线程归属、进程/线程时间、普通共享对象与系统/Agent 缓存对象的信任边界。Linux amd64/arm64 的 Go 完整测试与竞态检查、现有 Agent 生命周期回归、SQLite/PostgreSQL 的告警保存/身份聚合/事务回滚重传，以及两个架构的生产页面检查均通过。手机检查展开文件证据并测量实际内容面板，验证横向与纵向边界；归因结果、完整实例字符串、查看者权限、操作员入口和失败重试均已核对。原生最高级别 `SEV_CRITICAL=5` 正确显示为“严重”，纳入严重筛选、总览和大屏统计；现有控制台 1–4 级映射保持兼容。截图保存在对应 `browser-validation-*` 产物。
 
+合并后主分支检查发现首次提供程序配置的时序缺口，补充同步配置等待；原生归因的三轮检查改为三个独立测试进程，首个受控写入仍紧随就绪状态执行，不增加等待或重试来绕过失败。修复后的上述完整 CI 四作业与 21 份原始产物已重新验收通过，合并后还须核对主分支源码和检查结果。
+
 本机约 2 GiB 的构建和浏览器尝试触发资源限制后停止；上述完整前端和跨平台验收以相同提交的 CI 为准，未提高本地内存上限。
 
-接口依据：[ETW 会话属性](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties)、[TDH 属性读取](https://learn.microsoft.com/en-us/windows/win32/api/tdh/nf-tdh-tdhgetproperty)、[线程所属进程](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocessidofthread)、[进程时间](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)。
+接口依据：[提供程序配置与有界等待](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/nf-evntrace-enabletraceex2)、[ETW 会话属性](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties)、[TDH 属性读取](https://learn.microsoft.com/en-us/windows/win32/api/tdh/nf-tdh-tdhgetproperty)、[线程所属进程](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocessidofthread)、[进程时间](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)。
