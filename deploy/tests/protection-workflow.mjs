@@ -37,11 +37,11 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
   const fileBody = {enabled:true,match:{platforms:['linux'],paths:[containerPath],max_file_bytes:1024},actions:['alert']}
   let loginBody = {enabled:true,match:{platforms:['linux'],window_sec:60,failure_threshold:3,cooldown_sec:1,block_duration_sec:10,ssh_ports:[2222],trusted_ips:[],user_exclude:[],off_hours_enabled:false,allowed_start_hour:8,allowed_end_hour:20,timezone:'UTC'},actions:['alert']}
   async function count(type) { return (await alerts(type)).reduce((sum,row)=>sum+Number(row.count),0) }
-  async function newEvent(type,before,action) {
+  async function newEvent(type,before,action,change) {
     let result
     await until(async()=>{
       const rows = await alerts(type)
-      result = rows.find(r=>r.action_taken===action)
+      result = rows.find(r=>r.action_taken===action && (!change || JSON.parse(r.detail).change===change))
       return rows.reduce((n,r)=>n+Number(r.count),0)>before && result
     },`${type} did not report ${action}`,45_000)
     assert.ok(JSON.parse(result.detail).fingerprint,'Aggregation fingerprint was lost')
@@ -69,12 +69,15 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
     assert.equal(await dex('stat','-c','%a',containerPath),'640')
     for (const mutation of ['delete','symlink']) {
       before = await count('file_tamper')
-      await dex('rm','-f',containerPath)
       if (mutation==='symlink') {
         await writeProtected('OUTSIDE\n','/work/outside')
-        await dex('ln','-s','/work/outside',containerPath)
-      }
-      await newEvent('file_tamper',before,'restored')
+        // Install the completed fixture atomically: immediate restoration can
+        // otherwise fill the gap between separate removal and link creation.
+        const link = containerPath+'.replacement'
+        await dex('ln','-s','/work/outside',link)
+        await dex('mv','-Tf',link,containerPath)
+      } else await dex('rm','-f',containerPath)
+      await newEvent('file_tamper',before,'restored',mutation==='symlink'?'symlink':'missing')
       assert.equal(await readProtected(),'ORIGINAL\n')
       if (mutation==='symlink') assert.equal(await readProtected('/work/outside'),'OUTSIDE\n')
     }
