@@ -229,7 +229,7 @@ app_sql -c "DELETE FROM t_baseline_template WHERE code='migration-template-probe
 pass "reviewed template IDs advance past bootstrap seeds without reusing allocated IDs"
 
 cp "$work_dir/base/"*.sql "$work_dir/broken/"
-cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V022__broken.sql"
+cp "$repo_root/deploy/tests/fixtures/postgres/V002__broken.sql" "$work_dir/broken/V999__broken.sql"
 expect_migration_failure "$work_dir/broken" "migration_test_missing_function"
 assert_query "SELECT count(*) FROM t_schema_migration" "22"
 assert_query "SELECT to_regclass('public.t_migration_rollback_probe') IS NULL" "t"
