@@ -584,6 +584,12 @@ func (c *Client) buildHeartbeat() *pb.Report {
 	c.reconcileWindowsUpdates()
 	s := identity.Sample()
 	guardStatus := "normal"
+	var fileWatchContract uint32
+	var fileWatchStatus string
+	if c.grd != nil {
+		fileWatchContract = 1
+		fileWatchStatus = c.grd.FileWatchStatus()
+	}
 	if c.grd != nil && c.grd.Isolated() {
 		guardStatus = "isolated"
 	}
@@ -603,8 +609,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),
-			FileWatchContract:      1,
-			FileWatchStatus:        c.grd.FileWatchStatus(),
+			FileWatchContract:      fileWatchContract,
+			FileWatchStatus:        fileWatchStatus,
 			WindowsUpdateContract:  windowsupdate.ExecutionContract(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,
