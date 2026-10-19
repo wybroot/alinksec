@@ -24,7 +24,7 @@
             <el-button type="primary" size="small" :disabled="!ruleLoaded" @click="saveRule">保存配置</el-button>
           </el-form-item>
         </el-form>
-        <p style="font-size:12px;color:#94a3b8">默认 kill_and_isolate：诱饵被篡改或检测到批量加密行为时，本地立即结束进程并隔离主机（仅放行管控通道），同步上报 critical 事件。</p>
+        <p style="font-size:12px;color:#94a3b8">默认 kill_and_isolate：文件触发后按配置响应并上报告警。Windows 通过内核文件事件关联写入进程；无法核实、存在多个写入者或采集不可用时跳过进程终止，主机隔离仍独立执行。告警中心可查看归因证据。</p>
       </div>
       <div class="panel"><h4>最近拦截记录</h4>
         <el-empty v-if="!blocks.length" description="暂无拦截记录" :image-size="60" />
@@ -93,7 +93,7 @@ import WindowsLoginProtection from '../components/WindowsLoginProtection.vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
 import { fetchProtect, fetchProtectRules, updateProtectRule } from '../api'
-import { sevType, sevLabel } from '../utils/format'
+import { sevType, sevLabel, actionLabel } from '../utils/format'
 import { fileProtectionPayload, loginProtectionPayload } from '../utils/protection'
 
 const cards = ref([])
@@ -126,7 +126,6 @@ const actionsLevel = (actions) => {
 }
 
 const msg = (t, type = 'success') => ElMessage({ message: t, type, duration: 1800 })
-const actionLabel = action => ({ alert_only: '仅告警', restored: '已恢复文件', restore_failed: '恢复失败', blocked_ip: '已执行限时封禁', block_expired: '封禁意图已失效', block_failed: '封禁失败', killed: '已结束进程', isolated: '已隔离主机' }[action] || action || '仅告警')
 
 // 加载 PR-0010 内置规则 → 表单
 onMounted(async () => {

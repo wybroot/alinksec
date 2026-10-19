@@ -66,14 +66,14 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+        if(report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
             virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
-        if((report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if((report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
@@ -126,6 +126,11 @@ public class ReportDispatcher {
     private static boolean isolationOutcome(com.alinksec.proto.Report report) {
         return report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("self_defense")
                 && report.getSecurityEvent().getRuleId().equals("host-isolation-lease");
+    }
+
+    private static boolean ransomOutcome(com.alinksec.proto.Report report) {
+        return report.hasSecurityEvent() && (java.util.Set.of("decoy_tamper", "ransom_behavior")
+                .contains(report.getSecurityEvent().getType()) || report.getSecurityEvent().getRuleId().equals("windows-ransom-attribution"));
     }
 
     private static boolean configOutcome(com.alinksec.proto.Report report) {

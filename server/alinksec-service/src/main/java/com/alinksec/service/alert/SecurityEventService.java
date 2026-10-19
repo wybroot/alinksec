@@ -84,6 +84,21 @@ public class SecurityEventService {
     private String fingerprint(RptSecurityEvent event, String detailJson) {
         String base = event.getType() + ":" + event.getRuleId();
         try {
+            var node = JsonUtils.read(detailJson);
+            if ((event.getType().equals("decoy_tamper") || event.getType().equals("ransom_behavior")
+                    || event.getRuleId().equals("windows-ransom-attribution"))
+                    && node.path("attribution").path("source").asText().equals("windows_kernel_file_etw")) {
+                var a = node.path("attribution");
+                var paths = new java.util.TreeSet<String>();
+                node.path("files").forEach(p -> paths.add(p.asText()));
+                String key = a.path("status").asText() + ":" + a.path("reason").asText() + ":"
+                        + a.path("process").path("pid").asText() + ":"
+                        + a.path("process").path("created_filetime").asText() + ":" + JsonUtils.write(paths);
+                try {
+                    return base + ":" + java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+            }
             if(event.getType().equals("self_defense") && event.getRuleId().equals("agent-config-integrity")) {
                 return base+":"+JsonUtils.read(detailJson).path("id").asText();
             }

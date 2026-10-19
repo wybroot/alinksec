@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/filetrace"
 	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/proto"
 )
@@ -51,6 +52,10 @@ type Guard struct {
 	virusPrev     map[string]treeSnapshot
 	files         *fileMonitor
 	login         *loginMonitor
+	fileTrace     *filetrace.Monitor
+	healthSince   time.Time
+	rateSince     time.Time
+	traceStatus   string
 
 	ratePrev map[string]treeSnapshot // 各监测树上一快照
 }
@@ -69,6 +74,7 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 	g.files = newFileMonitor(workDir, log)
 	g.login = newLoginMonitor(workDir, log, g.applyLoginBlock)
 	g.login.reset = ClearLoginFirewall
+	g.fileTrace = filetrace.New(workDir)
 	g.recoverIsolationMarker()
 	return g
 }
@@ -148,10 +154,14 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 		g.log.Info("策略热更新生效：诱饵防护已关闭")
 	}
 	g.seedProcessBaseline()
+	g.configureAttribution()
 }
 
 // Run 主循环：初始投放 → 并行跑健康检查（60s）与速率监测（窗口周期）
 func (g *Guard) Run(ctx context.Context) {
+	g.configureAttribution()
+	stopAttribution := g.runAttribution(ctx)
+	defer stopAttribution()
 	g.initialDeploy()
 
 	healthTick := time.NewTicker(healthInterval)
@@ -183,6 +193,7 @@ func (g *Guard) Run(ctx context.Context) {
 			g.virusLoop()
 		case <-processTick.C:
 			g.processLoop()
+			g.reportAttributionStatus()
 		case <-fileTick.C:
 			g.fileLoop()
 		case <-loginTick.C:
@@ -226,12 +237,16 @@ func (g *Guard) healthLoop() {
 	if c.Enabled != nil && !*c.Enabled {
 		return
 	}
+	g.mu.Lock()
+	since := g.healthSince
+	g.healthSince = time.Now()
+	g.mu.Unlock()
 	dm := newDecoyManager(&c, g.workDir)
 	res := dm.healthCheck()
 
 	if len(res.Tampered) > 0 {
 		g.log.Error("诱饵篡改，触发本地响应", "count", len(res.Tampered), "paths", res.Tampered)
-		ev := g.respond("decoy_tampered", ruleDecoyID, ruleDecoyName, res.Tampered, res.Tampered)
+		ev := g.respondSince("decoy_tampered", ruleDecoyID, ruleDecoyName, res.Tampered, res.Tampered, since)
 		if g.report != nil {
 			g.report(ev)
 		}
@@ -261,6 +276,10 @@ func (g *Guard) rateLoop() {
 	if c.Enabled != nil && !*c.Enabled {
 		return
 	}
+	g.mu.Lock()
+	since := g.rateSince
+	g.rateSince = time.Now()
+	g.mu.Unlock()
 	// 监测树 = 配置 WatchTrees 或投放目录（热更新后实时生效）
 	trees := c.WatchTrees
 	if len(trees) == 0 {
@@ -301,9 +320,13 @@ func (g *Guard) rateLoop() {
 	// 触发素材：写入文件 + 改名后新文件（归因用）
 	trigPaths = append(trigPaths, merged.Modified...)
 	trigPaths = append(trigPaths, merged.Created...)
+	trigPaths = append(trigPaths, merged.Vanished...)
+	// Kernel rename operations identify the original open file path. Keep
+	// destinations in the change evidence, and attribute the affected sources.
+	attributionPaths := append(append([]string(nil), merged.Modified...), merged.Vanished...)
 	g.log.Error("加密速率行为触发本地响应", "churn", merged.Churn,
 		"renames", merged.Renames, "ext_changes", merged.ExtChanges)
-	ev := g.respond("ransom_rate", ruleRateID, ruleRateName, nil, trigPaths)
+	ev := g.respondWithAttributionFiles("ransom_rate", ruleRateID, ruleRateName, nil, trigPaths, attributionPaths, since)
 	if g.report != nil {
 		g.report(ev)
 	}

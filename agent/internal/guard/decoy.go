@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -222,12 +223,18 @@ func randPick(list []string) string {
 }
 
 func fileSha256(path string) string {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	defer f.Close()
+	const limit = 64 << 20
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(f, limit+1))
+	if err != nil || n > limit {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func isWritableDir(path string) bool {

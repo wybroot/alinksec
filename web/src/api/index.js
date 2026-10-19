@@ -93,7 +93,7 @@ export async function logout() {
 
 /* ---------------- 适配工具 ---------------- */
 
-const SEV = { 4: 'critical', 3: 'high', 2: 'medium', 1: 'low' }
+const SEV = { 5: 'critical', 4: 'critical', 3: 'high', 2: 'medium', 1: 'low' }
 const sev = (n) => SEV[Number(n)] || 'low'
 const OS = { 1: (v) => v || 'Linux', 2: (v) => v || 'Windows' }
 
@@ -136,6 +136,7 @@ export async function fetchDashboard() {
   const s = summary || {}
   const sevMap = {}
   for (const row of s.alerts?.bySeverity || []) sevMap[Number(row.severity)] = Number(row.count)
+  const critical = (sevMap[4] ?? 0) + (sevMap[5] ?? 0)
   const top = (topHosts || [])[0]
   return {
     stats: {
@@ -143,7 +144,7 @@ export async function fetchDashboard() {
       hostsTotal: s.hosts?.total ?? 0,
       weekNew: s.hosts?.weekNew ?? 0,
       pending: s.alerts?.open ?? 0,
-      crit: sevMap[4] ?? 0,
+      crit: critical,
       high: sevMap[3] ?? 0,
       virusWeek: s.virus?.findings30d ?? 0,
       quarantined: s.virus?.quarantined ?? 0,
@@ -151,9 +152,9 @@ export async function fetchDashboard() {
       riskHosts: (topHosts || []).length,
       topRisk: top ? `${top.hostname}（${top.alert_count}）` : '—',
     },
-    // 告警级别分布（饼图）：severity 4严重/3高危/2中危/1低危
+    // Include Agent SEV_CRITICAL=5 alongside the existing console severity 4.
     sevDist: [
-      { value: sevMap[4] ?? 0, name: '严重' },
+      { value: critical, name: '严重' },
       { value: sevMap[3] ?? 0, name: '高危' },
       { value: sevMap[2] ?? 0, name: '中危' },
       { value: sevMap[1] ?? 0, name: '低危' },
@@ -224,13 +225,14 @@ export async function fetchScreen() {
   const s = summary || {}
   const sevMap = {}
   for (const row of s.alerts?.bySeverity || []) sevMap[Number(row.severity)] = Number(row.count)
+  const critical = (sevMap[4] ?? 0) + (sevMap[5] ?? 0)
 
   // 趋势（date/virus/blocked）
   const trendData = (trend || []).map((d) => ({ date: d.date, virus: Number(d.virus), blocked: Number(d.blocked) }))
 
   // 告警等级分布（饼图）
   const sevPie = [
-    { name: '严重', value: sevMap[4] ?? 0 },
+    { name: '严重', value: critical },
     { name: '高危', value: sevMap[3] ?? 0 },
     { name: '中危', value: sevMap[2] ?? 0 },
     { name: '低危', value: sevMap[1] ?? 0 },
@@ -267,7 +269,7 @@ export async function fetchScreen() {
       coverage: total ? Math.round((Number(s.hosts?.online ?? 0) / total) * 100) : 0,
       protectOn,
       pending: Number(s.alerts?.open ?? 0),
-      crit: sevMap[4] ?? 0,
+      crit: critical,
       high: sevMap[3] ?? 0,
       virus: Number(s.virus?.findings30d ?? 0),
       rtHit: (alerts?.list || []).filter((a) => a.action_taken).length,
@@ -801,6 +803,11 @@ export function protectAction(agentId, action, target, reason) {
 
 /* ---------------- 告警 ---------------- */
 
+function parseAlertDetail(detail) {
+  if (detail && typeof detail === 'object') return detail
+  try { const value=JSON.parse(detail || '{}'); return value && typeof value==='object' ? value : {} } catch { return {} }
+}
+
 export async function fetchAlerts() {
   const data = await get('/api/alerts?page=1&size=100')
   return (data?.list || []).map((a) => ({
@@ -812,6 +819,8 @@ export async function fetchAlerts() {
     time: fmtTime(a.last_time),
     done: Number(a.status) === 2,
     handler: a.handle_remark || '',
+    action: a.action_taken || '',
+    detail: parseAlertDetail(a.detail),
   }))
 }
 

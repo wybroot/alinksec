@@ -2,7 +2,86 @@
 
 package guard
 
-/* Windows 归因：Restart Manager API 查锁定进程需 CGO/win32 绑定，
- * 一期降级为最近活跃进程启发式（respond.go attributeByRecency）。 */
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
 
-func attributeByOpenFD(files []string) *suspectProc { return nil }
+	"github.com/alinksec/alinksec-agent/internal/filetrace"
+	"github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/shirou/gopsutil/v3/process"
+)
+
+func (g *Guard) runAttribution(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { g.fileTrace.Run(ctx); close(done) }()
+	return func() { cancel(); <-done }
+}
+func (g *Guard) reportAttributionStatus() {
+	r := g.fileTrace.Status()
+	key := r.Status + ":" + r.Reason
+	g.mu.Lock()
+	changed := g.traceStatus != key
+	g.traceStatus = key
+	g.mu.Unlock()
+	if changed {
+		g.log.Info("Windows 勒索归因采集状态", "status", r.Status, "reason", r.Reason)
+		severity := proto.Severity_SEV_INFO
+		if r.Status == "unavailable" {
+			severity = proto.Severity_SEV_MEDIUM
+		}
+		if g.report != nil {
+			g.report(&proto.RptSecurityEvent{RuleId: "windows-ransom-attribution", RuleName: "Windows 勒索归因采集", Type: "self_defense", Severity: severity, ActionTaken: "alert_only", Detail: mustJSON(map[string]any{"attribution": r}), EventTs: time.Now().UnixMilli()})
+		}
+	}
+}
+
+func (g *Guard) configureAttribution() {
+	c := g.cur()
+	var roots []string
+	if c.Enabled == nil || *c.Enabled {
+		roots = append(roots, g.deployDirs()...)
+		roots = append(roots, c.WatchTrees...)
+	}
+	g.fileTrace.Configure(roots, time.Duration(c.RateWindowSec)*time.Second)
+	g.mu.Lock()
+	g.healthSince = time.Now()
+	g.rateSince = time.Now()
+	g.mu.Unlock()
+}
+
+func (g *Guard) attributeResponse(files []string, since time.Time, detail map[string]any) (*suspectProc, func() error) {
+	r := g.fileTrace.Lookup(files, since)
+	detail["attribution"] = r
+	deny := func() error { return fmt.Errorf("no verified writer identity") }
+	if r.Status != "attributed" || r.Process == nil {
+		return nil, deny
+	}
+	p, err := process.NewProcess(int32(r.Process.PID))
+	if err != nil {
+		r.Status = "unattributed"
+		r.Reason = "writer_exited"
+		detail["attribution"] = r
+		return nil, deny
+	}
+	sp := takeForensics(p)
+	if sp == nil || !strings.EqualFold(sp.Exe, r.Process.Image) {
+		r.Status = "unattributed"
+		r.Reason = "writer_identity_changed"
+		detail["attribution"] = r
+		return nil, deny
+	}
+	return sp, func() error {
+		c := g.cur()
+		if c.Enabled != nil && !*c.Enabled || c.Response != "kill" && c.Response != "kill_and_isolate" || g.excluded(sp.Exe) {
+			return fmt.Errorf("response policy changed")
+		}
+		latest := g.fileTrace.Lookup(files, since)
+		if latest.Status != "attributed" || latest.Process == nil || *latest.Process != *r.Process {
+			return fmt.Errorf("attribution evidence is no longer valid")
+		}
+		return filetrace.Terminate(*r.Process)
+	}
+}

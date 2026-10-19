@@ -135,9 +135,8 @@ func diffSnapshot(prev, cur treeSnapshot) *rateResult {
 		}
 	}
 	for c := range created {
-		if !used[c] {
-			r.Created = append(r.Created, c)
-		}
+		// Include rename destinations in response evidence as well as new files.
+		r.Created = append(r.Created, c)
 	}
 	// churn = 写入 + 重命名（新增未配对不计入：可能是正常落盘）
 	r.Churn = len(r.Modified) + r.Renames
