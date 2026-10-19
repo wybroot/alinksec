@@ -1,15 +1,15 @@
 package guard
 
 import (
-	"io/fs"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 /* 加密速率行为监测（docs/05 §2.1 触发②）：
  * 受监听目录树滑动窗口内快照对比 —— 写入/重命名文件数 > 阈值 且
  * 扩展名变化率 > 比例（加密拖尾典型特征：原名消失 + 加密扩展新文件出现）。
- * 轮询快照实现（免 CGO/免 inotify），窗口 = 轮询周期。 */
+ * 文件事件即时检查独立运行；行为判定保留完整窗口快照，避免缩短窗口造成漏判。 */
 
 const (
 	snapMaxDepth   = 5     // 目录树遍历深度上限（防误配打爆）
@@ -46,38 +46,8 @@ func (r *rateResult) triggered(threshold int, ratio float64) bool {
 
 // snapshotTree 遍历目录树生成快照（限深度/数量；符号链接不跟随）
 func snapshotTree(root string) treeSnapshot {
-	snap := treeSnapshot{}
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if path == root {
-				return err // 根不可读：整树跳过
-			}
-			return fs.SkipDir // 子目录不可读：跳过该子树
-		}
-		if d.IsDir() {
-			if path != root && strings.HasPrefix(d.Name(), ".") {
-				return fs.SkipDir // 隐藏目录跳过（.git 等）
-			}
-			return nil
-		}
-		if len(snap) >= snapMaxEntries {
-			return fs.SkipAll
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			return nil
-		}
-		snap[filepath.ToSlash(path)] = fileEntry{
-			Size:  info.Size(),
-			Mtime: info.ModTime().Unix(),
-			Ext:   strings.ToLower(filepath.Ext(path)),
-		}
-		return nil
-	})
-	return snap
+	remaining := snapMaxEntries
+	return virusSnapshot(root, &remaining, time.Now().Add(2*time.Second))
 }
 
 // diffSnapshot 对比前后快照：写入 = 交集内 size/mtime 变化；

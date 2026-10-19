@@ -73,6 +73,7 @@
       </section>
     </div>
     <WindowsLoginProtection :rule="windowsLoginRule" />
+    <FileWatchStatus />
     <div class="panel" style="margin-top:16px"><h4>EDR 进程行为规则</h4>
       <el-table v-if="processRules.length" :data="processRules" size="small" v-loading="loading">
         <el-table-column prop="name" label="规则" min-width="150" />
@@ -90,6 +91,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import WindowsLoginProtection from '../components/WindowsLoginProtection.vue'
+import FileWatchStatus from '../components/FileWatchStatus.vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
 import { fetchProtect, fetchProtectRules, updateProtectRule } from '../api'

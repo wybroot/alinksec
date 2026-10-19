@@ -40,7 +40,7 @@
         <el-select v-model="realtime.action" :disabled="!canWrite || realtime.saving" style="width:150px"><el-option label="仅告警" value="alert_only" /><el-option label="检出后隔离" value="quarantine" /></el-select>
         <el-button v-if="canWrite" type="primary" :loading="realtime.saving" @click="saveRealtime">保存周期策略</el-button>
       </div>
-      <p class="coverage-note">独立于勒索诱饵开关，每 10 秒比较关键目录快照，检查新增或修改的文件；存在快照间漏检及数量、时间限制。策略需要支持检测契约的 Agent，收到更新后生效，离线和旧 Agent 不保证已切换。</p>
+      <p class="coverage-note">独立于勒索诱饵开关，支持文件事件监控的 Agent 根据原生事件检查新增或修改文件，并周期补查。监听覆盖、积压和中断请查看实时防护页；短暂文件和超出预算的内容可能未检查。策略收到后生效，离线和旧 Agent 不保证已切换。</p>
     </div>
     <div class="panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">

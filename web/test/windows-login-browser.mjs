@@ -35,6 +35,7 @@ try {
    }
    if(req.method()!=='GET'){unexpected.push(req.method()+' '+path);return route.fulfill({status:500,json:{code:500,msg:'Unexpected write'}})}
    if(path==='/api/protect/windows-login-status'){if(fail)return route.fulfill({status:503,json:{code:503,msg:'监测状态暂不可用'}});data=stages[stage].status}
+   else if(path==='/api/protect/file-watch-status')data={items:[],total:0}
    else if(path==='/api/protect/rules')data=stages.rules.rules
    else if(path==='/api/protect/engines')data=[]
    else if(path==='/api/protect/blocks')data=[]

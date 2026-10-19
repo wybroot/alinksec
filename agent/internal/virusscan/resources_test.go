@@ -33,6 +33,11 @@ func TestResourceBudgetAppliesAcrossFilesAndPreservesPartialEvidence(t *testing.
 	if r.Status != pb.RptVirusResult_COMPLETE || r.FilesScanned != 2 || reads < 2 {
 		t.Fatalf("unpaced scan: %+v %d", r, reads)
 	}
+	reads = 0
+	e.CheckRealtime(filepath.Join(root, "a"), work)
+	if reads == 0 {
+		t.Fatal("native-event realtime checks bypass shared IO governor")
+	}
 	e.SetIOBudget(func(context.Context, int) error { return errors.New("resource deadline") })
 	r = e.ScanCommand(context.Background(), &pb.CmdVirusScan{TaskId: "interrupted", Mode: pb.CmdVirusScan_CUSTOM, Paths: []string{root}, ExecutionContract: 2}, work)
 	if r.Status == pb.RptVirusResult_COMPLETE || r.FilesScanned != 0 || len(r.GetIssues()) == 0 {

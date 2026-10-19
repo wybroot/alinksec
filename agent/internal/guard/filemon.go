@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/filewatch"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 )
 
@@ -92,10 +93,26 @@ func (m *fileMonitor) update(rules []config.FileRule) {
 }
 
 func (m *fileMonitor) check() []*pb.RptSecurityEvent {
+	return m.checkPaths(nil)
+}
+
+func (m *fileMonitor) checkPaths(paths []string) []*pb.RptSecurityEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var events []*pb.RptSecurityEvent
 	for _, watch := range m.files {
+		if paths != nil {
+			matched := false
+			for _, p := range paths {
+				if filewatch.Within(watch.path, p) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
 		if event := m.checkFile(watch); event != nil {
 			events = append(events, event)
 		}

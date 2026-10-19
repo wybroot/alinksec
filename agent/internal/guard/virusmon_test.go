@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestPeriodicVirusProtectionIndependentOfDecoyAndReportsIdentity(t *testing.T) {
+func TestRecoveryVirusProtectionIndependentOfDecoyAndReportsIdentity(t *testing.T) {
 	root := t.TempDir()
 	enabled := true
 	checks := 0
@@ -23,25 +23,28 @@ func TestPeriodicVirusProtectionIndependentOfDecoyAndReportsIdentity(t *testing.
 		checks++
 		return &pb.VirusFinding{Path: path, Name: "Harmless", Engine: "hash", Sha256: "digest", Severity: pb.Severity_SEV_HIGH, ActionTaken: "alert_only", ActionError: "budget_exhausted"}
 	})
-	g.virusLoop()
+	g.virusRescan = true
+	g.fileEventLoop()
 	path := filepath.Join(root, "new.sh")
 	os.WriteFile(path, []byte("harmless"), 0600)
-	g.virusLoop()
+	g.virusRescan = true
+	g.fileEventLoop()
 	if checks != 1 || len(events) != 1 || events[0].Severity != pb.Severity_SEV_HIGH || events[0].Type != "virus" {
 		t.Fatal(checks, events)
 	}
-	g.virusLoop()
+	g.fileEventLoop()
 	if checks != 1 {
 		t.Fatal("unchanged file rescanned")
 	}
 	enabled = false
 	os.WriteFile(path, []byte("changed harmless"), 0600)
-	g.virusLoop()
+	g.virusRescan = true
+	g.fileEventLoop()
 	if checks != 1 {
 		t.Fatal("disabled policy checked file")
 	}
 	enabled = true
-	g.virusLoop()
+	g.fileEventLoop()
 	if checks != 2 {
 		t.Fatal("reenabled policy missed changes")
 	}

@@ -3,6 +3,7 @@ module github.com/alinksec/alinksec-agent
 go 1.24.0
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/openwall/yescrypt-go v0.0.0-20240819163751-25b8ddb667c0
 	github.com/sergeymakinen/go-crypt v1.0.3
 	golang.org/x/crypto v0.46.0

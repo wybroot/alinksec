@@ -137,7 +137,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	if c.windowsLogin != nil {
 		c.windowsLogin.Update(cfg.LoginRules)
 	}
-	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
+	// 常驻 L1 引擎：原生文件事件触发，丢失/溢出由有界恢复遍历补查。
 	vEngine := c.newVirusEngine()
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
 		return vEngine.CheckRealtime(path, workDir)
@@ -603,6 +603,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),
+			FileWatchContract:      1,
+			FileWatchStatus:        c.grd.FileWatchStatus(),
 			WindowsUpdateContract:  windowsupdate.ExecutionContract(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,
