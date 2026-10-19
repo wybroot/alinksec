@@ -4,11 +4,21 @@
     <p class="help">Linux、Windows 文件事件触发病毒检查、关键文件和诱饵核验。监听失效或积压时补查，勒索行为按完整统计窗口判定。以下为最近心跳报告；监听正常不代表文件均已检查。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button size="small" @click="refresh">重试</el-button></el-alert>
     <div v-else class="table" v-loading="loading">
-      <el-table :data="items" empty-text="暂无主机" size="small">
+      <div v-if="mobile" class="host-cards">
+        <el-empty v-if="!items.length" description="暂无主机" :image-size="48" />
+        <article v-for="row in items" :key="row.agent_id" class="host-card">
+          <div class="card-heading"><b>{{ row.hostname }}</b><el-tag :type="stateType(row.state)">{{ stateLabel(row.state) }}</el-tag></div>
+          <div class="help">{{ row.ip }}</div>
+          <p>{{ issueLabel(row.coverage?.issue || row.coverage?.recovery_issue) }}</p>
+          <div class="help">监听目录 {{ row.coverage?.watches ?? '—' }} · 待处理 {{ row.coverage?.pending ?? '—' }}<br />本次运行丢弃 {{ row.coverage?.dropped ?? '—' }} · 覆盖中断 {{ row.coverage?.gaps ?? '—' }}</div>
+          <div class="help">最近补查结束：{{ sweepTime(row) }}</div>
+        </article>
+      </div>
+      <el-table v-else :data="items" empty-text="暂无主机" size="small">
         <el-table-column label="主机" min-width="155"><template #default="{ row }">{{ row.hostname }}<div class="help">{{ row.ip }}</div></template></el-table-column>
-        <el-table-column label="监控状态" min-width="145"><template #default="{ row }"><el-tag :type="row.state === 'watching' ? 'success' : ['disabled','offline'].includes(row.state) ? 'info' : 'warning'">{{ stateLabel(row.state) }}</el-tag></template></el-table-column>
-        <el-table-column label="覆盖与问题" min-width="285"><template #default="{ row }"><div>{{ issueLabel(row.coverage?.issue || row.coverage?.recovery_issue) }}</div><span class="help">监听目录 {{ row.coverage?.watches ?? '—' }} · 待处理 {{ row.coverage?.pending ?? '—' }} · 累计丢弃 {{ row.coverage?.dropped ?? '—' }} · 覆盖中断 {{ row.coverage?.gaps ?? '—' }}</span></template></el-table-column>
-        <el-table-column label="最近补查结束" min-width="170"><template #default="{ row }">{{ row.coverage?.last_sweep_at ? new Date(row.coverage.last_sweep_at).toLocaleString() : '尚未完成' }}</template></el-table-column>
+        <el-table-column label="监控状态" min-width="145"><template #default="{ row }"><el-tag :type="stateType(row.state)">{{ stateLabel(row.state) }}</el-tag></template></el-table-column>
+        <el-table-column label="覆盖与问题" min-width="285"><template #default="{ row }"><div>{{ issueLabel(row.coverage?.issue || row.coverage?.recovery_issue) }}</div><span class="help">监听目录 {{ row.coverage?.watches ?? '—' }} · 待处理 {{ row.coverage?.pending ?? '—' }} · 本次运行丢弃 {{ row.coverage?.dropped ?? '—' }} · 覆盖中断 {{ row.coverage?.gaps ?? '—' }}</span></template></el-table-column>
+        <el-table-column label="最近补查结束" min-width="170"><template #default="{ row }">{{ sweepTime(row) }}</template></el-table-column>
       </el-table>
     </div>
     <el-pagination v-if="total > 20" v-model:current-page="page" :page-size="20" :total="total" layout="prev, pager, next" @current-change="refresh" />
@@ -19,10 +29,14 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { fetchFileWatchStatus } from '../api'
 const items = ref([]), total = ref(0), page = ref(1), loading = ref(false), error = ref('')
+const mobile = ref(false)
+const updateViewport = () => { mobile.value = window.matchMedia('(max-width: 640px)').matches }
 const states = { starting: '正在启动', disabled: '未启用文件监控', watching: '正在监听', recovering: '正在补查', degraded: '覆盖降级', unsupported: 'Agent 不支持', offline: '主机离线或禁用', stale: '状态已过期', stalled: '监听状态未推进' }
 const issues = { path_limit: '路径超出监听长度上限', queue_overflow: '路径队列溢出，已请求补查', kernel_overflow_or_error: '系统事件丢失或读取失败，已请求补查', watcher_unavailable: '无法启动原生监听', watcher_closed: '原生监听已中断', root_limit: '配置目录超过监听范围', watch_budget: '目录数量或注册预算已达上限', unsafe_path: '路径含符号链接或目录联接', root_unavailable: '监控目录不存在或不可用', directory_unreadable: '目录无法读取', watch_add_failed: '目录监听注册失败', path_changed: '注册或补查时目录身份变化', unsupported: '当前系统不支持原生监听' }
 const stateLabel = state => states[state] || '状态未知'
+const stateType = state => state === 'watching' ? 'success' : ['disabled', 'offline'].includes(state) ? 'info' : 'warning'
 const issueLabel = issue => issue ? issues[issue] || '请检查 Agent 日志' : '未报告监听问题'
+const sweepTime = row => row.coverage?.last_sweep_at ? new Date(row.coverage.last_sweep_at).toLocaleString() : '尚未完成'
 async function refresh() {
   if (loading.value) return
   loading.value = true; error.value = ''
@@ -31,12 +45,16 @@ async function refresh() {
   finally { loading.value = false }
 }
 let timer
-onMounted(() => { refresh(); timer = setInterval(refresh, 15000) })
-onUnmounted(() => clearInterval(timer))
+onMounted(() => { updateViewport(); window.addEventListener('resize', updateViewport); refresh(); timer = setInterval(refresh, 15000) })
+onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', updateViewport) })
 </script>
 <style scoped>
 .file-watch { margin-top: 20px; min-width: 0; }
 .heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .help { font-size: 12px; line-height: 1.7; color: #64748b; overflow-wrap: anywhere; }
 .table { overflow-x: auto; }
+.host-card { padding: 14px 0; border-bottom: 1px solid #e2e8f0; overflow-wrap: anywhere; }
+.host-card:last-child { border-bottom: 0; }
+.host-card p { font-size: 13px; line-height: 1.7; margin: 8px 0; }
+.card-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 </style>
