@@ -59,6 +59,7 @@ try {
  await expect(section.getByText('12345678-1234-1234-1234-123456789abc · 修订 7')).toBeVisible()
  await expect(section.getByRole('button', { name: '提交安装审批' })).toHaveCount(0)
  await expect(section.getByRole('button', { name: '发现更新' })).toHaveCount(0)
+ await expect(section.locator('.el-loading-mask:visible')).toHaveCount(0)
  await page.screenshot({ path: root + '/discovery-viewer-desktop.png', fullPage: true, animations: 'disabled' }); checks.push('captured-host-coverage-exact-identity-viewer-readonly')
  fail = true; await section.getByRole('button', { name: '刷新状态', exact: true }).click(); await expect(section.getByText('更新状态暂不可用', { exact: true })).toBeVisible()
  fail = false; await section.getByRole('button', { name: '重试', exact: true }).click(); await expect(section.getByText('发现完成', { exact: true })).toBeVisible(); checks.push('failed-refresh-clears-stale-targets-and-retries')
