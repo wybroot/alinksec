@@ -54,7 +54,7 @@ try {
  }
  let { page, context, section } = await session('viewer', fixture.viewer)
  await expect(section.getByText('发现完成', { exact: true })).toBeVisible()
- await expect(section.getByText('尚未发现', { exact: true })).toBeVisible()
+ await expect(section.locator('.el-tag__content').filter({ hasText: /^尚未发现$/ })).toBeVisible()
  await section.getByRole('button', { name: 'Windows 更新验收', exact: true }).click()
  await expect(section.getByText('12345678-1234-1234-1234-123456789abc · 修订 7')).toBeVisible()
  await expect(section.getByRole('button', { name: '提交安装审批' })).toHaveCount(0)
