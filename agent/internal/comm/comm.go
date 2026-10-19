@@ -142,7 +142,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
 		return vEngine.CheckRealtime(path, workDir)
 	})
-	c.grd.SetVirusRoots(virusscan.QuickScanRoots(), func() bool { enabled, _ := vEngine.RealtimePolicy(workDir); return enabled })
+	c.grd.SetVirusRoots(virusscan.RealtimeRoots(), func() bool { enabled, _ := vEngine.RealtimePolicy(workDir); return enabled })
 	return c, nil
 }
 

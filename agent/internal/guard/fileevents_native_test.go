@@ -167,6 +167,13 @@ func TestNativeFileEvents(t *testing.T) {
 		t.Fatal("removed virus root was scanned")
 	}
 	checks = append(checks, "removed-scope-not-scanned")
+	missing := filepath.Join(t.TempDir(), "initially-missing")
+	g.SetVirusRoots([]string{missing, other}, func() bool { return true })
+	g.updateFileWatches()
+	os.Mkdir(missing, 0700)
+	late := filepath.Join(missing, "late.txt")
+	write(late, "new default root")
+	wait("missing-root-created", func() bool { return seen[late] > 0 })
 	decoyPolicy := &config.DecoyConfig{Enabled: &enabled, Dirs: []string{other}, WatchTrees: []string{other}, CountPerDir: 1, Response: "alert_only"}
 	decoyPolicy.Normalize()
 	g.UpdatePolicy(decoyPolicy, nil)

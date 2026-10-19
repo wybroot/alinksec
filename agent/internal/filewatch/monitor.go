@@ -127,6 +127,8 @@ func (m *Monitor) Update(roots []Root) {
 	}
 	m.roots = next
 	m.revision++
+	m.status.State = "starting"
+	m.status.Issue = ""
 	m.pending = map[string]string{}
 	m.rescan = true
 	m.topology = true

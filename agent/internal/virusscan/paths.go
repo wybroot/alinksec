@@ -10,6 +10,14 @@ import (
 
 // quickScanRoots 快速扫描路径（分钟级）：临时目录 / 用户目录 / 自启动目录
 func quickScanRoots() []string {
+	return dedupExists(realtimeRoots())
+}
+
+// RealtimeRoots preserves absent default directories so their parent anchors
+// can detect later creation. Explicit scans keep their existing-root selection.
+func RealtimeRoots() []string { return realtimeRoots() }
+
+func realtimeRoots() []string {
 	var roots []string
 	if runtime.GOOS == "windows" {
 		for _, e := range []string{"TEMP", "TMP", "USERPROFILE", "ProgramData", "APPDATA", "LOCALAPPDATA"} {
@@ -20,7 +28,19 @@ func quickScanRoots() []string {
 	} else {
 		roots = []string{"/tmp", "/var/tmp", "/dev/shm", "/root", "/home", "/etc/cron.d", "/var/spool/cron"}
 	}
-	return dedupExists(roots)
+	seen := map[string]bool{}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if !filepath.IsAbs(root) {
+			continue
+		}
+		root = filepath.Clean(root)
+		if !seen[pathKey(root)] {
+			seen[pathKey(root)] = true
+			out = append(out, root)
+		}
+	}
+	return out
 }
 
 func QuickScanRoots() []string { return quickScanRoots() }
