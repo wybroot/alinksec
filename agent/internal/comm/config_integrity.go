@@ -61,5 +61,6 @@ func (c *Client) newVirusEngine() *virusscan.Engine {
 		engine = virusscan.NewEngine(c.workDir, c.log)
 	}
 	engine.SetIOBudget(c.resources.WaitIO)
+	engine.SetClamAV(c.clamav)
 	return engine
 }

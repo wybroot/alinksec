@@ -74,7 +74,7 @@ public class VirusController {
                                                      HttpServletRequest request) {
         var mode=body.get("mode");
         if(mode!=null && (!mode.isIntegralNumber() || !mode.canConvertToInt())) throw new IllegalArgumentException("mode 必须为整数");
-        long taskId = taskService.createTask(text(body,"name",true),texts(body,"agentIds",false),mode==null?1:mode.intValue(),texts(body,"paths",true),actor(request));
+        long taskId = taskService.createTask(text(body,"name",true),texts(body,"agentIds",false),mode==null?1:mode.intValue(),texts(body,"paths",true),actor(request),text(body,"engine",true));
         return ApiResult.ok(Map.of("taskId", taskId));
     }
 

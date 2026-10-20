@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/alinksec/alinksec-agent/internal/baseline"
+	"github.com/alinksec/alinksec-agent/internal/clamav"
 	"github.com/alinksec/alinksec-agent/internal/collector"
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/configguard"
@@ -51,6 +52,7 @@ type Client struct {
 	log         *slog.Logger
 	configStore *configguard.Store
 	resources   *resources.Governor
+	clamav      *clamav.Client
 	bulkBusy    atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
@@ -108,6 +110,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		cfg:             cfg,
 		configStore:     store,
 		resources:       resources.New(cfg.Resources),
+		clamav:          clamav.New(cfg.ClamAV),
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
@@ -316,6 +319,7 @@ func (c *Client) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	ctx = runCtx
+	go c.clamav.Run(ctx)
 	if c.windowsLogin != nil {
 		go func() {
 			if err := c.windowsLogin.Run(ctx); err != nil {
@@ -606,6 +610,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			PolicyVersion:          c.state.PolicyVersion,
 			GuardStatus:            guardStatus,
 			VirusExecutionContract: 2,
+			ClamavContract:         1,
+			ClamavStatus:           c.clamav.StatusJSON(),
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),

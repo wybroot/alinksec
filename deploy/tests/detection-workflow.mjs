@@ -64,10 +64,16 @@ with zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED) as z:
  pass('actual Agent cross-volume quarantine/delete fail without removing original bytes')
  await realtime(true,'alert_only');await delay(12000)
  const periodic=prefix+'/periodic.sh';await dex('cp','/fixtures/detect-sample',periodic)
- await until(()=>sql("SELECT id FROM t_virus_finding WHERE agent_id=? AND task_id IS NULL AND path=?",agent.id,periodic).length===1,'Independent periodic detection did not produce finding',45_000)
- const event=sql('SELECT status,initial_evidence FROM t_virus_finding WHERE agent_id=? AND task_id IS NULL AND path=?',agent.id,periodic)[0]
- assert.equal(event.status,0);assert.equal(JSON.parse(event.initial_evidence).source,'realtime_guard');assert.equal(await dex('test','-f',periodic),'')
+ // Native events and bounded recovery can both report the same unchanged file.
+ // This workflow requires detection and byte-bound evidence, not exact-once delivery.
+ await until(()=>sql("SELECT id FROM t_virus_finding WHERE agent_id=? AND task_id IS NULL AND path=?",agent.id,periodic).length>0,'Independent periodic detection did not produce finding',45_000)
+ const events=sql('SELECT status,sha256,initial_evidence FROM t_virus_finding WHERE agent_id=? AND task_id IS NULL AND path=? ORDER BY id',agent.id,periodic)
+ for(const event of events) {
+  assert.equal(event.status,0);assert.equal(event.sha256,digest)
+  const proof=JSON.parse(event.initial_evidence);assert.equal(proof.source,'realtime_guard');assert.equal(proof.sha256,digest)
+ }
+ const event=events[0];assert.equal(await dex('test','-f',periodic),'')
  await realtime(false,'alert_only')
- const output=resolve(agent.dir,'../../detection-capabilities-native');mkdirSync(output,{recursive:true});writeFileSync(join(output,'result.json'),JSON.stringify({passed:true,agent:agent.id,distro:(await api(`/api/hosts/${agent.id}`)).distro_version,pinnedVersion:version,partialEvidence:evidence,firstFinding:first,replacementSurvived:true,restoredDigest:digest,restoredMode:'640',history,whitelistedEvidence:await api(`/api/virus/tasks/${clean}/evidence`),periodicEvidence:event},null,2)+'\n')
+ const output=resolve(agent.dir,'../../detection-capabilities-native');mkdirSync(output,{recursive:true});writeFileSync(join(output,'result.json'),JSON.stringify({passed:true,agent:agent.id,distro:(await api(`/api/hosts/${agent.id}`)).distro_version,pinnedVersion:version,partialEvidence:evidence,firstFinding:first,replacementSurvived:true,restoredDigest:digest,restoredMode:'640',history,whitelistedEvidence:await api(`/api/virus/tasks/${clean}/evidence`),periodicEvidence:event,periodicEvidenceCount:events.length},null,2)+'\n')
  pass('actual Agent whitelist retains historical physical state; independent periodic alert works while decoy is disabled')
 }

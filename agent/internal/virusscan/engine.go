@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/alinksec/alinksec-agent/internal/clamav"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"io"
 	"log/slog"
@@ -29,7 +30,10 @@ type Engine struct {
 	log          *slog.Logger
 	policyReader func() ([]byte, error)
 	ioBudget     func(context.Context, int) error
+	clamav       *clamav.Client
 }
+
+func (e *Engine) SetClamAV(client *clamav.Client) { e.clamav = client }
 
 // SetIOBudget must be called before publishing an engine. Active scans use
 // their own immutable callback; the shared governor coordinates other engines.
@@ -61,9 +65,20 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 	defer e.mu.Unlock()
 	e.refresh(workDir)
 	start := time.Now()
-	r := &pb.RptVirusResult{TaskId: cmd.GetTaskId(), Mode: rptMode(cmd.GetMode()), ExecutionContract: 2, Coverage: scanCoverage, Status: pb.RptVirusResult_COMPLETE}
+	selected := cmd.GetEngine()
+	if selected == "" {
+		selected = "builtin"
+	}
+	useClamAV := selected == "clamav"
+	r := &pb.RptVirusResult{TaskId: cmd.GetTaskId(), Mode: rptMode(cmd.GetMode()), ExecutionContract: 2, ScanEngine: selected, Coverage: scanCoverage, Status: pb.RptVirusResult_COMPLETE}
+	fileLimit := maxFileSize
+	if useClamAV {
+		r.ExecutionContract = 3
+		r.Coverage = "ClamAV INSTREAM of stable regular files <=20MiB; daemon archive/recursion/time limits apply; symlinks, special files, virtual/container filesystems and Agent work directory excluded; pinned reported engine version is not a complete signature corpus digest"
+		fileLimit = clamav.MaxFileBytes
+	}
 	finish := func() *pb.RptVirusResult { r.DurationMs = uint32(time.Since(start).Milliseconds()); return r }
-	if e.db != nil {
+	if e.db != nil && !useClamAV {
 		r.DbVersion = e.db.Version
 	}
 	fail := func(code string) *pb.RptVirusResult {
@@ -71,16 +86,28 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 		issue(r, "", code)
 		return finish()
 	}
-	if cmd.GetExecutionContract() != 2 {
+	if selected != "builtin" && !useClamAV || cmd.GetExecutionContract() != r.ExecutionContract {
 		return fail("unsupported_contract")
 	}
-	if e.db != nil && !e.db.Valid {
+	if !useClamAV && e.db != nil && !e.db.Valid {
 		return fail("invalid_signatures")
 	}
-	if e.db == nil || len(e.db.hashes)+len(e.db.rules) == 0 {
+	if !useClamAV && (e.db == nil || len(e.db.hashes)+len(e.db.rules) == 0) {
 		return fail("no_signatures")
 	}
-	if cmd.GetExpectedDbVersion() != "" && cmd.GetExpectedDbVersion() != r.DbVersion {
+	if useClamAV {
+		if e.clamav == nil {
+			return fail("clamav_disabled")
+		}
+		version, err := e.clamav.Probe(ctx)
+		if err != nil {
+			return fail(clamav.Code(err))
+		}
+		r.DbVersion = version
+		if cmd.GetExpectedDbVersion() == "" || cmd.GetExpectedDbVersion() != version {
+			return fail("clamav_version_changed")
+		}
+	} else if cmd.GetExpectedDbVersion() != "" && cmd.GetExpectedDbVersion() != r.DbVersion {
 		return fail("signature_version_changed")
 	}
 	if cmd.GetMode() != pb.CmdVirusScan_QUICK && cmd.GetMode() != pb.CmdVirusScan_FULL && cmd.GetMode() != pb.CmdVirusScan_CUSTOM {
@@ -191,7 +218,11 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 			scanFailure(r, abs, "report_path_limit")
 			return nil
 		}
-		if st.Size() > maxFileSize {
+		if st.Size() > fileLimit {
+			if useClamAV {
+				scanFailure(r, abs, "clamav_file_limit")
+				return nil
+			}
 			r.FilesSkipped++
 			issue(r, abs, "oversize")
 			return nil
@@ -205,14 +236,31 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 			r.FilesSkipped++
 			return nil
 		}
-		snap, err := readSnapshotScoped(ctx, abs, maxFileSize, bytesLimit-r.BytesRead, true, scope, workDir)
+		var snap snapshot
+		name := ""
+		if useClamAV {
+			name, err = e.clamav.Scan(ctx, r.DbVersion, func(scanCtx context.Context, sink io.Writer) error {
+				var readErr error
+				snap, readErr = readSnapshotScopedSink(scanCtx, abs, fileLimit, bytesLimit-r.BytesRead, true, scope, workDir, sink)
+				if errors.Is(readErr, errScanBudget) && scanCtx.Err() != nil && ctx.Err() == nil {
+					return scanCtx.Err()
+				}
+				return readErr
+			})
+		} else {
+			snap, err = readSnapshotScoped(ctx, abs, fileLimit, bytesLimit-r.BytesRead, true, scope, workDir)
+		}
 		r.BytesRead += snap.bytesRead
 		if errors.Is(err, errScanBudget) {
 			scanFailure(r, abs, "budget_exhausted")
 			return errScanBudget
 		}
 		if err != nil {
-			scanFailure(r, abs, "read_failed_or_changed")
+			code := "read_failed_or_changed"
+			if useClamAV {
+				code = clamav.Code(err)
+			}
+			scanFailure(r, abs, code)
 			return nil
 		}
 		r.FilesScanned++
@@ -220,7 +268,13 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 			r.FilesSkipped++
 			return nil
 		}
-		if finding := e.detect(abs, snap); finding != nil {
+		var finding *pb.VirusFinding
+		if useClamAV {
+			finding = clamavFinding(abs, snap, name, r.DbVersion)
+		} else {
+			finding = e.detect(abs, snap)
+		}
+		if finding != nil {
 			id, err := NewQuarantine(workDir).QuarantineExpected(ctx, abs, snap.sum)
 			if err != nil {
 				finding.QuarantineId = id
@@ -302,6 +356,9 @@ func protectedPath(path, workDir string) bool {
 	return err == nil && pathKey(path) == pathKey(exe)
 }
 func (e *Engine) detect(path string, s snapshot) *pb.VirusFinding {
+	if e.db == nil || !e.db.Valid {
+		return nil
+	}
 	entry, hit := e.db.Lookup(s.sum)
 	engine, name, severity := "hash", entry.Name, entry.Severity
 	if !hit {
@@ -320,7 +377,8 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.refresh(workDir)
-	if !utf8.ValidString(path) || len(path) > 512 || e.db == nil || !e.db.Valid || len(e.db.hashes)+len(e.db.rules) == 0 || protectedPath(path, workDir) || isExcludedDir(path) || e.whitelisted(path, "") {
+	useClamAV := e.clamav.Realtime()
+	if !utf8.ValidString(path) || len(path) > 512 || (!useClamAV && (e.db == nil || !e.db.Valid || len(e.db.hashes)+len(e.db.rules) == 0)) || protectedPath(path, workDir) || isExcludedDir(path) || e.whitelisted(path, "") {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -328,7 +386,28 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 	if e.ioBudget != nil {
 		ctx = context.WithValue(ctx, ioBudgetKey{}, e.ioBudget)
 	}
-	s, err := readSnapshotScoped(ctx, path, maxFileSize, 20<<20, true, "", workDir)
+	var s snapshot
+	var err error
+	var clamFinding *pb.VirusFinding
+	if useClamAV {
+		version, probeErr := e.clamav.Probe(ctx)
+		if probeErr == nil {
+			name, scanErr := e.clamav.Scan(ctx, version, func(scanCtx context.Context, sink io.Writer) error {
+				var readErr error
+				s, readErr = readSnapshotScopedSink(scanCtx, path, clamav.MaxFileBytes, 20<<20, true, "", workDir, sink)
+				return readErr
+			})
+			if scanErr == nil {
+				clamFinding = clamavFinding(path, s, name, version)
+			}
+		}
+	}
+	// A failed ClamAV connection must not disable the independent builtin engine.
+	// Only a complete, identity-checked snapshot can produce either finding.
+	if s.sum == "" {
+		remaining := uint64(20<<20) - min(uint64(20<<20), s.bytesRead)
+		s, err = readSnapshotScoped(ctx, path, maxFileSize, remaining, true, "", workDir)
+	}
 	if err != nil {
 		e.log.Debug("周期检测未覆盖文件", "path", path, "reason", actionErrorCode(err))
 		return nil
@@ -337,6 +416,9 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 		return nil
 	}
 	finding := e.detect(path, s)
+	if finding == nil {
+		finding = clamFinding
+	}
 	if finding == nil {
 		return nil
 	}
@@ -365,6 +447,15 @@ func readSnapshot(ctx context.Context, path string, maxSize int64, budget uint64
 	return readSnapshotScoped(ctx, path, maxSize, budget, limited, "", "")
 }
 func readSnapshotScoped(ctx context.Context, path string, maxSize int64, budget uint64, limited bool, scope, workDir string) (snapshot, error) {
+	return readSnapshotScopedSink(ctx, path, maxSize, budget, limited, scope, workDir, nil)
+}
+func clamavFinding(path string, s snapshot, name, version string) *pb.VirusFinding {
+	if name == "" || s.sum == "" || s.info == nil {
+		return nil
+	}
+	return &pb.VirusFinding{Path: path, Name: name, Sha256: s.sum, Size: uint64(s.info.Size()), Engine: "clamav", EngineVersion: version, Severity: pb.Severity_SEV_HIGH}
+}
+func readSnapshotScopedSink(ctx context.Context, path string, maxSize int64, budget uint64, limited bool, scope, workDir string, sink io.Writer) (snapshot, error) {
 	var s snapshot
 	f, parent, err := openRegular(path, false)
 	if err != nil {
@@ -399,6 +490,11 @@ func readSnapshotScoped(ctx context.Context, path string, maxSize int64, budget 
 				return s, errScanBudget
 			}
 			h.Write(buf[:n])
+			if sink != nil {
+				if _, err := sink.Write(buf[:n]); err != nil {
+					return s, err
+				}
+			}
 			if len(s.head) < ruleHeadBytes {
 				count := min(n, ruleHeadBytes-len(s.head))
 				s.head = append(s.head, buf[:count]...)
