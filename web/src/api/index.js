@@ -660,8 +660,8 @@ export async function fetchVirus(status) {
 }
 
 /** 创建病毒扫描任务：mode 1快速 2全盘 3自定义（paths 必填） */
-export async function createVirusTask(agentIds, mode, paths, name) {
-  return post('/api/virus/tasks', { agentIds, mode, paths: paths || [], name })
+export async function createVirusTask(agentIds, mode, paths, name, engine = 'builtin') {
+  return post('/api/virus/tasks', { agentIds, mode, paths: paths || [], name, engine })
 }
 
 /** 检出处置：action = quarantine / delete / restore / whitelist */
@@ -842,3 +842,5 @@ export async function fetchScanCoverage(page = 1) { return get(`/api/vuln/scan-c
 export async function fetchFileWatchStatus(page = 1) { return get(`/api/protect/file-watch-status?page=${page}&pageSize=20`) }
 
 export const fetchWindowsLoginStatus = (page = 1) => get(`/api/protect/windows-login-status?page=${page}&pageSize=20`)
+
+export async function fetchClamavStatus(page = 1, size = 20) { return get(`/api/virus/clamav-status?page=${page}&size=${size}`) }

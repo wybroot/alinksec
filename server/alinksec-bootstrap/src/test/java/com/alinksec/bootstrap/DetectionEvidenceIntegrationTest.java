@@ -71,6 +71,51 @@ class DetectionEvidenceIntegrationTest {
         var items=succeeded.entrySet().stream().map(e->Map.of("finding_id",Long.toString(e.getKey()),"success",e.getValue(),"quarantine_id",e.getValue()?"c".repeat(32):"","error",e.getValue()?"":"identity_changed")).toList();
         tx.executeWithoutResult(s->lifecycle.onTerminal(a,command,terminal,JsonUtils.write(Map.of("virus_action_contract",2,"results",items))));
     }
+    void clamHeartbeat(String agent,String version) {
+        var d=ClamavIntegrationTest.coverage("ready");d.put("version",version);
+        new ClamavService(jdbc).heartbeat(agent,RptHeartbeat.newBuilder().setClamavContract(1).setClamavStatus(JsonUtils.write(d)).build());
+    }
+    long clamTask(List<String> agents) {
+        long id=tx.execute(s->tasks.createTask("ClamAV 测试",agents,3,List.of("/tmp"),actor,"clamav"));created.add(id);return id;
+    }
+    RptVirusResult clamReport(long task,String v) {
+        return report(task,true,RptVirusResult.Status.COMPLETE).toBuilder().setExecutionContract(3).setScanEngine("clamav").setDbVersion(v).clearFindings().addFindings(VirusFinding.newBuilder().setPath("/tmp/clam-marker").setName("Harmless.ClamFixture").setSha256("b".repeat(64)).setSize(12).setSeverity(Severity.SEV_HIGH).setEngine("clamav").setEngineVersion(v).setActionTaken("alert_only")).build();
+    }
+    @Test void clamavPinsPerHostVersionsWithoutBuiltinLibraryAndPreservesEvidence() throws Exception {
+        String va="ClamAV 1.4.6/fixture-a",vb="ClamAV 1.4.6/fixture-b";
+        clamHeartbeat(a,va);clamHeartbeat(b,vb);jdbc.update("UPDATE t_virus_db SET hash_count=0,rule_count=0 WHERE id=?",release);
+        long task=clamTask(List.of(a,b));
+        for(Command command:commands.values())if(command.hasVirusScan()) {
+            assertEquals(3,command.getVirusScan().getExecutionContract());assertEquals("clamav",command.getVirusScan().getEngine());
+            String agent=jdbc.queryForObject("SELECT agent_id FROM t_virus_task_agent WHERE command_id=?",String.class,command.getCmdId());
+            assertEquals(agent.equals(a)?va:vb,command.getVirusScan().getExpectedDbVersion());
+            assertNotNull(tx.execute(s->lifecycle.prepareDelivery(agent,command)));
+        }
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,report(task,true,RptVirusResult.Status.COMPLETE))));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,clamReport(task,vb))));
+        tx.executeWithoutResult(s->results.onResult(a,clamReport(task,va)));
+        tx.executeWithoutResult(s->results.onResult(b,clamReport(task,vb).toBuilder().clearFindings().build()));
+        assertEquals(2,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,task));
+        assertEquals("clamav",jdbc.queryForObject("SELECT engine FROM t_virus_finding WHERE task_id=?",String.class,task));
+        assertTrue(JsonUtils.write(query.taskEvidence(task)).contains("expected_engine_version"));assertTrue(JsonUtils.write(query.taskEvidence(task)).contains("clamav"));
+        assertFalse(JsonUtils.write(query.taskEvidence(task)).contains("report_b64"));
+        String action=command(finding(task),"quarantine");receipt(action,Map.of(finding(task),true),TerminalState.DONE);
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM t_virus_finding WHERE task_id=?",Integer.class,task));
+        capture("clamav",task);
+        String directory=System.getenv("ALINKSEC_CLAMAV_BROWSER_FIXTURES");
+        if(directory!=null&&!directory.isBlank()){Path dest=Path.of(directory);Files.createDirectories(dest);Files.writeString(dest.resolve("task.json"),JsonUtils.write(snapshot(task,finding(task))));}
+    }
+    @Test void clamavDeliveryRechecksReadinessAndVersionAndBuiltinRejectsClamav() {
+        assertThrows(IllegalArgumentException.class,()->clamTask(List.of(a)));
+        clamHeartbeat(a,"ClamAV 1.4.6/a");long task=clamTask(List.of(a));
+        Command command=commands.values().stream().filter(Command::hasVirusScan).findFirst().orElseThrow();
+        clamHeartbeat(a,"ClamAV 1.4.6/b");assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,command)));
+        clamHeartbeat(a,"ClamAV 1.4.6/a");jdbc.update("UPDATE t_clamav_status SET observed_at=1 WHERE agent_id=?",a);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,command)));
+        long builtin=task(List.of(b));assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(b,clamReport(builtin,"ClamAV 1.4.6/a"))));
+        var failure=clamReport(task,"ClamAV 1.4.6/b").toBuilder().clearFindings().setFilesScanned(0).setStatus(RptVirusResult.Status.FAILED).setFilesFailed(1).addIssues(VirusScanIssue.newBuilder().setCode("clamav_version_changed")).build();
+        tx.executeWithoutResult(s->results.onResult(a,failure));assertEquals(3,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,task));
+    }
     @Test void duplicateFirstResultCannotOverwriteFindingsOrAdvanceProgress() {
         long task=task(List.of(a,b)); tx.executeWithoutResult(s->results.onResult(a,report(task,true,RptVirusResult.Status.COMPLETE)));
         long finding=finding(task); tx.executeWithoutResult(s->results.onResult(a,report(task,false,RptVirusResult.Status.COMPLETE)));

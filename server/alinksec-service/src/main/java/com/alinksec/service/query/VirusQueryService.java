@@ -28,7 +28,7 @@ public class VirusQueryService {
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT t.id, t.task_no, t.name, t.mode, CAST(t.scope AS TEXT) AS scope, t.status, t.progress,
                        (SELECT count(*) FROM t_virus_finding f WHERE f.task_id = t.id) AS findings,
-                       t.created_at, t.started_at, t.finished_at,t.expected_db_version,
+                       t.created_at, t.started_at, t.finished_at,t.expected_db_version,t.scan_engine,
                        (SELECT count(*) FROM t_virus_task_agent m WHERE m.task_id=t.id) AS total_hosts,
                        (SELECT count(*) FROM t_virus_task_agent m WHERE m.task_id=t.id AND m.state='pending') AS pending_hosts,
                        (SELECT count(*) FROM t_virus_task_agent m WHERE m.task_id=t.id AND m.state='complete') AS complete_hosts
@@ -100,7 +100,7 @@ public class VirusQueryService {
     }
 
     public List<Map<String,Object>> taskEvidence(long task) {
-        var rows=jdbc.queryForList("SELECT agent_id,state,evidence,evidence_sha256,received_at,late FROM t_virus_task_agent WHERE task_id=? ORDER BY agent_id",task);
+        var rows=jdbc.queryForList("SELECT agent_id,state,evidence,evidence_sha256,received_at,late,expected_engine_version FROM t_virus_task_agent WHERE task_id=? ORDER BY agent_id",task);
         for(var row:rows) {
             String raw=String.valueOf(row.get("evidence"));
             if(!raw.isBlank()) { var json=com.alinksec.common.util.JsonUtils.read(raw); if(json.isObject()) ((com.fasterxml.jackson.databind.node.ObjectNode)json).remove("report_b64"); row.put("evidence",json); }

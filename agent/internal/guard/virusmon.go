@@ -110,6 +110,7 @@ func (g *Guard) virusSweep(paths []string) {
 				"action":        f.GetActionTaken(),
 				"quarantine_id": f.GetQuarantineId(), "action_error": f.GetActionError(),
 				"engine": f.GetEngine(), "size": f.GetSize(), "execution_contract": 2,
+				"engine_version": f.GetEngineVersion(),
 			}),
 			EventTs: time.Now().UnixMilli(),
 		}
