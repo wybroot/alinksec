@@ -34,10 +34,6 @@ func Native(t testing.TB) (clamav.Config, string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	t.Cleanup(cancel)
-	version, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(version)), "ClamAV 1.4.6") {
-		t.Fatalf("native version=%q err=%v", version, err)
-	}
 	root := t.TempDir()
 	database := filepath.Join(root, "database")
 	if err := os.Mkdir(database, 0700); err != nil {
@@ -57,6 +53,10 @@ func Native(t testing.TB) (clamav.Config, string) {
 	config := filepath.Join(root, "clamd.conf")
 	if err := os.WriteFile(config, []byte(conf), 0600); err != nil {
 		t.Fatal(err)
+	}
+	version, err := exec.CommandContext(ctx, bin, "--config-file="+config, "--version").CombinedOutput()
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(version)), "ClamAV 1.4.6") {
+		t.Fatalf("native version=%q err=%v", version, err)
 	}
 	log, err := os.Create(filepath.Join(root, "clamd.log"))
 	if err != nil {

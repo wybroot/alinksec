@@ -58,11 +58,16 @@ def main():
     if len(binaries) != 1:
         raise RuntimeError('Expected exactly one native clamd binary')
     binary = binaries[0]
-    identity = subprocess.run([str(binary), '--version'], check=True, capture_output=True, text=True, timeout=15).stdout.strip()
-    if not identity.startswith('ClamAV ' + VERSION):
-        raise RuntimeError('Unexpected native engine version')
-    evidence = {'version': VERSION, 'identity': identity, 'asset': name, 'sha256': digest, 'url': url, 'binary': str(binary), 'system': platform.system(), 'machine': platform.machine()}
+    version_db = root / 'version-database'
+    version_db.mkdir(exist_ok=True)
+    version_config = root / 'version.conf'
+    version_config.write_text(f'DatabaseDirectory {version_db.as_posix()}\n', encoding='utf-8')
+    probe = subprocess.run([str(binary), '--config-file=' + str(version_config), '--version'], capture_output=True, text=True, timeout=15)
+    identity = probe.stdout.strip()
+    evidence = {'version': VERSION, 'identity': identity, 'asset': name, 'sha256': digest, 'url': url, 'binary': str(binary), 'system': platform.system(), 'machine': platform.machine(), 'version_exit': probe.returncode, 'version_stderr': probe.stderr[:4096]}
     (root / 'install.json').write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
+    if probe.returncode != 0 or not identity.startswith('ClamAV ' + VERSION):
+        raise RuntimeError(f'Native version probe failed: {probe.returncode}: {identity[:4096]} {probe.stderr[:4096]}')
     if os.getenv('GITHUB_ENV'):
         with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
             env.write(f'ALINKSEC_CLAMAV_TEST_BIN={binary}\nALINKSEC_CLAMAV_TEST_SHA256={digest}\n')

@@ -248,7 +248,7 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 
 // Scan accepts only the same validated descriptor bytes used for the SHA256
 // action precondition. Version is the daemon's reported identity, not a corpus digest.
-func (c *Client) Scan(ctx context.Context, expected string, consume func(io.Writer) error) (name string, err error) {
+func (c *Client) Scan(ctx context.Context, expected string, consume func(context.Context, io.Writer) error) (name string, err error) {
 	if c == nil || !c.cfg.Enabled {
 		return "", issue("clamav_disabled")
 	}
@@ -289,7 +289,7 @@ func (c *Client) Scan(ctx context.Context, expected string, consume func(io.Writ
 	if _, err = io.WriteString(conn, "zINSTREAM\x00"); err != nil {
 		return "", err
 	}
-	if err = consume(&streamWriter{conn: conn}); err != nil {
+	if err = consume(ctx, &streamWriter{conn: conn}); err != nil {
 		return "", err
 	}
 	if _, err = conn.Write([]byte{0, 0, 0, 0}); err != nil {

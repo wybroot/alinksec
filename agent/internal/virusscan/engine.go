@@ -239,9 +239,9 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 		var snap snapshot
 		name := ""
 		if useClamAV {
-			name, err = e.clamav.Scan(ctx, r.DbVersion, func(sink io.Writer) error {
+			name, err = e.clamav.Scan(ctx, r.DbVersion, func(scanCtx context.Context, sink io.Writer) error {
 				var readErr error
-				snap, readErr = readSnapshotScopedSink(ctx, abs, fileLimit, bytesLimit-r.BytesRead, true, scope, workDir, sink)
+				snap, readErr = readSnapshotScopedSink(scanCtx, abs, fileLimit, bytesLimit-r.BytesRead, true, scope, workDir, sink)
 				return readErr
 			})
 		} else {
@@ -389,9 +389,9 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 	if useClamAV {
 		version, probeErr := e.clamav.Probe(ctx)
 		if probeErr == nil {
-			name, scanErr := e.clamav.Scan(ctx, version, func(sink io.Writer) error {
+			name, scanErr := e.clamav.Scan(ctx, version, func(scanCtx context.Context, sink io.Writer) error {
 				var readErr error
-				s, readErr = readSnapshotScopedSink(ctx, path, clamav.MaxFileBytes, 20<<20, true, "", workDir, sink)
+				s, readErr = readSnapshotScopedSink(scanCtx, path, clamav.MaxFileBytes, 20<<20, true, "", workDir, sink)
 				return readErr
 			})
 			if scanErr == nil {

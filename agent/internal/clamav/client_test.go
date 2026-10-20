@@ -43,7 +43,10 @@ func fixture(t *testing.T, response string, mutate bool) (*clamav.Client, *atomi
 	})
 	return clamav.New(cfg), &scans
 }
-func consume(w io.Writer) error { _, err := io.WriteString(w, "harmless fixture"); return err }
+func consume(_ context.Context, w io.Writer) error {
+	_, err := io.WriteString(w, "harmless fixture")
+	return err
+}
 func TestStreamVerdictsAndVersionBinding(t *testing.T) {
 	for _, tc := range []struct {
 		reply, name, code string
@@ -79,7 +82,7 @@ func boolInt(v bool) int {
 func TestVersionMismatchDoesNotSendContent(t *testing.T) {
 	c, n := fixture(t, "stream: OK", false)
 	called := false
-	_, err := c.Scan(context.Background(), "ClamAV different", func(w io.Writer) error { called = true; return consume(w) })
+	_, err := c.Scan(context.Background(), "ClamAV different", func(ctx context.Context, w io.Writer) error { called = true; return consume(ctx, w) })
 	if clamav.Code(err) != "clamav_version_changed" || called || n.Load() != 0 {
 		t.Fatalf("err=%v content=%v", err, called)
 	}
@@ -130,12 +133,28 @@ func TestScanSerializationAndCancelledWaiter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	called := false
-	_, err := c.Scan(ctx, version, func(w io.Writer) error { called = true; return nil })
+	_, err := c.Scan(ctx, version, func(_ context.Context, w io.Writer) error { called = true; return nil })
 	close(release)
 	if err == nil || called {
 		t.Fatalf("waiter err=%v consumed=%v", err, called)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFileDeadlineReachesResourceWait(t *testing.T) {
+	c, _ := fixture(t, "stream: OK", false)
+	started := time.Now()
+	_, err := c.Scan(context.Background(), version, func(scanCtx context.Context, w io.Writer) error {
+		deadline, ok := scanCtx.Deadline()
+		if !ok || deadline.Sub(started) > 2100*time.Millisecond {
+			t.Error("file timeout did not reach resource wait")
+		}
+		<-scanCtx.Done()
+		return scanCtx.Err()
+	})
+	if clamav.Code(err) != "clamav_timeout" || time.Since(started) > 3*time.Second {
+		t.Fatalf("resource wait deadline err=%v duration=%v", err, time.Since(started))
 	}
 }
