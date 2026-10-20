@@ -58,11 +58,19 @@ def main():
     if len(binaries) != 1:
         raise RuntimeError('Expected exactly one native clamd binary')
     binary = binaries[0]
+    runtime_env = dict(os.environ)
+    library_path = None
+    if asset.endswith('.deb'):
+        libraries = list(extracted.rglob('libclamav.so.*'))
+        if not libraries:
+            raise RuntimeError('Missing extracted ClamAV runtime library')
+        library_path = os.pathsep.join(sorted({str(p.parent) for p in libraries}))
+        runtime_env['LD_LIBRARY_PATH'] = library_path
     version_db = root / 'version-database'
     version_db.mkdir(exist_ok=True)
     version_config = root / 'version.conf'
     version_config.write_text(f'DatabaseDirectory {version_db}\n', encoding='utf-8')
-    probe = subprocess.run([str(binary), '--config-file=' + str(version_config), '--version'], capture_output=True, text=True, timeout=15)
+    probe = subprocess.run([str(binary), '--config-file=' + str(version_config), '--version'], capture_output=True, text=True, timeout=15, env=runtime_env)
     identity = probe.stdout.strip()
     evidence = {'version': VERSION, 'identity': identity, 'asset': name, 'sha256': digest, 'url': url, 'binary': str(binary), 'system': platform.system(), 'machine': platform.machine(), 'version_exit': probe.returncode, 'version_stderr': probe.stderr[:4096]}
     (root / 'install.json').write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
@@ -71,6 +79,8 @@ def main():
     if os.getenv('GITHUB_ENV'):
         with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
             env.write(f'ALINKSEC_CLAMAV_TEST_BIN={binary}\nALINKSEC_CLAMAV_TEST_SHA256={digest}\n')
+            if library_path is not None:
+                env.write(f'LD_LIBRARY_PATH={library_path}\n')
     print(json.dumps(evidence))
 
 if __name__ == '__main__':
