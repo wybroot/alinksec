@@ -61,7 +61,7 @@ def main():
     version_db = root / 'version-database'
     version_db.mkdir(exist_ok=True)
     version_config = root / 'version.conf'
-    version_config.write_text(f'DatabaseDirectory {version_db.as_posix()}\n', encoding='utf-8')
+    version_config.write_text(f'DatabaseDirectory {version_db}\n', encoding='utf-8')
     probe = subprocess.run([str(binary), '--config-file=' + str(version_config), '--version'], capture_output=True, text=True, timeout=15)
     identity = probe.stdout.strip()
     evidence = {'version': VERSION, 'identity': identity, 'asset': name, 'sha256': digest, 'url': url, 'binary': str(binary), 'system': platform.system(), 'machine': platform.machine(), 'version_exit': probe.returncode, 'version_stderr': probe.stderr[:4096]}

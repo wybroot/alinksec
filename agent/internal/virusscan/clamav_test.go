@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alinksec/alinksec-agent/internal/clamav"
@@ -142,5 +143,30 @@ func TestClamavWhitelistRealtimeAndOversize(t *testing.T) {
 	r := e.ScanCommand(context.Background(), clamCommand(path), work)
 	if r.Status != pb.RptVirusResult_FAILED || len(r.Findings) != 0 || !strings.Contains(r.String(), "clamav_file_limit") {
 		t.Fatal(r)
+	}
+}
+
+func TestClamavFileTimeoutDoesNotConsumeWholeTaskDeadline(t *testing.T) {
+	e, work := clamEngine(t, "stream: OK", nil)
+	root := t.TempDir()
+	paths := []string{filepath.Join(root, "first"), filepath.Join(root, "second")}
+	for _, p := range paths {
+		if err := os.WriteFile(p, []byte("harmless"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var blocked atomic.Bool
+	e.SetIOBudget(func(ctx context.Context, n int) error {
+		if n == 64<<10 && blocked.CompareAndSwap(false, true) {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	})
+	cmd := clamCommand(paths[0])
+	cmd.Paths = paths
+	r := e.ScanCommand(context.Background(), cmd, work)
+	if r.Status != pb.RptVirusResult_PARTIAL || r.FilesFailed != 1 || r.FilesScanned != 1 || r.BudgetExhausted || len(r.Findings) != 0 || !strings.Contains(r.String(), "clamav_timeout") {
+		t.Fatalf("file timeout stopped remaining work: %+v", r)
 	}
 }

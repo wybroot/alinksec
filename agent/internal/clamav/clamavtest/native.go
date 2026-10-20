@@ -49,7 +49,7 @@ func Native(t testing.TB) (clamav.Config, string) {
 	address := reservation.Addr().String()
 	port := reservation.Addr().(*net.TCPAddr).Port
 	reservation.Close()
-	conf := fmt.Sprintf("Foreground yes\nDatabaseDirectory %s\nTemporaryDirectory %s\nTCPSocket %d\nTCPAddr 127.0.0.1\nMaxThreads 1\nMaxQueue 2\nStreamMaxLength 20M\nMaxFileSize 20M\nMaxScanSize 1M\nMaxRecursion 4\nMaxFiles 8\nMaxScanTime 2000\nReadTimeout 5\nCommandReadTimeout 5\nSelfCheck 0\nConcurrentDatabaseReload no\nBytecode no\nAlertExceedsMax yes\nAlertEncrypted yes\n", filepath.ToSlash(database), filepath.ToSlash(root), port)
+	conf := fmt.Sprintf("Foreground yes\nDatabaseDirectory %s\nTemporaryDirectory %s\nTCPSocket %d\nTCPAddr 127.0.0.1\nMaxThreads 1\nMaxQueue 2\nStreamMaxLength 20M\nMaxFileSize 20M\nMaxScanSize 1M\nMaxRecursion 4\nMaxFiles 8\nMaxScanTime 2000\nReadTimeout 5\nCommandReadTimeout 5\nSelfCheck 0\nConcurrentDatabaseReload no\nBytecode no\nAlertExceedsMax yes\nAlertEncrypted yes\n", database, root, port)
 	config := filepath.Join(root, "clamd.conf")
 	if err := os.WriteFile(config, []byte(conf), 0600); err != nil {
 		t.Fatal(err)

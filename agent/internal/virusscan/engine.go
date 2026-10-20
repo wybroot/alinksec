@@ -242,6 +242,9 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 			name, err = e.clamav.Scan(ctx, r.DbVersion, func(scanCtx context.Context, sink io.Writer) error {
 				var readErr error
 				snap, readErr = readSnapshotScopedSink(scanCtx, abs, fileLimit, bytesLimit-r.BytesRead, true, scope, workDir, sink)
+				if errors.Is(readErr, errScanBudget) && scanCtx.Err() != nil && ctx.Err() == nil {
+					return scanCtx.Err()
+				}
 				return readErr
 			})
 		} else {
