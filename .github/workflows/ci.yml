@@ -731,7 +731,7 @@ jobs:
           cache-dependency-path: agent/go.sum
       - name: Install Linux native build tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc make autoconf automake libtool curl ca-certificates
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc make autoconf automake libtool pkg-config curl ca-certificates
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
@@ -739,7 +739,7 @@ jobs:
           path-type: inherit
           install: >-
             mingw-w64-x86_64-gcc
-            autoconf automake libtool make curl
+            autoconf automake libtool make pkgconf curl
       - name: Build pinned static libyara and exercise actual native Linux Agent
         if: runner.os == 'Linux'
         shell: bash
