@@ -24,8 +24,8 @@ public class VirusTaskService {
     @Transactional
     public long createTask(String name,List<String> agents,int mode,List<String> paths,Long actor,String engine) {
         if(engine==null)engine="builtin";
-        if(!Set.of("builtin","clamav").contains(engine))throw new IllegalArgumentException("扫描引擎无效");
-        boolean clamav=engine.equals("clamav");
+        if(!Set.of("builtin","clamav","yara").contains(engine))throw new IllegalArgumentException("扫描引擎无效");
+        boolean clamav=engine.equals("clamav"),yara=engine.equals("yara"),external=clamav||yara;
         Map<String,String> versions=new HashMap<>();
         VirusExecution.lock(jdbc); if(actor!=null) VirusExecution.actor(jdbc,actor);
         if(agents==null || agents.isEmpty() || agents.size()>500 || agents.stream().anyMatch(a->a==null || a.isBlank() || a.length()>64)) throw new IllegalArgumentException("请选择1至500台有效目标主机");
@@ -41,20 +41,20 @@ public class VirusTaskService {
             if(rows.size()!=1 || ((Number)rows.get(0).get("virus_execution_contract")).intValue()!=2) throw new IllegalArgumentException("目标主机尚未上报检测执行契约2，请先更新Agent并等待心跳");
             int os=((Number)rows.get(0).get("os_type")).intValue();
             if(os!=1 && os!=2) throw new IllegalArgumentException("目标主机系统未支持");
-            if(clamav)versions.put(agent,ClamavService.requireReady(jdbc,agent));
+            if(external)versions.put(agent,yara?YaraService.requireReady(jdbc,agent):ClamavService.requireReady(jdbc,agent));
             for(String path:clean) if(os==1 && !path.startsWith("/") || os==2 && !path.matches("^[A-Za-z]:[\\\\/].*")) throw new IllegalArgumentException("自定义路径与目标主机系统不匹配，请按系统分组");
         }
         String version="";
-        if(!clamav) {
+        if(!external) {
             var releases=jdbc.queryForList("SELECT db_version,hash_count,rule_count FROM t_virus_db ORDER BY id DESC LIMIT 1");
             if(releases.isEmpty() || ((Number)releases.get(0).get("hash_count")).longValue()+((Number)releases.get(0).get("rule_count")).longValue()==0) throw new IllegalArgumentException("当前特征库为空，无法创建扫描任务");
             version=String.valueOf(releases.get(0).get("db_version"));
         }
         String no="VS-"+UUID.randomUUID();
         long task=jdbc.queryForObject("INSERT INTO t_virus_scan_task(task_no,name,mode,scope,status,created_by,started_at,expected_db_version,scan_engine) VALUES(?,?,?,?,1,?,CURRENT_TIMESTAMP,?,?) RETURNING id",Long.class,no,name==null || name.isBlank()?no+" 病毒扫描":name,mode,JsonUtils.write(Map.of("agent_ids",agents,"paths",clean,"time_limit_sec",7200,"max_files",100000,"max_total_bytes",20L<<30)),actor,version,engine);
-        var scan=CmdVirusScan.newBuilder().setTaskId(Long.toString(task)).setMode(mode==2?CmdVirusScan.Mode.FULL:mode==3?CmdVirusScan.Mode.CUSTOM:CmdVirusScan.Mode.QUICK).addAllPaths(clean).setExecutionContract(clamav?3:2).setEngine(engine).setTimeLimitSec(7200).setMaxFiles(100000).setMaxTotalBytes(20L<<30);
+        var scan=CmdVirusScan.newBuilder().setTaskId(Long.toString(task)).setMode(mode==2?CmdVirusScan.Mode.FULL:mode==3?CmdVirusScan.Mode.CUSTOM:CmdVirusScan.Mode.QUICK).addAllPaths(clean).setExecutionContract(yara?4:clamav?3:2).setEngine(engine).setTimeLimitSec(7200).setMaxFiles(100000).setMaxTotalBytes(20L<<30);
         for(String agent:agents) {
-            String pinned=clamav?versions.get(agent):version;
+            String pinned=external?versions.get(agent):version;
             scan.setExpectedDbVersion(pinned);
             jdbc.update("INSERT INTO t_virus_task_agent(task_id,agent_id,expected_engine_version) VALUES(?,?,?)",task,agent,pinned);
             String command=commands.dispatchAfterCommit(agent,Command.newBuilder().setVirusScan(scan),actor);

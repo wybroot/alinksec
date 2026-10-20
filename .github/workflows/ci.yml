@@ -87,7 +87,7 @@ jobs:
           CGO_ENABLED: '0'
           GOARCH: amd64
       - name: Check native Windows detection, quarantine and periodic protection
-        run: go test -v -count=1 ./internal/clamav ./internal/virusscan ./internal/guard ./internal/comm
+        run: go test -v -count=1 ./internal/yara ./internal/clamav ./internal/virusscan ./internal/guard ./internal/comm
         working-directory: agent
       - name: Check actual Windows SCM service and TLS communication
         run: go test -v -count=1 -timeout=4m -run '^TestNativeWindowsService$' ./cmd/agent
@@ -295,6 +295,7 @@ jobs:
           ALINKSEC_WINDOWS_UPDATE_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-update-fixtures
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
+          ALINKSEC_YARA_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/yara-fixtures
         working-directory: server
       - name: Check source governance with captured database lifecycle responses
         working-directory: web
@@ -314,6 +315,9 @@ jobs:
       - name: Check ClamAV readiness and explicit engine tasks in production pages
         working-directory: web
         run: node test/clamav-browser.mjs
+      - name: Check native YARA readiness and matched-rule evidence in production pages
+        working-directory: web
+        run: node test/yara-browser.mjs
       - name: Check per-host native file event coverage and recovery in production pages
         working-directory: web
         run: node test/file-watch-browser.mjs
@@ -453,7 +457,7 @@ jobs:
       - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
         run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
-        run: go test -race ./internal/clamav ./internal/windowsupdate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
+        run: go test -race ./internal/yara ./internal/clamav ./internal/windowsupdate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
         working-directory: agent
       - name: Extract pinned native ClamAV test engine
         run: python3 deploy/tests/clamav-install.py .tmp/clamav-native
@@ -590,8 +594,10 @@ jobs:
             .tmp/windows-update-browser
             .tmp/file-watch-browser
             .tmp/clamav-browser
+            .tmp/yara-browser
             .tmp/file-watch-fixtures
             .tmp/clamav-fixtures
+            .tmp/yara-fixtures
             .tmp/weakpwd-fixtures
             .tmp/windows-login-fixtures
             .tmp/windows-ransom-fixtures
@@ -702,6 +708,63 @@ jobs:
           docker compose -f deploy/docker/docker-compose.yml down -v --remove-orphans || true
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
+  native-yara:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    name: native-yara (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: windows-amd64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Install Linux native build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc make autoconf automake libtool curl ca-certificates
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            autoconf automake libtool make curl
+      - name: Build pinned static libyara and exercise actual native Linux Agent
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash deploy/tests/yara-native.sh
+      - name: Build pinned static libyara and exercise actual native Windows Agent
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash deploy/tests/yara-native.sh
+      - name: Retain native YARA engine, Agent and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yara-validation-${{ matrix.platform }}
+          path: |
+            .tmp/yara-native/build.json
+            .tmp/yara-native/worker.json
+            .tmp/yara-native/scan.json
+            .tmp/yara-native/event.json
+            .tmp/yara-native/agent.json
+            .tmp/yara-native/agent/*
+            .tmp/yara-native/LICENSE-YARA.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   schema:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
     runs-on: ubuntu-latest
@@ -751,8 +814,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "23"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "68"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "24"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "69"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -787,7 +850,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,UpgradeWatchdogIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,UpgradeWatchdogIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -803,6 +866,7 @@ jobs:
           ALINKSEC_WINDOWS_UPDATE_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-update-fixtures
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
+          ALINKSEC_YARA_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/yara-fixtures
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -817,5 +881,6 @@ jobs:
             .tmp/windows-update-fixtures
             .tmp/file-watch-fixtures
             .tmp/clamav-fixtures
+            .tmp/yara-fixtures
           include-hidden-files: true
           if-no-files-found: error

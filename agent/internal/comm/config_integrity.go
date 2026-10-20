@@ -62,5 +62,6 @@ func (c *Client) newVirusEngine() *virusscan.Engine {
 	}
 	engine.SetIOBudget(c.resources.WaitIO)
 	engine.SetClamAV(c.clamav)
+	engine.SetYARA(c.yara)
 	return engine
 }

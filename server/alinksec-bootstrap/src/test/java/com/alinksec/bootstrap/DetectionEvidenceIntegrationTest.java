@@ -116,6 +116,66 @@ class DetectionEvidenceIntegrationTest {
         var failure=clamReport(task,"ClamAV 1.4.6/b").toBuilder().clearFindings().setFilesScanned(0).setStatus(RptVirusResult.Status.FAILED).setFilesFailed(1).addIssues(VirusScanIssue.newBuilder().setCode("clamav_version_changed")).build();
         tx.executeWithoutResult(s->results.onResult(a,failure));assertEquals(3,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,task));
     }
+    void yaraHeartbeat(String agent,String version) {
+        var d=YaraIntegrationTest.coverage("ready");d.put("version",version);
+        new YaraService(jdbc).heartbeat(agent,RptHeartbeat.newBuilder().setYaraContract(1).setYaraStatus(JsonUtils.write(d)).build());
+    }
+    long yaraTask(List<String> agents) {
+        long id=tx.execute(s->tasks.createTask("YARA 测试",agents,3,List.of("/tmp"),actor,"yara"));created.add(id);return id;
+    }
+    RptVirusResult yaraReport(long task,String v) {
+        return report(task,true,RptVirusResult.Status.COMPLETE).toBuilder().setExecutionContract(4).setScanEngine("yara").setDbVersion(v).setCoverage("Native YARA isolated memory scan; exact UTF8 rule source SHA256 pinned; no includes or archive expansion").clearFindings().addFindings(VirusFinding.newBuilder().setPath("/tmp/clam-marker").setName("Harmless_YaraFixture").addMatchedRules("Harmless_YaraFixture").addMatchedRules("Harmless_SecondRule").setSha256("b".repeat(64)).setSize(12).setSeverity(Severity.SEV_HIGH).setEngine("yara").setEngineVersion(v).setActionTaken("alert_only")).build();
+    }
+    @Test void yaraPinsPerHostVersionsWithoutBuiltinLibraryAndPreservesEvidence() throws Exception {
+        String va="YARA 4.5.8/sha256:"+"a".repeat(64),vb="YARA 4.5.8/sha256:"+"b".repeat(64);
+        yaraHeartbeat(a,va);yaraHeartbeat(b,vb);jdbc.update("UPDATE t_virus_db SET hash_count=0,rule_count=0 WHERE id=?",release);
+        long task=yaraTask(List.of(a,b));
+        for(Command command:commands.values())if(command.hasVirusScan()) {
+            assertEquals(4,command.getVirusScan().getExecutionContract());assertEquals("yara",command.getVirusScan().getEngine());
+            String agent=jdbc.queryForObject("SELECT agent_id FROM t_virus_task_agent WHERE command_id=?",String.class,command.getCmdId());
+            assertEquals(agent.equals(a)?va:vb,command.getVirusScan().getExpectedDbVersion());
+            assertNotNull(tx.execute(s->lifecycle.prepareDelivery(agent,command)));
+        }
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,report(task,true,RptVirusResult.Status.COMPLETE))));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,yaraReport(task,vb))));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,yaraReport(task,va).toBuilder().setFindings(0,yaraReport(task,va).getFindings(0).toBuilder().clearMatchedRules()).build())));
+        assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(a,yaraReport(task,va).toBuilder().setFindings(0,yaraReport(task,va).getFindings(0).toBuilder().addMatchedRules("Harmless_YaraFixture")).build())));
+        tx.executeWithoutResult(s->results.onResult(a,yaraReport(task,va)));
+        tx.executeWithoutResult(s->results.onResult(b,yaraReport(task,vb).toBuilder().clearFindings().build()));
+        assertEquals(2,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,task));
+        assertEquals("yara",jdbc.queryForObject("SELECT engine FROM t_virus_finding WHERE task_id=?",String.class,task));
+        assertTrue(JsonUtils.write(query.taskEvidence(task)).contains("expected_engine_version"));assertTrue(JsonUtils.write(query.taskEvidence(task)).contains("yara"));
+        assertFalse(JsonUtils.write(query.taskEvidence(task)).contains("report_b64"));
+        String action=command(finding(task),"quarantine");receipt(action,Map.of(finding(task),true),TerminalState.DONE);
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM t_virus_finding WHERE task_id=?",Integer.class,task));
+        String initial=jdbc.queryForObject("SELECT initial_evidence FROM t_virus_finding WHERE task_id=?",String.class,task);
+        assertTrue(initial.contains("Harmless_SecondRule"));
+        String restore=command(finding(task),"restore");receipt(restore,Map.of(finding(task),true),TerminalState.DONE);
+        assertEquals(initial,jdbc.queryForObject("SELECT initial_evidence FROM t_virus_finding WHERE task_id=?",String.class,task));
+        capture("yara",task);
+        String directory=System.getenv("ALINKSEC_YARA_BROWSER_FIXTURES");
+        if(directory!=null&&!directory.isBlank()){Path dest=Path.of(directory);Files.createDirectories(dest);Files.writeString(dest.resolve("task.json"),JsonUtils.write(snapshot(task,finding(task))));}
+    }
+    @Test void yaraRealtimeRetainsValidatedMatchedRulesAndRejectsMalformedEvidence() {
+        var data=new LinkedHashMap<String,Object>();
+        data.put("execution_contract",2);data.put("source","realtime_guard");data.put("path","/tmp/yara-realtime");data.put("sha256","d".repeat(64));data.put("name","Harmless_YaraFixture");data.put("matched_rules",List.of("Harmless_YaraFixture","Harmless_SecondRule"));data.put("engine","yara");data.put("engine_version","YARA 4.5.8/sha256:"+"a".repeat(64));data.put("size",12);data.put("action","quarantined");data.put("quarantine_id","c".repeat(32));
+        var event=RptSecurityEvent.newBuilder().setType("virus").setSeverity(Severity.SEV_HIGH).setDetail(JsonUtils.write(data)).build();
+        tx.executeWithoutResult(s->results.onRealtime(a,event,"yara-realtime"));tx.executeWithoutResult(s->results.onRealtime(a,event,"yara-realtime"));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_virus_finding WHERE agent_id=?",Integer.class,a));
+        assertTrue(jdbc.queryForObject("SELECT initial_evidence FROM t_virus_finding WHERE agent_id=?",String.class,a).contains("Harmless_SecondRule"));
+        for(var change:List.of(Map.of("matched_rules",List.of()),Map.of("matched_rules",List.of("wrong_first")),Map.of("matched_rules",List.of("Harmless_YaraFixture","Harmless_YaraFixture")),Map.of("engine_version","YARA wrong"),Map.of("size",(20L<<20)+1))){var bad=new LinkedHashMap<>(data);bad.putAll(change);assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onRealtime(a,event.toBuilder().setDetail(JsonUtils.write(bad)).build(),"bad-yara")));}
+    }
+    @Test void yaraDeliveryRechecksReadinessAndVersionAndBuiltinRejectsYara() {
+        assertThrows(IllegalArgumentException.class,()->yaraTask(List.of(a)));
+        yaraHeartbeat(a,"YARA 4.5.8/sha256:"+"a".repeat(64));long task=yaraTask(List.of(a));
+        Command command=commands.values().stream().filter(Command::hasVirusScan).findFirst().orElseThrow();
+        yaraHeartbeat(a,"YARA 4.5.8/sha256:"+"b".repeat(64));assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,command)));
+        yaraHeartbeat(a,"YARA 4.5.8/sha256:"+"a".repeat(64));jdbc.update("UPDATE t_yara_status SET observed_at=1 WHERE agent_id=?",a);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,command)));
+        long builtin=task(List.of(b));assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->results.onResult(b,yaraReport(builtin,"YARA 4.5.8/sha256:"+"a".repeat(64)))));
+        var failure=yaraReport(task,"YARA 4.5.8/sha256:"+"b".repeat(64)).toBuilder().clearFindings().setFilesScanned(0).setStatus(RptVirusResult.Status.FAILED).setFilesFailed(1).addIssues(VirusScanIssue.newBuilder().setCode("yara_version_changed")).build();
+        tx.executeWithoutResult(s->results.onResult(a,failure));assertEquals(3,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,task));
+    }
     @Test void duplicateFirstResultCannotOverwriteFindingsOrAdvanceProgress() {
         long task=task(List.of(a,b)); tx.executeWithoutResult(s->results.onResult(a,report(task,true,RptVirusResult.Status.COMPLETE)));
         long finding=finding(task); tx.executeWithoutResult(s->results.onResult(a,report(task,false,RptVirusResult.Status.COMPLETE)));

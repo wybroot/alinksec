@@ -62,7 +62,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V020__windows_login_protection.sql",
                 "db/sqlite/V021__windows_update_repair.sql",
                 "db/common/V022__file_watch_coverage.sql",
-                "db/common/V023__clamav_engine.sql"
+                "db/common/V023__clamav_engine.sql",
+                "db/common/V024__native_yara_engine.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();
