@@ -163,7 +163,7 @@ message CmdVirusScan {
   uint32 time_limit_sec = 6;
   uint32 max_files = 7;
   uint64 max_total_bytes = 8;
-  string engine = 9;                 // builtin (contract 2) / clamav (contract 3)
+  string engine = 9;                 // builtin (contract 2) / clamav (contract 3) / yara (contract 4)
 }
 
 message CmdVirusAction {
@@ -246,6 +246,8 @@ message RptHeartbeat {
   string file_watch_status = 17; // explicit coverage; not a clean-file certificate
   uint32 clamav_contract = 18; // 1: pinned TLS loopback INSTREAM and snapshot-bound actions
   string clamav_status = 19; // readiness and reported version, not a corpus digest
+  uint32 yara_contract = 20; // 1 only with native YARA and bounded isolated workers
+  string yara_status = 21; // native version plus exact pinned rule source SHA256
 }
 
 message RptIsolationState {
@@ -463,12 +465,13 @@ message VirusFinding {
   string name = 2;           // 检出名，如 Trojan.Linux.Miner.X
   string sha256 = 3;
   uint64 size = 4;
-  string engine = 5;         // hash / rule / clamav
+  string engine = 5;         // hash / rule / clamav / yara
   Severity severity = 6;
   string action_taken = 7;   // quarantined / deleted / alert_only
   string quarantine_id = 8; // immutable Agent-local object identity, absent on old evidence
   string action_error = 9;
   string engine_version = 10; // ClamAV reported identity; not a complete signature digest
+  repeated string matched_rules = 11; // native YARA identifiers, at most 32; no matching bytes
 }
 
 message RptFixResult {

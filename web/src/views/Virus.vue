@@ -34,6 +34,7 @@
       </div>
     </div>
     <ClamavStatus />
+    <YaraStatus />
     <div class="panel">
       <h4>周期病毒检测</h4>
       <div class="toolbar">
@@ -153,12 +154,13 @@
   <!-- 发起扫描对话框 -->
   <el-dialog v-model="scanDlg" :title="'发起' + modeLabel(scanForm.mode) + '扫描'" width="min(560px, calc(100vw - 24px))">
     <el-form label-width="96px">
-      <el-form-item label="扫描引擎"><el-select v-model="scanForm.engine" @change="changeEngine" style="width:100%"><el-option label="内置特征库" value="builtin" /><el-option label="ClamAV" value="clamav" /></el-select></el-form-item>
+      <el-form-item label="扫描引擎"><el-select v-model="scanForm.engine" @change="changeEngine" style="width:100%"><el-option label="内置特征库" value="builtin" /><el-option label="ClamAV" value="clamav" /><el-option label="原生 YARA" value="yara" /></el-select></el-form-item>
+      <p v-if="scanForm.engine === 'yara'" class="coverage-note">仅可选择原生 YARA 就绪的主机；单文件最多 20 MiB，不解包压缩内容。任务固定每台主机的原生版本及规则源码 SHA256，提交时重新检查状态。</p>
       <p v-if="scanForm.engine === 'clamav'" class="coverage-note">仅可选择 ClamAV 就绪的主机；单文件最多 20 MiB，压缩内容受引擎配置限制。引擎状态在提交时重新检查。</p>
-      <el-alert v-if="clamavError && scanForm.engine === 'clamav'" :title="clamavError" type="error" :closable="false"><el-button size="small" @click="changeEngine">重试</el-button></el-alert>
+      <el-alert v-if="engineError && scanForm.engine !== 'builtin'" :title="engineError" type="error" :closable="false"><el-button size="small" @click="changeEngine">重试</el-button></el-alert>
       <el-form-item label="目标主机">
         <el-select v-model="scanForm.agentIds" multiple :multiple-limit="500" filterable placeholder="选择主机（可多选）" style="width:100%">
-          <el-option v-for="a in agents" :key="a.id" :label="a.name + '（' + a.ip + '）' + (eligible(a) ? '' : scanForm.engine === 'clamav' ? ' · ClamAV 未就绪' : ' · 需更新 Agent')" :value="a.id" :disabled="!eligible(a)" />
+          <el-option v-for="a in agents" :key="a.id" :label="a.name + '（' + a.ip + '）' + (eligible(a) ? '' : scanForm.engine !== 'builtin' ? ' · ' + engineLabel(scanForm.engine) + ' 未就绪' : ' · 需更新 Agent')" :value="a.id" :disabled="!eligible(a)" />
         </el-select>
       </el-form-item>
       <el-form-item label="扫描模式">
@@ -178,7 +180,7 @@
     </el-form>
     <template #footer>
       <el-button @click="scanDlg = false">取消</el-button>
-      <el-button type="primary" :loading="scanSubmitting || clamavLoading" :disabled="scanForm.engine === 'clamav' && !!clamavError" @click="submitScan">开始扫描</el-button>
+      <el-button type="primary" :loading="scanSubmitting || engineLoading" :disabled="scanForm.engine !== 'builtin' && !!engineError" @click="submitScan">开始扫描</el-button>
     </template>
   </el-dialog>
 
@@ -228,6 +230,7 @@
         <p>{{ fmt(item.created_at) }} <span v-if="item.finished_at">→ {{ fmt(item.finished_at) }}</span></p>
         <p v-if="item.error" class="action-failure">{{ item.error }}</p>
         <p v-if="item.evidence" class="digest">首次检出：{{ item.evidence.source }}；SHA256 {{ item.evidence.sha256 }}；隔离编号 {{ item.evidence.quarantine_id || '未隔离' }}</p>
+        <p v-if="item.evidence?.engine === 'yara'" class="digest">原生 YARA：{{ item.evidence.engine_version || item.evidence.db_version }}；命中规则：{{ item.evidence.matched_rules?.join('、') || '未报告' }}</p>
         <p v-if="item.request_evidence" class="digest">操作对象：{{ item.request_evidence.path }}；SHA256 {{ item.request_evidence.sha256 }}；请求隔离编号 {{ item.request_evidence.quarantine_id || '无' }}</p>
         <p v-if="item.receipt?.target?.quarantine_id" class="digest">回执隔离编号 {{ item.receipt.target.quarantine_id }}</p>
       </div>
@@ -242,9 +245,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchVirus, fetchVirusTasks, fetchVirusWhitelist, createVirusTask, virusAct,
   importVirusDb, pushVirusDb, addVirusWhitelist, removeVirusWhitelist, fetchAgentsForSelect,
-  fetchClamavStatus, getUser, fetchVirusTaskEvidence, fetchVirusActionHistory, updateVirusRealtime,
+  fetchClamavStatus, fetchYaraStatus, getUser, fetchVirusTaskEvidence, fetchVirusActionHistory, updateVirusRealtime,
 } from '../api'
 import ClamavStatus from '../components/ClamavStatus.vue'
+import YaraStatus from '../components/YaraStatus.vue'
+import { yaraIssueLabel } from '../utils/yara'
 import { clamavIssueLabel } from '../utils/clamav'
 import { sevType, sevLabel } from '../utils/format'
 
@@ -262,11 +267,11 @@ const statusFilter = ref('')
 const tasks = ref([])
 const whitelist = ref([])
 const agents = ref([])
-const clamavReady = ref(new Set())
-const clamavLoading = ref(false), clamavError = ref('')
-let clamavSerial = 0
-const engineLabel = engine => engine === 'clamav' ? 'ClamAV' : '内置特征库'
-const eligible = a => a.virusExecutionContract === 2 && (scanForm.value.engine !== 'clamav' || clamavReady.value.has(a.id))
+const engineReady = ref(new Set())
+const engineLoading = ref(false), engineError = ref('')
+let engineSerial = 0
+const engineLabel = engine => ({ clamav: 'ClamAV', yara: '原生 YARA' }[engine] || '内置特征库')
+const eligible = a => a.virusExecutionContract === 2 && (scanForm.value.engine === 'builtin' || engineReady.value.has(a.id))
 
 const scanDlg = ref(false)
 const scanSubmitting = ref(false)
@@ -298,7 +303,7 @@ const taskStatusLabel = (s) => ({ 1: '执行中', 2: '限定范围完成', 3: '�
 const evidenceLabel = s => ({ pending: '待回报', complete: '限定范围完成', partial: '部分覆盖', failed: '失败', timeout: '超时' }[s] || '覆盖未知')
 const actionLabel = s => ({ quarantine: '隔离', quarantined: '自动隔离', alert_only: '检出告警', delete: '删除', restore: '恢复', whitelist: '加白' }[s] || s)
 const actionStateLabel = s => ({ observed: '首次检出证据', pending: '待确认', succeeded: '已确认成功', failed: '失败', timeout: '超时，结果未确认', committed: '策略已保存' }[s] || s)
-const issueLabel = s => ({ unreadable: '无法读取', root_unavailable: '扫描路径不可用', read_failed_or_changed: '读取失败或文件发生变化', budget_exhausted: '达到扫描预算', no_signatures: '没有有效特征', signature_version_changed: '特征库版本已变化', depth_limit: '目录深度超过上限', oversize: '文件超过大小上限', report_path_limit: '路径超过报告长度上限' }[s] || clamavIssueLabel(s))
+const issueLabel = s => ({ unreadable: '无法读取', root_unavailable: '扫描路径不可用', read_failed_or_changed: '读取失败或文件发生变化', budget_exhausted: '达到扫描预算', no_signatures: '没有有效特征', signature_version_changed: '特征库版本已变化', depth_limit: '目录深度超过上限', oversize: '文件超过大小上限', report_path_limit: '路径超过报告长度上限' }[s] || (s.startsWith('yara_') ? yaraIssueLabel(s) : clamavIssueLabel(s)))
 
 const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
 
@@ -353,23 +358,24 @@ const onTabChange = (name) => {
 /* ---------- 扫描任务 ---------- */
 
 const changeEngine = async () => {
-  const serial = ++clamavSerial
+  const serial = ++engineSerial
   scanForm.value.agentIds = []
-  clamavReady.value = new Set(); clamavError.value = ''; clamavLoading.value = false
-  if (scanForm.value.engine !== 'clamav') return
-  clamavLoading.value = true
+  engineReady.value = new Set(); engineError.value = ''; engineLoading.value = false
+  const engine = scanForm.value.engine
+  if (engine === 'builtin') return
+  engineLoading.value = true
   try {
     const ready = new Set()
     for (let page = 1, total = 1; (page - 1) * 100 < total; page++) {
-      const data = await fetchClamavStatus(page, 100)
-      if (serial !== clamavSerial) return
+      const data = await (engine === 'yara' ? fetchYaraStatus : fetchClamavStatus)(page, 100)
+      if (serial !== engineSerial) return
       total = Number(data.total || 0)
       for (const row of data.items || []) if (row.state === 'ready') ready.add(row.agent_id)
       if (!data.items?.length || page >= 1000) break
     }
-    if (serial === clamavSerial) clamavReady.value = ready
-  } catch (e) { if (serial === clamavSerial) clamavError.value = e.message || 'ClamAV 状态加载失败' }
-  finally { if (serial === clamavSerial) clamavLoading.value = false }
+    if (serial === engineSerial) engineReady.value = ready
+  } catch (e) { if (serial === engineSerial) engineError.value = e.message || engineLabel(engine) + ' 状态加载失败' }
+  finally { if (serial === engineSerial) engineLoading.value = false }
 }
 const openScan = async (mode) => {
   try {
@@ -382,7 +388,7 @@ const openScan = async (mode) => {
 
 const submitScan = async () => {
   const form = scanForm.value
-  if (clamavLoading.value) return
+  if (engineLoading.value) return
   if (form.agentIds.some(id => !agents.value.some(a => a.id === id && eligible(a)))) return ElMessage.warning('目标主机当前不可用，请重新选择')
   if (!form.agentIds.length) return ElMessage({ message: '请选择目标主机', type: 'warning' })
   const paths = form.pathsText.split('\n').map(p => p.trim()).filter(Boolean)
@@ -506,7 +512,7 @@ onMounted(() => {
     if (tab.value === 'findings' && findings.value.some(f => f.pending)) loadFindings(false)
   }, 5000)
 })
-onUnmounted(() => { clearInterval(poll); ++detail.serial; ++clamavSerial })
+onUnmounted(() => { clearInterval(poll); ++detail.serial; ++engineSerial })
 </script>
 
 <style scoped>

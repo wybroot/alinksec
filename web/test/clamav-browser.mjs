@@ -31,7 +31,8 @@ try {
     if (path === '/api/virus/clamav-status' && method === 'GET') {
       if (fail) return route.fulfill({ status: 503, json: { code: 503, msg: 'ClamAV 状态暂不可用' } })
       data = stages[stage]
-    } else if (path === '/api/hosts' && method === 'GET') data = stages.hosts
+    } else if (path === '/api/virus/yara-status' && method === 'GET') data = { items: [], total: 0 }
+    else if (path === '/api/hosts' && method === 'GET') data = stages.hosts
     else if (method === 'GET' && path === '/api/virus/stats') data = task.stats
     else if (method === 'GET' && path === '/api/virus/findings') data = task.findings
     else if (method === 'GET' && path === '/api/virus/tasks') data = task.tasks

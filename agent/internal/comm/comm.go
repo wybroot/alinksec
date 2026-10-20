@@ -40,6 +40,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/virusscan"
 	"github.com/alinksec/alinksec-agent/internal/windowslogin"
 	"github.com/alinksec/alinksec-agent/internal/windowsupdate"
+	"github.com/alinksec/alinksec-agent/internal/yara"
 )
 
 // Client Agent 通信客户端：注册 + 主通道双向流
@@ -53,6 +54,7 @@ type Client struct {
 	configStore *configguard.Store
 	resources   *resources.Governor
 	clamav      *clamav.Client
+	yara        *yara.Client
 	bulkBusy    atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
@@ -111,6 +113,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		configStore:     store,
 		resources:       resources.New(cfg.Resources),
 		clamav:          clamav.New(cfg.ClamAV),
+		yara:            yara.New(cfg.YARA, configguard.ReadFile),
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
@@ -320,6 +323,7 @@ func (c *Client) Run(ctx context.Context) error {
 	defer cancel(nil)
 	ctx = runCtx
 	go c.clamav.Run(ctx)
+	go c.yara.Run(ctx)
 	if c.windowsLogin != nil {
 		go func() {
 			if err := c.windowsLogin.Run(ctx); err != nil {
@@ -612,6 +616,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			VirusExecutionContract: 2,
 			ClamavContract:         1,
 			ClamavStatus:           c.clamav.StatusJSON(),
+			YaraContract:           yara.Contract(),
+			YaraStatus:             c.yara.StatusJSON(),
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),

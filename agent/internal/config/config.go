@@ -12,12 +12,14 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/clamav"
 	"github.com/alinksec/alinksec-agent/internal/resources"
+	"github.com/alinksec/alinksec-agent/internal/yara"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config Agent 运行配置（工作目录下 agent.yml，可用 --config 覆盖）
 type Config struct {
+	YARA      yara.Config      `yaml:"yara"`
 	ClamAV    clamav.Config    `yaml:"clamav"`
 	Resources resources.Config `yaml:"resources"`
 	// 服务端 gRPC 地址（host:port）
@@ -162,6 +164,9 @@ func Parse(b []byte) (*Config, error) {
 	c.Decoy.Normalize()
 	c.Resources = c.Resources.Defaults()
 	if err := c.ClamAV.Validate(); err != nil {
+		return nil, err
+	}
+	if err := c.YARA.Validate(); err != nil {
 		return nil, err
 	}
 	if err := c.Resources.Validate(); err != nil {

@@ -32,7 +32,7 @@ try {
   if(method==='GET' && path==='/api/virus/stats') data=current.stats
   else if(method==='GET' && path==='/api/virus/findings') data=current.findings
   else if(method==='GET' && path==='/api/virus/tasks') data=current.tasks
-  else if(method==='GET' && path==='/api/virus/clamav-status') data={items:[],total:0}
+  else if(method==='GET' && ['/api/virus/clamav-status','/api/virus/yara-status'].includes(path)) data={items:[],total:0}
   else if(method==='GET' && path==='/api/virus/db') data=current.db
   else if(method==='GET' && path==='/api/virus/whitelist') data=current.whitelist
   else if(method==='GET' && path===`/api/virus/tasks/${fixture.task}/evidence`) data=current.evidence

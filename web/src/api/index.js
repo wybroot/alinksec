@@ -844,3 +844,5 @@ export async function fetchFileWatchStatus(page = 1) { return get(`/api/protect/
 export const fetchWindowsLoginStatus = (page = 1) => get(`/api/protect/windows-login-status?page=${page}&pageSize=20`)
 
 export async function fetchClamavStatus(page = 1, size = 20) { return get(`/api/virus/clamav-status?page=${page}&size=${size}`) }
+
+export async function fetchYaraStatus(page = 1, size = 20) { return get(`/api/virus/yara-status?page=${page}&size=${size}`) }
