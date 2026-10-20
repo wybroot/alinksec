@@ -79,7 +79,7 @@ class DetectionEvidenceIntegrationTest {
         long id=tx.execute(s->tasks.createTask("ClamAV 测试",agents,3,List.of("/tmp"),actor,"clamav"));created.add(id);return id;
     }
     RptVirusResult clamReport(long task,String v) {
-        return report(task,true,RptVirusResult.Status.COMPLETE).toBuilder().setExecutionContract(3).setScanEngine("clamav").setDbVersion(v).clearFindings().addFindings(VirusFinding.newBuilder().setPath("/tmp/clam-marker").setName("Harmless.ClamFixture").setSha256("b".repeat(64)).setSize(12).setSeverity(Severity.SEV_HIGH).setEngine("clamav").setEngineVersion(v).setActionTaken("alert_only")).build();
+        return report(task,true,RptVirusResult.Status.COMPLETE).toBuilder().setExecutionContract(3).setScanEngine("clamav").setDbVersion(v).setCoverage("ClamAV INSTREAM of stable regular files <=20MiB; daemon archive/recursion/time limits apply; symlinks, special files, virtual/container filesystems and Agent work directory excluded; pinned reported engine version is not a complete signature corpus digest").clearFindings().addFindings(VirusFinding.newBuilder().setPath("/tmp/clam-marker").setName("Harmless.ClamFixture").setSha256("b".repeat(64)).setSize(12).setSeverity(Severity.SEV_HIGH).setEngine("clamav").setEngineVersion(v).setActionTaken("alert_only")).build();
     }
     @Test void clamavPinsPerHostVersionsWithoutBuiltinLibraryAndPreservesEvidence() throws Exception {
         String va="ClamAV 1.4.6/fixture-a",vb="ClamAV 1.4.6/fixture-b";

@@ -102,8 +102,29 @@ func TestTLSConfigAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := clamav.New(cfg).Probe(ctx); err == nil || time.Since(start) > time.Second {
+	if _, err := clamav.New(cfg).Probe(ctx); clamav.Code(err) != "clamav_timeout" || time.Since(start) > time.Second {
 		t.Fatalf("cancellation=%v duration=%v", err, time.Since(start))
+	}
+}
+
+func TestScanReplyDeadlineIsReportedAsTimeout(t *testing.T) {
+	cfg := clamavtest.Start(t, func(c net.Conn) {
+		cmd, _ := clamavtest.Command(c)
+		if cmd == "zVERSION\x00" {
+			clamavtest.Reply(c, version)
+			return
+		}
+		if cmd == "zINSTREAM\x00" {
+			_, _ = clamavtest.Stream(c)
+			_, _ = io.Copy(io.Discard, c)
+		}
+	})
+	client := clamav.New(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	name, err := client.Scan(ctx, version, consume)
+	if name != "" || clamav.Code(err) != "clamav_timeout" || client.Status().LastIssue != "clamav_timeout" {
+		t.Fatalf("stalled reply name=%q err=%v status=%+v", name, err, client.Status())
 	}
 }
 func TestScanSerializationAndCancelledWaiter(t *testing.T) {

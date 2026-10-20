@@ -174,6 +174,10 @@ func (c *Client) bounded(ctx context.Context) (context.Context, context.CancelFu
 func reply(conn io.Reader) (string, error) {
 	r := bufio.NewReaderSize(conn, 4097)
 	b, err := r.ReadSlice(0)
+	var network net.Error
+	if errors.As(err, &network) && network.Timeout() {
+		return "", err
+	}
 	if err != nil || len(b) > 4096 || len(b) < 2 || !utf8.Valid(b[:len(b)-1]) {
 		return "", issue("clamav_protocol")
 	}
@@ -209,6 +213,9 @@ func (c *Client) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	v, err := c.version(ctx)
+	if err != nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	if c != nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -261,6 +268,9 @@ func (c *Client) Scan(ctx context.Context, expected string, consume func(context
 		return "", ctx.Err()
 	}
 	defer func() {
+		if err != nil && ctx.Err() != nil {
+			name, err = "", ctx.Err()
+		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.status.Scans++
