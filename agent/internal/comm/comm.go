@@ -137,12 +137,12 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	if c.windowsLogin != nil {
 		c.windowsLogin.Update(cfg.LoginRules)
 	}
-	// 病毒实时防护（docs/05 §1.5）：常驻 L1 引擎注入 guard，窗口 diff 文件准实时检查
+	// 常驻 L1 引擎：原生文件事件触发，丢失/溢出由有界恢复遍历补查。
 	vEngine := c.newVirusEngine()
 	c.grd.SetVirusEngine(func(path string) *pb.VirusFinding {
 		return vEngine.CheckRealtime(path, workDir)
 	})
-	c.grd.SetVirusRoots(virusscan.QuickScanRoots(), func() bool { enabled, _ := vEngine.RealtimePolicy(workDir); return enabled })
+	c.grd.SetVirusRoots(virusscan.RealtimeRoots(), func() bool { enabled, _ := vEngine.RealtimePolicy(workDir); return enabled })
 	return c, nil
 }
 
@@ -584,6 +584,12 @@ func (c *Client) buildHeartbeat() *pb.Report {
 	c.reconcileWindowsUpdates()
 	s := identity.Sample()
 	guardStatus := "normal"
+	var fileWatchContract uint32
+	var fileWatchStatus string
+	if c.grd != nil {
+		fileWatchContract = 1
+		fileWatchStatus = c.grd.FileWatchStatus()
+	}
 	if c.grd != nil && c.grd.Isolated() {
 		guardStatus = "isolated"
 	}
@@ -603,6 +609,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			WeakPasswordContract:   scan.WeakPasswordContract(),
 			WindowsLoginContract:   windowslogin.ExecutionContract(),
 			WindowsLoginStatus:     c.windowsLoginStatus(),
+			FileWatchContract:      fileWatchContract,
+			FileWatchStatus:        fileWatchStatus,
 			WindowsUpdateContract:  windowsupdate.ExecutionContract(),
 			UpgradeContract:        c.upgradeContract,
 			IsolationContract:      c.isolationContract,

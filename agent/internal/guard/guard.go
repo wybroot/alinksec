@@ -18,6 +18,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/filetrace"
+	"github.com/alinksec/alinksec-agent/internal/filewatch"
 	"github.com/alinksec/alinksec-agent/internal/isolation"
 	"github.com/alinksec/alinksec-agent/internal/proto"
 )
@@ -40,22 +41,31 @@ type Guard struct {
 	log     *slog.Logger
 	report  ReportFunc
 
-	mu            sync.Mutex
-	isolated      bool // 当前隔离状态（marker 持久化）
-	processRules  []config.ProcessRule
-	processSeen   map[int32]int64 // pid -> create time; prevents PID reuse from being missed
-	watchDirs     []string
-	serverAddrVal string         // gRPC 连接地址（comm 注入，隔离放行解析用）
-	virusCheck    VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
-	virusTrees    []string
-	virusEnabled  func() bool
-	virusPrev     map[string]treeSnapshot
-	files         *fileMonitor
-	login         *loginMonitor
-	fileTrace     *filetrace.Monitor
-	healthSince   time.Time
-	rateSince     time.Time
-	traceStatus   string
+	mu             sync.Mutex
+	isolated       bool // 当前隔离状态（marker 持久化）
+	processRules   []config.ProcessRule
+	processSeen    map[int32]int64 // pid -> create time; prevents PID reuse from being missed
+	watchDirs      []string
+	serverAddrVal  string         // gRPC 连接地址（comm 注入，隔离放行解析用）
+	virusCheck     VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
+	virusTrees     []string
+	virusEnabled   func() bool
+	files          *fileMonitor
+	login          *loginMonitor
+	fileTrace      *filetrace.Monitor
+	healthSince    time.Time
+	rateSince      time.Time
+	traceStatus    string
+	watcher        *filewatch.Monitor
+	eventPending   []string // Run goroutine only; unprocessed work survives read budgets
+	virusRecovery  *filewatch.Sweep
+	virusRescan    bool
+	virusRunning   bool
+	virusScope     []string
+	watchMu        sync.Mutex // recovery status is also read by heartbeat
+	watchRecovery  bool
+	watchIssue     string
+	watchLastSweep int64
 
 	ratePrev map[string]treeSnapshot // 各监测树上一快照
 }
@@ -75,6 +85,7 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 	g.login = newLoginMonitor(workDir, log, g.applyLoginBlock)
 	g.login.reset = ClearLoginFirewall
 	g.fileTrace = filetrace.New(workDir)
+	g.watcher = filewatch.New()
 	g.recoverIsolationMarker()
 	return g
 }
@@ -163,6 +174,17 @@ func (g *Guard) Run(ctx context.Context) {
 	stopAttribution := g.runAttribution(ctx)
 	defer stopAttribution()
 	g.initialDeploy()
+	g.updateFileWatches()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() { defer close(watchDone); g.watcher.Run(watchCtx) }()
+	defer func() {
+		stopWatch()
+		<-watchDone
+		if g.virusRecovery != nil {
+			g.virusRecovery.Close()
+		}
+	}()
 
 	healthTick := time.NewTicker(healthInterval)
 	rateWindow := time.Duration(g.cur().RateWindowSec) * time.Second
@@ -174,7 +196,9 @@ func (g *Guard) Run(ctx context.Context) {
 	defer processTick.Stop()
 	fileTick := time.NewTicker(5 * time.Second)
 	loginTick := time.NewTicker(5 * time.Second)
-	virusTick := time.NewTicker(10 * time.Second)
+	virusTick := time.NewTicker(60 * time.Second)
+	eventTick := time.NewTicker(250 * time.Millisecond)
+	defer eventTick.Stop()
 	defer virusTick.Stop()
 	defer fileTick.Stop()
 	defer loginTick.Stop()
@@ -190,7 +214,10 @@ func (g *Guard) Run(ctx context.Context) {
 		case <-rateTick.C:
 			g.rateLoop()
 		case <-virusTick.C:
-			g.virusLoop()
+			g.virusRescan = true
+		case <-eventTick.C:
+			g.updateFileWatches()
+			g.fileEventLoop()
 		case <-processTick.C:
 			g.processLoop()
 			g.reportAttributionStatus()
@@ -266,7 +293,10 @@ func (g *Guard) healthLoop() {
 				EventTs:  time.Now().UnixMilli(),
 			})
 		}
-		dm.ensureDeployed(g.watchDirs)
+		g.mu.Lock()
+		dirs := append([]string(nil), g.watchDirs...)
+		g.mu.Unlock()
+		dm.ensureDeployed(dirs)
 	}
 }
 

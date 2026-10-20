@@ -241,6 +241,8 @@ message RptHeartbeat {
   uint32 windows_login_contract = 13; // 1: bounded Security XML reader and dynamic WFP blocks
   string windows_login_status = 14; // bounded JSON coverage; policy ACK does not prove coverage
   uint32 windows_update_contract = 15; // 1: pinned WUA updates, durable intent and installed-state verification
+  uint32 file_watch_contract = 16; // 1: native file invalidations and bounded recovery
+  string file_watch_status = 17; // explicit coverage; not a clean-file certificate
 }
 
 message RptIsolationState {

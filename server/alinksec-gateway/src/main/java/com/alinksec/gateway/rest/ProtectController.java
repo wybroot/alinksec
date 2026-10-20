@@ -26,11 +26,14 @@ public class ProtectController {
     private final JdbcTemplate jdbc;
     private final ProtectRuleService protectRuleService;
     private final com.alinksec.service.protect.WindowsLoginService windowsLogin;
+    private final com.alinksec.service.protect.FileWatchService fileWatch;
 
-    public ProtectController(JdbcTemplate jdbc, ProtectRuleService protectRuleService, com.alinksec.service.protect.WindowsLoginService windowsLogin) {
+    public ProtectController(JdbcTemplate jdbc, ProtectRuleService protectRuleService, com.alinksec.service.protect.WindowsLoginService windowsLogin,
+                             com.alinksec.service.protect.FileWatchService fileWatch) {
         this.jdbc = jdbc;
         this.protectRuleService = protectRuleService;
         this.windowsLogin = windowsLogin;
+        this.fileWatch = fileWatch;
     }
 
     /** 内置防护引擎清单（M2 固化：进程/文件/登录/诱饵） */
@@ -60,6 +63,11 @@ public class ProtectController {
     @GetMapping("/windows-login-status")
     public ApiResult<Map<String,Object>> windowsLoginStatus(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize) {
         return ApiResult.ok(windowsLogin.status(page,pageSize));
+    }
+
+    @GetMapping("/file-watch-status")
+    public ApiResult<Map<String,Object>> fileWatchStatus(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize) {
+        return ApiResult.ok(fileWatch.status(page,pageSize));
     }
 
     /** 防护规则清单（docs/03 t_protect_rule：诱饵 PR-0010 / 加密行为 PR-0011 内置） */

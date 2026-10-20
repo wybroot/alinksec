@@ -325,6 +325,9 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	if e.ioBudget != nil {
+		ctx = context.WithValue(ctx, ioBudgetKey{}, e.ioBudget)
+	}
 	s, err := readSnapshotScoped(ctx, path, maxFileSize, 20<<20, true, "", workDir)
 	if err != nil {
 		e.log.Debug("周期检测未覆盖文件", "path", path, "reason", actionErrorCode(err))

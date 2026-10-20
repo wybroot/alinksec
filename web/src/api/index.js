@@ -839,5 +839,6 @@ export const reviewPatch = (id, body) => post(`/api/fix/patches/${id}/reviews`, 
 export const revokePatchReview = (id, reviewId, note) => post(`/api/fix/patches/${id}/reviews/${encodeURIComponent(reviewId)}/revoke`, { note })
 
 export async function fetchScanCoverage(page = 1) { return get(`/api/vuln/scan-coverage?page=${page}&size=20`) }
+export async function fetchFileWatchStatus(page = 1) { return get(`/api/protect/file-watch-status?page=${page}&pageSize=20`) }
 
 export const fetchWindowsLoginStatus = (page = 1) => get(`/api/protect/windows-login-status?page=${page}&pageSize=20`)

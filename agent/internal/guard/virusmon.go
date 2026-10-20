@@ -1,5 +1,4 @@
-// Periodic metadata snapshots are independent from decoy monitoring.
-// Only new or changed files within the declared snapshot/read budgets are checked.
+// Native file events and bounded recovery feed the existing detection engine.
 package guard
 
 import (
@@ -32,35 +31,6 @@ func (g *Guard) SetVirusRoots(roots []string, enabled func() bool) {
 	defer g.mu.Unlock()
 	g.virusTrees = append([]string(nil), roots...)
 	g.virusEnabled = enabled
-	g.virusPrev = map[string]treeSnapshot{}
-}
-func (g *Guard) virusLoop() {
-	g.mu.Lock()
-	roots := append([]string(nil), g.virusTrees...)
-	enabled := g.virusEnabled
-	g.mu.Unlock()
-	if enabled != nil && !enabled() {
-		return
-	}
-	var changes []string
-	remaining := snapMaxEntries
-	deadline := time.Now().Add(2 * time.Second)
-	for _, root := range roots {
-		if remaining <= 0 || time.Now().After(deadline) {
-			break
-		}
-		current := virusSnapshot(root, &remaining, deadline)
-		g.mu.Lock()
-		previous, ok := g.virusPrev[root]
-		g.virusPrev[root] = current
-		g.mu.Unlock()
-		if ok {
-			diff := diffSnapshot(previous, current)
-			changes = append(changes, diff.Modified...)
-			changes = append(changes, diff.Created...)
-		}
-	}
-	g.virusSweep(changes)
 }
 
 // Read directories in small chunks; budget includes directories and rejected

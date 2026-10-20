@@ -81,6 +81,9 @@ func TestResourcePressureKeepsControlAndOfflineEvents(t *testing.T) {
 	if c.buildHeartbeat().GetHeartbeat() == nil {
 		t.Fatal("pause stopped control")
 	}
+	if hb := c.buildHeartbeat().GetHeartbeat(); hb.GetFileWatchContract() != 0 || hb.GetFileWatchStatus() != "" {
+		t.Fatal("absent guard advertised native file coverage")
+	}
 }
 
 func TestQueueCompactionContentionDoesNotBlockHeartbeat(t *testing.T) {

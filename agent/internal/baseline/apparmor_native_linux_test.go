@@ -46,8 +46,8 @@ func TestNativeAppArmor(t *testing.T) {
 	}
 	initial := read()
 	initialProfiles, _ := parseAppArmorProfiles(initial.Values["profiles"])
-	if initial.Values["enabled"] != "Y\n" || initial.Values["mode"] != "enforce" || initialProfiles[name] != "" {
-		t.Fatal("enabled enforcing root view and unused unique fixture name required")
+	if initial.Values["enabled"] != "Y\n" || strings.TrimSuffix(initial.Values["mode"], "\n") != "enforce" || initialProfiles[name] != "" {
+		t.Fatalf("enabled enforcing root view and unused unique fixture name required: enabled=%q mode=%q fixture_exists=%t", initial.Values["enabled"], initial.Values["mode"], initialProfiles[name] != "")
 	}
 	loaded := false
 	t.Cleanup(func() {
@@ -108,7 +108,7 @@ func TestNativeAppArmor(t *testing.T) {
 		if fixturePresent && profiles[name] != mode || !fixturePresent && profiles[name] != "" {
 			t.Fatal("unique fixture mode mismatch")
 		}
-		want := len(profiles) > 0 && s.Values["mode"] == "enforce"
+		want := len(profiles) > 0 && strings.TrimSuffix(s.Values["mode"], "\n") == "enforce"
 		for _, actualMode := range profiles {
 			want = want && actualMode == "enforce"
 		}
