@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -44,6 +45,10 @@ func TestNativeScapWorker(t *testing.T) {
 	}
 	cfg := Config{Enabled: true, RuntimeDir: dir, RuntimeSHA256: pin, TimeoutSec: 180}
 	client := New(cfg, work)
+	before, err := filepath.Glob(filepath.Join(nativeTempRoot(), "alinksec-scap-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	if err = client.Probe(ctx); err != nil {
@@ -103,6 +108,10 @@ func TestNativeScapWorker(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(work); err != nil || len(entries) != 0 {
 		t.Fatal("native worker cancellation left a workspace", err, len(entries))
+	}
+	after, err := filepath.Glob(filepath.Join(nativeTempRoot(), "alinksec-scap-*"))
+	if err != nil || !slices.Equal(before, after) {
+		t.Fatal("native parent left a private temporary runtime", err, before, after)
 	}
 	// A command cannot substitute a different locally installed runtime.
 	command.RuntimeSha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

@@ -111,7 +111,7 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 	}
 	// The parent owns the workspace and removes it after killing the complete
 	// native process tree, including on timeout or an abruptly killed worker.
-	workspace, err := os.MkdirTemp(input.WorkDir, ".scap-job-")
+	workspace, err := os.MkdirTemp(nativeTempRoot(), "alinksec-scap-")
 	if err != nil {
 		return result, issue("scap_worker_failed")
 	}
@@ -205,11 +205,7 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 }
 func executeNative(ctx context.Context, input workerInput) (workerOutput, error) {
 	var result workerOutput
-	directory, err := os.MkdirTemp(input.WorkDir, ".scap-")
-	if err != nil {
-		return result, issue("scap_worker_failed")
-	}
-	defer os.RemoveAll(directory)
+	directory := input.WorkDir
 	native := filepath.Join(directory, "runtime")
 	reports := filepath.Join(directory, "reports")
 	bin, err := cloneRuntime(ctx, input.Config, native)
@@ -348,6 +344,16 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 	}
 	result.SourceSHA256 = Digest(source)
 	return result, nil
+}
+
+func nativeTempRoot() string {
+	// The official Linux SCC launcher rejects spaces in its application path.
+	// Use an atomic 0700 directory in /tmp, independently of Agent workdir and
+	// TMPDIR. Source runtime paths may contain spaces because files are copied.
+	if runtime.GOOS == "linux" {
+		return "/tmp"
+	}
+	return os.TempDir()
 }
 
 func workspaceBudget(directory string) error {
