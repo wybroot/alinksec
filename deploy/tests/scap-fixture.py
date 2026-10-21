@@ -45,6 +45,11 @@ def create(root):
     xml = f'''<?xml version="1.0" encoding="UTF-8"?>
     <ds:data-stream-collection xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2"
       xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:cat="urn:oasis:names:tc:entity:xmlns:xml:catalog"
+      xmlns:ind="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent"
+      xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5"
+      xmlns:xccdf="http://checklists.nist.gov/xccdf/1.2"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://scap.nist.gov/schema/scap/source/1.2 http://scap.nist.gov/schema/scap/1.3/scap-source-data-stream_1.3.xsd http://checklists.nist.gov/xccdf/1.2 http://scap.nist.gov/schema/xccdf/1.2/xccdf_1.2.xsd http://oval.mitre.org/XMLSchema/oval-definitions-5 https://github.com/OVALProject/Language/tree/5.11.2/schemas/oval-definitions-schema.xsd http://oval.mitre.org/XMLSchema/oval-definitions-5#independent https://github.com/OVALProject/Language/tree/5.11.2/schemas/independent-definitions-schema.xsd"
       id="scap_org.alinksec_collection_native" schematron-version="1.3">
       <ds:data-stream id="scap_org.alinksec_datastream_native" use-case="CONFIGURATION" scap-version="1.3" timestamp="2026-10-21T00:00:00Z">
         <ds:checklists><ds:component-ref id="scap_org.alinksec_cref_benchmark" xlink:href="#scap_org.alinksec_comp_benchmark">

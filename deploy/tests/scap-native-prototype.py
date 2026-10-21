@@ -16,6 +16,7 @@ spec.loader.exec_module(fixture)
 def main():
     root = Path(sys.argv[1]).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    (root/'reports').mkdir()
     source = Path(os.environ['ALINKSEC_SCAP_TEST_BIN']).resolve().parent
     runtime = root/'private-runtime'
     if runtime.exists():
@@ -32,7 +33,7 @@ def main():
         appUpdateURL='',contentRepository='', ignoreCPEOVALResults='0',
         saveResultsForNotApplicableContent='1', answerOCILwithSCAP='0',
         validateContentOnInstall='1', validateContent='1', validateDigitalSignature='0',
-        contentDevModeSkipValidation='0', reviewType='local', newInstall='0',
+        contentDevModeSkipValidation='0', reviewType='local', newInstall='0',filterSCAPContentPerFamily='0',
         sharedOptions='1', customPathLocal=str(root/'reports'), keepXCCDFXML='1', keepOVALXML='0',
         keepOCILXML='0', keepCPEXML='0',keepARFXML='0', saveDISACKL='0', saveDISACKLB='0',
         allSettingsHTMLReport='0', nonComplianceHTMLReport='0', enableScanSessionDB='0',
