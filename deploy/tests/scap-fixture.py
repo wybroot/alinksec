@@ -119,7 +119,7 @@ def create(root):
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
         z.writestr('alinksec-scap.json',json.dumps(manifest))
         z.writestr('native-ds.xml',xml)
-    (root/'native-ds.xml').write_text(xml,encoding='utf-8')
+    (root/'native-ds.xml').write_bytes(xml.encode('utf-8'))
     return archive
 
 if __name__=='__main__':

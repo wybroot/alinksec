@@ -51,7 +51,7 @@ def main():
     evidence = {'kind':'native SCC execution; disposable file, no remediation', 'commands':[], 'outcomes':{}}
     prefix = ['sudo','-n'] if os.name != 'nt' and os.geteuid()!=0 and os.getenv('GITHUB_ACTIONS')=='true' else []
     try:
-        for args in [['--installScap',str(archive),fixture.PROFILE], ['--doNotSaveChanges','--userDir',str(root/'reports')]]:
+        for args in [['--installScap',str(archive),fixture.PROFILE], ['--userDir',str(root/'reports')]]:
             result = subprocess.run([*prefix,str(binary),*args],cwd=runtime,capture_output=True,text=True,timeout=180)
             evidence['commands'].append({'args':args,'exit':result.returncode,'stdout':result.stdout[-16000:],'stderr':result.stderr[-16000:]})
             if result.returncode:
