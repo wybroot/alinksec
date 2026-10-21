@@ -106,6 +106,16 @@ func cleanEnvironment() []string {
 			env = append(env, key+"="+value)
 		}
 	}
+	if runtime.GOOS == "windows" {
+		// SCC reads these identity/home values directly. Keep the allowlist
+		// narrow: Perl/module search paths and arbitrary parent variables must
+		// never enter the pinned runtime.
+		for _, key := range []string{"COMPUTERNAME", "USERDOMAIN", "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+			if value := os.Getenv(key); value != "" {
+				env = append(env, key+"="+value)
+			}
+		}
+	}
 	if root := os.Getenv("SYSTEMROOT"); root != "" {
 		env = append(env, "PATH="+filepath.Join(root, "System32"))
 	} else {
@@ -133,6 +143,11 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()
+	nativePath, err := nativeWorkspacePath(workspace)
+	if err != nil {
+		return result, issue("scap_worker_failed")
+	}
+	workspace = nativePath
 	input.WorkDir = workspace
 	cmd := exec.CommandContext(ctx, executable, workerArg)
 	cmd.Env = cleanEnvironment()

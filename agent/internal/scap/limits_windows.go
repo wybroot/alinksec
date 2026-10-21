@@ -11,6 +11,24 @@ import (
 
 func workerLimits() error        { return nil }
 func configureProcess(*exec.Cmd) {}
+func nativeWorkspacePath(path string) (string, error) {
+	// GetTempPath may return a DOS 8.3 alias (e.g. RUNNER~1). SCC's trusted
+	// options schema rejects '~'; resolve the existing private directory using
+	// the OS API rather than modifying the vendor schema or validation flags.
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetLongPathName(name, &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		return "", err
+	}
+	if n == 0 || n >= uint32(len(buffer)) {
+		return "", issue("scap_worker_failed")
+	}
+	return windows.UTF16ToString(buffer[:n]), nil
+}
 func limitProcess(process *os.Process) (func(), error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {

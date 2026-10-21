@@ -7,8 +7,34 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestNativeEnvironmentKeepsIdentityWithoutModuleInjection(t *testing.T) {
+	t.Setenv("PERL5LIB", "untrusted-parent-modules")
+	t.Setenv("PERL5OPT", "-Muntrusted")
+	t.Setenv("ALINKSEC_SECRET", "parent-secret")
+	t.Setenv("USERNAME", "service-user")
+	t.Setenv("USERDOMAIN", "service-domain")
+	t.Setenv("COMPUTERNAME", "service-host")
+	t.Setenv("USERPROFILE", `C:\Users\service-user`)
+	env := map[string]string{}
+	for _, entry := range cleanEnvironment() {
+		key, value, _ := strings.Cut(entry, "=")
+		env[key] = value
+	}
+	for _, key := range []string{"PERL5LIB", "PERL5OPT", "ALINKSEC_SECRET"} {
+		if _, exists := env[key]; exists {
+			t.Fatal("parent injection entered native runtime", key)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if env["LANG"] != "C" || env["USERNAME"] != "service-user" || env["USERDOMAIN"] != "service-domain" || env["COMPUTERNAME"] != "service-host" || env["USERPROFILE"] != `C:\Users\service-user` {
+			t.Fatal("Windows native identity environment missing")
+		}
+	}
+}
 
 func TestDisabledAndInvalidCommandsNeverProduceSuccessfulEvidence(t *testing.T) {
 	client := New(Config{}, t.TempDir())

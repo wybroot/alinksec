@@ -9,6 +9,8 @@ import (
 	"syscall"
 )
 
+func nativeWorkspacePath(path string) (string, error) { return path, nil }
+
 func workerLimits() error {
 	for resource, value := range map[int]uint64{unix.RLIMIT_DATA: 256 << 20, unix.RLIMIT_CPU: 1200, unix.RLIMIT_CORE: 0, unix.RLIMIT_FSIZE: 128 << 20, unix.RLIMIT_NOFILE: 128} {
 		if err := unix.Setrlimit(resource, &unix.Rlimit{Cur: value, Max: value}); err != nil {
