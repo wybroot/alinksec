@@ -437,7 +437,9 @@ jobs:
         run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
       - name: Capture native Linux compliance pack observations
         working-directory: agent/internal/baseline
-        run: sudo env ALINKSEC_COMPLIANCE_NATIVE_OUTPUT="$GITHUB_WORKSPACE/.tmp/compliance-native/result.json" ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeCompliancePack$'
+        run: |
+          sudo env ALINKSEC_COMPLIANCE_NATIVE_OUTPUT="$GITHUB_WORKSPACE/.tmp/compliance-native/result.json" ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeCompliancePack$'
+          sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.tmp/compliance-native" "$GITHUB_WORKSPACE/.tmp/compliance-native/result.json"
       - name: Retain native Linux compliance evidence
         if: always()
         uses: actions/upload-artifact@v4
