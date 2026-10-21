@@ -79,6 +79,20 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
             if (!file.getKey().endsWith(".xml")) continue;
             var document = xml(file.getValue());
             var elements = document.getElementsByTagName("*");
+            if (elements.getLength() > 150000) throw invalid("XML 元素数量超过上限");
+            Set<String> localIds = new HashSet<>();
+            Map<String, String> catalog = new LinkedHashMap<>();
+            for (int i = 0; i < elements.getLength(); i++) {
+                Element element = (Element) elements.item(i);
+                if (element.hasAttribute("id") && !localIds.add(element.getAttribute("id"))) throw invalid("XML 标识重复");
+                if ("urn:oasis:names:tc:entity:xmlns:xml:catalog".equals(element.getNamespaceURI()) && "uri".equals(element.getLocalName())) {
+                    String alias = element.getAttribute("name"), target = element.getAttribute("uri");
+                    if (!safePath(alias) || !target.startsWith("#") || target.length() < 2
+                            || catalog.containsKey(alias) && !catalog.get(alias).equals(target)) throw invalid("数据流目录映射无效");
+                    catalog.put(alias, target);
+                }
+            }
+            if (catalog.values().stream().anyMatch(target -> !localIds.contains(target.substring(1)))) throw invalid("数据流目录引用缺失");
             for (int i = 0; i < elements.getLength(); i++) {
                 Element element = (Element) elements.item(i);
                 String local = element.getLocalName();
@@ -92,10 +106,12 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
                     throw invalid("只允许 OVAL 声明式检查或 OCIL 人工问题");
                 if ("check-content".equals(local) || local != null && local.matches("(?i).*(shellcommand|powershell|cmdlet).*"))
                     throw invalid("核查内容不得包含脚本探针");
+                if ("http://www.w3.org/2001/XInclude".equals(element.getNamespaceURI()) || element.hasAttributeNS(XMLConstants.XML_NS_URI, "base"))
+                    throw invalid("核查内容不得包含 XInclude 或外部基路径");
                 for (int a = 0; a < element.getAttributes().getLength(); a++) {
                     var attribute = element.getAttributes().item(a);
                     if ("href".equals(attribute.getLocalName()) && !Set.of("reference", "metadata").contains(local))
-                        reference(attribute.getNodeValue(), file.getKey(), files);
+                        reference(attribute.getNodeValue(), file.getKey(), files, localIds, catalog);
                 }
             }
         }
@@ -128,13 +144,16 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
         return name.length() <= 512 && name.matches("[A-Za-z0-9_][A-Za-z0-9_./-]*")
                 && java.util.Arrays.stream(name.split("/", -1)).noneMatch(s -> s.isEmpty() || s.equals(".") || s.equals(".."));
     }
-    private static void reference(String href, String source, Map<String, byte[]> files) {
-        if (href.startsWith("#")) return;
+    private static void reference(String href, String source, Map<String, byte[]> files, Set<String> ids, Map<String, String> catalog) {
+        if (href.startsWith("#")) {
+            if (!ids.contains(href.substring(1))) throw invalid("数据流内部引用缺失");
+            return;
+        }
         String file = href.split("#", 2)[0];
         if (!safePath(file)) throw invalid("检查引用必须为包内相对路径");
         int slash = source.lastIndexOf('/');
         String path = (slash < 0 ? "" : source.substring(0, slash + 1)) + file;
-        if (!files.containsKey(path)) throw invalid("缺少本地引用文件: " + path);
+        if (!files.containsKey(path) && !catalog.containsKey(file)) throw invalid("缺少本地引用文件: " + path);
     }
     private static boolean xccdf(Element element) { return Set.of(XCCDF11, XCCDF12).contains(element.getNamespaceURI() == null ? "" : element.getNamespaceURI()); }
     public static org.w3c.dom.Document xml(byte[] bytes) {
@@ -148,6 +167,7 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
             factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
             factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            factory.setAttribute("jdk.xml.maxElementDepth", "128");
             factory.setXIncludeAware(false);
             var builder = factory.newDocumentBuilder();
             builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() {

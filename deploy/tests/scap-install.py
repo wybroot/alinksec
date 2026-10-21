@@ -79,7 +79,10 @@ def main():
     binary = binaries[0]
     checked(binary.read_bytes(), binary_digest)
     # Running help/version uses the complete native runtime; it does not scan.
-    probe = subprocess.run([str(binary), '--version'], capture_output=True, text=True, timeout=45, cwd=binary.parent)
+    command = [str(binary), '--version']
+    if platform.system() == 'Linux' and os.geteuid() != 0 and os.getenv('GITHUB_ACTIONS') == 'true':
+        command = ['sudo', '-n', *command]
+    probe = subprocess.run(command, capture_output=True, text=True, timeout=45, cwd=binary.parent)
     evidence = {'version': VERSION, 'asset': name, 'sha256': digest, 'innerSha256': inner_digest,
                 'binarySha256': binary_digest, 'binary': str(binary), 'url': url,
                 'system': platform.system(), 'machine': platform.machine(),

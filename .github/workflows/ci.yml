@@ -36,12 +36,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Extract and verify official native SCAP interpreter
         run: python deploy/tests/scap-install.py .tmp/scap-native
+      - name: Check native XCCDF Profile and OVAL variable semantics
+        run: python deploy/tests/scap-native-prototype.py .tmp/scap-native/execution
       - name: Retain native interpreter identity
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scap-native-${{ matrix.platform }}
-          path: .tmp/scap-native/install.json
+          path: |
+            .tmp/scap-native/install.json
+            .tmp/scap-native/execution/result.json
+            .tmp/scap-native/execution/reports
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
