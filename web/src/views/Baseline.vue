@@ -1,7 +1,7 @@
 <template>
   <div class="baseline-page">
     <div class="grid-2">
-      <div class="panel"><h4>基线核查 · 合规得分</h4><div ref="scoreEl" class="chart"></div></div>
+      <div class="panel"><h4>基线核查 · 自动检查得分</h4><div ref="scoreEl" class="chart"></div></div>
       <div class="panel"><h4>各检查领域通过率</h4><div ref="catEl" class="chart"></div></div>
     </div>
     <div class="panel">
@@ -15,7 +15,7 @@
       <el-table :data="rows" stripe>
         <el-table-column prop="host" label="主机" width="170" />
         <el-table-column prop="tpl" label="模板" width="220" />
-        <el-table-column label="合规率" width="200">
+        <el-table-column label="自动检查通过率" width="200">
           <template #default="{ row }"><span v-if="row.legacy" style="color:#b45309">旧结果待重新核查</span><el-progress v-else :percentage="row.rate" :stroke-width="8" :color="row.rate > 80 ? '#16a34a' : row.rate > 60 ? '#f59e0b' : '#dc2626'" /></template>
         </el-table-column>
         <el-table-column label="不合规（严重/高/中/低）" width="180">
@@ -64,6 +64,7 @@
     <!-- 单机明细 -->
     <el-dialog v-model="detail.visible" :title="`${detail.host} · 核查明细`" width="min(920px, calc(100vw - 32px))">
       <div class="toolbar">
+        <el-button @click="complianceVisible = true">等保条款与证据</el-button>
         <span style="font-size:12px;color:#94a3b8">未通过且支持自动修复的项可勾选提交：Agent 将 备份 → 执行 → 复核 → 失败自动回滚</span>
         <div class="spacer"></div>
         <el-button type="warning" :disabled="!fixSel.length" :loading="fixLoading" @click="submitFix">一键修复所选（{{ fixSel.length }}）</el-button>
@@ -96,6 +97,10 @@
         </el-table-column>
       </el-table>
       <template #footer><el-button @click="detail.visible = false">关闭</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="complianceVisible" title="等保条款与证据" width="min(1100px, calc(100vw - 24px))" destroy-on-close>
+      <BaselineCompliance v-if="complianceVisible && detail.taskId" :key="`${detail.taskId}:${detail.agentId}`" :task-id="detail.taskId" :agent-id="detail.agentId" />
     </el-dialog>
 
     <!-- 修复任务记录 -->
@@ -263,6 +268,8 @@ import {
   fetchBaselineTaskDetail, fetchBaselineTemplates, fetchBaselineCoverage, fetchFixTaskRecords, fetchFixTasks, fetchAllHosts, cancelFixTask, getUser,
 } from '../api'
 import { useChart } from '../composables/useChart'
+import BaselineCompliance from '../components/BaselineCompliance.vue'
+const complianceVisible = ref(false)
 
 const fmtTime = (iso) => {
   if (!iso) return '—'
@@ -515,7 +522,7 @@ const { render: renderScore } = useChart(scoreEl, () => ({
     pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
     title: { offsetCenter: [0, '30%'], fontSize: 13, color: '#64748b' },
     detail: { valueAnimation: true, fontSize: 40, fontWeight: 700, offsetCenter: [0, '-5%'], color: '#0f172a', formatter: (v) => (avgScore.value == null ? '—' : v) },
-    data: [{ value: avgScore.value ?? 0, name: rows.value.some((r) => r.legacy) ? '旧结果待重新核查' : rows.value.length ? `平均合规得分（${rows.value.length} 台）` : '暂无核查数据' }],
+    data: [{ value: avgScore.value ?? 0, name: rows.value.some((r) => r.legacy) ? '旧结果待重新核查' : rows.value.length ? `平均自动检查得分（${rows.value.length} 台）` : '暂无核查数据' }],
   }],
 }))
 

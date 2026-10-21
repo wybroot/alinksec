@@ -14,6 +14,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
+    @Test void complianceEvidenceReadsAllowAllRolesAndOnlyAdminCanRecordConclusions() throws Exception {
+        for (String role : new String[]{"admin", "operator", "viewer"}) {
+            var read = request(role); read.setRequestURI("/api/baseline/tasks/1/agents/ubuntu/compliance");
+            assertTrue(interceptor().preHandle(read, new MockHttpServletResponse(), new Object()));
+            var write = request(role); write.setMethod("POST"); write.setRequestURI(read.getRequestURI()+"/review");
+            assertEquals(role.equals("admin"), interceptor().preHandle(write, new MockHttpServletResponse(), new Object()));
+        }
+    }
 
     @Test void fileWatchCoverageRequiresAuthenticationAndSupportsAllReadRoles() throws Exception {
         for(String role:new String[]{"admin","operator","viewer"}) {

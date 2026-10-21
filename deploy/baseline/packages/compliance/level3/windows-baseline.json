@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 2,
+  "code": "ALINKSEC-MLPS2-L3-WINDOWS",
+  "name": "等保 2.0 3级安全计算环境 · Windows",
+  "standard": "GB/T 22239-2019",
+  "product": "Windows 10/11、Server 2019/2022/2025",
+  "osType": 2,
+  "osVersionPattern": "^(Microsoft )?Windows (10|11|Server (2019|2022|2025))([ .][A-Za-z0-9._ -]+)?$",
+  "version": "1.0.0",
+  "source": {
+    "name": "AlinkSec reviewed MLPS host evidence definitions",
+    "version": "1.0.0",
+    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline/compliance",
+    "sha256": "39fbff6e0a7ac5ae3ba8101f8341bc60e1e9670996beb8dbe33ea3f46d183258"
+  },
+  "items": [
+    {
+      "code": "MLPS-WIN-password_length",
+      "ruleId": "alinksec:windows:password_length",
+      "name": "本机口令最小长度",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "password_length",
+        "operator": "eq",
+        "expected": "minimum_length>=12"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-password_age",
+      "ruleId": "alinksec:windows:password_age",
+      "name": "本机口令有效期与最短修改间隔",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "password_age",
+        "operator": "eq",
+        "expected": "maximum_age=1..90d,minimum_age=1..maximum_age"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-password_history",
+      "ruleId": "alinksec:windows:password_history",
+      "name": "本机口令历史",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "password_history",
+        "operator": "eq",
+        "expected": "history>=5"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-lockout",
+      "ruleId": "alinksec:windows:lockout",
+      "name": "本机登录失败锁定",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "lockout",
+        "operator": "eq",
+        "expected": "threshold=1..5,duration>=900s,reset>=900s,reset<=duration"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-audit_logon",
+      "ruleId": "alinksec:windows:audit_logon",
+      "name": "登录成功与失败审计",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "audit_logon",
+        "operator": "eq",
+        "expected": "success+failure"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-audit_account",
+      "ruleId": "alinksec:windows:audit_account",
+      "name": "账户管理成功与失败审计",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "audit_account",
+        "operator": "eq",
+        "expected": "success+failure"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-audit_policy",
+      "ruleId": "alinksec:windows:audit_policy",
+      "name": "审计策略变更成功与失败审计",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "audit_policy",
+        "operator": "eq",
+        "expected": "success+failure"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-audit_integrity",
+      "ruleId": "alinksec:windows:audit_integrity",
+      "name": "系统完整性成功与失败审计",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "audit_integrity",
+        "operator": "eq",
+        "expected": "success+failure"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-rdp_nla",
+      "ruleId": "alinksec:windows:rdp_nla",
+      "name": "RDP 网络级身份验证声明",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "rdp_nla",
+        "operator": "eq",
+        "expected": "UserAuthentication=1"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-rdp_tls",
+      "ruleId": "alinksec:windows:rdp_tls",
+      "name": "RDP TLS 与加密强度声明",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "rdp_tls",
+        "operator": "eq",
+        "expected": "SecurityLayer=2,MinEncryptionLevel>=3"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-ntlm",
+      "ruleId": "alinksec:windows:ntlm",
+      "name": "NTLMv2 认证兼容级别声明",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "ntlm",
+        "operator": "eq",
+        "expected": "LmCompatibilityLevel=5"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-idle_timeout",
+      "ruleId": "alinksec:windows:idle_timeout",
+      "name": "本机交互空闲锁定声明",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "idle_timeout",
+        "operator": "eq",
+        "expected": "InactivityTimeoutSecs=1..900"
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-WIN-smb1",
+      "ruleId": "alinksec:windows:smb1",
+      "name": "SMBv1 可选组件处于禁用状态",
+      "category": "Windows 安全策略",
+      "severity": 3,
+      "check": {
+        "type": "windows_security_policy",
+        "target": "local-machine",
+        "option": "smb1",
+        "operator": "eq",
+        "expected": "SMB1Protocol=Disabled|DisabledWithPayloadRemoved",
+        "timeout_ms": 30000
+      },
+      "remediation": "经变更审批配置本机或域策略并重新核查；同时核验域细粒度策略、实际会话与业务账户。建议阈值由项目制定，不等同于标准规定值。"
+    },
+    {
+      "code": "MLPS-ALINKSEC-WINDOWS-001",
+      "ruleId": "ALINKSEC-WINDOWS-001",
+      "name": "有效策略的三个防火墙配置均已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 15000
+      },
+      "remediation": "读取 ActiveStore 的 Domain、Private、Public 三个配置；缺失配置或查询失败是执行异常。不证明规则集允许的流量安全；由管理员核对业务规则，本包不自动修复。"
+    },
+    {
+      "code": "MLPS-ALINKSEC-WINDOWS-002",
+      "ruleId": "ALINKSEC-WINDOWS-002",
+      "name": "Defender 实时保护已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+        "operator": "eq",
+        "expected": "True",
+        "timeout_ms": 15000
+      },
+      "remediation": "只确认 Defender 的 RealTimeProtectionEnabled 当前值；缺少 Defender 或查询失败是执行异常。其他杀毒产品不据此判为合规；人工核对当前检测产品和更新策略，本包不自动修复。"
+    },
+    {
+      "code": "MLPS-ALINKSEC-WINDOWS-003",
+      "ruleId": "ALINKSEC-WINDOWS-003",
+      "name": "事件日志服务运行",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+        "operator": "eq",
+        "expected": "Running",
+        "timeout_ms": 15000
+      },
+      "remediation": "只确认 EventLog 服务当前状态为 Running；不证明日志保留、审计策略、完整性或集中传输。由管理员审查日志策略，本包不自动修复。"
+    },
+    {
+      "code": "MLPS-ALINKSEC-WINDOWS-004",
+      "ruleId": "ALINKSEC-WINDOWS-004",
+      "name": "用户账户控制已启用",
+      "category": "基础防护",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\"",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 15000
+      },
+      "remediation": "只确认 EnableLUA 注册表配置为 1；不证明所有 UAC 提示或重启后的生效状态。按 Microsoft 的 UAC 策略核对，本包不自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "compliance": {
+    "catalogId": "MLPS2-HOST-2019-L3",
+    "catalogSha256": "929a5dfd1bd47c64ea70fa72524d003f9f9b94c8d7169cfea7d66e55238d3458",
+    "controlChecks": {
+      "8.1.4.1.a": [
+        "MLPS-WIN-password_length",
+        "MLPS-WIN-password_age",
+        "MLPS-WIN-password_history"
+      ],
+      "8.1.4.1.b": [
+        "MLPS-WIN-lockout",
+        "MLPS-WIN-idle_timeout"
+      ],
+      "8.1.4.1.c": [
+        "MLPS-WIN-rdp_nla",
+        "MLPS-WIN-rdp_tls",
+        "MLPS-WIN-ntlm"
+      ],
+      "8.1.4.1.d": [],
+      "8.1.4.2.a": [],
+      "8.1.4.2.b": [],
+      "8.1.4.2.c": [],
+      "8.1.4.2.d": [
+        "MLPS-ALINKSEC-WINDOWS-004"
+      ],
+      "8.1.4.2.e": [
+        "MLPS-ALINKSEC-WINDOWS-004"
+      ],
+      "8.1.4.2.f": [],
+      "8.1.4.2.g": [],
+      "8.1.4.3.a": [
+        "MLPS-WIN-audit_logon",
+        "MLPS-WIN-audit_account",
+        "MLPS-WIN-audit_policy",
+        "MLPS-WIN-audit_integrity",
+        "MLPS-ALINKSEC-WINDOWS-003"
+      ],
+      "8.1.4.3.b": [],
+      "8.1.4.3.c": [],
+      "8.1.4.3.d": [
+        "MLPS-ALINKSEC-WINDOWS-003"
+      ],
+      "8.1.4.4.a": [],
+      "8.1.4.4.b": [
+        "MLPS-WIN-smb1"
+      ],
+      "8.1.4.4.c": [
+        "MLPS-ALINKSEC-WINDOWS-001"
+      ],
+      "8.1.4.4.d": [],
+      "8.1.4.4.e": [],
+      "8.1.4.4.f": [],
+      "8.1.4.5": [
+        "MLPS-ALINKSEC-WINDOWS-002"
+      ],
+      "8.1.4.6": [],
+      "8.1.4.7.a": [],
+      "8.1.4.7.b": [],
+      "8.1.4.8.a": [],
+      "8.1.4.8.b": [],
+      "8.1.4.9.a": [],
+      "8.1.4.9.b": [],
+      "8.1.4.9.c": [],
+      "8.1.4.10.a": [],
+      "8.1.4.10.b": [],
+      "8.1.4.11.a": [],
+      "8.1.4.11.b": []
+    }
+  }
+}

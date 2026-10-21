@@ -1,0 +1,1921 @@
+{
+  "schemaVersion": 1,
+  "standardUrl": "https://std.samr.gov.cn/gb/search/gbDetailed?id=88F4E6DA63434198E05397BE0A0ADE2D",
+  "scopeNote": "二级、三级安全计算环境的主机核验证据；组织、物理、网络及扩展场景另行测评。配置检查通过率不等同于等保测评结论。",
+  "windowsReferences": {
+    "password_length": "minimum_length>=12",
+    "password_age": "maximum_age=1..90d,minimum_age=1..maximum_age",
+    "password_history": "history>=5",
+    "lockout": "threshold=1..5,duration>=900s,reset>=900s,reset<=duration",
+    "audit_logon": "success+failure",
+    "audit_account": "success+failure",
+    "audit_policy": "success+failure",
+    "audit_integrity": "success+failure",
+    "rdp_nla": "UserAuthentication=1",
+    "rdp_tls": "SecurityLayer=2,MinEncryptionLevel>=3",
+    "ntlm": "LmCompatibilityLevel=5",
+    "idle_timeout": "InactivityTimeoutSecs=1..900",
+    "smb1": "SMB1Protocol=Disabled|DisabledWithPayloadRemoved"
+  },
+  "catalogs": [
+    {
+      "id": "MLPS2-HOST-2019-L2",
+      "standard": "GB/T 22239-2019",
+      "level": 2,
+      "scope": "7.1.4 安全计算环境",
+      "controls": [
+        {
+          "id": "7.1.4.1.a",
+          "name": "账户身份与口令生命周期",
+          "evidence": "账户及业务身份清单、唯一标识、有效口令策略和抽样修改记录；补查域/应用账户、现有账户过期例外与复杂度。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0001",
+              "BL-LINUX-0002",
+              "BL-LINUX-0003",
+              "BL-LINUX-0004",
+              "BL-LINUX-0006",
+              "BL-LINUX-0009"
+            ],
+            "windows": [
+              "MLPS-WIN-password_length",
+              "MLPS-WIN-password_age",
+              "MLPS-WIN-password_history"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.1.b",
+          "name": "失败锁定与会话退出",
+          "evidence": "核验全部登录入口的失败锁定、超时退出和会话终止；提交现场测试记录及例外审批。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0005",
+              "BL-LINUX-0008",
+              "BL-LINUX-0010"
+            ],
+            "windows": [
+              "MLPS-WIN-lockout",
+              "MLPS-WIN-idle_timeout"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.1.c",
+          "name": "远程管理鉴别通道",
+          "evidence": "提交 SSH/RDP/管理应用的协议与加密配置、证书或主机密钥信任及抓包/会话验证；检查所有远程入口。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": [
+              "MLPS-WIN-rdp_nla",
+              "MLPS-WIN-rdp_tls",
+              "MLPS-WIN-ntlm"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.2.a",
+          "name": "账户授权对应关系",
+          "evidence": "提交逐用户账户与权限矩阵、批准人和授权依据；核验文件及应用/数据库权限。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0011",
+              "BL-LINUX-0012",
+              "BL-LINUX-0013",
+              "BL-LINUX-0014"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.2.b",
+          "name": "默认账户及初始凭据",
+          "evidence": "提交默认账户处置与初始凭据变更记录；Linux root 等保留账户说明使用边界。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0009",
+              "BL-LINUX-0016"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.2.c",
+          "name": "账户清退与共享治理",
+          "evidence": "提交账户责任人、过期/多余账户停用记录及共享账户排查；覆盖域、服务和应用账户。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0015"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.2.d",
+          "name": "管理员最小权限与职责分离",
+          "evidence": "提交管理职责划分、sudo/本地管理员/域权限审批及实际权限复核；核验管理账户无越权。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0016",
+              "BL-LINUX-0017",
+              "BL-LINUX-0018",
+              "BL-LINUX-0045"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-004"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.3.a",
+          "name": "重要行为及事件审计覆盖",
+          "evidence": "提交用户/事件审计矩阵和成功失败样例；核验日志实际生成而非仅有配置。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0021",
+              "BL-LINUX-0022",
+              "BL-LINUX-0025",
+              "BL-LINUX-0024",
+              "BL-LINUX-0029"
+            ],
+            "windows": [
+              "MLPS-WIN-audit_logon",
+              "MLPS-WIN-audit_account",
+              "MLPS-WIN-audit_policy",
+              "MLPS-WIN-audit_integrity",
+              "MLPS-ALINKSEC-WINDOWS-003"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.3.b",
+          "name": "审计字段与时间关联",
+          "evidence": "提交脱敏日志样例，核验时间、身份、事件分类及结果字段；记录时钟源与跨系统关联验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0026",
+              "BL-LINUX-0055",
+              "BL-LINUX-0044"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.3.c",
+          "name": "审计日志保护与备份",
+          "evidence": "提交日志访问权限、留存/防覆盖策略、备份及恢复验证；核验所有实际日志路径。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0023",
+              "BL-LINUX-0027",
+              "BL-LINUX-0028",
+              "BL-AUDITD-0001",
+              "BL-AUDITD-0002",
+              "BL-AUDITD-0003",
+              "BL-LINUX-0030"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.4.a",
+          "name": "组件与软件最小安装",
+          "evidence": "提交软件/组件清单、业务必要性批准和不需要组件移除记录。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.4.b",
+          "name": "服务共享及端口收敛",
+          "evidence": "提交服务、默认共享和监听端口清单及批准范围；验证外部可达性和不需要项关闭记录。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0019",
+              "BL-LINUX-0031",
+              "BL-LINUX-0032",
+              "BL-LINUX-0033",
+              "BL-LINUX-0034",
+              "BL-LINUX-0035",
+              "BL-LINUX-0037",
+              "BL-LINUX-0039",
+              "BL-LINUX-0046",
+              "BL-LINUX-0047",
+              "BL-LINUX-0048",
+              "BL-LINUX-0056",
+              "BL-LINUX-0057",
+              "BL-LINUX-0058",
+              "BL-LINUX-0059",
+              "BL-LINUX-0060"
+            ],
+            "windows": [
+              "MLPS-WIN-smb1"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.4.c",
+          "name": "管理接入终端限制",
+          "evidence": "提交管理网络/终端允许范围及生效访问规则，使用获准与未获准来源进行实际连接验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0007"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-001"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.4.d",
+          "name": "应用输入有效性",
+          "evidence": "按业务接口与输入字段提交边界、类型和非法内容测试记录，覆盖本机管理界面及通信接口。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.4.e",
+          "name": "漏洞识别和补丁处置",
+          "evidence": "提交当前漏洞扫描、影响评估、测试、变更审批、修补和复核闭环；签名源声明仅是补充证据。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0052",
+              "BL-LINUX-0053"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.5",
+          "name": "恶意代码防护",
+          "evidence": "提交防护运行、策略、引擎/特征更新及受控样本阻断/告警证据；核验第三方产品或可信免疫替代方案。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0049",
+              "BL-LINUX-0050"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-002"
+            ]
+          }
+        },
+        {
+          "id": "7.1.4.6",
+          "name": "可信根与验证链",
+          "evidence": "核验可信根、启动/系统/重要配置/应用验证范围和告警上送；三级补查关键执行环节动态验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0040",
+              "BL-LINUX-0041"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.7",
+          "name": "传输数据完整性",
+          "evidence": "提交重要数据分类、传输链路清单及完整性保护与篡改检测测试；覆盖鉴别、业务、审计及配置等实际数据。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.8.a",
+          "name": "本地备份与恢复",
+          "evidence": "提交重要数据备份范围、周期、备份成功记录和最近恢复演练结果，核对恢复目标。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.8.b",
+          "name": "异地备份",
+          "evidence": "提交异地备份链路、隔离与完整性、备份/恢复记录；二级核验定时批量传送，三级核验实时备份及延迟。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.9",
+          "name": "鉴别信息残留处置",
+          "evidence": "提交鉴别信息存储介质/内存复用与释放流程和清除验证；覆盖备份、缓存及临时数据。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.10.a",
+          "name": "个人信息最小处理",
+          "evidence": "提交个人信息目录、业务必要性、采集字段与保存期限审查及超范围处理整改记录。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "7.1.4.10.b",
+          "name": "个人信息授权与使用",
+          "evidence": "提交个人信息权限矩阵、使用审计与越权测试记录，验证未授权访问和不当使用的限制。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        }
+      ],
+      "evidenceChecks": {
+        "linux": {
+          "BL-LINUX-0049": {
+            "type": "agent_runtime",
+            "target": "current-agent",
+            "option": "channel",
+            "operator": "eq",
+            "expected": "self_process=running,current_mtls_session=active,successful_send_and_receive_age<=60s",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0050": {
+            "type": "agent_runtime",
+            "target": "current-agent",
+            "option": "hash_inventory",
+            "operator": "eq",
+            "expected": "manifest=nonempty_hash_only,cache=disk_exact,inputs=trusted_stable",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0040": {
+            "type": "apparmor_runtime",
+            "target": "current-kernel",
+            "operator": "eq",
+            "expected": "enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0052": {
+            "type": "apt_install_policy",
+            "target": "/etc/apt",
+            "operator": "eq",
+            "expected": "apt/apt-get:AllowUnauthenticated=false,Force-Yes=false",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0053": {
+            "type": "apt_sources_policy",
+            "target": "/etc/apt",
+            "operator": "eq",
+            "expected": "apt/apt-get:AllowInsecureRepositories=false,AllowWeakRepositories=false,AllowDowngradeToInsecureRepositories=false;sources:Trusted!=yes,allow-insecure=false,allow-weak=false,allow-downgrade-to-insecure=false,Signed-By=explicit-keyring-files",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0021": {
+            "type": "linux_audit",
+            "target": "kernel",
+            "option": "enabled",
+            "operator": "eq",
+            "expected": "enabled=1|2",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0025": {
+            "type": "linux_audit",
+            "target": "kernel",
+            "option": "identity_watches",
+            "operator": "eq",
+            "expected": "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0001": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "local_logging",
+            "operator": "eq",
+            "expected": "local_events=yes,write_logs=yes,log_format=raw|enriched",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0002": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "keep_logs",
+            "operator": "eq",
+            "expected": "local_logging=1,max_log_file>=1,max_log_file_action=keep_logs",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0003": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "log_file_metadata",
+            "operator": "eq",
+            "expected": "local_logging=1,regular,mode<=0640,uid=0,gid=declared_numeric_log_group",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0010": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "login_timeout",
+            "operator": "eq",
+            "expected": "TMOUT=1..600,readonly=1,exported=1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0017": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "login_umask",
+            "operator": "eq",
+            "expected": "umask=027|077",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0026": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "history_time",
+            "operator": "eq",
+            "expected": "HISTTIMEFORMAT=%F %T %z ",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0044": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "history_capacity",
+            "operator": "eq",
+            "expected": "HISTSIZE=1000..10000,HISTFILESIZE=1000..10000",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0045": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "nonlogin_umask",
+            "operator": "eq",
+            "expected": "umask=027|077",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0019": {
+            "type": "debian_cron_metadata",
+            "target": "system-tables",
+            "operator": "eq",
+            "expected": "crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0060": {
+            "type": "systemd_ctrl_alt_del",
+            "target": "ctrl-alt-del.target",
+            "operator": "eq",
+            "expected": "masked/inactive/dead,burst_action=none",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0009": {
+            "type": "local_accounts",
+            "target": "/etc/shadow",
+            "option": "empty_password",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0011": {
+            "type": "local_identity_file",
+            "target": "/etc/passwd",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0012": {
+            "type": "local_identity_file",
+            "target": "/etc/shadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0013": {
+            "type": "local_identity_file",
+            "target": "/etc/group",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0014": {
+            "type": "local_identity_file",
+            "target": "/etc/gshadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0015": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "system_shells",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000,
+            "uid_min": 1,
+            "uid_max": 999
+          },
+          "BL-LINUX-0016": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "uid0_accounts",
+            "operator": "eq",
+            "expected": "root",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0023": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/audit",
+            "operator": "subset",
+            "perm": "0700",
+            "owner": "0",
+            "group": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0027": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/btmp",
+            "operator": "subset",
+            "perm": "0660",
+            "owner": "0",
+            "group": "utmp",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0028": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/wtmp",
+            "operator": "subset",
+            "perm": "0664",
+            "owner": "0",
+            "group": "utmp",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0001": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "minimum_length",
+            "expected": "minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+          },
+          "BL-LINUX-0002": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "quality",
+            "expected": "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+          },
+          "BL-LINUX-0006": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "unix_hash",
+            "expected": "yescrypt"
+          },
+          "BL-LINUX-0005": {
+            "type": "pam_auth",
+            "target": "/etc/pam.d/login",
+            "option": "faillock",
+            "operator": "eq",
+            "expected": "deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0039": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "core",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=0,hard=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0056": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "nofile",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=1024..65536,hard=1024..65536",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0057": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "nproc",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=1..4096,hard=1..4096",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0041": {
+            "type": "linux_program_files",
+            "target": "system-program-inputs",
+            "option": "linker_metadata",
+            "operator": "eq",
+            "expected": "main+included_conf<=0644,dirs<=0755,uid=0,gid=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0030": {
+            "type": "cmd_output",
+            "cmd": "stat -L -c '%f %u' /var/log/messages",
+            "operator": "regex",
+            "expected": "^8[0-9a-f]{3} 0$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0031": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0032": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0033": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv6.conf.all.accept_redirects",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0034": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0035": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0037": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.log_martians",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0047": {
+            "type": "cmd_output",
+            "cmd": "findmnt --noheadings --raw --output OPTIONS --target /tmp",
+            "operator": "regex",
+            "expected": "^(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*)(?:\\n(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*))*$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0048": {
+            "type": "rsyslog_cron_routing",
+            "target": "/etc/rsyslog.conf",
+            "operator": "eq",
+            "expected": "imuxsock=on,cron.emerg..debug=/var/log/cron.log",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0058": {
+            "type": "pam_securetty",
+            "target": "/etc/pam.d/login",
+            "operator": "eq",
+            "expected": "first_auth=required|requisite:securetty,noconsole=1,ttys=nonempty_subset(tty1..tty6)",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0003": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "max_days",
+            "operator": "eq",
+            "expected": "max_days=1..90,min_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0004": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "warn_days",
+            "operator": "eq",
+            "expected": "warn_days=7..14,warn_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0007": {
+            "type": "sshd_effective",
+            "target": "/etc/ssh/sshd_config",
+            "option": "permitrootlogin",
+            "connection": {
+              "user": "root",
+              "host": "admin.example.invalid",
+              "address": "192.0.2.10",
+              "local_address": "192.0.2.20",
+              "local_port": 22
+            },
+            "operator": "eq",
+            "expected": "no",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0008": {
+            "type": "sshd_effective",
+            "target": "/etc/ssh/sshd_config",
+            "option": "maxauthtries",
+            "connection": {
+              "user": "root",
+              "host": "admin.example.invalid",
+              "address": "192.0.2.10",
+              "local_address": "192.0.2.20",
+              "local_port": 22
+            },
+            "operator": "regex",
+            "expected": "^[1-4]$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0018": {
+            "type": "sudoers_policy",
+            "target": "/etc/sudoers",
+            "option": "authentication",
+            "operator": "eq",
+            "expected": "authenticate=on,exempt_group=unset,nopasswd_tags=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0029": {
+            "type": "sudoers_policy",
+            "target": "/etc/sudoers",
+            "option": "allowed_logging",
+            "operator": "eq",
+            "expected": "log_allowed=on,logfile=/var/log/sudo.log",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0022": {
+            "type": "systemd_service",
+            "target": "auditd.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0024": {
+            "type": "systemd_service",
+            "target": "rsyslog.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0046": {
+            "type": "systemd_maintenance",
+            "target": "local-system",
+            "option": "tmpfiles_clean",
+            "operator": "eq",
+            "expected": "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0055": {
+            "type": "systemd_maintenance",
+            "target": "local-system",
+            "option": "time_sync",
+            "operator": "eq",
+            "expected": "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0059": {
+            "type": "systemd_rescue_policy",
+            "target": "local-system",
+            "operator": "eq",
+            "expected": "rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false",
+            "timeout_ms": 5000
+          }
+        },
+        "windows": {
+          "MLPS-WIN-password_length": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_length",
+            "operator": "eq",
+            "expected": "minimum_length>=12"
+          },
+          "MLPS-WIN-password_age": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_age",
+            "operator": "eq",
+            "expected": "maximum_age=1..90d,minimum_age=1..maximum_age"
+          },
+          "MLPS-WIN-password_history": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_history",
+            "operator": "eq",
+            "expected": "history>=5"
+          },
+          "MLPS-WIN-lockout": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "lockout",
+            "operator": "eq",
+            "expected": "threshold=1..5,duration>=900s,reset>=900s,reset<=duration"
+          },
+          "MLPS-WIN-audit_logon": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_logon",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_account": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_account",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_policy": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_policy",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_integrity": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_integrity",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-rdp_nla": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "rdp_nla",
+            "operator": "eq",
+            "expected": "UserAuthentication=1"
+          },
+          "MLPS-WIN-rdp_tls": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "rdp_tls",
+            "operator": "eq",
+            "expected": "SecurityLayer=2,MinEncryptionLevel>=3"
+          },
+          "MLPS-WIN-ntlm": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "ntlm",
+            "operator": "eq",
+            "expected": "LmCompatibilityLevel=5"
+          },
+          "MLPS-WIN-idle_timeout": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "idle_timeout",
+            "operator": "eq",
+            "expected": "InactivityTimeoutSecs=1..900"
+          },
+          "MLPS-WIN-smb1": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "smb1",
+            "operator": "eq",
+            "expected": "SMB1Protocol=Disabled|DisabledWithPayloadRemoved",
+            "timeout_ms": 30000
+          },
+          "MLPS-ALINKSEC-WINDOWS-001": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-002": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+            "operator": "eq",
+            "expected": "True",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-003": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+            "operator": "eq",
+            "expected": "Running",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-004": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\"",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 15000
+          }
+        }
+      }
+    },
+    {
+      "id": "MLPS2-HOST-2019-L3",
+      "standard": "GB/T 22239-2019",
+      "level": 3,
+      "scope": "8.1.4 安全计算环境",
+      "controls": [
+        {
+          "id": "8.1.4.1.a",
+          "name": "账户身份与口令生命周期",
+          "evidence": "账户及业务身份清单、唯一标识、有效口令策略和抽样修改记录；补查域/应用账户、现有账户过期例外与复杂度。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0001",
+              "BL-LINUX-0002",
+              "BL-LINUX-0003",
+              "BL-LINUX-0004",
+              "BL-LINUX-0006",
+              "BL-LINUX-0009"
+            ],
+            "windows": [
+              "MLPS-WIN-password_length",
+              "MLPS-WIN-password_age",
+              "MLPS-WIN-password_history"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.1.b",
+          "name": "失败锁定与会话退出",
+          "evidence": "核验全部登录入口的失败锁定、超时退出和会话终止；提交现场测试记录及例外审批。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0005",
+              "BL-LINUX-0008",
+              "BL-LINUX-0010"
+            ],
+            "windows": [
+              "MLPS-WIN-lockout",
+              "MLPS-WIN-idle_timeout"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.1.c",
+          "name": "远程管理鉴别通道",
+          "evidence": "提交 SSH/RDP/管理应用的协议与加密配置、证书或主机密钥信任及抓包/会话验证；检查所有远程入口。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": [
+              "MLPS-WIN-rdp_nla",
+              "MLPS-WIN-rdp_tls",
+              "MLPS-WIN-ntlm"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.1.d",
+          "name": "组合身份鉴别",
+          "evidence": "提交所有适用登录入口的两类以上鉴别要素设计、密码技术说明及实际绕过/回退测试记录。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.2.a",
+          "name": "账户授权对应关系",
+          "evidence": "提交逐用户账户与权限矩阵、批准人和授权依据；核验文件及应用/数据库权限。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0011",
+              "BL-LINUX-0012",
+              "BL-LINUX-0013",
+              "BL-LINUX-0014"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.2.b",
+          "name": "默认账户及初始凭据",
+          "evidence": "提交默认账户处置与初始凭据变更记录；Linux root 等保留账户说明使用边界。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0009",
+              "BL-LINUX-0016"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.2.c",
+          "name": "账户清退与共享治理",
+          "evidence": "提交账户责任人、过期/多余账户停用记录及共享账户排查；覆盖域、服务和应用账户。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0015"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.2.d",
+          "name": "管理员最小权限与职责分离",
+          "evidence": "提交管理职责划分、sudo/本地管理员/域权限审批及实际权限复核；核验管理账户无越权。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0016",
+              "BL-LINUX-0017",
+              "BL-LINUX-0018",
+              "BL-LINUX-0045"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-004"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.2.e",
+          "name": "授权主体配置访问策略",
+          "evidence": "提交策略管理员授权、主体客体访问规则、变更审批与策略生效验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0018"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-004"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.2.f",
+          "name": "访问控制粒度",
+          "evidence": "提交用户/进程到文件、数据库表的有效访问规则和正反向访问验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0011",
+              "BL-LINUX-0012",
+              "BL-LINUX-0013",
+              "BL-LINUX-0014",
+              "BL-LINUX-0041"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.2.g",
+          "name": "安全标记与强制访问",
+          "evidence": "提交重要主体/客体标记方案、标签配置和受控访问验证；通用模式启用不代表业务标记覆盖。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0040"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.3.a",
+          "name": "重要行为及事件审计覆盖",
+          "evidence": "提交用户/事件审计矩阵和成功失败样例；核验日志实际生成而非仅有配置。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0021",
+              "BL-LINUX-0022",
+              "BL-LINUX-0025",
+              "BL-LINUX-0024",
+              "BL-LINUX-0029"
+            ],
+            "windows": [
+              "MLPS-WIN-audit_logon",
+              "MLPS-WIN-audit_account",
+              "MLPS-WIN-audit_policy",
+              "MLPS-WIN-audit_integrity",
+              "MLPS-ALINKSEC-WINDOWS-003"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.3.b",
+          "name": "审计字段与时间关联",
+          "evidence": "提交脱敏日志样例，核验时间、身份、事件分类及结果字段；记录时钟源与跨系统关联验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0026",
+              "BL-LINUX-0055",
+              "BL-LINUX-0044"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.3.c",
+          "name": "审计日志保护与备份",
+          "evidence": "提交日志访问权限、留存/防覆盖策略、备份及恢复验证；核验所有实际日志路径。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0023",
+              "BL-LINUX-0027",
+              "BL-LINUX-0028",
+              "BL-AUDITD-0001",
+              "BL-AUDITD-0002",
+              "BL-AUDITD-0003",
+              "BL-LINUX-0030"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.3.d",
+          "name": "审计进程保护",
+          "evidence": "提交审计组件的服务/进程控制权限和未经授权停止测试记录，核验告警与恢复。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0022"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-003"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.4.a",
+          "name": "组件与软件最小安装",
+          "evidence": "提交软件/组件清单、业务必要性批准和不需要组件移除记录。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.4.b",
+          "name": "服务共享及端口收敛",
+          "evidence": "提交服务、默认共享和监听端口清单及批准范围；验证外部可达性和不需要项关闭记录。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0019",
+              "BL-LINUX-0031",
+              "BL-LINUX-0032",
+              "BL-LINUX-0033",
+              "BL-LINUX-0034",
+              "BL-LINUX-0035",
+              "BL-LINUX-0037",
+              "BL-LINUX-0039",
+              "BL-LINUX-0046",
+              "BL-LINUX-0047",
+              "BL-LINUX-0048",
+              "BL-LINUX-0056",
+              "BL-LINUX-0057",
+              "BL-LINUX-0058",
+              "BL-LINUX-0059",
+              "BL-LINUX-0060"
+            ],
+            "windows": [
+              "MLPS-WIN-smb1"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.4.c",
+          "name": "管理接入终端限制",
+          "evidence": "提交管理网络/终端允许范围及生效访问规则，使用获准与未获准来源进行实际连接验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0007"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-001"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.4.d",
+          "name": "应用输入有效性",
+          "evidence": "按业务接口与输入字段提交边界、类型和非法内容测试记录，覆盖本机管理界面及通信接口。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.4.e",
+          "name": "漏洞识别和补丁处置",
+          "evidence": "提交当前漏洞扫描、影响评估、测试、变更审批、修补和复核闭环；签名源声明仅是补充证据。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0052",
+              "BL-LINUX-0053"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.4.f",
+          "name": "重要节点入侵检测及报警",
+          "evidence": "提交重要节点覆盖、检测策略和受控入侵测试的报警接收/处置证据。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0049"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.5",
+          "name": "恶意代码防护",
+          "evidence": "提交防护运行、策略、引擎/特征更新及受控样本阻断/告警证据；核验第三方产品或可信免疫替代方案。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0049",
+              "BL-LINUX-0050"
+            ],
+            "windows": [
+              "MLPS-ALINKSEC-WINDOWS-002"
+            ]
+          }
+        },
+        {
+          "id": "8.1.4.6",
+          "name": "可信根与验证链",
+          "evidence": "核验可信根、启动/系统/重要配置/应用验证范围和告警上送；三级补查关键执行环节动态验证。",
+          "requiredChecks": {
+            "linux": [
+              "BL-LINUX-0040",
+              "BL-LINUX-0041"
+            ],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.7.a",
+          "name": "传输数据完整性",
+          "evidence": "提交重要数据分类、传输链路清单及完整性保护与篡改检测测试；覆盖鉴别、业务、审计及配置等实际数据。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.7.b",
+          "name": "存储数据完整性",
+          "evidence": "提交重要数据存储范围、完整性校验/密码机制及篡改检测恢复测试。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.8.a",
+          "name": "传输数据保密性",
+          "evidence": "提交重要数据通道、密码算法及密钥管理、证书信任与实测加密证据。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.8.b",
+          "name": "存储数据保密性",
+          "evidence": "提交重要数据文件/数据库/备份加密配置、密钥权限与明文泄露检查。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.9.a",
+          "name": "本地备份与恢复",
+          "evidence": "提交重要数据备份范围、周期、备份成功记录和最近恢复演练结果，核对恢复目标。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.9.b",
+          "name": "异地备份",
+          "evidence": "提交异地备份链路、隔离与完整性、备份/恢复记录；二级核验定时批量传送，三级核验实时备份及延迟。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.9.c",
+          "name": "重要处理系统热冗余",
+          "evidence": "提交冗余拓扑、容量与切换演练结果，核验处理连续性和可用性目标。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.10.a",
+          "name": "鉴别信息残留处置",
+          "evidence": "提交鉴别信息存储介质/内存复用与释放流程和清除验证；覆盖备份、缓存及临时数据。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.10.b",
+          "name": "敏感数据残留处置",
+          "evidence": "提交敏感数据存储空间释放/重分配的清除措施和受控验证，覆盖介质、缓存及临时空间。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.11.a",
+          "name": "个人信息最小处理",
+          "evidence": "提交个人信息目录、业务必要性、采集字段与保存期限审查及超范围处理整改记录。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        },
+        {
+          "id": "8.1.4.11.b",
+          "name": "个人信息授权与使用",
+          "evidence": "提交个人信息权限矩阵、使用审计与越权测试记录，验证未授权访问和不当使用的限制。",
+          "requiredChecks": {
+            "linux": [],
+            "windows": []
+          }
+        }
+      ],
+      "evidenceChecks": {
+        "linux": {
+          "BL-LINUX-0049": {
+            "type": "agent_runtime",
+            "target": "current-agent",
+            "option": "channel",
+            "operator": "eq",
+            "expected": "self_process=running,current_mtls_session=active,successful_send_and_receive_age<=60s",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0050": {
+            "type": "agent_runtime",
+            "target": "current-agent",
+            "option": "hash_inventory",
+            "operator": "eq",
+            "expected": "manifest=nonempty_hash_only,cache=disk_exact,inputs=trusted_stable",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0040": {
+            "type": "apparmor_runtime",
+            "target": "current-kernel",
+            "operator": "eq",
+            "expected": "enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0052": {
+            "type": "apt_install_policy",
+            "target": "/etc/apt",
+            "operator": "eq",
+            "expected": "apt/apt-get:AllowUnauthenticated=false,Force-Yes=false",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0053": {
+            "type": "apt_sources_policy",
+            "target": "/etc/apt",
+            "operator": "eq",
+            "expected": "apt/apt-get:AllowInsecureRepositories=false,AllowWeakRepositories=false,AllowDowngradeToInsecureRepositories=false;sources:Trusted!=yes,allow-insecure=false,allow-weak=false,allow-downgrade-to-insecure=false,Signed-By=explicit-keyring-files",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0021": {
+            "type": "linux_audit",
+            "target": "kernel",
+            "option": "enabled",
+            "operator": "eq",
+            "expected": "enabled=1|2",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0025": {
+            "type": "linux_audit",
+            "target": "kernel",
+            "option": "identity_watches",
+            "operator": "eq",
+            "expected": "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0001": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "local_logging",
+            "operator": "eq",
+            "expected": "local_events=yes,write_logs=yes,log_format=raw|enriched",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0002": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "keep_logs",
+            "operator": "eq",
+            "expected": "local_logging=1,max_log_file>=1,max_log_file_action=keep_logs",
+            "timeout_ms": 5000
+          },
+          "BL-AUDITD-0003": {
+            "type": "auditd_config",
+            "target": "/etc/audit/auditd.conf",
+            "option": "log_file_metadata",
+            "operator": "eq",
+            "expected": "local_logging=1,regular,mode<=0640,uid=0,gid=declared_numeric_log_group",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0010": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "login_timeout",
+            "operator": "eq",
+            "expected": "TMOUT=1..600,readonly=1,exported=1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0017": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "login_umask",
+            "operator": "eq",
+            "expected": "umask=027|077",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0026": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "history_time",
+            "operator": "eq",
+            "expected": "HISTTIMEFORMAT=%F %T %z ",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0044": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "history_capacity",
+            "operator": "eq",
+            "expected": "HISTSIZE=1000..10000,HISTFILESIZE=1000..10000",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0045": {
+            "type": "bash_global_policy",
+            "target": "/etc",
+            "option": "nonlogin_umask",
+            "operator": "eq",
+            "expected": "umask=027|077",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0019": {
+            "type": "debian_cron_metadata",
+            "target": "system-tables",
+            "operator": "eq",
+            "expected": "crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0060": {
+            "type": "systemd_ctrl_alt_del",
+            "target": "ctrl-alt-del.target",
+            "operator": "eq",
+            "expected": "masked/inactive/dead,burst_action=none",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0009": {
+            "type": "local_accounts",
+            "target": "/etc/shadow",
+            "option": "empty_password",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0011": {
+            "type": "local_identity_file",
+            "target": "/etc/passwd",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0012": {
+            "type": "local_identity_file",
+            "target": "/etc/shadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0013": {
+            "type": "local_identity_file",
+            "target": "/etc/group",
+            "perm": "0644",
+            "owner": "0",
+            "group": "0",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0014": {
+            "type": "local_identity_file",
+            "target": "/etc/gshadow",
+            "perm": "0640",
+            "owner": "0",
+            "group": "shadow",
+            "operator": "subset",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0015": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "system_shells",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000,
+            "uid_min": 1,
+            "uid_max": 999
+          },
+          "BL-LINUX-0016": {
+            "type": "local_accounts",
+            "target": "/etc/passwd",
+            "option": "uid0_accounts",
+            "operator": "eq",
+            "expected": "root",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0023": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/audit",
+            "operator": "subset",
+            "perm": "0700",
+            "owner": "0",
+            "group": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0027": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/btmp",
+            "operator": "subset",
+            "perm": "0660",
+            "owner": "0",
+            "group": "utmp",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0028": {
+            "type": "linux_log_metadata",
+            "target": "/var/log/wtmp",
+            "operator": "subset",
+            "perm": "0664",
+            "owner": "0",
+            "group": "utmp",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0001": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "minimum_length",
+            "expected": "minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+          },
+          "BL-LINUX-0002": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "quality",
+            "expected": "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+          },
+          "BL-LINUX-0006": {
+            "type": "pam_password",
+            "target": "/etc/pam.d/passwd",
+            "operator": "eq",
+            "timeout_ms": 5000,
+            "option": "unix_hash",
+            "expected": "yescrypt"
+          },
+          "BL-LINUX-0005": {
+            "type": "pam_auth",
+            "target": "/etc/pam.d/login",
+            "option": "faillock",
+            "operator": "eq",
+            "expected": "deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0039": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "core",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=0,hard=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0056": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "nofile",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=1024..65536,hard=1024..65536",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0057": {
+            "type": "pam_limits",
+            "target": "/etc/pam.d/login",
+            "option": "nproc",
+            "operator": "eq",
+            "expected": "default_and_explicit_root_soft=1..4096,hard=1..4096",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0041": {
+            "type": "linux_program_files",
+            "target": "system-program-inputs",
+            "option": "linker_metadata",
+            "operator": "eq",
+            "expected": "main+included_conf<=0644,dirs<=0755,uid=0,gid=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0030": {
+            "type": "cmd_output",
+            "cmd": "stat -L -c '%f %u' /var/log/messages",
+            "operator": "regex",
+            "expected": "^8[0-9a-f]{3} 0$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0031": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0032": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0033": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv6.conf.all.accept_redirects",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0034": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0035": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0037": {
+            "type": "cmd_output",
+            "cmd": "sysctl -n net.ipv4.conf.all.log_martians",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0047": {
+            "type": "cmd_output",
+            "cmd": "findmnt --noheadings --raw --output OPTIONS --target /tmp",
+            "operator": "regex",
+            "expected": "^(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*)(?:\\n(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*))*$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0048": {
+            "type": "rsyslog_cron_routing",
+            "target": "/etc/rsyslog.conf",
+            "operator": "eq",
+            "expected": "imuxsock=on,cron.emerg..debug=/var/log/cron.log",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0058": {
+            "type": "pam_securetty",
+            "target": "/etc/pam.d/login",
+            "operator": "eq",
+            "expected": "first_auth=required|requisite:securetty,noconsole=1,ttys=nonempty_subset(tty1..tty6)",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0003": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "max_days",
+            "operator": "eq",
+            "expected": "max_days=1..90,min_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0004": {
+            "type": "shadow_account_defaults",
+            "target": "/etc/login.defs",
+            "option": "warn_days",
+            "operator": "eq",
+            "expected": "warn_days=7..14,warn_days<=max_days",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0007": {
+            "type": "sshd_effective",
+            "target": "/etc/ssh/sshd_config",
+            "option": "permitrootlogin",
+            "connection": {
+              "user": "root",
+              "host": "admin.example.invalid",
+              "address": "192.0.2.10",
+              "local_address": "192.0.2.20",
+              "local_port": 22
+            },
+            "operator": "eq",
+            "expected": "no",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0008": {
+            "type": "sshd_effective",
+            "target": "/etc/ssh/sshd_config",
+            "option": "maxauthtries",
+            "connection": {
+              "user": "root",
+              "host": "admin.example.invalid",
+              "address": "192.0.2.10",
+              "local_address": "192.0.2.20",
+              "local_port": 22
+            },
+            "operator": "regex",
+            "expected": "^[1-4]$",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0018": {
+            "type": "sudoers_policy",
+            "target": "/etc/sudoers",
+            "option": "authentication",
+            "operator": "eq",
+            "expected": "authenticate=on,exempt_group=unset,nopasswd_tags=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0029": {
+            "type": "sudoers_policy",
+            "target": "/etc/sudoers",
+            "option": "allowed_logging",
+            "operator": "eq",
+            "expected": "log_allowed=on,logfile=/var/log/sudo.log",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0022": {
+            "type": "systemd_service",
+            "target": "auditd.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0024": {
+            "type": "systemd_service",
+            "target": "rsyslog.service",
+            "operator": "eq",
+            "expected": "loaded/active/running",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0046": {
+            "type": "systemd_maintenance",
+            "target": "local-system",
+            "option": "tmpfiles_clean",
+            "operator": "eq",
+            "expected": "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0055": {
+            "type": "systemd_maintenance",
+            "target": "local-system",
+            "option": "time_sync",
+            "operator": "eq",
+            "expected": "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0",
+            "timeout_ms": 5000
+          },
+          "BL-LINUX-0059": {
+            "type": "systemd_rescue_policy",
+            "target": "local-system",
+            "operator": "eq",
+            "expected": "rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false",
+            "timeout_ms": 5000
+          }
+        },
+        "windows": {
+          "MLPS-WIN-password_length": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_length",
+            "operator": "eq",
+            "expected": "minimum_length>=12"
+          },
+          "MLPS-WIN-password_age": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_age",
+            "operator": "eq",
+            "expected": "maximum_age=1..90d,minimum_age=1..maximum_age"
+          },
+          "MLPS-WIN-password_history": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "password_history",
+            "operator": "eq",
+            "expected": "history>=5"
+          },
+          "MLPS-WIN-lockout": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "lockout",
+            "operator": "eq",
+            "expected": "threshold=1..5,duration>=900s,reset>=900s,reset<=duration"
+          },
+          "MLPS-WIN-audit_logon": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_logon",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_account": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_account",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_policy": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_policy",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-audit_integrity": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "audit_integrity",
+            "operator": "eq",
+            "expected": "success+failure"
+          },
+          "MLPS-WIN-rdp_nla": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "rdp_nla",
+            "operator": "eq",
+            "expected": "UserAuthentication=1"
+          },
+          "MLPS-WIN-rdp_tls": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "rdp_tls",
+            "operator": "eq",
+            "expected": "SecurityLayer=2,MinEncryptionLevel>=3"
+          },
+          "MLPS-WIN-ntlm": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "ntlm",
+            "operator": "eq",
+            "expected": "LmCompatibilityLevel=5"
+          },
+          "MLPS-WIN-idle_timeout": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "idle_timeout",
+            "operator": "eq",
+            "expected": "InactivityTimeoutSecs=1..900"
+          },
+          "MLPS-WIN-smb1": {
+            "type": "windows_security_policy",
+            "target": "local-machine",
+            "option": "smb1",
+            "operator": "eq",
+            "expected": "SMB1Protocol=Disabled|DisabledWithPayloadRemoved",
+            "timeout_ms": 30000
+          },
+          "MLPS-ALINKSEC-WINDOWS-001": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop); if ($profiles.Count -ne 3) { throw 'Expected three firewall profiles' }; $profiles | Where-Object { -not $_.Enabled } | Measure-Object | Select-Object -ExpandProperty Count\"",
+            "operator": "eq",
+            "expected": "0",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-002": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-MpComputerStatus -ErrorAction Stop | Select-Object -ExpandProperty RealTimeProtectionEnabled\"",
+            "operator": "eq",
+            "expected": "True",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-003": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-Service -Name EventLog -ErrorAction Stop | Select-Object -ExpandProperty Status\"",
+            "operator": "eq",
+            "expected": "Running",
+            "timeout_ms": 15000
+          },
+          "MLPS-ALINKSEC-WINDOWS-004": {
+            "type": "cmd_output",
+            "cmd": "powershell.exe -NoProfile -NonInteractive -Command \"Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -ErrorAction Stop | Select-Object -ExpandProperty EnableLUA\"",
+            "operator": "eq",
+            "expected": "1",
+            "timeout_ms": 15000
+          }
+        }
+      }
+    }
+  ]
+}

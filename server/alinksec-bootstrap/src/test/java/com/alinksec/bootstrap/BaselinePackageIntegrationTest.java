@@ -64,6 +64,78 @@ class BaselinePackageIntegrationTest {
     }
     @AfterEach void cleanup() { source.destroy(); }
 
+    ObjectNode complianceDocument(int level, String platform) throws Exception {
+        Path repo = Path.of("").toAbsolutePath();
+        while (!java.nio.file.Files.exists(repo.resolve("deploy/baseline"))) repo = repo.getParent();
+        return (ObjectNode) JsonUtils.mapper().readTree(repo.resolve("deploy/baseline/packages/compliance/level" + level + "/" + platform + "-baseline.json").toFile());
+    }
+
+    @Test void completeCompliancePacksHaveEveryClauseAndRequireHumanEvidenceEvenWhenAllChecksPass() throws Exception {
+        var compliance = transactional(new BaselineComplianceService(jdbc));
+        for (int level : List.of(2, 3)) for (String platform : List.of("linux", "windows")) {
+            var doc = complianceDocument(level, platform);
+            var agent = platform.equals("linux") ? "ubuntu" : "windows";
+            var pkg = published(doc, agent);
+            long task = tasks.createTask("Full clause evidence", List.of(agent), List.of(template(pkg)), 7L);
+            results.onResult(agent, report(task, agent, true));
+            var profile = compliance.assessment(task, agent).get(0);
+            int total = level == 2 ? 23 : 34;
+            assertEquals(total, profile.get("total"));
+            assertEquals(total, ((Map<?,?>) profile.get("counts")).get("pending"));
+            assertEquals(0, ((Map<?,?>) profile.get("counts")).get("pass"));
+            assertEquals(false, profile.get("complete"));
+            assertTrue(compliance.assessment(task, platform.equals("linux") ? "windows" : "ubuntu").isEmpty());
+            String clause = (level == 2 ? "7" : "8") + ".1.4.1.a";
+            var decision = new BaselineComplianceService.Decision(template(pkg), clause, 0, "pass", "已核验现场全部账户与有效口令策略", "case:MLPS/identity;sha256="+"a".repeat(64));
+            var reviewed = compliance.review(task, agent, decision, 7L).get(0);
+            assertEquals(1, ((Map<?,?>) reviewed.get("counts")).get("pass"));
+            assertThrows(IllegalArgumentException.class, () -> compliance.review(task, agent, decision, 8L));
+            compliance.review(task, agent, new BaselineComplianceService.Decision(template(pkg), clause, 1, "pending", "现场账户发生变更需要重新核验证据", ""), 8L);
+            assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM t_baseline_compliance_review WHERE task_id=?", Integer.class, task));
+            packages.withdraw(id(pkg), "New candidate planned");
+            assertEquals(total, compliance.assessment(task, agent).get(0).get("total"));
+        }
+    }
+
+    @Test void clauseReviewCannotHideMissingFailedOrErrorAutomaticEvidenceOrChangeItsSnapshot() throws Exception {
+        var compliance = transactional(new BaselineComplianceService(jdbc));
+        var pkg = published(complianceDocument(3, "linux"), "ubuntu");
+        for (String status : List.of("missing", "fail", "error")) {
+            long task = tasks.createTask("Evidence state " + status, List.of("ubuntu"), List.of(template(pkg)), 7L);
+            if (!status.equals("missing")) {
+                var result = report(task, "ubuntu", false).toBuilder();
+                if (status.equals("error")) for (int i=0;i<result.getItemsCount();i++) result.setItems(i, result.getItems(i).toBuilder().setExecutionStatus("error"));
+                results.onResult("ubuntu", result.build());
+            }
+            for (String decision : List.of("pass", "not_applicable"))
+                assertThrows(IllegalArgumentException.class, () -> compliance.review(task, "ubuntu", new BaselineComplianceService.Decision(template(pkg), "8.1.4.1.a", 0, decision, "人工不能覆盖自动证据中的缺失或失败", "case:failure"), 7L));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_compliance_review WHERE task_id=?", Integer.class, task));
+        }
+        long task = tasks.createTask("Snapshot tamper", List.of("ubuntu"), List.of(template(pkg)), 7L);
+        jdbc.update("UPDATE t_baseline_task_item SET \"check\"='{}' WHERE task_id=?", task);
+        assertThrows(IllegalArgumentException.class, () -> compliance.assessment(task, "ubuntu"));
+    }
+
+    @Test void completePackImportRejectsMissingClausesMissingRequiredChecksAndDowngradeClaims() throws Exception {
+        var original = complianceDocument(3, "windows");
+        var missing = original.deepCopy(); ((ObjectNode) missing.path("compliance").path("controlChecks")).remove("8.1.4.1.a");
+        assertThrows(IllegalArgumentException.class, () -> imported(missing));
+        var omitted = original.deepCopy(); ((ObjectNode) omitted.path("compliance").path("controlChecks")).putArray("8.1.4.1.a");
+        assertThrows(IllegalArgumentException.class, () -> imported(omitted));
+        var unknown = original.deepCopy(); ((ObjectNode) unknown.path("compliance")).put("catalogId", "claim-unreviewed-catalog");
+        assertThrows(IllegalArgumentException.class, () -> imported(unknown));
+        var downgraded = original.deepCopy(); downgraded.put("schemaVersion", 1); downgraded.remove("compliance");
+        assertThrows(IllegalArgumentException.class, () -> imported(downgraded));
+        var wrongPlatform = original.deepCopy(); wrongPlatform.put("osType", 1);
+        assertThrows(IllegalArgumentException.class, () -> imported(wrongPlatform));
+        var weakened = original.deepCopy();
+        ((ObjectNode) weakened.path("items").get(0)).putObject("check").put("type", "cmd_output")
+                .put("cmd", JsonUtils.mapper().readTree(BaselinePackageIntegrationTest.class.getResourceAsStream("/baseline/commands.json")).path("windows").get(1).asText())
+                .put("operator", "regex").put("expected", ".*");
+        assertThrows(IllegalArgumentException.class, () -> imported(weakened));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM t_baseline_package", Integer.class));
+    }
+
     @Test void retiredLegacyTemplateCannotCreateNewTasksOrRepairs() {
         assertFalse(DatabaseDialect.readBoolean(jdbc.queryForObject("SELECT enabled FROM t_baseline_template WHERE id=1", Object.class)));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item WHERE template_id=1 AND NOT enabled AND fix_spec IS NULL", Integer.class));

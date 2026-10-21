@@ -41,8 +41,9 @@ public final class BaselinePackageFormat {
         try { doc = STRICT.readTree(bytes); }
         catch (IOException e) { throw new IllegalArgumentException("模板包 JSON 无效或包含重复字段"); }
         fields(doc, "schemaVersion", "code", "name", "standard", "product", "osType",
-                "osVersionPattern", "version", "source", "items", "unsupported");
-        require(doc.path("schemaVersion").isInt() && doc.path("schemaVersion").intValue() == 1, "模板包格式版本必须为 1");
+                "osVersionPattern", "version", "source", "items", "unsupported", "compliance");
+        require(doc.path("schemaVersion").isInt() && Set.of(1, 2).contains(doc.path("schemaVersion").intValue()), "模板包格式版本必须为 1 或 2");
+        require(doc.path("schemaVersion").asInt() == 2 || !doc.has("compliance"), "合规目录需使用格式版本 2");
         require(text(doc, "code", 40).matches("[A-Za-z0-9][A-Za-z0-9_.-]*"), "模板编号只能包含字母、数字、点、横线和下划线");
         text(doc, "name", 128); text(doc, "standard", 64); text(doc, "product", 128); text(doc, "version", 32);
         require(doc.path("osType").isInt(), "osType 必须为整数");
@@ -79,6 +80,9 @@ public final class BaselinePackageFormat {
             require(rules.add(text(item, "ruleId", 255)), "原始规则编号重复");
             text(item, "reason", 1000);
         }
+        if (doc.path("schemaVersion").asInt() == 2) BaselineComplianceCatalog.validate(doc);
+        require(!doc.path("code").asText().startsWith("ALINKSEC-MLPS2-") || doc.path("schemaVersion").asInt() == 2,
+                "等保完整包编号需使用含完整目录的格式版本 2");
         // Sorting object keys makes the content digest independent of whitespace and field order.
         JsonNode canonical = STRICT.valueToTree(canonical(doc));
         try {
@@ -122,6 +126,13 @@ public final class BaselinePackageFormat {
                     try { require(Double.isFinite(Double.parseDouble(expected)), "期望值必须为有限数值"); }
                     catch (NumberFormatException e) { throw new IllegalArgumentException("期望值必须为有限数值"); }
                 }
+            }
+            case "windows_security_policy" -> {
+                fields(check, "type", "target", "option", "operator", "expected", "timeout_ms");
+                require(os == 2 && text(check, "target", 1024).equals("local-machine")
+                        && text(check, "operator", 32).equals("eq"), "Windows 安全策略需固定本机查询");
+                String reference = BaselineComplianceCatalog.windowsReferences().get(text(check, "option", 32));
+                require(reference != null && reference.equals(text(check, "expected", 1000)), "Windows 安全策略需完整建议参考");
             }
             case "sshd_effective", "sshd_notice" -> {
                 fields(check, "type", "target", "option", "connection", "operator", "expected", "timeout_ms");
@@ -398,7 +409,7 @@ public final class BaselinePackageFormat {
         Set<String> keys = Set.of(allowed);
         node.fieldNames().forEachRemaining(key -> require(keys.contains(key), "未知字段: " + key));
     }
-    private static Object canonical(JsonNode node) {
+    static Object canonical(JsonNode node) {
         if (node.isObject()) {
             Map<String, Object> sorted = new TreeMap<>();
             node.fields().forEachRemaining(entry -> sorted.put(entry.getKey(), canonical(entry.getValue())));

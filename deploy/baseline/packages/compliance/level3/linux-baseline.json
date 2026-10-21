@@ -1,0 +1,1046 @@
+{
+  "schemaVersion": 2,
+  "code": "ALINKSEC-MLPS2-L3-LINUX",
+  "name": "等保 2.0 3级安全计算环境 · Linux",
+  "standard": "GB/T 22239-2019",
+  "product": "Ubuntu 24.04 LTS",
+  "osType": 1,
+  "osVersionPattern": "^(?i).*ubuntu[ ]+24\\.04(?:[^0-9].*)?$",
+  "version": "1.0.0",
+  "source": {
+    "name": "AlinkSec reviewed MLPS host evidence definitions",
+    "version": "1.0.0",
+    "url": "https://github.com/wybroot/alinksec/tree/main/deploy/baseline/compliance",
+    "sha256": "39fbff6e0a7ac5ae3ba8101f8341bc60e1e9670996beb8dbe33ea3f46d183258"
+  },
+  "items": [
+    {
+      "code": "BL-LINUX-0049",
+      "ruleId": "BL-LINUX-0049",
+      "name": "当前Agent进程、mTLS会话及最近60秒成功收发",
+      "category": "恶意代码防范",
+      "severity": 4,
+      "check": {
+        "type": "agent_runtime",
+        "target": "current-agent",
+        "option": "channel",
+        "operator": "eq",
+        "expected": "self_process=running,current_mtls_session=active,successful_send_and_receive_age<=60s",
+        "timeout_ms": 5000
+      },
+      "remediation": "观察执行任务的同一ALinkSec实例；当前会话必须活跃且有最近60秒成功stream.Send/Recv，重连清空历史，以会话代次排除旧回调。缺少运行上下文、变化、未来/回退时间戳或读取超时为error；完整断线、未观察收发或超龄为fail。仅报告状态和收发年龄，不回显地址、凭据、证书或指令原文。服务端业务接受/持久化、其他Agent及防护有效性未验证；多次观察非原子，不能保证之后持续在线，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0050",
+      "ruleId": "BL-LINUX-0050",
+      "name": "当前Agent有限非空哈希库的可信磁盘与已加载缓存一致性",
+      "category": "恶意代码防范",
+      "severity": 4,
+      "check": {
+        "type": "agent_runtime",
+        "target": "current-agent",
+        "option": "hash_inventory",
+        "operator": "eq",
+        "expected": "manifest=nonempty_hash_only,cache=disk_exact,inputs=trusted_stable",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定当前实例的工作目录virus/db，严格核对manifest四字段、版本、计数及最多1024条唯一SHA256/名称/severity哈希，与当前已加载进程缓存的完整集合及版本/计数比较；不触发重载或更新。文件各64KiB、总1MiB，root可信祖先/目录/普通文件、无额外写权限/ACL/硬链接，描述符与缺失状态结束复核；空清单或完整缓存差异为fail。未知字段、重复/坏行、非零规则库、未确认缓存、缺失/链接/特殊输入、超限或变化为error。只输出计数及摘要，不回显特征名、版本原文、路径或情报；来源真实性、新鲜度、包摘要认证、各引擎实例和检测覆盖未验证，同步读取不可抢占、快照非原子，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0040",
+      "ruleId": "BL-LINUX-0040",
+      "name": "AppArmor当前根视图启用及非空全部enforce模式参考",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "apparmor_runtime",
+        "target": "current-kernel",
+        "operator": "eq",
+        "expected": "enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64当前AppArmor内核根视图：固定sysfs enabled=Y、securityfs lsm明确apparmor、全局mode=enforce、.ns_level=0且.stacked/.ns_stacked均no；profiles非空且每项模式enforce。完整已知禁用、缺少AppArmor LSM、空策略或complain/kill/unconfined为fail；kill不满足本项目精确enforce参考，Ubuntu默认unconfined策略也可fail。缺失/权限不足/未知值/嵌套或叠加/重复/不可解释名称或模式/身份错误/超限/变化/超时为error，不回退SELinux。固定路径逐级无符号链接打开，校验root属主、非组/其他可写、sysfs/securityfs身份、FD与路径复核；两次完整观测共享100..30000ms截止时间，策略列表256KiB/1024项/每行1024字节，仅有限ASCII根名称与四种模式，读取前后检查截止时间但不保证抢占同步内核调用。报告仅模式计数、清单摘要与边界，不回显策略名称。策略内容、应用绑定、实际访问控制、未加载策略、其他安全机制及重启持久未验证，观测非原子，当前namespace不证明完整主机策略覆盖。管理员确认应用和运行策略需求、按产品安全规范人工审查后主机测试；本参考不作全局安全结论，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0052",
+      "ruleId": "BL-LINUX-0052",
+      "name": "APT 默认磁盘未认证安装策略",
+      "category": "恶意代码防范",
+      "severity": 2,
+      "check": {
+        "type": "apt_install_policy",
+        "target": "/etc/apt",
+        "operator": "eq",
+        "expected": "apt/apt-get:AllowUnauthenticated=false,Force-Yes=false",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 apt 与 libapt-pkg6.0t64 2.8.3，管理员确认可信安装及默认配置入口适用性。固定读取 /etc/apt/apt.conf.d 再读取存在的 /etc/apt/apt.conf，按原生隐藏文件、扩展名和 ASCII 文件名选择与字节排序，主文件缺失采用此版本默认值且验证名称集合稳定。支持有限引号标量、作用域、列表、普通行注释、整行块注释、顶层 #clear，按 apt/apt-get 专属 Binary 树覆盖；布尔值限明确词和0/1，缺失/空值使用已核实 false 默认，未知值保持error。本参考同时要求两个前端 AllowUnauthenticated=false、Force-Yes=false。含 #include、配置加载路径/RootDir 改写、嵌套 Binary、未支持语法/布尔值、链接/硬链接/特殊文件、ACL、不可信元数据、读取失败/超限/期间变化均error。输入UID/GID0、组/其他不可写；32片段、单64KiB、总256KiB、4096行、每目录128名称、作用域16层、共享deadline且前后确认两包版本。仅默认磁盘声明：environment_state、command_line_state、source_trust_state、installation_state均unverified；不读取管理员调用环境，不执行apt-config/apt/apt-get、钩子或安装，不更新索引/访问网络，不读取软件源/密钥/仓库签名，不证明真实安装调用或软件源可信，无自动修复。实际使用APT_CONFIG、-c、-o、--allow-unauthenticated及其他前端须另核对。"
+    },
+    {
+      "code": "BL-LINUX-0053",
+      "ruleId": "BL-LINUX-0053",
+      "name": "APT 默认磁盘源认证与显式签名范围声明",
+      "category": "恶意代码防范",
+      "severity": 1,
+      "check": {
+        "type": "apt_sources_policy",
+        "target": "/etc/apt",
+        "operator": "eq",
+        "expected": "apt/apt-get:AllowInsecureRepositories=false,AllowWeakRepositories=false,AllowDowngradeToInsecureRepositories=false;sources:Trusted!=yes,allow-insecure=false,allow-weak=false,allow-downgrade-to-insecure=false,Signed-By=explicit-keyring-files",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 apt/libapt-pkg6.0t64 2.8.3，管理员确认可信安装及默认配置入口。读取默认apt.conf.d/apt.conf和sources.list/sources.list.d的有限.list/.sources，两个前端Acquire::AllowInsecureRepositories、AllowWeakRepositories、AllowDowngradeToInsecureRepositories均须false（即使源级显式false仍要求全局false）；活动源Trusted不能yes，三种单行源allow-*绕过项不能true。每个活动URI/套件声明须显式Signed-By包含/etc/apt/keyrings或/usr/share/keyrings直接.gpg/.asc文件，可附40位指纹/!；只含指纹或缺范围为fail，不读取默认全局keyring或缓存Release继承。keyring仅核对非空/最多1MiB、UID/GID0、组其他不可写、所有用户可读、单硬链接普通文件和直接目录无ACL；不读取或验证密钥内容。至少一个活动声明；禁用Deb822段落不检查其密钥路径，但全部语法/字段仍须已支持。同URI/套件认证与Signed-By范围不一致、未知/重复选项或字段、嵌入密钥、平坦源/变量/非HTTP(S)/带凭据地址、源入口改写/额外源、未知布尔值、链接/特殊文件/ACL/不可信元数据/读取超限/超时/期间变化均error。APT2.8.3 Deb822原生未映射Allow-Insecure/Allow-Weak/Allow-Downgrade-To-Insecure，本候选明确error而非误解释。配置和源各32片段、单64KiB、合计256KiB/4096行、每目录128名称、64个URI/套件声明、16不同keyring文件，同一deadline前后确认两包版本与输入快照。仅默认磁盘声明；environment_state、command_line_state、key_identity_state、key_material_state、repository_signature_state、cached_release_state、installation_state均unverified。HTTPS不等于签名或源可信；pass不证明密钥可用、指纹匹配、官方源身份、签名算法、索引/包真实性或真实安装调用。生产不执行APT前端/apt-config/gpg、钩子/安装、不更新索引/访问网络、不读缓存Release或密钥内容，无自动修复；管理员独立确认密钥身份、真实签名验证和调用覆盖。"
+    },
+    {
+      "code": "BL-LINUX-0021",
+      "ruleId": "BL-LINUX-0021",
+      "name": "内核审计当前启用状态",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "linux_audit",
+        "target": "kernel",
+        "option": "enabled",
+        "operator": "eq",
+        "expected": "enabled=1|2",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察内核当前审计启用状态及已加载规则，不证明 auditd 运行、事件生成/投递、日志完整性、重启持久规则或进程审计上下文。需初始用户/PID命名空间及 CAP_AUDIT_CONTROL；权限不足、协议/读取异常、规则变化为error。身份参考限定四个普通无链接文件、always/exit、无arch/UID等过滤且全部syscall掩码、每个路径覆盖w+a；任何抑制/目录/过滤/其他未知规则均error。无规则或明确缺少覆盖为fail。仅只读内核查询，无自动修复，不读身份内容、不改审计状态或规则。"
+    },
+    {
+      "code": "BL-LINUX-0025",
+      "ruleId": "BL-LINUX-0025",
+      "name": "当前加载的四个身份文件审计 watch 参考",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "linux_audit",
+        "target": "kernel",
+        "option": "identity_watches",
+        "operator": "eq",
+        "expected": "enabled=1|2,always_exit_all,passwd_shadow_group_gshadow=wa",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察内核当前审计启用状态及已加载规则，不证明 auditd 运行、事件生成/投递、日志完整性、重启持久规则或进程审计上下文。需初始用户/PID命名空间及 CAP_AUDIT_CONTROL；权限不足、协议/读取异常、规则变化为error。身份参考限定四个普通无链接文件、always/exit、无arch/UID等过滤且全部syscall掩码、每个路径覆盖w+a；任何抑制/目录/过滤/其他未知规则均error。无规则或明确缺少覆盖为fail。仅只读内核查询，无自动修复，不读身份内容、不改审计状态或规则。"
+    },
+    {
+      "code": "BL-AUDITD-0001",
+      "ruleId": "BL-AUDITD-0001",
+      "name": "auditd 磁盘配置的本地日志写入声明",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "local_logging",
+        "operator": "eq",
+        "expected": "local_events=yes,write_logs=yes,log_format=raw|enriched",
+        "timeout_ms": 5000
+      },
+      "remediation": "只观察固定磁盘配置，含 auditd 3.1.2 已核实的默认值；不证明实例使用该配置入口、已加载、运行、捕获或交付事件。重复、长行、缺最终换行、未知字段、脚本、远程配置及无法确认形式为error。日志目标限 /var/log 下无链接普通单硬链接文件，ACL或变化为error，模式上限0640、UID0及声明数值GID偏差为fail；命名log_group不推断NSS结果。keep_logs仅声明不按最大文件大小覆盖旧日志，不证明保留期限、容量或外部轮转。生产不启动auditd、不改配置或日志、不读日志内容，无自动修复。"
+    },
+    {
+      "code": "BL-AUDITD-0002",
+      "ruleId": "BL-AUDITD-0002",
+      "name": "auditd 磁盘配置的 keep_logs 声明",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "keep_logs",
+        "operator": "eq",
+        "expected": "local_logging=1,max_log_file>=1,max_log_file_action=keep_logs",
+        "timeout_ms": 5000
+      },
+      "remediation": "本项限定磁盘本地写入声明、正数 max_log_file 与 keep_logs，不按此值推导小时/天保留期限。管理员需另行评估空间、告警、满盘处置、外部轮转与实际加载配置；不自动修改可能导致停机的日志策略。配置读取与形式不确定保持error；明确rotate/ignore等为完整不满足参考。"
+    },
+    {
+      "code": "BL-AUDITD-0003",
+      "ruleId": "BL-AUDITD-0003",
+      "name": "auditd 磁盘配置所指日志文件的元数据",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "auditd_config",
+        "target": "/etc/audit/auditd.conf",
+        "option": "log_file_metadata",
+        "operator": "eq",
+        "expected": "local_logging=1,regular,mode<=0640,uid=0,gid=declared_numeric_log_group",
+        "timeout_ms": 5000
+      },
+      "remediation": "从固定磁盘配置的 log_file 查元数据，不假设路径恒为audit.log，不证明运行实例实际写入该文件。日志限 /var/log 下规范路径；逐段拒绝链接、特殊文件、多硬链接、访问ACL与期间变化，不读取内容。模式不超出0640、UID0、GID等于声明数值log_group；更严格模式接受。命名root或其他NSS组无法从本地声明确认，保持error，管理员需确认范围并使用新候选流程。无chmod/chown或自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0010",
+      "ruleId": "BL-LINUX-0010",
+      "name": "Bash交互登录全局超时声明及只读导出属性",
+      "category": "身份鉴别",
+      "severity": 2,
+      "check": {
+        "type": "bash_global_policy",
+        "target": "/etc",
+        "option": "login_timeout",
+        "operator": "eq",
+        "expected": "TMOUT=1..600,readonly=1,exported=1",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0017",
+      "ruleId": "BL-LINUX-0017",
+      "name": "Bash交互登录全局umask声明",
+      "category": "访问控制",
+      "severity": 2,
+      "check": {
+        "type": "bash_global_policy",
+        "target": "/etc",
+        "option": "login_umask",
+        "operator": "eq",
+        "expected": "umask=027|077",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0026",
+      "ruleId": "BL-LINUX-0026",
+      "name": "Bash交互登录全局历史时间格式声明",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "bash_global_policy",
+        "target": "/etc",
+        "option": "history_time",
+        "operator": "eq",
+        "expected": "HISTTIMEFORMAT=%F %T %z ",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0044",
+      "ruleId": "BL-LINUX-0044",
+      "name": "Bash交互登录全局历史容量声明",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "bash_global_policy",
+        "target": "/etc",
+        "option": "history_capacity",
+        "operator": "eq",
+        "expected": "HISTSIZE=1000..10000,HISTFILESIZE=1000..10000",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0045",
+      "ruleId": "BL-LINUX-0045",
+      "name": "Bash交互非登录全局umask声明",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "bash_global_policy",
+        "target": "/etc",
+        "option": "nonlogin_umask",
+        "operator": "eq",
+        "expected": "umask=027|077",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装bash5.2.21-2ubuntu4及base-files13ubuntu10系列；固定/etc/profile、/etc/bash.bashrc和profile.d。仅审核过的Ubuntu原始启动前缀及追加的有限字面声明，选中变量仅TMOUT/HISTTIMEFORMAT/HISTSIZE/HISTFILESIZE，可赋值/export/readonly/unset及数字umask；不执行Shell配置，未知命令/替换/控制流/readonly覆盖为error。登录按bashrc尾部、C字节排序全部非隐藏.sh片段、profile尾部处理；非登录仅bashrc。文件/目录root:root、普通用户可读/遍历、无链接/硬链接/访问默认ACL/组其他写权限。64KiB每文件、256KiB总量、1024行/1024字节物理行、32片段/128目录项/512语句，包版本及持描述符/路径/目录稳定复核共用截止时间。缺少或完整已知偏差为fail；不可信/未知/超限/变化为error。用户启动文件、环境/启动参数、现存Shell、真实闲置终止、历史写入/持久化及其他Shell均未验证；容量是有限保留声明，不宣称退出清理或完整审计。项目阈值须管理员评估适用性；生产不运行bash、不修改配置或用户文件，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0019",
+      "ruleId": "BL-LINUX-0019",
+      "name": "Debian cron 系统任务表与直接条目元数据",
+      "category": "访问控制",
+      "severity": 3,
+      "check": {
+        "type": "debian_cron_metadata",
+        "target": "system-tables",
+        "operator": "eq",
+        "expected": "crontab<=0644,cron.d<=0755,all_entries<=0644,uid=0,gid=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 已完整安装的 Debian cron 3.0pl1-184ubuntu2，软件包查询固定且前后确认；管理员确认默认系统任务路径与可信安装。核查 /etc/crontab、/etc/cron.d 及其全部直接条目（包括点文件和备份名）的磁盘元数据：普通单硬链接文件模式位不超0644，目录不超0755，数值UID/GID均0，无ACL。更严格模式满足位上限，不证明可读或可用。缺失、其他产品/版本、链接、子目录/特殊文件、ACL、未支持文件名、超过128条目、读取异常或期间变化为error，明确模式/UID/GID偏差为fail。仅元数据，不读任务内容、不执行命令、不改变服务，不证明调度器加载/运行、任务语法/执行、cron.hourly等run-parts目录、用户spool、父目录完整授权或日志策略；loaded_state=unverified。无自动修复，管理员按实际业务处置后重新测试。"
+    },
+    {
+      "code": "BL-LINUX-0060",
+      "ruleId": "BL-LINUX-0060",
+      "name": "systemd 当前 Ctrl-Alt-Del 目标屏蔽与连续按键动作",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "systemd_ctrl_alt_del",
+        "target": "ctrl-alt-del.target",
+        "operator": "eq",
+        "expected": "masked/inactive/dead,burst_action=none",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定 Ubuntu24.04 已加载的 systemd255 本地系统管理器；目标需 masked/inactive/dead、文件状态 masked 或 masked-runtime，且管理器 CtrlAltDelBurstAction=none。disabled、指向 reboot.target 的别名、活动目标或非 none 连续按键动作不满足；缺失/加载异常、待重载、未知或变化状态、总线/查询/超时保持error。两次串行观察共用截止时间，仅当前已加载设置；不证明重启后持久、实际键盘/桌面输入路径或真实触发行为。管理员按本机运行与恢复要求确认策略，完成主机测试后发布；无自动修复，生产不屏蔽/重载/启动目标、不发送信号或模拟按键。"
+    },
+    {
+      "code": "BL-LINUX-0009",
+      "ruleId": "BL-LINUX-0009",
+      "name": "本地 passwd/shadow 不含空口令字段",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "local_accounts",
+        "target": "/etc/shadow",
+        "option": "empty_password",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "读取本地 passwd 和 shadow，检查两文件的空口令字段、重复名称及 x 对应记录；锁定标记不为空。仅输出账户名称和数量，不输出口令字段或哈希。它不验证口令算法、实际认证方式、PAM 是否接受空口令或 LDAP/SSSD/NSS 等外部身份源。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0011",
+      "ruleId": "BL-LINUX-0011",
+      "name": "本地 passwd 普通文件的权限不超出 0644 且属主/属组符合参考",
+      "category": "访问控制",
+      "severity": 3,
+      "check": {
+        "type": "local_identity_file",
+        "target": "/etc/passwd",
+        "perm": "0644",
+        "owner": "0",
+        "group": "0",
+        "operator": "subset",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 数值 GID 0。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+    },
+    {
+      "code": "BL-LINUX-0012",
+      "ruleId": "BL-LINUX-0012",
+      "name": "本地 shadow 普通文件的权限不超出 0640 且属主/属组符合参考",
+      "category": "访问控制",
+      "severity": 4,
+      "check": {
+        "type": "local_identity_file",
+        "target": "/etc/shadow",
+        "perm": "0640",
+        "owner": "0",
+        "group": "shadow",
+        "operator": "subset",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 本地 /etc/group 解析得到的 shadow GID；不是统一 root 组。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+    },
+    {
+      "code": "BL-LINUX-0013",
+      "ruleId": "BL-LINUX-0013",
+      "name": "本地 group 普通文件的权限不超出 0644 且属主/属组符合参考",
+      "category": "访问控制",
+      "severity": 3,
+      "check": {
+        "type": "local_identity_file",
+        "target": "/etc/group",
+        "perm": "0644",
+        "owner": "0",
+        "group": "0",
+        "operator": "subset",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 数值 GID 0。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+    },
+    {
+      "code": "BL-LINUX-0014",
+      "ruleId": "BL-LINUX-0014",
+      "name": "本地 gshadow 普通文件的权限不超出 0640 且属主/属组符合参考",
+      "category": "访问控制",
+      "severity": 4,
+      "check": {
+        "type": "local_identity_file",
+        "target": "/etc/gshadow",
+        "perm": "0640",
+        "owner": "0",
+        "group": "shadow",
+        "operator": "subset",
+        "timeout_ms": 5000
+      },
+      "remediation": "固定本地文件必须为非链接普通文件，数值 UID 为 0。权限按允许位上限比较，更严格模式不会被精确值误判；特殊权限位也参与核对。属组为 本地 /etc/group 解析得到的 shadow GID；不是统一 root 组。扩展 POSIX 访问 ACL 存在或无法确认时返回执行异常；不据权限位推断完整有效访问权限、目录链、MAC 或外部身份源。不提供自动 chmod/chown，请按实际发行版和认证工具人工评估。"
+    },
+    {
+      "code": "BL-LINUX-0015",
+      "ruleId": "BL-LINUX-0015",
+      "name": "本地 UID 1 至 999 账户的 shell 字段为 nologin/false",
+      "category": "身份鉴别",
+      "severity": 3,
+      "check": {
+        "type": "local_accounts",
+        "target": "/etc/passwd",
+        "option": "system_shells",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000,
+        "uid_min": 1,
+        "uid_max": 999
+      },
+      "remediation": "明确仅 UID 1 至 999，root 与范围外账户不在本项；允许 /usr/sbin/nologin、/sbin/nologin、/bin/false、/usr/bin/false，空 shell 按默认 /bin/sh 视作未满足。参考集合不包含合法的 sync/shutdown 等其他受限命令，需人工按业务范围评估；字段满足不证明账户完全锁定或无法以其他方式访问。改变 UID 范围必须新建候选版本并重审测试。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0016",
+      "ruleId": "BL-LINUX-0016",
+      "name": "本地 passwd 的 UID 0 账户恰好为 root",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "local_accounts",
+        "target": "/etc/passwd",
+        "option": "uid0_accounts",
+        "operator": "eq",
+        "expected": "root",
+        "timeout_ms": 5000
+      },
+      "remediation": "只解析本地 passwd，要求 UID 0 名称列表恰好包含 root 一项；不运行 getent、不访问网络，不宣称覆盖外部身份源或全部提权授权。 文件缺失、无权限、链接、畸形记录、读取超限或变化保持 error；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0023",
+      "ruleId": "BL-LINUX-0023",
+      "name": "固定审计目录元数据",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/audit",
+        "operator": "subset",
+        "perm": "0700",
+        "owner": "0",
+        "group": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    },
+    {
+      "code": "BL-LINUX-0027",
+      "ruleId": "BL-LINUX-0027",
+      "name": "固定 btmp 文件元数据",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/btmp",
+        "operator": "subset",
+        "perm": "0660",
+        "owner": "0",
+        "group": "utmp",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    },
+    {
+      "code": "BL-LINUX-0028",
+      "ruleId": "BL-LINUX-0028",
+      "name": "固定 wtmp 文件元数据",
+      "category": "安全审计",
+      "severity": 1,
+      "check": {
+        "type": "linux_log_metadata",
+        "target": "/var/log/wtmp",
+        "operator": "subset",
+        "perm": "0664",
+        "owner": "0",
+        "group": "utmp",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅固定日志路径的当前元数据，不证明 auditd 实际 log_file、日志记录/投递、内容完整性、轮转后权限、父目录授权或服务状态。需管理员确认 Ubuntu24.04 传统 auditd/utmp 路径及本地 utmp 组；缺失/链接/非预期类型/硬链接/ACL/变化/读取异常为error，明确权限或UID/GID偏差为fail；更严格模式满足位上限，不证明可用性。无自动修复，不读取日志内容或修改服务。"
+    },
+    {
+      "code": "BL-LINUX-0001",
+      "ruleId": "BL-LINUX-0001",
+      "name": "passwd 服务强制最小口令长度及已检查口令传递",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "pam_password",
+        "target": "/etc/pam.d/passwd",
+        "operator": "eq",
+        "timeout_ms": 5000,
+        "option": "minimum_length",
+        "expected": "minlen>=8,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+      },
+      "remediation": "限定Ubuntu24 Linux-PAM1.5.3/libpwquality1.4.5的passwd password本地quality/unix/deny/permit链，独立核对minlen>=8、全部credit<=0、enforcing、显式enforce_for_root及use_authtok；不把login.defs当成PAM长度策略。按默认、排序drop-in、主文件和模块参数覆盖解释。已知长度或强制标记不满足为fail；未知链、缺失/链接/非普通输入、非root属主/属组、额外写权限、ACL、硬链接、超限或变化为error。读取串行有界、非原子，同步系统调用不可抢占。实际应用调用、现存口令、模块完整性及其他入口仍未验证；不读取口令/哈希，不认证或改口令，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0002",
+      "ruleId": "BL-LINUX-0002",
+      "name": "passwd 服务强制口令质量与已检查口令的传递",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "pam_password",
+        "target": "/etc/pam.d/passwd",
+        "operator": "eq",
+        "timeout_ms": 5000,
+        "option": "quality",
+        "expected": "minlen>=12,minclass>=3,credits<=0,enforcing=1,enforce_for_root=1,use_authtok=1"
+      },
+      "remediation": "限定 passwd 的 password 管理组和已支持的本地 PAM 链：requisite pam_pwquality、指定跳转的 pam_unix、requisite pam_deny、required pam_permit。按 libpwquality 1.4.5 的默认值、排序 drop-in、主配置及模块参数顺序解释；参考 minlen>=12、minclass>=3、credit<=0、enforcing=1、enforce_for_root 出现，并要求 pam_unix use_authtok。只核对指定长度/类别参考，不证明字典、旧口令、全部服务、外部身份源、实际应用调用或现存口令质量。 Include 循环、未知模块/控制、子栈、无权限、缺失/非普通文件、配置错误或读取变化保持 error；不提供 PAM 或口令自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0006",
+      "ruleId": "BL-LINUX-0006",
+      "name": "passwd 服务 pam_unix 的新口令散列选择为 yescrypt",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "pam_password",
+        "target": "/etc/pam.d/passwd",
+        "operator": "eq",
+        "timeout_ms": 5000,
+        "option": "unix_hash",
+        "expected": "yescrypt"
+      },
+      "remediation": "只核对 passwd 已支持 password 链中明确的 pam_unix yescrypt 选择；没有显式算法时无法确认编译默认值。它不读取、报告或认证现有口令哈希，不证明全部服务、外部身份源、实际应用调用或已存口令使用此算法。 Include 循环、未知模块/控制、子栈、无权限、缺失/非普通文件、配置错误或读取变化保持 error；不提供 PAM 或口令自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0005",
+      "ruleId": "BL-LINUX-0005",
+      "name": "login 服务本地认证链的连续失败锁定参考",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "pam_auth",
+        "target": "/etc/pam.d/login",
+        "option": "faillock",
+        "operator": "eq",
+        "expected": "deny=1..5,fail_interval>=900,unlock_time=900..86400,explicit_even_deny_root=1,root_unlock_time=900..86400",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定 Ubuntu24.04 login 的 auth 组及明确 preauth/unix/authfail/authsucc/deny 顺序和控制；解析固定 faillock.conf 及各阶段模块覆盖，要求三个阶段计数设置一致。参考 deny 1–5、fail_interval 至少900秒、普通与root有限解锁900–86400秒、显式even_deny_root。仅只读认证配置，不证明应用调用、全部PAM服务、计数文件可写/持久、NSS身份源或运行期模块行为。未知链、额外模块/身份源、substack、任意配置/计数目录、异常或读取变化保持error。无自动修复，不尝试登录、不读取口令/哈希/计数记录。"
+    },
+    {
+      "code": "BL-LINUX-0039",
+      "ruleId": "BL-LINUX-0039",
+      "name": "login PAM core软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "core",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=0,hard=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    },
+    {
+      "code": "BL-LINUX-0056",
+      "ruleId": "BL-LINUX-0056",
+      "name": "login PAM文件句柄软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "nofile",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=1024..65536,hard=1024..65536",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    },
+    {
+      "code": "BL-LINUX-0057",
+      "ruleId": "BL-LINUX-0057",
+      "name": "login PAM用户进程软硬限制声明",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "pam_limits",
+        "target": "/etc/pam.d/login",
+        "option": "nproc",
+        "operator": "eq",
+        "expected": "default_and_explicit_root_soft=1..4096,hard=1..4096",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 libpam-modules 1.5.3-5ubuntu5系列，固定login的有限session链和/etc/security/limits.conf及有序limits.d/*.conf。仅支持无参数required pam_limits、pam_unix、pam_permit；每次需一个强制limits。仅解释默认*和显式root的core/nofile/nproc声明，soft/hard分别覆盖，soft超过hard按原生规则归一化；缺少任一声明为fail，命名账户/组/UID范围/豁免、未知模块/控制/参数/语法、链接/不可信/变化输入为error。两端拒绝弱化或其他入口；实际应用调用、现存进程、core处理管道和特权nproc强制均unverified，nproc不证明root或持有豁免能力者受限。阈值为本项目参考，管理员按业务容量评估并完成主机测试；无自动修复，生产不打开PAM会话或修改限制。"
+    },
+    {
+      "code": "BL-LINUX-0041",
+      "ruleId": "BL-LINUX-0041",
+      "name": "glibc默认有限链接器配置链当前元数据参考",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "linux_program_files",
+        "target": "system-program-inputs",
+        "option": "linker_metadata",
+        "operator": "eq",
+        "expected": "main+included_conf<=0644,dirs<=0755,uid=0,gid=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64完整安装libc-bin/libc6 2.39-0ubuntu8系列。固定/etc/ld.so.conf唯一include /etc/ld.so.conf.d/*.conf，解释全部非隐藏直接.conf片段的有限注释/规范绝对目录行；不执行ldconfig，不读取库、cache/preload或环境。文件模式不超0644、目录不超0755；root:root、无组/其他写、链接/普通硬链接/访问默认ACL，普通元数据上限偏差fail，不可信/未知语法/读取/变化为error。每文件64KiB、总256KiB、1024行/每行1024字节、32片段/128目录成员，持描述符及成员稳定性复核。SUID/SGID项须管理员准备可信/etc/alinksec/privileged-files.reference，并将原始字节SHA256写入新候选完整expected；示例为空批准集，不代表生产授权。固定两目录全部直接条目，普通文件模式位SUID/SGID核对路径、完整模式、UID0、规范GID、内容SHA256，与本机架构已审核集合完全一致；链接/子目录/非普通项明确计数排除，目标与后代/其他路径/能力/真实提权/授权流程未验证。每目录4096项、每架构128批准/128观测、选中文件单8MiB/单次总16MiB，两次完整扫描；选中硬链接/ACL、缺失或不匹配清单摘要/不可信目录/超限/变化保持error，完整集合偏差fail。版本前后、所有读取和复核共用deadline，非原子，无自动修复。管理员按实际业务审核后重测，不自动学习或创建生产清单，不执行特权文件，不证明完整访问授权或库安全。"
+    },
+    {
+      "code": "BL-LINUX-0030",
+      "ruleId": "BL-LINUX-0030",
+      "name": "/var/log/messages 的最终目标为 UID 0 属主的普通文件",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "stat -L -c '%f %u' /var/log/messages",
+        "operator": "regex",
+        "expected": "^8[0-9a-f]{3} 0$",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅用于确实使用 /var/log/messages 的 GNU stat 主机；-L 查询符号链接的最终目标，%f 核对普通文件类型，%u 核对数值属主 UID 0。文件缺失、断链或查询失败是执行异常；目录等非普通文件不通过。不证明日志服务运行或全部日志权限。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0031",
+      "ruleId": "BL-LINUX-0031",
+      "name": "net.ipv4.tcp_syncookies 当前值为 1",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.tcp_syncookies",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察当前内核参数；不证明完整 SYN Flood 防护或重启后的持久配置。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0032",
+      "ruleId": "BL-LINUX-0032",
+      "name": "IPv4 all.accept_redirects 当前值为 0",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_redirects",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；各接口、default 参数及转发状态仍需人工核对，不宣称全部接口已拒绝重定向。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0033",
+      "ruleId": "BL-LINUX-0033",
+      "name": "IPv6 all.accept_redirects 当前值为 0",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv6.conf.all.accept_redirects",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "需启用 IPv6 且参数存在；缺少参数或查询失败是执行异常，不以 0 代替。仅观察 all 参数，不证明所有接口策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0034",
+      "ruleId": "BL-LINUX-0034",
+      "name": "IPv4 all.accept_source_route 当前值为 0",
+      "category": "入侵防范",
+      "severity": 3,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.accept_source_route",
+        "operator": "eq",
+        "expected": "0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；仍需核对实际接口、default 参数和主机网络角色。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0035",
+      "ruleId": "BL-LINUX-0035",
+      "name": "ICMP 广播回显忽略参数当前值为 1",
+      "category": "入侵防范",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.icmp_echo_ignore_broadcasts",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察当前内核参数；不证明完整 ICMP 或网络防护策略。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0037",
+      "ruleId": "BL-LINUX-0037",
+      "name": "IPv4 all.log_martians 当前值为 1",
+      "category": "入侵防范",
+      "severity": 1,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "sysctl -n net.ipv4.conf.all.log_martians",
+        "operator": "eq",
+        "expected": "1",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅观察 all 参数；不证明日志已持久化、集中传输或覆盖全部网络接口。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0047",
+      "ruleId": "BL-LINUX-0047",
+      "name": "findmnt 返回的 /tmp 挂载记录均含 nosuid 和 nodev",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "cmd_output",
+        "cmd": "findmnt --noheadings --raw --output OPTIONS --target /tmp",
+        "operator": "regex",
+        "expected": "^(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*)(?:\\n(?:([^,\\s]+,)*nosuid(,[^,\\s]+)*,nodev(,[^,\\s]+)*|([^,\\s]+,)*nodev(,[^,\\s]+)*,nosuid(,[^,\\s]+)*))*$",
+        "timeout_ms": 5000
+      },
+      "remediation": "适用于 util-linux findmnt 可查询当前挂载命名空间的主机；--target 包含父挂载。每条返回记录必须同时含两个独立选项；叠加挂载的旧记录也计入，保守判定。查询失败是异常；不证明 noexec、独立分区或临时文件清理。 由管理员按业务和发行版人工处置；本包不提供自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0048",
+      "ruleId": "BL-LINUX-0048",
+      "name": "rsyslog cron 八级专用日志磁盘路由",
+      "category": "剩余信息保护",
+      "severity": 1,
+      "check": {
+        "type": "rsyslog_cron_routing",
+        "target": "/etc/rsyslog.conf",
+        "operator": "eq",
+        "expected": "imuxsock=on,cron.emerg..debug=/var/log/cron.log",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 rsyslog 8.2312.0-3ubuntu9.4；管理员确认可信安装、默认配置入口和适用性。只解释 /etc/rsyslog.conf 及其唯一一次 /etc/rsyslog.d/*.conf 包含的有限传统本地路由，包含文件需唯一两位数字前缀并按顺序在包含位置展开。参考要求声明 imuxsock 系统输入开启，cron emerg 至 debug 八级均在丢弃前路由到 /var/log/cron.log；更广 facility 选择器也可满足此声明，不证明专用文件只含cron事件。仅 /var/log 下静态文件动作、传统级别选择器、有限厂商全局声明及通知/丢弃；其他规则集、表达式、模板、队列、输入、插件、远程/动态/命令动作、未知语法、链接/硬链接/特殊文件、非UID0或组/其他用户可写配置、ACL、读取失败/超限/期间变化为error；完整声明偏差为fail。上限32包含文件、单文件64KiB、总256KiB、4096行、目录128条目。软件包查询固定且前后确认，不继承数据库环境。生产不调用rsyslogd、不执行配置动作、不读日志、不改变服务。loaded_state和delivery_state均unverified；不证明实际实例入口、加载、cron调度器发送、输入socket、限流、队列、文件目标类型/授权/可写性/轮转/交付或父目录完整授权。无自动修复，管理员按实际业务核对后重测。"
+    },
+    {
+      "code": "BL-LINUX-0058",
+      "ruleId": "BL-LINUX-0058",
+      "name": "login 首个强制securetty、noconsole及非空有限终端清单",
+      "category": "资源控制",
+      "severity": 3,
+      "check": {
+        "type": "pam_securetty",
+        "target": "/etc/pam.d/login",
+        "operator": "eq",
+        "expected": "first_auth=required|requisite:securetty,noconsole=1,ttys=nonempty_subset(tty1..tty6)",
+        "timeout_ms": 5000
+      },
+      "remediation": "只解释login auth首个required/requisite pam_securetty及随后本地unix/deny/permit链，要求noconsole关闭内核console例外，/etc/securetty为非空tty1..tty6子集。按原始字节比较终端声明，不把注释、空行、CRLF或空白重写为有效终端。缺模块、optional/sufficient控制、缺noconsole、完整空清单或其他已知终端为fail；未知链/参数、重复/超长行、缺文件、链接/特殊文件、非root属主/属组、额外写权限、ACL、硬链接、超限或变化为error。文件缺失时原生模块可能允许root，禁止据缺失推断安全。仅报告数量、固定标记和摘要，实际调用、NSS身份、模块完整性、其他服务、终端参数仍未验证；不认证、读口令或自动改PAM。"
+    },
+    {
+      "code": "BL-LINUX-0003",
+      "ruleId": "BL-LINUX-0003",
+      "name": "普通本地新账户的口令有效期默认声明",
+      "category": "身份鉴别",
+      "severity": 2,
+      "check": {
+        "type": "shadow_account_defaults",
+        "target": "/etc/login.defs",
+        "option": "max_days",
+        "operator": "eq",
+        "expected": "max_days=1..90,min_days<=max_days",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0004",
+      "ruleId": "BL-LINUX-0004",
+      "name": "普通本地新账户的口令到期预警默认声明",
+      "category": "身份鉴别",
+      "severity": 2,
+      "check": {
+        "type": "shadow_account_defaults",
+        "target": "/etc/login.defs",
+        "option": "warn_days",
+        "operator": "eq",
+        "expected": "warn_days=7..14,warn_days<=max_days",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64 passwd 1:4.13+dfsg1-4ubuntu3系列；仅普通本地新账户、未使用-r/-K/-R/-P等覆盖的useradd参考。固定/etc/login.defs，PASS_MAX_DAYS/PASS_MIN_DAYS/PASS_WARN_AGE只接受唯一规范十进制-1或0至2147483647；重复、引号、转义、八/十六进制、额外字段及非ASCII分隔未支持。普通文件/root父目录需root:root、无链接/硬链接/ACL/组或其他写权限；64KiB、1024行、每物理行1000字节上限。包版本前后复核、输入稳定复核共用截止时间，仍非原子快照。max需1至90天且已声明min不超过max；warn需7至14天且不超过明确正max。选中声明缺失或完整已知偏差为fail，格式/读取/适用性/超限/变化为error；不以原生解析失败后的默认值通过。阈值是需按业务评估的项目参考，不是通用口令周期轮换要求。实际创建调用、已有账户、到期强制及预警交付未验证；未声明min不推断其原生默认值，其他login.defs设置与其他创建工具不在范围。生产不调用useradd、不读取shadow口令字段、不建账户或修改配置，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0007",
+      "ruleId": "BL-LINUX-0007",
+      "name": "指定示例连接的 OpenSSH root 登录配置为 no",
+      "category": "身份鉴别",
+      "severity": 4,
+      "check": {
+        "type": "sshd_effective",
+        "target": "/etc/ssh/sshd_config",
+        "option": "permitrootlogin",
+        "connection": {
+          "user": "root",
+          "host": "admin.example.invalid",
+          "address": "192.0.2.10",
+          "local_address": "192.0.2.20",
+          "local_port": 22
+        },
+        "operator": "eq",
+        "expected": "no",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。 prohibit-password 仍允许部分 root 登录，本参考策略要求 no；管理员评估业务需求后人工调整并验证实际服务。"
+    },
+    {
+      "code": "BL-LINUX-0008",
+      "ruleId": "BL-LINUX-0008",
+      "name": "指定示例连接的 OpenSSH MaxAuthTries 为 1 至 4",
+      "category": "身份鉴别",
+      "severity": 3,
+      "check": {
+        "type": "sshd_effective",
+        "target": "/etc/ssh/sshd_config",
+        "option": "maxauthtries",
+        "connection": {
+          "user": "root",
+          "host": "admin.example.invalid",
+          "address": "192.0.2.10",
+          "local_address": "192.0.2.20",
+          "local_port": 22
+        },
+        "operator": "regex",
+        "expected": "^[1-4]$",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅解析指定主配置及其 Include/Match 对本项明确连接条件的配置值，不连接网络；样例连接条件须按实际来源/目的地址、用户、来源主机和端口重新建立独立候选。需要 /usr/sbin/sshd 支持 -T -C、可读取配置和主机密钥。该结果不证明运行中的 sshd 已加载这些文件，也不覆盖服务启动参数 -o 覆盖或其他连接；自定义服务配置须明确改用实际配置路径。本包不提供自动修复。 1 至 4 是本项目参考阈值，不是 OpenSSH 默认值或完整账户锁定策略。"
+    },
+    {
+      "code": "BL-LINUX-0018",
+      "ruleId": "BL-LINUX-0018",
+      "name": "sudoers 磁盘统一认证声明",
+      "category": "身份鉴别",
+      "severity": 2,
+      "check": {
+        "type": "sudoers_policy",
+        "target": "/etc/sudoers",
+        "option": "authentication",
+        "operator": "eq",
+        "expected": "authenticate=on,exempt_group=unset,nopasswd_tags=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 sudo 1.9.15p5-3ubuntu5.24.04.4，管理员确认可信安装、默认 sudoers 插件和入口适用性。固定 /etc/sudoers 与唯一一次 /etc/sudoers.d，包含文件限唯一两位数字前缀或厂商 README，按原位置展开；点文件和末尾~文件按原生语义忽略但名称集合参与稳定性检查。只支持全局有限 Defaults、单个命名用户/组或ALL主体、ALL主机、root/ALL运行身份和简单正命令列表，解释 PASSWD/NOPASSWD 继承。明确声明参考，不假定编译默认值；缺少 authenticate 或 log_allowed 显式声明不满足对应参考，但不表示默认 sudo 禁用了认证或日志。任何NOPASSWD声明即不满足认证参考，包括被后续授权覆盖的声明；不计算给定账户的最终授权。未知/别名/作用域Defaults/否定/命令参数/其他标签/包含/续行/插件语义、不可信输入、ACL、链接/硬链接/特殊文件、读取失败/超限/期间变化保持error。配置需UID/GID0、组/其他不可写。上限32包含、单文件64KiB、总256KiB、4096行、目录128条目，共享deadline且前后确认包版本。authorization_state、authentication_state、delivery_state均unverified；不查询NSS或PAM，不证明实际用户组/授权、每次要求输入口令、root/相同身份/缓存例外、插件加载、sudo.conf/nsswitch入口、目标文件授权/写入/轮转或事件交付；生产不调用sudo/visudo/cvtsudoers、不执行命令、不读日志、不改配置，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0029",
+      "ruleId": "BL-LINUX-0029",
+      "name": "sudoers 获准命令日志文件声明",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "sudoers_policy",
+        "target": "/etc/sudoers",
+        "option": "allowed_logging",
+        "operator": "eq",
+        "expected": "log_allowed=on,logfile=/var/log/sudo.log",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅 Ubuntu24.04 完整安装 sudo 1.9.15p5-3ubuntu5.24.04.4，管理员确认可信安装、默认 sudoers 插件和入口适用性。固定 /etc/sudoers 与唯一一次 /etc/sudoers.d，包含文件限唯一两位数字前缀或厂商 README，按原位置展开；点文件和末尾~文件按原生语义忽略但名称集合参与稳定性检查。只支持全局有限 Defaults、单个命名用户/组或ALL主体、ALL主机、root/ALL运行身份和简单正命令列表，解释 PASSWD/NOPASSWD 继承。明确声明参考，不假定编译默认值；缺少 authenticate 或 log_allowed 显式声明不满足对应参考，但不表示默认 sudo 禁用了认证或日志。任何NOPASSWD声明即不满足认证参考，包括被后续授权覆盖的声明；不计算给定账户的最终授权。未知/别名/作用域Defaults/否定/命令参数/其他标签/包含/续行/插件语义、不可信输入、ACL、链接/硬链接/特殊文件、读取失败/超限/期间变化保持error。配置需UID/GID0、组/其他不可写。上限32包含、单文件64KiB、总256KiB、4096行、目录128条目，共享deadline且前后确认包版本。authorization_state、authentication_state、delivery_state均unverified；不查询NSS或PAM，不证明实际用户组/授权、每次要求输入口令、root/相同身份/缓存例外、插件加载、sudo.conf/nsswitch入口、目标文件授权/写入/轮转或事件交付；生产不调用sudo/visudo/cvtsudoers、不执行命令、不读日志、不改配置，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0022",
+      "ruleId": "BL-LINUX-0022",
+      "name": "auditd 系统服务当前运行状态",
+      "category": "安全审计",
+      "severity": 3,
+      "check": {
+        "type": "systemd_service",
+        "target": "auditd.service",
+        "operator": "eq",
+        "expected": "loaded/active/running",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 auditd.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。"
+    },
+    {
+      "code": "BL-LINUX-0024",
+      "ruleId": "BL-LINUX-0024",
+      "name": "rsyslog 系统服务当前运行状态",
+      "category": "安全审计",
+      "severity": 2,
+      "check": {
+        "type": "systemd_service",
+        "target": "rsyslog.service",
+        "operator": "eq",
+        "expected": "loaded/active/running",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定 Ubuntu24.04 systemd 系统管理器，固定查询 rsyslog.service 的 Id/LoadState/ActiveState/SubState/MainPID；需 loaded/active/running 且有效主进程。inactive/dead、failed/failed、active/exited 或 masked 为已观察到的不满足；缺失单元、加载异常、未知或切换状态、总线/查询错误保持error。仅当前单元状态，不证明程序身份、实际审计事件、内核审计、日志写入/投递、开机启用或持续运行。管理员按本机产品评估安装与配置，完成主机测试后发布；无自动修复、不启动/停止/重载服务。"
+    },
+    {
+      "code": "BL-LINUX-0046",
+      "ruleId": "BL-LINUX-0046",
+      "name": "systemd-tmpfiles-clean当前已加载命令与调度参考",
+      "category": "剩余信息保护",
+      "severity": 2,
+      "check": {
+        "type": "systemd_maintenance",
+        "target": "local-system",
+        "option": "tmpfiles_clean",
+        "operator": "eq",
+        "expected": "timer=loaded/active/waiting,next_monotonic=finite_positive,service=loaded/oneshot,inactive/dead,remain=no,command=systemd-tmpfiles--clean",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64、本地已加载systemd255管理器，固定查询systemd-tmpfiles-clean.timer/service及systemd-timesyncd.service。清理仅要求timer loaded/active/waiting、正确Unit及有限正NextElapseUSecMonotonic，service loaded/oneshot且inactive/dead、RemainAfterExit=no，主ExecStart恰为/usr/bin/systemd-tmpfiles与两个完整argv（argv0为程序名或绝对路径、argv1为--clean），不忽略命令错误。时钟参考要求timesyncd loaded/active/running、有效MainPID、Type=notify、主ExecStart为/usr/lib/systemd/systemd-timesyncd且仅一个argv，同时adjtimex(modes=0)返回0..4并无STA_UNSYNC/STA_CLOCKERR。systemctl状态与busctl指定属性的带类型JSON共用截止时间，结构化argv边界不能由拼接文字替代；两次完整查询确认单元、命令、调度与时钟状态/位未变化。已知完整偏差为fail，缺失/别名/未知/待重载/切换/读取失败/超限/变化/超时为error，一项error阻止整批发布。命令输出64KiB、最多8 ExecStart/32 argv、单路径或参数1024字节，拒绝额外字段、弱比较、远程/自选单元及命令。清理配置、路径/年龄、条件/其他执行阶段、命名空间/环境、实际删除与交付未验证；时间源身份、真实提供者、偏移准确性、认证与持续同步未验证，内核估计值不是准确性证明。两项只观察当前状态，重启持久性未验证，非原子；组件完整性由管理员确认。生产不启动/停止/重载服务、不触发清理、不读取环境或凭据、不改时钟，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0055",
+      "ruleId": "BL-LINUX-0055",
+      "name": "timesyncd当前运行状态与内核同步指示联合参考",
+      "category": "资源控制",
+      "severity": 2,
+      "check": {
+        "type": "systemd_maintenance",
+        "target": "local-system",
+        "option": "time_sync",
+        "operator": "eq",
+        "expected": "service=loaded/active/running,type=notify,command=systemd-timesyncd,kernel_state=0..4,STA_UNSYNC=0,STA_CLOCKERR=0",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64、本地已加载systemd255管理器，固定查询systemd-tmpfiles-clean.timer/service及systemd-timesyncd.service。清理仅要求timer loaded/active/waiting、正确Unit及有限正NextElapseUSecMonotonic，service loaded/oneshot且inactive/dead、RemainAfterExit=no，主ExecStart恰为/usr/bin/systemd-tmpfiles与两个完整argv（argv0为程序名或绝对路径、argv1为--clean），不忽略命令错误。时钟参考要求timesyncd loaded/active/running、有效MainPID、Type=notify、主ExecStart为/usr/lib/systemd/systemd-timesyncd且仅一个argv，同时adjtimex(modes=0)返回0..4并无STA_UNSYNC/STA_CLOCKERR。systemctl状态与busctl指定属性的带类型JSON共用截止时间，结构化argv边界不能由拼接文字替代；两次完整查询确认单元、命令、调度与时钟状态/位未变化。已知完整偏差为fail，缺失/别名/未知/待重载/切换/读取失败/超限/变化/超时为error，一项error阻止整批发布。命令输出64KiB、最多8 ExecStart/32 argv、单路径或参数1024字节，拒绝额外字段、弱比较、远程/自选单元及命令。清理配置、路径/年龄、条件/其他执行阶段、命名空间/环境、实际删除与交付未验证；时间源身份、真实提供者、偏移准确性、认证与持续同步未验证，内核估计值不是准确性证明。两项只观察当前状态，重启持久性未验证，非原子；组件完整性由管理员确认。生产不启动/停止/重载服务、不触发清理、不读取环境或凭据、不改时钟，无自动修复。"
+    },
+    {
+      "code": "BL-LINUX-0059",
+      "ruleId": "BL-LINUX-0059",
+      "name": "rescue/emergency当前sulogin启动与非force输入声明参考",
+      "category": "资源控制",
+      "severity": 3,
+      "check": {
+        "type": "systemd_rescue_policy",
+        "target": "local-system",
+        "operator": "eq",
+        "expected": "rescue+emergency=loaded,sulogin-shell=exact,force_inputs=absent|false",
+        "timeout_ms": 5000
+      },
+      "remediation": "限定Ubuntu24 amd64/arm64已加载systemd255本地管理器，联合查询rescue.service/emergency.service：loaded、Type=idle，ExecStartEx仅/usr/lib/systemd/systemd-sulogin-shell与完整模式参数，允许默认ignore-failure或无标记。管理器/单元Environment及固定/proc/cmdline中SYSTEMD_SULOGIN_FORCE均需缺省或明确false；这是全部输入声明参考，不计算被覆盖true的最终环境。环境文件/PassEnvironment/UnsetEnvironment、PAMName或替代根链非空保持error；未知布尔、重复、引号/转义/--/initrd启动语义、缺失/别名/待重载/切换/查询失败/超限/变化/超时为error，完整已知偏差fail。两次完整查询共用100..30000ms截止时间；每查询64KiB、环境128项/单字符串4096字节、主命令8项/32argv、启动参数16KiB/1024词。报告不回显命令、环境或启动参数原文，仅匹配状态。实际口令验证、root口令状态、可执行文件完整性、辅助阶段/条件/依赖/命名空间、其他启动路径及重启持久未验证，观察非原子。此项不认证维护模式有效认证，也不读取口令字段或触发登录；管理员确认可信组件与恢复需求后主机测试，无自动修复。"
+    }
+  ],
+  "unsupported": [],
+  "compliance": {
+    "catalogId": "MLPS2-HOST-2019-L3",
+    "catalogSha256": "929a5dfd1bd47c64ea70fa72524d003f9f9b94c8d7169cfea7d66e55238d3458",
+    "controlChecks": {
+      "8.1.4.1.a": [
+        "BL-LINUX-0001",
+        "BL-LINUX-0002",
+        "BL-LINUX-0003",
+        "BL-LINUX-0004",
+        "BL-LINUX-0006",
+        "BL-LINUX-0009"
+      ],
+      "8.1.4.1.b": [
+        "BL-LINUX-0005",
+        "BL-LINUX-0008",
+        "BL-LINUX-0010"
+      ],
+      "8.1.4.1.c": [],
+      "8.1.4.1.d": [],
+      "8.1.4.2.a": [
+        "BL-LINUX-0011",
+        "BL-LINUX-0012",
+        "BL-LINUX-0013",
+        "BL-LINUX-0014"
+      ],
+      "8.1.4.2.b": [
+        "BL-LINUX-0009",
+        "BL-LINUX-0016"
+      ],
+      "8.1.4.2.c": [
+        "BL-LINUX-0015"
+      ],
+      "8.1.4.2.d": [
+        "BL-LINUX-0016",
+        "BL-LINUX-0017",
+        "BL-LINUX-0018",
+        "BL-LINUX-0045"
+      ],
+      "8.1.4.2.e": [
+        "BL-LINUX-0018"
+      ],
+      "8.1.4.2.f": [
+        "BL-LINUX-0011",
+        "BL-LINUX-0012",
+        "BL-LINUX-0013",
+        "BL-LINUX-0014",
+        "BL-LINUX-0041"
+      ],
+      "8.1.4.2.g": [
+        "BL-LINUX-0040"
+      ],
+      "8.1.4.3.a": [
+        "BL-LINUX-0021",
+        "BL-LINUX-0022",
+        "BL-LINUX-0025",
+        "BL-LINUX-0024",
+        "BL-LINUX-0029"
+      ],
+      "8.1.4.3.b": [
+        "BL-LINUX-0026",
+        "BL-LINUX-0055",
+        "BL-LINUX-0044"
+      ],
+      "8.1.4.3.c": [
+        "BL-LINUX-0023",
+        "BL-LINUX-0027",
+        "BL-LINUX-0028",
+        "BL-AUDITD-0001",
+        "BL-AUDITD-0002",
+        "BL-AUDITD-0003",
+        "BL-LINUX-0030"
+      ],
+      "8.1.4.3.d": [
+        "BL-LINUX-0022"
+      ],
+      "8.1.4.4.a": [],
+      "8.1.4.4.b": [
+        "BL-LINUX-0019",
+        "BL-LINUX-0031",
+        "BL-LINUX-0032",
+        "BL-LINUX-0033",
+        "BL-LINUX-0034",
+        "BL-LINUX-0035",
+        "BL-LINUX-0037",
+        "BL-LINUX-0039",
+        "BL-LINUX-0046",
+        "BL-LINUX-0047",
+        "BL-LINUX-0048",
+        "BL-LINUX-0056",
+        "BL-LINUX-0057",
+        "BL-LINUX-0058",
+        "BL-LINUX-0059",
+        "BL-LINUX-0060"
+      ],
+      "8.1.4.4.c": [
+        "BL-LINUX-0007"
+      ],
+      "8.1.4.4.d": [],
+      "8.1.4.4.e": [
+        "BL-LINUX-0052",
+        "BL-LINUX-0053"
+      ],
+      "8.1.4.4.f": [
+        "BL-LINUX-0049"
+      ],
+      "8.1.4.5": [
+        "BL-LINUX-0049",
+        "BL-LINUX-0050"
+      ],
+      "8.1.4.6": [
+        "BL-LINUX-0040",
+        "BL-LINUX-0041"
+      ],
+      "8.1.4.7.a": [],
+      "8.1.4.7.b": [],
+      "8.1.4.8.a": [],
+      "8.1.4.8.b": [],
+      "8.1.4.9.a": [],
+      "8.1.4.9.b": [],
+      "8.1.4.9.c": [],
+      "8.1.4.10.a": [],
+      "8.1.4.10.b": [],
+      "8.1.4.11.a": [],
+      "8.1.4.11.b": []
+    }
+  }
+}

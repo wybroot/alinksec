@@ -6,6 +6,7 @@ import https from 'node:https'
 import { after, before, test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { captureCompliance } from './baseline-compliance-api.mjs'
 
 const mode = process.env.ALINKSEC_SMOKE_DB
 assert.ok(['postgres', 'sqlite'].includes(mode), 'Set ALINKSEC_SMOKE_DB to postgres or sqlite')
@@ -148,6 +149,7 @@ after(() => {
     DELETE FROM t_baseline_template WHERE id=${pkg.template || -1};
     COMMIT;`)
   for (const task of baselineTaskIds) sql(`BEGIN;
+    DELETE FROM t_baseline_compliance_review WHERE task_id=${task};
     DELETE FROM t_baseline_result WHERE task_id=${task};
     DELETE FROM t_baseline_summary WHERE task_id=${task};
     DELETE FROM t_baseline_task_expected WHERE task_id=${task};
@@ -1521,5 +1523,6 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   fixtures.list.push((await ok('/api/baseline/packages', { token: tokens.viewer })).find(pkg => pkg.id === authRecord.id))
   pamAuth.withdrawn = await ok(`${authPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pamAuth.withdrawn.status, 'withdrawn')
   const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
+  fixtures.compliance = await captureCompliance({ mode, sql, ok, request, tokens, baselinePackages, baselineTaskIds })
   writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })

@@ -35,7 +35,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout");
 
     /** 平台管理类写后缀：仅 admin（卸载口令布防） */
-    private static final List<String> ADMIN_WRITE_SUFFIXES = List.of("/uninstall-token");
+    private static final List<String> ADMIN_WRITE_SUFFIXES = List.of("/uninstall-token", "/compliance/review");
 
     private final JwtSecretHolder secretHolder;
 
