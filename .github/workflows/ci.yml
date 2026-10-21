@@ -51,7 +51,7 @@ jobs:
           cache-dependency-path: server/**/pom.xml
       - name: Check server SCAP import boundary
         if: matrix.platform == 'linux-amd64'
-        run: mvn -B -pl alinksec-service -am -Dtest=ScapPackageTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -pl alinksec-bootstrap -am -Dtest=ScapPackageTest,ScapIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
         working-directory: server
         env:
           MAVEN_OPTS: -Xmx256m

@@ -76,7 +76,7 @@ func (c *Client) observe(err error) {
 		return
 	}
 	c.status.State = "ready"
-	c.status.Version = "5.12"
+	c.status.Version = "5.15"
 	c.status.RuntimeSHA256 = c.cfg.RuntimeSHA256
 }
 func (c *Client) Probe(ctx context.Context) error {
@@ -114,7 +114,7 @@ func (c *Client) Scan(ctx context.Context, commandID string, command *pb.CmdScap
 	started := time.Now()
 	result := &pb.RptScapResult{TaskId: command.GetTaskId(), CommandId: commandID, ExecutionContract: 1, Engine: "SCC", ContentSha256: command.GetContentSha256(), BenchmarkId: command.GetBenchmarkId(), ProfileId: command.GetProfileId(), State: "failed"}
 	finish := func(err error) *pb.RptScapResult {
-		result.DurationMs = time.Since(started).Milliseconds()
+		result.DurationMs = uint64(time.Since(started).Milliseconds())
 		result.Issue = Code(err)
 		return result
 	}
@@ -145,7 +145,7 @@ func (c *Client) Scan(ctx context.Context, commandID string, command *pb.CmdScap
 		return finish(err)
 	}
 	result.State = "complete"
-	result.EngineVersion = "5.12"
+	result.EngineVersion = "5.15"
 	result.RuntimeSha256 = c.cfg.RuntimeSHA256
 	result.Rules = output.Rules
 	result.Scores = output.Scores

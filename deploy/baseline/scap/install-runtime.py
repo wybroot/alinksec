@@ -16,21 +16,22 @@ import tarfile
 import urllib.request
 import zipfile
 
-VERSION = '5.12'
-COMMIT = '023bf76037a003b58f52b165bcfdb7a3b4f8108d'
+VERSION = '5.15'
+# Official publisher checksums, reviewed 2026-10-22:
+# https://dl.dod.cyber.mil/wp-content/uploads/stigs/txt/SCC_5.15_Checksums.txt
 ASSETS = {
-    ('Linux', 'x86_64'): ('ubuntu22_amd64',
-        '9bd935b92633f350b315b815b2e334aadda49abacaf4d2a1c80ac72fc6a4710f',
-        'scc-5.12_ubuntu22_amd64.tar.gz', 'e27ab5d1501be25cc5fa832baf38c5763660bdb762c52c7bf4853b406dd3c1c0',
-        'f9af0e837d0298fd6ae7bbd57fd237bbc43bfb7b78ada497991eb280b277b84e'),
-    ('Linux', 'aarch64'): ('ubuntu22_arm64',
-        'c82d4054e6409e3e4e03889895143fdee71afbddfd4005cac2ee5438b135df8b',
-        'scc-5.12_ubuntu22_arm64.tar.gz', '1fe20521219ab7a3278f669009f81a557178807a97c0d6824e89281cfab68be5',
-        '6931fa878f7632445247c818b4bfa0b79e750ad8ff8af4e60cb1d5f7ef2917c5'),
+    ('Linux', 'x86_64'): ('linux_x86_64',
+        'f3fac797a54efe8fb8bba8604b984a73302a98a4900befda17be85c6ef7fcee4',
+        'scc-5.15_linux_x86_64.tar.gz', '5f9ef606106f743a093e71682cb1b999594644d724240869b44480032f0e6deb',
+        'ba908a907b8cbef7a3c7b1d2cad65c1c255e6290ef2ac3dd8a98ba2163afce8d'),
+    ('Linux', 'aarch64'): ('linux_aarch64',
+        '2e1f75e909033ef7dded0a58985807bf1c09cd44dc3600bf31339f34fd4c5162',
+        'scc-5.15_linux_aarch64.tar.gz', 'b3a5be3cc9b720606fb0362491e6fdf55a5aaa02898744c70ad043173ac641dd',
+        'bdd792b9e16f0328565b636a2c343fa6686aa8bc521e736d2887641e80feb998'),
     ('Windows', 'AMD64'): ('Windows',
-        '87f62f5e45be024af3a3ffb38045e7f70c87c32a92a321e9859a6a6e2fd9b5bf',
-        'scc-5.12_Windows.zip', 'a210d00818fab2a0f23aef0a99202c7e3a28a130f09333753cc94c5523e4a256',
-        'b8170ad0fbb137d521d523527a9f75836f02e8d4a5cc95172a1d1bbaa4b0d7b7'),
+        'a537a0f9a39ccc2231818709f8bb5f8f9b9cbfc2ec0d44dbbfabbe35d4f558ba',
+        'scc-5.15_Windows.zip', 'e830910d9eb43f55a4b11317b1801eaf08cda69073e8d3263e49d5e0d130b044',
+        '333b209c457a5b4778292378773bc4adec0fcfb0c2ba3bfaa29432758e2d5b7b'),
 }
 
 def checked(data, expected):
@@ -44,7 +45,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     name = f'scc-{VERSION}_{asset}_bundle.zip'
     archive = root/name
-    url = f'https://media.githubusercontent.com/media/niwc-atlantic/scap-scc/{COMMIT}/release_archive/SCC_5.12/{name}'
+    url = f'https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/{name}'
     if not archive.exists():
         temporary = archive.with_suffix('.part')
         with urllib.request.urlopen(url, timeout=120) as response, temporary.open('wb') as out:
@@ -85,7 +86,7 @@ def main():
     total = 0
     for path in sorted(runtime.rglob('*')):
         relative = path.relative_to(runtime).as_posix()
-        if relative.startswith('Resources/Content/') or relative == 'Resources/Content':
+        if relative.startswith('Resources/Content/') or relative in ['Resources/Content','alinksec-runtime.json']:
             continue
         if path.is_symlink():
             raise RuntimeError('Native runtime contains a symbolic link')

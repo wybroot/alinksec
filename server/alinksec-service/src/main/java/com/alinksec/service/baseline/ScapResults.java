@@ -31,11 +31,11 @@ public final class ScapResults {
         if (!target.get("evidence_sha256").toString().isEmpty()) return;
         boolean complete=report.getState().equals("complete");
         if (complete) {
-            if (!report.getIssue().isEmpty() || !report.getEngineVersion().equals("5.12")
+            if (!report.getIssue().isEmpty() || !report.getEngineVersion().equals("5.15")
                     || !report.getRuntimeSha256().equals(target.get("runtime_sha256")) || !ScapStore.hash(report.getSourceResultSha256()))
                 throw new IllegalArgumentException("SCAP 原生执行身份不完整");
         } else if (report.getIssue().isEmpty() || report.getRulesCount()!=0 || report.getScoresCount()!=0 || !report.getSourceResultSha256().isEmpty()
-                || !report.getEngineVersion().isEmpty()&&!report.getEngineVersion().equals("5.12")
+                || !report.getEngineVersion().isEmpty()&&!report.getEngineVersion().equals("5.15")
                 || !report.getRuntimeSha256().isEmpty()&&!ScapStore.hash(report.getRuntimeSha256())) {
             throw new IllegalArgumentException("SCAP 失败结果不得附带部分成功结论");
         }

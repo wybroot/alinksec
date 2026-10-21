@@ -20,8 +20,8 @@ public final class ScapReadiness {
             long observed=input.path("observed_at").asLong(-1),now=System.currentTimeMillis()/1000;
             if (!input.isObject() || !Set.of("starting","disabled","ready","running","unavailable").contains(state)
                     || !ScapStore.ISSUES.contains(input.path("last_issue").asText()) || !input.path("observed_at").isIntegralNumber()
-                    || observed<0 || observed>now+30 || !version.isEmpty()&&!version.equals("5.12") || !pin.isEmpty()&&!ScapStore.hash(pin)
-                    || Set.of("ready","running").contains(state)&&(!version.equals("5.12")||!ScapStore.hash(pin)||observed==0))
+                    || observed<0 || observed>now+30 || !version.isEmpty()&&!version.equals("5.15") || !pin.isEmpty()&&!ScapStore.hash(pin)
+                    || Set.of("ready","running").contains(state)&&(!version.equals("5.15")||!ScapStore.hash(pin)||observed==0))
                 throw new IllegalArgumentException("SCAP 原生就绪状态无效");
             var output=JsonUtils.mapper().createObjectNode();
             for (String key:List.of("state","version","runtime_sha256","last_issue")) output.put(key,input.path(key).asText());

@@ -55,7 +55,7 @@ func cloneRuntime(ctx context.Context, cfg Config, destination string) (string, 
 	var manifest runtimeManifest
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
-	if d.Decode(&manifest) != nil || d.Decode(new(any)) != io.EOF || manifest.SchemaVersion != 1 || manifest.Engine != "SCC" || manifest.Version != "5.12" || manifest.Platform != runtime.GOOS+"-"+runtime.GOARCH || len(manifest.Files) == 0 || len(manifest.Files) > 4096 {
+	if d.Decode(&manifest) != nil || d.Decode(new(any)) != io.EOF || manifest.SchemaVersion != 1 || manifest.Engine != "SCC" || manifest.Version != "5.15" || manifest.Platform != runtime.GOOS+"-"+runtime.GOARCH || len(manifest.Files) == 0 || len(manifest.Files) > 4096 {
 		return "", issue("scap_config_invalid")
 	}
 	executable := "cscc"
