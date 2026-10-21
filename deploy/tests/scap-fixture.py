@@ -76,6 +76,11 @@ def create(root):
           <select idref="{PREFIX}unselected" selected="false"/>
           <set-value idref="xccdf_org.alinksec_value_expected">observed-native</set-value>
         </Profile>
+        <Profile id="{PROFILE}_control"><title>Explicit selection diagnostic control</title>
+          {''.join(f'<select idref="{PREFIX}{name}" selected="true"/>' for name in ['external','failure','compound','platform'])}
+          <select idref="{PREFIX}unselected" selected="false"/>
+          <set-value idref="xccdf_org.alinksec_value_expected">observed-native</set-value>
+        </Profile>
         <Value id="xccdf_org.alinksec_value_expected" type="string"><title>Expected disposable file value</title><value>wrong-default</value></Value>
         {rules}
        </Benchmark>

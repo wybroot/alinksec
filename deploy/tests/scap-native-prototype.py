@@ -76,6 +76,20 @@ def main():
                     evidence['outcomes'][rule]=result.find('x:result',ns).text
         expected={fixture.PREFIX+name:value for name,value in dict(external='pass',failure='fail',compound='pass',unselected='notselected',platform='notapplicable').items()}
         if evidence['outcomes']!=expected:
+            # Diagnose inheritance separately without accepting the failed
+            # primary Profile or replacing its semantics assertion.
+            diagnostic=root/'diagnostic-reports'
+            diagnostic.mkdir()
+            for args in [['--setProfile',fixture.PROFILE+'_control','native'],['--userDir',str(diagnostic)]]:
+                result=subprocess.run([*prefix,str(binary),*args],cwd=runtime,capture_output=True,text=True,timeout=180)
+                evidence.setdefault('diagnosticCommands',[]).append({'args':args,'exit':result.returncode,'stdout':result.stdout[-16000:],'stderr':result.stderr[-16000:]})
+            if prefix:
+                subprocess.run([*prefix,'chown','-R',f'{os.getuid()}:{os.getgid()}',str(root)],check=True,timeout=30)
+            evidence['diagnosticOutcomes']={}
+            for path in diagnostic.rglob('*.xml'):
+                document=E.parse(path).getroot()
+                for result in document.findall('.//x:rule-result',ns):
+                    evidence['diagnosticOutcomes'][result.attrib['idref']]=result.find('x:result',ns).text
             raise RuntimeError('Native Profile/OVAL outcomes differ: '+str(evidence['outcomes']))
         evidence['accepted']=True
     finally:
