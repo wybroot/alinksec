@@ -20,7 +20,7 @@ import java.util.zip.ZipInputStream;
 
 /** Immutable, offline SCAP content. Semantic evaluation belongs to the native
  * interpreter; this class validates transport, identity and execution boundaries. */
-public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
+public record ScapPackage(byte[] archive, String sha256, String sourceSha256, JsonNode manifest,
                           List<Map<String, String>> rules, List<String> profiles) {
     public static final int MAX_ARCHIVE = 2 * 1024 * 1024;
     public static final int MAX_EXPANDED = 32 * 1024 * 1024;
@@ -84,7 +84,7 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
             Map<String, String> catalog = new LinkedHashMap<>();
             for (int i = 0; i < elements.getLength(); i++) {
                 Element element = (Element) elements.item(i);
-                if (element.hasAttribute("id") && !localIds.add(element.getAttribute("id"))) throw invalid("XML 标识重复");
+                if (element.hasAttribute("id")) localIds.add(element.getAttribute("id"));
                 if ("urn:oasis:names:tc:entity:xmlns:xml:catalog".equals(element.getNamespaceURI()) && "uri".equals(element.getLocalName())) {
                     String alias = element.getAttribute("name"), target = element.getAttribute("uri");
                     if (!safePath(alias) || !target.startsWith("#") || target.length() < 2
@@ -133,11 +133,24 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
         var profileNodes = benchmark.getElementsByTagNameNS(namespace, "Profile");
         for (int i = 0; i < profileNodes.getLength(); i++) {
             String id = ((Element) profileNodes.item(i)).getAttribute("id");
-            if (id.isBlank() || profiles.contains(id)) throw invalid("Profile 编号无效或重复");
+            if (!id.matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}") || profiles.contains(id)) throw invalid("Profile 编号无效或重复");
             profiles.add(id);
         }
         if (!profiles.contains(manifest.path("profileId").asText())) throw invalid("所选 Profile 不在 Benchmark 内");
-        return new ScapPackage(archive.clone(), digest(archive), manifest.deepCopy(), List.copyOf(rules), List.copyOf(profiles));
+        // Normalize the reviewed local ZIP records before delivery. Java's local
+        // entry reader and Go's central-directory reader must never see two
+        // different documents from an ambiguous, attacker-authored archive.
+        byte[] canonical;
+        try (var output = new java.io.ByteArrayOutputStream(); var zip = new java.util.zip.ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            for (String name : files.keySet().stream().sorted().toList()) {
+                var entry = new java.util.zip.ZipEntry(name);
+                entry.setTimeLocal(java.time.LocalDateTime.of(1980, 1, 1, 0, 0));
+                zip.putNextEntry(entry); zip.write(files.get(name)); zip.closeEntry();
+            }
+            zip.finish(); canonical = output.toByteArray();
+        } catch (IOException e) { throw new IllegalStateException(e); }
+        if (canonical.length > MAX_ARCHIVE) throw invalid("规范化内容 ZIP 超过 2 MiB");
+        return new ScapPackage(canonical, digest(canonical), digest(archive), manifest.deepCopy(), List.copyOf(rules), List.copyOf(profiles));
     }
 
     static boolean safePath(String name) {
@@ -159,6 +172,9 @@ public record ScapPackage(byte[] archive, String sha256, JsonNode manifest,
     public static org.w3c.dom.Document xml(byte[] bytes) {
         if (bytes.length == 0 || bytes.length > MAX_EXPANDED) throw invalid("XML 大小无效");
         try {
+            StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes));
+            for (byte value : bytes) if (value == 0) throw invalid("XML 必须使用 UTF-8");
             var factory = DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(true);
             factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
