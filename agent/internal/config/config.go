@@ -12,6 +12,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/clamav"
 	"github.com/alinksec/alinksec-agent/internal/resources"
+	"github.com/alinksec/alinksec-agent/internal/scap"
 	"github.com/alinksec/alinksec-agent/internal/yara"
 
 	"gopkg.in/yaml.v3"
@@ -19,6 +20,7 @@ import (
 
 // Config Agent 运行配置（工作目录下 agent.yml，可用 --config 覆盖）
 type Config struct {
+	SCAP      scap.Config      `yaml:"scap"`
 	YARA      yara.Config      `yaml:"yara"`
 	ClamAV    clamav.Config    `yaml:"clamav"`
 	Resources resources.Config `yaml:"resources"`
@@ -167,6 +169,9 @@ func Parse(b []byte) (*Config, error) {
 		return nil, err
 	}
 	if err := c.YARA.Validate(); err != nil {
+		return nil, err
+	}
+	if err := c.SCAP.Validate(); err != nil {
 		return nil, err
 	}
 	if err := c.Resources.Validate(); err != nil {

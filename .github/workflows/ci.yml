@@ -58,6 +58,10 @@ jobs:
           ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/scap-native/execution/fixture/content.zip
       - name: Check native XCCDF Profile and OVAL variable semantics
         run: python deploy/tests/scap-native-prototype.py .tmp/scap-native/execution
+      - name: Compile and check Agent execution boundaries
+        if: always()
+        run: go test -v -count=1 ./internal/scap ./internal/comm ./internal/config
+        working-directory: agent
       - name: Check Agent content boundary and complete native result parsing
         run: go test -v -count=1 ./internal/scap
         working-directory: agent

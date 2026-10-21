@@ -6,6 +6,7 @@ unselects one rule. OVAL exercises a real text probe, a local concat variable,
 AND criteria, negation and extend_definition on Linux and Windows.
 """
 from pathlib import Path
+import re
 from xml.sax.saxutils import escape
 import json
 import platform
@@ -117,6 +118,11 @@ def create(root):
        </oval_definitions>
       </ds:component>
     </ds:data-stream-collection>'''
+    # Use the explicit namespace style of official SCC content, keeping the
+    # exact same namespace URIs and Profile semantics.
+    start=xml.index('<Benchmark ');end=xml.index('</Benchmark>')+len('</Benchmark>')
+    section=re.sub(r'<(/?)([A-Za-z][A-Za-z0-9-]*)(?=[ >])',r'<\1xccdf:\2',xml[start:end])
+    xml=xml[:start]+section+xml[end:]
     manifest = dict(schemaVersion=1, code='ALINKSEC-SCAP-NATIVE', version='1', name='Native SCAP fixture',
         osType=2 if platform.system()=='Windows' else 1, osVersionPattern='.*',
         benchmarkFile='native-ds.xml', benchmarkId=BENCHMARK, profileId=PROFILE)
