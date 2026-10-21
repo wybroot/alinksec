@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,10 +38,31 @@ func TestNativeScapWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := New(Config{Enabled: true, RuntimeDir: dir, RuntimeSHA256: pin, TimeoutSec: 180}, t.TempDir())
+	work := t.TempDir()
+	cfg := Config{Enabled: true, RuntimeDir: dir, RuntimeSHA256: pin, TimeoutSec: 180}
+	client := New(cfg, work)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	if err = client.Probe(ctx); err != nil {
+		// Only the explicit native CI test prints this bounded version-only
+		// diagnostic. Production errors and reports retain fixed issue codes.
+		directory := filepath.Join(t.TempDir(), "runtime with spaces")
+		if binary, cloneErr := cloneRuntime(ctx, cfg, directory); cloneErr == nil {
+			if configErr := configureRuntime(directory, filepath.Join(t.TempDir(), "reports"), 180); configErr == nil {
+				command := exec.CommandContext(ctx, binary, "--version")
+				command.Dir = directory
+				command.Env = cleanEnvironment()
+				stdout, stderr := &cappedBuffer{limit: 16384}, &cappedBuffer{limit: 4096}
+				command.Stdout = stdout
+				command.Stderr = stderr
+				err := command.Run()
+				t.Logf("isolated version diagnostic without Job Object: error=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			} else {
+				t.Log("trusted template configuration:", configErr)
+			}
+		} else {
+			t.Log("trusted runtime clone:", cloneErr)
+		}
 		t.Fatalf("actual bounded native identity: %v", err)
 	}
 	if client.Status().Version != "5.15" || client.Status().RuntimeSHA256 != pin || client.Status().State != "ready" {
@@ -69,6 +91,15 @@ func TestNativeScapWorker(t *testing.T) {
 	}
 	if result.RuntimeSha256 != pin || result.ContentSha256 != content.SHA256 || result.ProfileId != content.Manifest.ProfileID {
 		t.Fatal("native worker execution identity differs")
+	}
+	cancelled, stop := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer stop()
+	failed := client.Scan(cancelled, "cancelled-native-command", command)
+	if failed.State != "failed" || len(failed.Rules) != 0 || failed.SourceResultSha256 != "" {
+		t.Fatal("cancelled worker fabricated evidence", failed)
+	}
+	if entries, err := os.ReadDir(work); err != nil || len(entries) != 0 {
+		t.Fatal("native worker cancellation left a workspace", err, len(entries))
 	}
 	// A command cannot substitute a different locally installed runtime.
 	command.RuntimeSha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

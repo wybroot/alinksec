@@ -63,6 +63,16 @@ func TestNativeSCAPAgent(t *testing.T) {
 	defer process.stop(t)
 	t.Cleanup(func() {
 		if t.Failed() {
+			var statuses []string
+			for _, pending := range fixture.pending {
+				if hb := pending.report.GetHeartbeat(); hb != nil {
+					statuses = append(statuses, hb.ScapStatus)
+				}
+			}
+			if len(statuses) > 6 {
+				statuses = statuses[len(statuses)-6:]
+			}
+			t.Log("latest native SCAP readiness:", statuses)
 			if log, err := os.ReadFile(filepath.Join(root, "agent-process.log")); err == nil {
 				if len(log) > 12000 {
 					log = log[len(log)-12000:]

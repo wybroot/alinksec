@@ -104,6 +104,21 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 	if err != nil {
 		return result, issue("scap_worker_failed")
 	}
+	// The parent owns the workspace and removes it after killing the complete
+	// native process tree, including on timeout or an abruptly killed worker.
+	workspace, err := os.MkdirTemp(input.WorkDir, ".scap-job-")
+	if err != nil {
+		return result, issue("scap_worker_failed")
+	}
+	defer func() {
+		for attempt := 0; attempt < 30; attempt++ {
+			if os.RemoveAll(workspace) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+	input.WorkDir = workspace
 	cmd := exec.CommandContext(ctx, executable, workerArg)
 	cmd.Env = cleanEnvironment()
 	cmd.WaitDelay = time.Second

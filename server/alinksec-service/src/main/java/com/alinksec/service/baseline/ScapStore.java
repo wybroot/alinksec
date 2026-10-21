@@ -17,7 +17,7 @@ final class ScapStore {
             "scap_runtime_changed","scap_engine_version","scap_resource_limit","scap_timeout","scap_worker_failed","scap_worker_protocol",
             "scap_archive_limit","scap_archive_invalid","scap_archive_path","scap_manifest_invalid","scap_xml_invalid","scap_xml_external_entity",
             "scap_xml_limit","scap_reference_missing","scap_reference_external","scap_executable_content","scap_check_system_unsupported",
-            "scap_selection_invalid","scap_rule_invalid","scap_profile_invalid","scap_result_invalid","scap_result_missing","scap_result_limit",
+            "scap_selection_invalid","scap_content_unresolved","scap_rule_invalid","scap_profile_invalid","scap_result_invalid","scap_result_missing","scap_result_limit",
             "scap_native_failed","scap_cancelled","scap_busy","scap_command_invalid","command_failed","command_timeout","task_timeout");
     static boolean hash(String value) { return value != null && value.matches("[0-9a-f]{64}"); }
     static String digest(String value) { return ScapPackage.digest(value.getBytes(StandardCharsets.UTF_8)); }

@@ -88,7 +88,7 @@ try {
   await review.getByPlaceholder('填写审核、测试或发布说明').fill('已核对标准来源、继承解析和适用系统范围')
   await review.getByRole('button', { name: '批准测试', exact: true }).click()
   await expect(review.getByRole('button', { name: '发布内容', exact: true })).toBeDisabled()
-  await review.getByPlaceholder('选择适用且就绪的测试主机（最多 10 台）').click()
+  await review.locator('.el-select__wrapper').click()
   await expect(page.getByRole('option', { name: /SCAP windows/ })).toHaveCount(0)
   await expect(page.getByRole('option', { name: /SCAP stale|SCAP unavailable/ })).toHaveCount(0)
   await page.getByRole('option', { name: /SCAP ready/ }).click(); await page.keyboard.press('Escape')
