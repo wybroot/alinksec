@@ -3,32 +3,15 @@ package scap
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	scapconfig "github.com/alinksec/alinksec-agent/internal/scap/config"
 )
 
-type Config struct {
-	Enabled       bool   `yaml:"enabled"`
-	RuntimeDir    string `yaml:"runtime_dir"`
-	RuntimeSHA256 string `yaml:"runtime_sha256"`
-	TimeoutSec    int    `yaml:"timeout_sec"`
-}
-
-func (c Config) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-	if !filepath.IsAbs(c.RuntimeDir) || len(c.RuntimeDir) > 4096 || strings.ContainsRune(c.RuntimeDir, 0) || !validHash(c.RuntimeSHA256) || c.TimeoutSec != 0 && (c.TimeoutSec < 30 || c.TimeoutSec > 1200) {
-		return errors.New("SCAP requires an absolute runtime directory, a runtime manifest SHA256 and timeout 30..1200 seconds")
-	}
-	return nil
-}
+type Config = scapconfig.Config
 
 type Status struct {
 	State         string `json:"state"`

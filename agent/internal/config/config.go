@@ -12,7 +12,7 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/clamav"
 	"github.com/alinksec/alinksec-agent/internal/resources"
-	"github.com/alinksec/alinksec-agent/internal/scap"
+	scapconfig "github.com/alinksec/alinksec-agent/internal/scap/config"
 	"github.com/alinksec/alinksec-agent/internal/yara"
 
 	"gopkg.in/yaml.v3"
@@ -20,10 +20,10 @@ import (
 
 // Config Agent 运行配置（工作目录下 agent.yml，可用 --config 覆盖）
 type Config struct {
-	SCAP      scap.Config      `yaml:"scap"`
-	YARA      yara.Config      `yaml:"yara"`
-	ClamAV    clamav.Config    `yaml:"clamav"`
-	Resources resources.Config `yaml:"resources"`
+	SCAP      scapconfig.Config `yaml:"scap"`
+	YARA      yara.Config       `yaml:"yara"`
+	ClamAV    clamav.Config     `yaml:"clamav"`
+	Resources resources.Config  `yaml:"resources"`
 	// 服务端 gRPC 地址（host:port）
 	ServerAddr string `yaml:"server_addr"`
 	// 注册码（首次安装使用，注册成功后证书落盘即不再依赖）

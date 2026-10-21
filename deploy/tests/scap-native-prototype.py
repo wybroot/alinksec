@@ -80,7 +80,7 @@ def main():
             # primary Profile or replacing its semantics assertion.
             diagnostic=root/'diagnostic-reports'
             diagnostic.mkdir()
-            for args in [['--installScap',str(archive),'native_control','--force'],['--userDir',str(diagnostic)]]:
+            for args in [['--setProfile','native_control','native'],['--userDir',str(diagnostic)]]:
                 result=subprocess.run([*prefix,str(binary),*args],cwd=runtime,capture_output=True,text=True,timeout=180)
                 evidence.setdefault('diagnosticCommands',[]).append({'args':args,'exit':result.returncode,'stdout':result.stdout[-16000:],'stderr':result.stderr[-16000:]})
             if prefix:
