@@ -12,9 +12,41 @@ on:
         description: Run only native Windows Agent validation
         type: boolean
         default: false
+      scap_only:
+        description: Run only native SCAP interpreter validation
+        type: boolean
+        default: false
 
 jobs:
+  native-scap:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - runner: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract and verify official native SCAP interpreter
+        run: python deploy/tests/scap-install.py .tmp/scap-native
+      - name: Retain native interpreter identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scap-native-${{ matrix.platform }}
+          path: .tmp/scap-native/install.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   windows-agent:
+    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -237,7 +269,7 @@ jobs:
           retention-days: 14
 
   build-and-test:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -789,7 +821,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   native-yara:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     name: native-yara (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -846,7 +878,7 @@ jobs:
           retention-days: 14
 
   schema:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     runs-on: ubuntu-latest
     services:
       postgres:
