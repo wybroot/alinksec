@@ -36,6 +36,12 @@
           <p>{{ os(detail.document.osType) }} · {{ detail.document.product }} · {{ detail.document.osVersionPattern }}</p>
           <p>来源：<a :href="detail.document.source.url" target="_blank" rel="noopener noreferrer">{{ detail.document.source.name }}</a> · {{ detail.document.source.version }}</p>
           <p class="digest">来源 SHA256：{{ detail.document.source.sha256 }}<br />模板内容 SHA256：{{ detail.content_sha256 }}</p>
+          <section v-if="detail.complianceCoverage?.total">
+            <h4>{{ detail.complianceCoverage.scope }} · 条款覆盖 {{ detail.complianceCoverage.total }}</h4>
+            <p>{{ detail.complianceCoverage.scopeNote }}</p>
+            <p>含自动证据 {{ detail.complianceCoverage.withAutomaticEvidence }} 条 · 完全人工取证 {{ detail.complianceCoverage.manualOnly }} 条；全部条款均需人工复核证据。</p>
+            <el-table :data="detail.complianceCoverage.controls" max-height="300"><el-table-column prop="id" label="条款" width="130" /><el-table-column prop="name" label="核验范围" min-width="180" /><el-table-column label="自动证据" width="90"><template #default="{ row }">{{ row.checkCodes.length }} 项</template></el-table-column><el-table-column prop="evidence" label="人工取证要求" min-width="280" /></el-table>
+          </section>
           <p v-if="detail.review_note">审核说明：{{ detail.review_note }}</p><p v-if="detail.publication_note">发布 / 撤回说明：{{ detail.publication_note }}</p>
           <h4>来源与适用范围变更</h4>
           <el-table :data="detail.metadataDiff" max-height="220"><el-table-column prop="field" label="字段" width="140" /><el-table-column label="原版本" min-width="180"><template #default="{ row }"><pre>{{ json(row.before) }}</pre></template></el-table-column><el-table-column label="候选版本" min-width="180"><template #default="{ row }"><pre>{{ json(row.after) }}</pre></template></el-table-column></el-table>

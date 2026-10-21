@@ -108,6 +108,8 @@ func checkOneWithRuntime(spec *pb.BaselineCheckSpec, rt *AgentRuntime) ItemResul
 		result = checkFilePerm(cs)
 	case "cmd_output":
 		result = checkCmdOutput(cs)
+	case "windows_security_policy":
+		result = checkWindowsSecurity(cs)
 	case "sshd_effective":
 		result = checkSSHEffective(cs)
 	case "sshd_notice":

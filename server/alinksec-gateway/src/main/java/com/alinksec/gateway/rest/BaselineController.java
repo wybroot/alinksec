@@ -3,6 +3,7 @@ package com.alinksec.gateway.rest;
 import com.alinksec.common.web.ApiResult;
 import com.alinksec.service.baseline.BaselineTaskService;
 import com.alinksec.service.baseline.BaselinePackageService;
+import com.alinksec.service.baseline.BaselineComplianceService;
 import com.alinksec.service.query.BaselineQueryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,11 +28,13 @@ public class BaselineController {
     private final BaselineQueryService query;
     private final BaselineTaskService taskService;
     private final BaselinePackageService packages;
+    private final BaselineComplianceService compliance;
 
-    public BaselineController(BaselineQueryService query, BaselineTaskService taskService, BaselinePackageService packages) {
+    public BaselineController(BaselineQueryService query, BaselineTaskService taskService, BaselinePackageService packages, BaselineComplianceService compliance) {
         this.query = query;
         this.taskService = taskService;
         this.packages = packages;
+        this.compliance = compliance;
     }
 
     public record Selection(List<String> agentIds, List<Long> templateIds, String name) {}
@@ -111,6 +114,17 @@ public class BaselineController {
             @PathVariable long id, @PathVariable String agentId,
             @RequestParam(required = false) Boolean passed) {
         return ApiResult.ok(query.taskAgentItems(id, agentId, passed));
+    }
+
+    @GetMapping("/tasks/{id}/agents/{agentId}/compliance")
+    public ApiResult<List<Map<String, Object>>> compliance(@PathVariable long id, @PathVariable String agentId) {
+        return ApiResult.ok(compliance.assessment(id, agentId));
+    }
+
+    @PostMapping("/tasks/{id}/agents/{agentId}/compliance/review")
+    public ApiResult<List<Map<String, Object>>> reviewCompliance(@PathVariable long id, @PathVariable String agentId,
+            @RequestBody BaselineComplianceService.Decision decision, HttpServletRequest request) {
+        return ApiResult.ok(compliance.review(id, agentId, decision, user(request)));
     }
 
     @GetMapping("/tasks/{id}/category-stats")

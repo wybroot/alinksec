@@ -28,6 +28,20 @@ jobs:
         working-directory: agent
       - name: Extract pinned native ClamAV test engine
         run: python deploy/tests/clamav-install.py .tmp/clamav-native
+      - name: Capture native Windows compliance pack observations
+        run: go test -v -count=1 -timeout=3m -run '^TestNativeCompliancePack$' ./internal/baseline
+        working-directory: agent
+        env:
+          ALINKSEC_COMPLIANCE_NATIVE_OUTPUT: ${{ github.workspace }}/.tmp/compliance-native/result.json
+      - name: Retain native Windows compliance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-compliance-native-windows-amd64
+          path: .tmp/compliance-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check actual ClamAV scanning, archive limits and native event quarantine
         run: go test -v -count=1 -timeout=3m -run '^TestNativeClamav' ./internal/virusscan ./internal/guard
         working-directory: agent
@@ -281,6 +295,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s deploy/tests -p 'test_*_tools.py' -v
           node --test deploy/tests/baseline-package.test.mjs
+          python3 deploy/baseline/build-compliance-pack.py --check
       - name: Check deployment configuration and least-privilege boundaries
         run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
@@ -357,6 +372,9 @@ jobs:
       - name: Check baseline review and mixed-system selection in the production web bundle
         working-directory: web
         run: node test/baseline-packages-browser.mjs
+      - name: Check complete compliance catalogs and human evidence review in production pages
+        working-directory: web
+        run: node test/compliance-browser.mjs
       - name: Check real SQLite maintenance and restored application
         timeout-minutes: 10
         run: |
@@ -417,6 +435,20 @@ jobs:
       - name: Check native fixed log metadata and ACL boundaries
         working-directory: agent/internal/baseline
         run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
+      - name: Capture native Linux compliance pack observations
+        working-directory: agent/internal/baseline
+        run: |
+          sudo env ALINKSEC_COMPLIANCE_NATIVE_OUTPUT="$GITHUB_WORKSPACE/.tmp/compliance-native/result.json" ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeCompliancePack$'
+          sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.tmp/compliance-native" "$GITHUB_WORKSPACE/.tmp/compliance-native/result.json"
+      - name: Retain native Linux compliance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-compliance-native-linux-${{ matrix.arch }}
+          path: .tmp/compliance-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check native OpenSSH name resolution and banner declarations with mandatory input boundaries
         working-directory: agent/internal/baseline
         run: sudo env ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeSSHNotice$'
@@ -655,6 +687,7 @@ jobs:
             .tmp/software-inventory-browser
             .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
+            .tmp/compliance-browser
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
@@ -740,6 +773,7 @@ jobs:
             .tmp/operations-volume-local/result.json
             .tmp/operations-native-postgres/result.json
             .tmp/operations-native-sqlite/result.json
+            .tmp/baseline-browser-fixtures-postgres.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -860,8 +894,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "25"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "69"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "26"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "70"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

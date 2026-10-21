@@ -428,6 +428,8 @@ export const reviewBaselinePackage = (id, approved, note) => post(`/api/baseline
 export const testBaselinePackage = (id, agentIds) => post(`/api/baseline/packages/${encodeURIComponent(id)}/test`, { agentIds })
 export const publishBaselinePackage = (id, note) => post(`/api/baseline/packages/${encodeURIComponent(id)}/publish`, { note })
 export const withdrawBaselinePackage = (id, note) => post(`/api/baseline/packages/${encodeURIComponent(id)}/withdraw`, { note })
+export const fetchBaselineCompliance = (taskId, agentId) => get(`/api/baseline/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/compliance`)
+export const reviewBaselineCompliance = (taskId, agentId, decision) => post(`/api/baseline/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/compliance/review`, decision)
 export const fetchBaselineCoverage = (agentIds, templateIds = []) => post('/api/baseline/coverage', { agentIds, templateIds })
 
 export async function fetchBaselineTemplates() {

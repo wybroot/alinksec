@@ -52,11 +52,12 @@ public class BaselinePackageService {
         Map<String, Object> result = new LinkedHashMap<>(row(id));
         JsonNode doc = JsonUtils.read(String.valueOf(result.get("document")));
         result.put("document", doc);
+        result.put("complianceCoverage", BaselineComplianceCatalog.coverage(doc));
         JsonNode previous = null;
         if (result.get("base_package_id") != null) previous = JsonUtils.read(String.valueOf(row(String.valueOf(result.get("base_package_id"))).get("document")));
         result.put("diff", diff(previous, doc));
         List<Map<String, Object>> metadataDiff = new ArrayList<>();
-        for (String field : List.of("name", "standard", "product", "osType", "osVersionPattern", "version", "source")) {
+        for (String field : List.of("name", "standard", "product", "osType", "osVersionPattern", "version", "source", "compliance")) {
             JsonNode oldValue = previous == null ? null : previous.path(field);
             if (!Objects.equals(oldValue, doc.path(field))) {
                 Map<String, Object> change = new LinkedHashMap<>(); change.put("field", field); change.put("before", oldValue); change.put("after", doc.path(field)); metadataDiff.add(change);
