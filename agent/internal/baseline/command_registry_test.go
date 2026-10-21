@@ -8,7 +8,7 @@ import (
 func TestApprovedCmdOutputRejectsUnknownCommands(t *testing.T) {
 	want := 14
 	if runtime.GOOS == "windows" {
-		want = 4
+		want = 5
 	}
 	if len(approvedCmdOutput) != want {
 		t.Fatalf("approved command count = %d, want %d", len(approvedCmdOutput), want)
