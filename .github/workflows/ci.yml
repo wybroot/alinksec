@@ -116,6 +116,8 @@ jobs:
             .tmp/scap-native/roundtrip.json
             .tmp/scap-resolved/provenance.json
             .tmp/scap-native/execution/result.json
+            .tmp/scap-native/execution/fixture/content.zip
+            .tmp/scap-native/execution/fixture/native-ds.xml
             .tmp/scap-native/execution/options-after-install.xml
             .tmp/scap-native/execution/reports
           include-hidden-files: true

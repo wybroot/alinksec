@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -85,7 +86,11 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func cleanEnvironment() []string {
-	env := []string{"GOMEMLIMIT=64MiB", "GOMAXPROCS=1", "GOGC=50", "LANG=C.UTF-8"}
+	locale := "C.UTF-8"
+	if runtime.GOOS == "windows" {
+		locale = "C"
+	}
+	env := []string{"GOMEMLIMIT=64MiB", "GOMAXPROCS=1", "GOGC=50", "LANG=" + locale}
 	for _, key := range []string{"SYSTEMROOT", "WINDIR", "TMP", "TEMP", "TMPDIR"} {
 		if value := os.Getenv(key); value != "" {
 			env = append(env, key+"="+value)

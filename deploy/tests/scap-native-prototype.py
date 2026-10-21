@@ -49,6 +49,8 @@ def main():
     archive = fixture.create(root/'fixture')
     binary = runtime/('cscc.exe' if os.name=='nt' else 'cscc')
     evidence = {'kind':'native SCC execution; disposable file, no remediation', 'commands':[], 'outcomes':{}}
+    if os.getenv('ALINKSEC_SCAP_RESOLVED_BENCHMARK'):
+        evidence['resolvedBenchmarkSha256']=hashlib.sha256(Path(os.environ['ALINKSEC_SCAP_RESOLVED_BENCHMARK']).read_bytes()).hexdigest()
     prefix = ['sudo','-n'] if os.name != 'nt' and os.geteuid()!=0 and os.getenv('GITHUB_ACTIONS')=='true' else []
     try:
         for args in [['--installScap',str(archive)], ['--setProfile','native','native'], ['--listAllProfiles'], ['--userDir',str(root/'reports')]]:

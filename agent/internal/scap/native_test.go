@@ -38,7 +38,10 @@ func TestNativeScapWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	work := t.TempDir()
+	work := filepath.Join(t.TempDir(), "Agent Work With Spaces")
+	if err := os.MkdirAll(work, 0700); err != nil {
+		t.Fatal(err)
+	}
 	cfg := Config{Enabled: true, RuntimeDir: dir, RuntimeSHA256: pin, TimeoutSec: 180}
 	client := New(cfg, work)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
