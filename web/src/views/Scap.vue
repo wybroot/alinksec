@@ -81,7 +81,7 @@
 
     <el-dialog v-model="createVisible" title="发起标准核查" width="min(640px, calc(100vw - 32px))">
       <el-form label-width="90px">
-        <el-form-item label="任务名称"><el-input v-model="form.name" maxlength="128" /></el-form-item>
+        <el-form-item label="任务名称"><el-input v-model="form.name" maxlength="128" aria-label="任务名称" /></el-form-item>
         <el-form-item label="已发布内容"><el-select v-model="form.packageId" style="width:100%" @change="form.agentIds = []"><el-option v-for="item in packages.filter(p => p.status === 'published')" :key="item.id" :label="`${item.name} · ${item.version}`" :value="item.id" /></el-select></el-form-item>
         <el-form-item label="目标主机"><el-select v-model="form.agentIds" multiple filterable style="width:100%"><el-option v-for="host in applicable(packages.find(p => p.id === form.packageId))" :key="host.agent_id" :label="`${host.hostname} · ${host.os_version}`" :value="host.agent_id" /></el-select><span class="hint">仅显示系统类型匹配且原生引擎就绪的主机，最多 20 台；提交时检查系统版本。</span></el-form-item>
       </el-form>
@@ -130,10 +130,10 @@ const outcome = value => `${names[value] || value} (${value})`
 const applicable = content => content ? targets.value.filter(h => h.state === 'ready' && Number(h.os_type) === Number(content.os_type)) : []
 async function refresh() {
   loading.value = true
-  try { packages.value = await fetchScapPackages(); targets.value = await fetchScapTargets(); tasks.value = await fetchScapTasks(page.value) } catch (e) { ElMessage.error(e.message) } finally { loading.value = false }
+  try { packages.value = await fetchScapPackages(); targets.value = await fetchScapTargets(); tasks.value = await fetchScapTasks(page.value) } catch (e) { packages.value = []; targets.value = []; tasks.value = { items: [], total: 0 }; ElMessage.error(e.message) } finally { loading.value = false }
 }
-async function viewPackage(row) { try { selected.value = await fetchScapPackage(row.id); note.value = ''; testTargets.value = []; packageVisible.value = true } catch (e) { ElMessage.error(e.message) } }
-async function viewTask(row) { try { task.value = await fetchScapTask(row.id); expandedHosts.value = task.value.hosts.map(h => h.agent_id); taskVisible.value = true } catch (e) { ElMessage.error(e.message) } }
+async function viewPackage(row) { selected.value = null; try { selected.value = await fetchScapPackage(row.id); note.value = ''; testTargets.value = []; packageVisible.value = true } catch (e) { ElMessage.error(e.message) } }
+async function viewTask(row) { task.value = null; try { task.value = await fetchScapTask(row.id); expandedHosts.value = task.value.hosts.map(h => h.agent_id); taskVisible.value = true } catch (e) { ElMessage.error(e.message) } }
 async function upload(event) {
   const file = event.target.files?.[0]; event.target.value = ''
   if (!file) return
@@ -164,4 +164,5 @@ onMounted(refresh)
 .hash { overflow-wrap:anywhere; font-family:monospace; font-size:12px; }
 .hint { color:#64748b; font-size:12px; line-height:1.7; }
 .outcomes { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+:deep(.el-descriptions__content) { overflow-wrap:anywhere; }
 </style>

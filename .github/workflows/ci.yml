@@ -480,6 +480,9 @@ jobs:
       - name: Check complete compliance catalogs and human evidence review in production pages
         working-directory: web
         run: node test/compliance-browser.mjs
+      - name: Check standard SCAP lifecycle, nine outcomes and immutable evidence in production pages
+        working-directory: web
+        run: node test/scap-browser.mjs
       - name: Check real SQLite maintenance and restored application
         timeout-minutes: 10
         run: |
@@ -793,6 +796,7 @@ jobs:
             .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
             .tmp/compliance-browser
+            .tmp/scap-browser
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore

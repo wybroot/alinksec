@@ -18,4 +18,9 @@ values = dict(ALINKSEC_SCAP_NATIVE_WORKER_REQUIRED='true',
 command = [str(test),'-test.v','-test.run','^TestNativeScapWorker$','-test.timeout','5m']
 if os.name != 'nt' and os.geteuid()!=0:
     command = ['sudo','-n','env',*(f'{k}={v}' for k,v in values.items()),*command]
-subprocess.run(command,env=dict(env,**values),check=True,timeout=320)
+try:
+    subprocess.run(command,env=dict(env,**values),check=True,timeout=320)
+finally:
+    evidence=Path(values['ALINKSEC_SCAP_NATIVE_EVIDENCE_FILE'])
+    if os.name!='nt' and os.geteuid()!=0 and evidence.exists():
+        subprocess.run(['sudo','-n','chown',f'{os.getuid()}:{os.getgid()}',str(evidence)],check=True,timeout=15)
