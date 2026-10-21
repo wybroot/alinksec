@@ -121,6 +121,11 @@ func TestNativeSCAPAgent(t *testing.T) {
 	ready(connection.number)
 	send("scap-actual-command", scan)
 	ack("scap-actual-command", pb.RptAck_DONE)
+	for _, pending := range fixture.pending {
+		if pending.report.GetScapResult().GetCommandId() == "scap-actual-command" {
+			t.Fatal("replayed completed command executed native probes again")
+		}
+	}
 	wrong := proto.Clone(scan).(*pb.CmdScapScan)
 	wrong.TaskId = "scap-wrong-runtime"
 	wrong.RuntimeSha256 = scap.Digest([]byte("unapproved runtime"))

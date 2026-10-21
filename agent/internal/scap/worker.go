@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -28,6 +30,7 @@ type workerInput struct {
 }
 type workerOutput struct {
 	Issue        string
+	NativeError  string // private worker IPC only; never included in Agent reports
 	SourceSHA256 string
 	Rules        []*pb.ScapRuleResult
 	Scores       []*pb.ScapScore
@@ -62,6 +65,13 @@ func worker(in io.Reader, out io.Writer) int {
 		cancel()
 		if err != nil {
 			result = workerOutput{Issue: Code(err)}
+			var native *nativeFailure
+			if errors.As(err, &native) {
+				result.NativeError = native.detail
+				if len(result.NativeError) > 12000 {
+					result.NativeError = result.NativeError[:12000]
+				}
+			}
 		}
 		if json.NewEncoder(out).Encode(result) != nil {
 			return 2
@@ -165,10 +175,10 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 		return workerOutput{}, issue("scap_worker_protocol")
 	}
 	if result.Issue != "" {
-		if !strings.HasPrefix(result.Issue, "scap_") || len(result.Issue) > 64 {
+		if !strings.HasPrefix(result.Issue, "scap_") || len(result.Issue) > 64 || len(result.NativeError) > 16384 {
 			return workerOutput{}, issue("scap_worker_protocol")
 		}
-		return workerOutput{}, issue(result.Issue)
+		return result, issue(result.Issue)
 	}
 	if input.Probe {
 		if len(result.Rules) != 0 || len(result.Scores) != 0 || result.SourceSHA256 != "" {
@@ -227,7 +237,7 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		if err := cmd.Start(); err != nil {
-			return "", issue("scap_native_failed")
+			return "", &nativeFailure{fmt.Sprintf("%s start=%v", args[0], err)}
 		}
 		finished := make(chan error, 1)
 		go func() { finished <- cmd.Wait() }()
@@ -255,12 +265,12 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			return "", issue("scap_native_failed")
+			return "", &nativeFailure{fmt.Sprintf("%s exit=%v stdout=%q stderr=%q", args[0], nativeErr, lastOutput(stdout.String()), lastOutput(stderr.String()))}
 		}
 		// SCC can exit zero after native errors. Complete bound XML evidence is
 		// still mandatory, and crashes in native helper threads fail closed.
 		if stderr.Len() != 0 {
-			return "", issue("scap_native_failed")
+			return "", &nativeFailure{fmt.Sprintf("%s stderr=%q stdout=%q", args[0], lastOutput(stderr.String()), lastOutput(stdout.String()))}
 		}
 		return stdout.String(), nil
 	}
@@ -344,6 +354,17 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 	}
 	result.SourceSHA256 = Digest(source)
 	return result, nil
+}
+
+type nativeFailure struct{ detail string }
+
+func (*nativeFailure) Error() string { return "scap_native_failed" }
+func (*nativeFailure) Unwrap() error { return issue("scap_native_failed") }
+func lastOutput(s string) string {
+	if len(s) > 3000 {
+		return s[len(s)-3000:]
+	}
+	return s
 }
 
 func nativeTempRoot() string {

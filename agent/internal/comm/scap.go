@@ -47,6 +47,9 @@ func (c *Client) executeScapScan(ctx context.Context, command *pb.CmdScapScan, r
 			ack.Code = 1
 			ack.Message = result.GetIssue()
 		}
+		if _, err := c.scapFinal(received.GetCmdId(), command, ack); err != nil {
+			ack = &pb.RptAck{CmdId: received.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "SCAP 最终指令记录保存失败"}
+		}
 		c.dedup.Put(received.GetCmdId(), ack)
 		c.pushReport(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(), Payload: &pb.Report_ScapResult{ScapResult: result}})
 		c.pushReport(c.wrapAck(ack))

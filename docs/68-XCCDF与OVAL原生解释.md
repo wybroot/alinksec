@@ -42,7 +42,7 @@ V027 为 SQLite／PostgreSQL 增加六张独立表；旧基线任务与等保条
 
 ## 安装与启用
 
-服务端镜像包含发行版提供的 `openscap-scanner` 和 util-linux。裸 JAR 部署同样需要 `/usr/bin/oscap`、`setsid`、`prlimit`、`setpriv`。解析在临时目录中完成，最多一个解析进程；root 服务端会降为 nobody 执行解析。外层设置地址空间、数据段、CPU、文件大小、描述符和 15 秒单次执行上限。原生解析发生在数据库写事务之前。
+服务端镜像包含发行版提供的 OpenSCAP 和 util-linux。当前 Jammy 镜像由 `libopenscap8` 提供 `/usr/bin/oscap`；Ubuntu 24.04 的原生验证安装 `openscap-scanner`。裸 JAR 部署同样需要 `/usr/bin/oscap`、`setsid`、`prlimit`、`setpriv`。解析在临时目录中完成，最多一个解析进程；root 服务端会降为 nobody 执行解析。外层设置地址空间、数据段、CPU、文件大小、描述符和 15 秒单次执行上限。原生解析发生在数据库写事务之前。
 
 Agent 默认未启用 SCC。管理员手动运行 `python3 deploy/baseline/scap/install-runtime.py <安装目录>`（Windows 使用对应 Python 命令），安装器从发布者固定地址获取 SCC 5.15，校验官方 bundle、内部归档和 CLI 的 SHA256，生成 `alinksec-runtime.json`。保留整个原生运行目录及 Documentation 中的许可证和第三方说明；不会安装系统服务或启用随包附带的基准内容。此步骤属于显式本地安装，不是自动更新机制。
 
@@ -66,7 +66,7 @@ Agent 与其他重任务共用执行槽并纳入资源反馈。Linux 限制每�
 
 九种 XCCDF 结果分别保留：pass、fail、error、unknown、notapplicable、notchecked、notselected、informational、fixed。页面同时显示标准名称和中文含义；fixed 不改写为 pass。原生模型得分保留 system、value、maximum，不用简单通过率替代。
 
-报告绑定主机、任务、指令、执行契约、内容摘要、Benchmark／Profile、引擎版本和运行时摘要；规则集合必须完整，无重复且得分有限。失败执行不携带部分成功结论。指令 DONE、FAILED 或超时占位不构造核查证据；第一份真实结果冻结保存，晚到真实结果可替换无证据占位。指令最终 ACK 持久化并参与重启后去重。
+报告绑定主机、任务、指令、执行契约、内容摘要、Benchmark／Profile、引擎版本和运行时摘要；规则集合必须完整，无重复且得分有限。失败执行不携带部分成功结论。指令 DONE、FAILED 或超时占位不构造核查证据；第一份真实结果冻结保存，晚到真实结果可替换无证据占位。最近 1,000 条已完成指令的最终 ACK 与指令内容摘要以有界私有记录持久化，重启后重放 ACK，不重复执行探测。中断且尚无最终记录的只读指令允许重新执行；更早已淘汰指令不提供永久去重承诺。
 
 证据包含标准结果、权重、原生得分和原生 XCCDF 文件的 SHA256。不会上传 OVAL collected host values，也不提供原始 ARF 导出。保存的规范证据可原样下载，附件响应提供 SHA256；网页再次校验后才保存文件。
 
@@ -76,4 +76,4 @@ Agent 与其他重任务共用执行槽并纳入资源反馈。Linux 限制每�
 
 Java 测试覆盖真实迁移和事务、错误绑定、完整结果集合、错误状态、迟到报告及审核发布门槛。SQLite／PostgreSQL REST 与网页用明确标记的协议结果夹具覆盖九种结果、角色、修订竞争、下载摘要、撤回后快照、就绪状态和移动布局；这些夹具不是原生合规证明。模块状态、完整 CI 和原始产物验收记录保存在模块检查点；全部必需验证完成后才合并。
 
-参考：[NIST XCCDF 1.2](https://csrc.nist.gov/publications/detail/nistir/7275/rev-4/final)、[OpenSCAP 原生 resolve 实现](https://github.com/OpenSCAP/openscap/blob/main/utils/oscap-xccdf.c)、[NIWC Atlantic SCC](https://www.niwcatlantic.navy.mil/Technology/SCAP/)、[SCC 5.15 发布者摘要](https://dl.dod.cyber.mil/wp-content/uploads/stigs/txt/SCC_5.15_Checksums.txt)。
+参考：[NIST XCCDF 1.2](https://csrc.nist.gov/publications/detail/nistir/7275/rev-4/final)、[OpenSCAP 原生 resolve 实现](https://github.com/OpenSCAP/openscap/blob/main/utils/oscap-xccdf.c)、[NIWC Atlantic SCC](https://www.niwcatlantic.navy.mil/Technology/SCAP/)、[SCC 5.15 发布者摘要](https://dl.dod.cyber.mil/wp-content/uploads/stigs/txt/SCC_5.15_Checksums.txt)、[Ubuntu Jammy oscap 文件来源](https://packages.ubuntu.com/jammy-updates/arm64/libopenscap8/filelist)。

@@ -46,18 +46,19 @@ import (
 
 // Client Agent 通信客户端：注册 + 主通道双向流
 type Client struct {
-	cfg         *config.Config
-	workDir     string
-	state       *State
-	queue       *OfflineQueue
-	dedup       *cmdDedup
-	log         *slog.Logger
-	configStore *configguard.Store
-	resources   *resources.Governor
-	clamav      *clamav.Client
-	yara        *yara.Client
-	scap        *scap.Client
-	bulkBusy    atomic.Bool
+	cfg           *config.Config
+	workDir       string
+	state         *State
+	queue         *OfflineQueue
+	dedup         *cmdDedup
+	log           *slog.Logger
+	configStore   *configguard.Store
+	resources     *resources.Governor
+	clamav        *clamav.Client
+	yara          *yara.Client
+	scap          *scap.Client
+	scapJournalMu sync.Mutex
+	bulkBusy      atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
@@ -675,6 +676,15 @@ func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx c
 		}
 	}
 	// 幂等：已处理过的指令直接重发上次 ACK
+	if cmd.GetScapScan() != nil {
+		previous, err := c.scapFinal(cmd.GetCmdId(), cmd.GetScapScan(), nil)
+		if err != nil {
+			return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "SCAP 指令记录不可用或内容身份冲突"}}
+		}
+		if previous != nil {
+			return []*pb.RptAck{previous}
+		}
+	}
 	if prev := c.dedup.Get(cmd.GetCmdId()); prev != nil {
 		if terminal(prev) {
 			return []*pb.RptAck{prev}

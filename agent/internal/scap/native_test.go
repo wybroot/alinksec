@@ -89,6 +89,8 @@ func TestNativeScapWorker(t *testing.T) {
 		}
 	}
 	if result.State != "complete" || result.Issue != "" || !validHash(result.SourceResultSha256) || len(result.Rules) != 5 || len(result.Scores) == 0 {
+		diagnostic, _ := runWorker(ctx, workerInput{Config: cfg, WorkDir: work, Archive: archive, Benchmark: content.Manifest.BenchmarkID, Profile: content.Manifest.ProfileID})
+		t.Log("actual bounded native failure diagnostic:", diagnostic.NativeError)
 		t.Fatalf("actual production worker did not complete: %+v", result)
 	}
 	expected := map[string]string{"xccdf_org.alinksec_rule_external": "pass", "xccdf_org.alinksec_rule_failure": "fail", "xccdf_org.alinksec_rule_compound": "pass", "xccdf_org.alinksec_rule_unselected": "notselected", "xccdf_org.alinksec_rule_platform": "notapplicable"}
