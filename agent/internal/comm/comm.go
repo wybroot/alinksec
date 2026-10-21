@@ -606,27 +606,28 @@ func (c *Client) buildHeartbeat() *pb.Report {
 		ReportId: newUUID(),
 		Ts:       time.Now().UnixMilli(),
 		Payload: &pb.Report_Heartbeat{Heartbeat: &pb.RptHeartbeat{
-			AgentVersion:           identity.AgentVersion,
-			CpuUsage:               s.CpuUsage,
-			MemUsage:               s.MemUsage,
-			ProcessCount:           s.ProcessCount,
-			UptimeSec:              s.UptimeSec,
-			PolicyVersion:          c.state.PolicyVersion,
-			GuardStatus:            guardStatus,
-			VirusExecutionContract: 2,
-			ClamavContract:         1,
-			ClamavStatus:           c.clamav.StatusJSON(),
-			YaraContract:           yara.Contract(),
-			YaraStatus:             c.yara.StatusJSON(),
-			WeakPasswordContract:   scan.WeakPasswordContract(),
-			WindowsLoginContract:   windowslogin.ExecutionContract(),
-			WindowsLoginStatus:     c.windowsLoginStatus(),
-			FileWatchContract:      fileWatchContract,
-			FileWatchStatus:        fileWatchStatus,
-			WindowsUpdateContract:  windowsupdate.ExecutionContract(),
-			UpgradeContract:        c.upgradeContract,
-			IsolationContract:      c.isolationContract,
-			DbVersion:              virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
+			AgentVersion:            identity.AgentVersion,
+			CpuUsage:                s.CpuUsage,
+			MemUsage:                s.MemUsage,
+			ProcessCount:            s.ProcessCount,
+			UptimeSec:               s.UptimeSec,
+			PolicyVersion:           c.state.PolicyVersion,
+			GuardStatus:             guardStatus,
+			VirusExecutionContract:  2,
+			ClamavContract:          1,
+			ClamavStatus:            c.clamav.StatusJSON(),
+			YaraContract:            yara.Contract(),
+			YaraStatus:              c.yara.StatusJSON(),
+			WeakPasswordContract:    scan.WeakPasswordContract(),
+			WindowsLoginContract:    windowslogin.ExecutionContract(),
+			WindowsLoginStatus:      c.windowsLoginStatus(),
+			FileWatchContract:       fileWatchContract,
+			FileWatchStatus:         fileWatchStatus,
+			WindowsUpdateContract:   windowsupdate.ExecutionContract(),
+			UpgradeContract:         c.upgradeContract,
+			IsolationContract:       c.isolationContract,
+			DbVersion:               virusscan.LocalVersion(c.workDir), // 落后即触发 CmdSignatureUpdate
+			SignatureUpdateContract: 1,
 		}},
 	}
 }
@@ -1078,7 +1079,7 @@ func (c *Client) executeVirusAction(va *pb.CmdVirusAction, received *pb.RptAck, 
 func (c *Client) executeSignatureUpdate(su *pb.CmdSignatureUpdate, received *pb.RptAck, sctx context.Context) []*pb.RptAck {
 	cmdID := received.GetCmdId()
 	// 版本比对：本地已是目标版本则幂等跳过（服务端重推场景）
-	if virusscan.LocalVersion(c.workDir) == su.GetDbVersion() {
+	if su.GetUpdateContract() == 0 && virusscan.LoadDB(c.workDir).Valid && virusscan.LocalVersion(c.workDir) == su.GetDbVersion() {
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Code: 0,
 			Message: "already at " + su.GetDbVersion()}}
 	}
@@ -1090,8 +1091,21 @@ func (c *Client) executeSignatureUpdate(su *pb.CmdSignatureUpdate, received *pb.
 		Message: "downloading " + su.GetDbVersion()}
 	go func() {
 		defer c.sigBusy.Store(false)
-		err := virusscan.UpdateDB(sctx, c.workDir, su.GetDownloadUrl(), su.GetSha256(), c.log)
+		var err error
+		var receipt virusscan.UpdateReceipt
+		switch su.GetUpdateContract() {
+		case 0:
+			err = virusscan.UpdateDB(sctx, c.workDir, su.GetDownloadUrl(), su.GetSha256(), c.log)
+		case 1:
+			receipt, err = virusscan.UpdateRelease(sctx, c.workDir, virusscan.UpdateSpec{Version: su.GetDbVersion(), URL: su.GetDownloadUrl(), SHA256: su.GetSha256(), DeltaURL: su.GetDeltaUrl(), DeltaSHA256: su.GetDeltaSha256(), BaseVersion: su.GetBaseVersion(), BaseContent: su.GetBaseContentSha256(), Content: su.GetContentSha256()})
+		default:
+			err = fmt.Errorf("unsupported signature update contract")
+		}
 		stage, code, msg := pb.RptAck_DONE, int32(0), "updated to "+su.GetDbVersion()
+		if err == nil && su.GetUpdateContract() == 1 {
+			encoded, _ := json.Marshal(receipt)
+			msg = string(encoded)
+		}
 		if err != nil {
 			stage, code, msg = pb.RptAck_FAILED, int32(1), "update failed: "+err.Error()
 			c.log.Error("特征库更新失败", "target", su.GetDbVersion(), "err", err)

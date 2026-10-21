@@ -40,8 +40,9 @@ public class AgentDownloadTokenService {
         }
         if ("patch".equals(resourceType)) return authorizedRepair(token,resourceKey);
         if ("virus-db".equals(resourceType)) {
-            var keys=jdbc.queryForList("SELECT package_key FROM t_virus_db ORDER BY id DESC LIMIT 1",String.class);
-            if (keys.size()!=1 || !keys.get(0).equals(resourceKey)) return false;
+            var keys=jdbc.queryForList("SELECT package_key,delta_key FROM t_virus_db ORDER BY id DESC LIMIT 1");
+            if (keys.size()!=1 || !keys.get(0).get("package_key").equals(resourceKey)
+                    && (String.valueOf(keys.get(0).get("delta_key")).isEmpty() || !keys.get(0).get("delta_key").equals(resourceKey))) return false;
         }
         Integer count = jdbc.queryForObject("""
                 SELECT count(*) FROM t_agent_download_token

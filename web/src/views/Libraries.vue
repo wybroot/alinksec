@@ -9,15 +9,17 @@
         <el-button v-if="canImport" type="primary" plain :loading="uploading" @click="cveInput.click()">导入漏洞库</el-button>
       </div>
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-      <el-descriptions :column="compact ? 1 : 2" :label-width="compact ? 110 : undefined" border style="margin-top:12px">
+      <el-descriptions v-if="!error" :column="compact ? 1 : 2" :label-width="compact ? 110 : undefined" border style="margin-top:12px">
         <el-descriptions-item label="病毒库版本">{{ state.signature?.db_version || '尚无可用特征库' }}</el-descriptions-item>
         <el-descriptions-item label="病毒检测依据">{{ state.signature?.hash_count || 0 }} 条哈希 / {{ state.signature?.rule_count || 0 }} 条内部规则</el-descriptions-item>
+        <el-descriptions-item label="更新包">全量 {{ packageSize(state.signature?.size) }}<template v-if="Number(state.signature?.delta_size) > 0"> · 增量 {{ packageSize(state.signature.delta_size) }}，基于 {{ state.signature.delta_base_version }}</template><template v-else> · 当前版本使用全量更新</template></el-descriptions-item>
         <el-descriptions-item label="已管理漏洞信息">{{ state.managedCveCount || 0 }} 条</el-descriptions-item>
         <el-descriptions-item label="含资产比对规则">{{ state.matchableCveCount || 0 }} 条</el-descriptions-item>
         <el-descriptions-item label="存储方式">{{ state.storage === 's3' ? '对象存储' : '本地持久化存储' }}</el-descriptions-item>
         <el-descriptions-item label="病毒库发布时间">{{ date(state.signature?.imported_at) }}</el-descriptions-item>
       </el-descriptions>
-      <el-alert v-if="!state.signature?.db_version || Number(state.signature?.hash_count || 0) + Number(state.signature?.rule_count || 0) === 0" title="当前有效病毒特征为空，缺少病毒识别依据；零特征不代表主机安全。请导入基础特征库或启用有效来源。" type="warning" :closable="false" show-icon style="margin-top:12px" />
+      <p v-if="!error" class="hint">支持增量更新且基库一致的 Agent 优先下载差量；基库不符或差量失败时回退完整包，校验失败保留旧库。旧 Agent 使用全量包。此处仅指内置哈希及内部规则库，ClamAV 与原生 YARA 沿用各自的本机配置。</p>
+      <el-alert v-if="!loading && !error && (!state.signature?.db_version || Number(state.signature?.hash_count || 0) + Number(state.signature?.rule_count || 0) === 0)" title="当前有效病毒特征为空，缺少病毒识别依据；零特征不代表主机安全。请导入基础特征库或启用有效来源。" type="warning" :closable="false" show-icon style="margin-top:12px" />
       <p class="hint">人工导入与远端同步可同时使用。远端不可用时，平台和 Agent 继续使用已有库；人工补充的规则优先保留。</p>
       <p class="hint">漏洞信息只有包含适用的软件和版本条件，才能参与资产比对。补丁包继续在漏洞修复流程中按需使用。</p>
       <el-alert v-if="state.unattributedCveCount" type="warning" :closable="false" :title="`${state.unattributedCveCount} 条历史漏洞缺少入库来源记录，请重新导入并扫描；旧依据保持未知`" style="margin-bottom:12px" />
@@ -235,6 +237,7 @@ const canImport = isAdmin || role === 'operator'
 const types = { hashes: '恶意文件哈希', 'signature-zip': '病毒特征包', malwarebazaar: 'MalwareBazaar', misp: 'MISP 文件情报', 'cve-json': '漏洞比对规则', nvd: 'NVD 漏洞信息' }
 const runStatus = { success: '成功', failed: '失败', running: '执行中', interrupted: '重启中断' }
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+const packageSize = value => Number.isFinite(Number(value)) && Number(value) > 0 ? `${(Number(value) / 1024).toFixed(1)} KiB` : '—'
 const nextCheck = value => !value ? '已暂停' : new Date(value).getTime() <= Date.now() ? '等待调度' : date(value)
 let timer
 function editSchedule(row) {

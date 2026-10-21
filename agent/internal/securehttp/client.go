@@ -36,7 +36,7 @@ func Get(ctx context.Context, workDir, rawURL string, timeout time.Duration) (*h
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
 			MinVersion: tls.VersionTLS12,
-		}},
+		}, DisableKeepAlives: true}, // This client is used for one package download.
 		CheckRedirect: func(next *http.Request, _ []*http.Request) error {
 			_, err := ValidateURL(next.URL.String())
 			return err

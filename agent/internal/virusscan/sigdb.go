@@ -12,6 +12,7 @@
 //	virus/db/hashes.txt   当前生效哈希库
 //	virus/db/manifest.json
 //	virus/quarantine/     隔离区（meta.json 记录原路径）
+//
 // 主动扫描每次读取文件字节，元数据缓存不构成放行依据。
 package virusscan
 
@@ -73,15 +74,11 @@ func QuarantineDir(workDir string) string { return filepath.Join(workDir, "virus
 
 // LocalVersion 当前本地特征库版本（未安装返回空串）
 func LocalVersion(workDir string) string {
-	b, err := os.ReadFile(filepath.Join(DBDir(workDir), "manifest.json"))
-	if err != nil {
+	db := LoadDB(workDir)
+	if !db.Valid {
 		return ""
 	}
-	var m dbManifest
-	if json.Unmarshal(b, &m) != nil {
-		return ""
-	}
-	return m.DbVersion
+	return db.Version
 }
 
 var (
@@ -93,6 +90,11 @@ var (
 
 // LoadDB 加载特征库到内存（进程内单例：特征库更新后调 ReloadDB 失效重载）
 func LoadDB(workDir string) *SigDB {
+	installMu.Lock()
+	defer installMu.Unlock()
+	if recoverDB(workDir) != nil {
+		return &SigDB{}
+	}
 	dbMu.Lock()
 	defer dbMu.Unlock()
 	if dbCached == nil || !dbCached.Valid || dbPath != DBDir(workDir) {
@@ -105,6 +107,11 @@ func LoadDB(workDir string) *SigDB {
 
 // ReloadDB 特征库更新后重载（next 单例重建）
 func ReloadDB(workDir string) *SigDB {
+	installMu.Lock()
+	defer installMu.Unlock()
+	if recoverDB(workDir) != nil {
+		return &SigDB{}
+	}
 	dbMu.Lock()
 	defer dbMu.Unlock()
 	dbPath = DBDir(workDir)
@@ -164,15 +171,31 @@ func parseDB(dir string) *SigDB {
 	if _, ok := fields["rule_count"]; ok && manifest.RuleCount != len(rules) {
 		return db
 	}
-	f, parent, err := openRegular(filepath.Join(dir, "hashes.txt"), false)
+	hashes, err := readHashes(filepath.Join(dir, "hashes.txt"))
 	if err != nil {
 		return db
+	}
+	db.hashes = hashes
+	if _, ok := fields["hash_count"]; ok && manifest.HashCount != len(db.hashes) {
+		return db
+	}
+	db.HashCount = len(db.hashes)
+	db.RuleCount = len(rules)
+	db.Valid = true
+	return db
+}
+
+func readHashes(path string) (map[string]HashEntry, error) {
+	hashes := map[string]HashEntry{}
+	f, parent, err := openRegular(path, false)
+	if err != nil {
+		return nil, fmt.Errorf("invalid signature hashes")
 	}
 	defer f.Close()
 	defer parent.Close()
 	info, err := f.Stat()
 	if err != nil || info.Size() > maxExpandedBytes {
-		return db
+		return nil, fmt.Errorf("invalid signature hashes")
 	}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 4096)
@@ -183,38 +206,32 @@ func parseDB(dir string) *SigDB {
 		}
 		parts := strings.Fields(line)
 		if len(parts) < 2 || len(parts) > 3 || len(parts[0]) != 64 || !utf8.ValidString(parts[1]) || utf8.RuneCountInString(parts[1]) > 255 {
-			return db
+			return nil, fmt.Errorf("invalid signature hashes")
 		}
 		if _, err := hex.DecodeString(parts[0]); err != nil {
-			return db
+			return nil, fmt.Errorf("invalid signature hashes")
 		}
 		severity := 4
 		if len(parts) == 3 {
 			value, err := strconv.Atoi(parts[2])
 			if err != nil || value < 1 || value > 5 {
-				return db
+				return nil, fmt.Errorf("invalid signature hashes")
 			}
 			severity = value
 		}
 		key := strings.ToLower(parts[0])
-		if _, duplicate := db.hashes[key]; duplicate {
-			return db
+		if _, duplicate := hashes[key]; duplicate {
+			return nil, fmt.Errorf("invalid signature hashes")
 		}
-		db.hashes[key] = HashEntry{Name: parts[1], Severity: int32(severity)}
-		if len(db.hashes) > maxHashEntries {
-			return db
+		hashes[key] = HashEntry{Name: parts[1], Severity: int32(severity)}
+		if len(hashes) > maxHashEntries {
+			return nil, fmt.Errorf("invalid signature hashes")
 		}
 	}
 	if scanner.Err() != nil {
-		return db
+		return nil, fmt.Errorf("invalid signature hashes")
 	}
-	if _, ok := fields["hash_count"]; ok && manifest.HashCount != len(db.hashes) {
-		return db
-	}
-	db.HashCount = len(db.hashes)
-	db.RuleCount = len(rules)
-	db.Valid = true
-	return db
+	return hashes, nil
 }
 
 var installMu sync.Mutex
@@ -222,8 +239,15 @@ var installMu sync.Mutex
 // InstallDB 安装特征库包：sha256 校验 → 解压到临时目录 → 原子替换 db 目录。
 // 失败保留旧库（断网沿用本地库）。
 func InstallDB(workDir, pkgPath, expectSha256 string) error {
+	return installDB(workDir, pkgPath, expectSha256, nil, false)
+}
+
+func installDB(workDir, pkgPath, expectSha256 string, spec *UpdateSpec, delta bool) error {
 	installMu.Lock()
 	defer installMu.Unlock()
+	if err := recoverDB(workDir); err != nil {
+		return err
+	}
 	if info, err := os.Stat(pkgPath); err != nil || info.Size() > 20<<20 {
 		return fmt.Errorf("signature package exceeds 20MiB or is unreadable")
 	}
@@ -252,7 +276,12 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 	defer os.RemoveAll(tmp)
 	// 解压（仅接受白名单文件名，防 zip 路径穿越）
 	allowed := map[string]bool{"manifest.json": true, "hashes.txt": true, "rules.json": true}
-	if len(zr.File) > 3 {
+	entryLimit := 3
+	if delta {
+		allowed["delta.json"], allowed["removed.txt"] = true, true
+		entryLimit = 5
+	}
+	if len(zr.File) > entryLimit {
 		return fmt.Errorf("unexpected package entries")
 	}
 	seen := map[string]bool{}
@@ -283,7 +312,21 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 		}
 		remaining -= n
 		rc.Close()
-		out.Close()
+		if err := out.Sync(); err != nil {
+			out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+	if delta {
+		if len(seen) != 5 {
+			return fmt.Errorf("incomplete delta")
+		}
+		if err := expandDelta(dbDir, tmp, *spec); err != nil {
+			return err
+		}
 	}
 	// manifest 必须存在（校验解压完整）
 	if _, err := os.Stat(filepath.Join(tmp, "manifest.json")); err != nil {
@@ -293,6 +336,25 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 	if err := validateInstalledDB(tmp); err != nil {
 		return err
 	}
+	if spec != nil {
+		db := parseDB(tmp)
+		digest, err := contentDigest(tmp)
+		if db.Version != spec.Version || err != nil || digest != spec.Content {
+			return fmt.Errorf("target content mismatch")
+		}
+	}
+	var expanded int64
+	for _, name := range []string{"manifest.json", "hashes.txt", "rules.json"} {
+		if info, err := os.Stat(filepath.Join(tmp, name)); err == nil {
+			expanded += info.Size()
+		}
+	}
+	if expanded > maxExpandedBytes {
+		return fmt.Errorf("target exceeds expanded capacity")
+	}
+	// Readers keep an immutable old snapshot until this complete target is live.
+	dbMu.Lock()
+	defer dbMu.Unlock()
 	// 原子替换：旧目录 → .old，tmp → db，删 .old
 	old := dbDir + ".old"
 	os.RemoveAll(old)
@@ -307,5 +369,6 @@ func InstallDB(workDir, pkgPath, expectSha256 string) error {
 		return fmt.Errorf("启用新库: %w", err)
 	}
 	os.RemoveAll(old)
+	dbCached = nil
 	return nil
 }
