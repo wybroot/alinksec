@@ -13,7 +13,11 @@ import java.util.UUID;
 public class ScapPackageService {
     private final JdbcTemplate jdbc;
     private final ScapTaskService tasks;
-    public ScapPackageService(JdbcTemplate jdbc,ScapTaskService tasks) {this.jdbc=jdbc;this.tasks=tasks;}
+    private final ScapResolver resolver;
+    private final org.springframework.transaction.support.TransactionTemplate transaction;
+    public ScapPackageService(JdbcTemplate jdbc,ScapTaskService tasks,ScapResolver resolver,org.springframework.transaction.PlatformTransactionManager manager) {
+        this.jdbc=jdbc;this.tasks=tasks;this.resolver=resolver;this.transaction=new org.springframework.transaction.support.TransactionTemplate(manager);
+    }
     public record Decision(Integer revision,String action,String note,List<String> agentIds) {}
 
     public List<Map<String,Object>> list() {
@@ -21,7 +25,7 @@ public class ScapPackageService {
     }
     public Map<String,Object> detail(String id) {
         var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
-        ScapStore.packageContent(row);row.remove("content_zip");row.put("metadata",JsonUtils.read(row.get("metadata").toString()));
+        ScapStore.packageContent(row);row.remove("content_zip");row.remove("source_zip");row.put("metadata",JsonUtils.read(row.get("metadata").toString()));row.put("resolution",JsonUtils.read(row.get("resolution").toString()));
         row.put("reviews",jdbc.queryForList("SELECT revision,action,note,actor,created_at FROM t_scap_package_review WHERE package_id=? ORDER BY revision",id));
         String task=row.get("last_test_task")==null?null:row.get("last_test_task").toString();
         row.put("testReady",ScapTaskService.testReady(jdbc,task));
@@ -31,19 +35,34 @@ public class ScapPackageService {
     public byte[] content(String id) {
         return ScapStore.packageContent(ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id)).archive();
     }
-    @Transactional
+    public byte[] source(String id) {
+        var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);ScapStore.packageContent(row);
+        return Base64.getDecoder().decode(row.get("source_zip").toString());
+    }
     public Map<String,Object> importContent(byte[] bytes,Long actor) {
         ScapStore.actor(actor);
-        var content=ScapPackage.read(bytes);var m=content.manifest();String code=m.path("code").asText(),version=m.path("version").asText();
+        var source=ScapPackage.read(bytes);var m=source.manifest();String code=m.path("code").asText(),version=m.path("version").asText();
+        // Native parsing happens before opening a write transaction. In
+        // particular, a SQLite import must not block heartbeats for 15 seconds.
+        var found=jdbc.queryForList("SELECT * FROM t_scap_package WHERE code=? AND version=?",code,version);
+        if (!found.isEmpty()) return sameSource(found.get(0),source);
+        var resolved=resolver.resolve(source);var content=resolved.content();
+        if (!content.manifest().equals(source.manifest())) throw new IllegalArgumentException("标准解析不得更改内容身份");
+        return transaction.execute(status->saveResolved(bytes,source,resolved,actor));
+    }
+    private Map<String,Object> sameSource(Map<String,Object> existing,ScapPackage source) {
+        ScapStore.packageContent(existing);
+        if (JsonUtils.read(existing.get("resolution").toString()).path("sourceCanonicalSha256").asText().equals(source.sha256())) return detail(existing.get("id").toString());
+        throw new IllegalArgumentException("同一内容编号和版本已存在不同内容，请使用新版本");
+    }
+    private Map<String,Object> saveResolved(byte[] bytes,ScapPackage source,ScapResolver.Resolved resolved,Long actor) {
+        var content=resolved.content();var m=content.manifest();String code=m.path("code").asText(),version=m.path("version").asText();
         ScapStore.gate(jdbc,code);
-        var existing=jdbc.queryForList("SELECT id,content_sha256 FROM t_scap_package WHERE code=? AND version=?",code,version);
-        if (!existing.isEmpty()) {
-            if (existing.get(0).get("content_sha256").equals(content.sha256())) return detail(existing.get(0).get("id").toString());
-            throw new IllegalArgumentException("同一内容编号和版本已存在不同内容，请使用新版本");
-        }
+        var existing=jdbc.queryForList("SELECT * FROM t_scap_package WHERE code=? AND version=?",code,version);
+        if (!existing.isEmpty()) return sameSource(existing.get(0),source);
         String id=UUID.randomUUID().toString();
-        jdbc.update("INSERT INTO t_scap_package(id,code,version,name,os_type,os_version_pattern,status,revision,source_sha256,content_sha256,content_zip,metadata,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                id,code,version,m.path("name").asText(),m.path("osType").intValue(),m.path("osVersionPattern").asText(),"candidate",0,content.sourceSha256(),content.sha256(),Base64.getEncoder().encodeToString(content.archive()),ScapStore.metadata(content),actor);
+        jdbc.update("INSERT INTO t_scap_package(id,code,version,name,os_type,os_version_pattern,status,revision,source_sha256,source_zip,resolution,content_sha256,content_zip,metadata,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id,code,version,m.path("name").asText(),m.path("osType").intValue(),m.path("osVersionPattern").asText(),"candidate",0,ScapPackage.digest(bytes),Base64.getEncoder().encodeToString(bytes),resolved.provenance(),content.sha256(),Base64.getEncoder().encodeToString(content.archive()),ScapStore.metadata(content),actor);
         jdbc.update("INSERT INTO t_scap_package_review(package_id,revision,action,note,actor) VALUES(?,?,?,?,?)",id,0,"import","导入离线内容，等待审核",actor);
         return detail(id);
     }

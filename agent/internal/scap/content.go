@@ -263,11 +263,17 @@ func inspectXML(data []byte) (*xmlInfo, error) {
 				info.catalog[name] = ref
 			}
 			if isXCCDF(space) && local == "Benchmark" {
+				if resolved := attr(t, "resolved"); resolved != "true" && resolved != "1" {
+					return nil, errors.New("scap_content_unresolved")
+				}
 				info.benchmarks++
 				info.benchmarkID = attr(t, "id")
 				benchmarkDepth = depth
 			}
 			if isXCCDF(space) && benchmarkDepth > 0 {
+				if attr(t, "extends") != "" {
+					return nil, errors.New("scap_content_unresolved")
+				}
 				if local == "Rule" {
 					id := attr(t, "id")
 					if !identifier.MatchString(id) || rules[id] || len(info.rules) >= MaxRules {

@@ -12,7 +12,7 @@ import (
 
 // These minimal documents test the transport boundary only. Native standards
 // validation is mandatory in the separate three-platform SCAP fixture job.
-const boundaryXML = `<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.2" id="xccdf_org.alinksec_benchmark_test"><Profile id="xccdf_org.alinksec_profile_test"/><Rule id="xccdf_org.alinksec_rule_test"><title>Test</title></Rule></Benchmark>`
+const boundaryXML = `<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.2" resolved="true" id="xccdf_org.alinksec_benchmark_test"><Profile id="xccdf_org.alinksec_profile_test"/><Rule id="xccdf_org.alinksec_rule_test"><title>Test</title></Rule></Benchmark>`
 
 func archiveFor(t *testing.T, xmlText, manifest string, extra map[string]string) []byte {
 	t.Helper()
@@ -54,6 +54,8 @@ func TestOfflineContentBoundary(t *testing.T) {
 	}
 	for name, xmlText := range map[string]string{
 		"entity":         `<!DOCTYPE Benchmark [<!ENTITY x SYSTEM "file:///etc/shadow">]>` + boundaryXML,
+		"unresolved":     strings.Replace(boundaryXML, `resolved="true"`, `resolved="false"`, 1),
+		"inheritance":    strings.Replace(boundaryXML, `<Profile `, `<Profile extends="xccdf_org.alinksec_profile_other" `, 1),
 		"repair":         strings.Replace(boundaryXML, "<title>Test</title>", `<title>Test</title><fix system="urn:xccdf:fix:script:sh">touch /tmp/should-never-run</fix>`, 1),
 		"sce":            strings.Replace(boundaryXML, "<title>Test</title>", `<check system="http://open-scap.org/page/SCE"><check-content-ref href="check.sh"/></check>`, 1),
 		"shell-probe":    strings.Replace(boundaryXML, "<title>Test</title>", `<shellcommand_test/>`, 1),

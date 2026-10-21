@@ -44,7 +44,12 @@ class ScapIntegrationTest {
         doAnswer(invocation->{String id=UUID.randomUUID().toString();sent.add(((Command.Builder)invocation.getArgument(1)).setCmdId(id).build());return id;})
                 .when(commands).dispatchAfterCommit(anyString(),any(Command.Builder.class),any());
         tasks=transactional(new ScapTaskService(jdbc,commands,new DatabaseDialect(props)));
-        packages=transactional(new ScapPackageService(jdbc,tasks));guard=new ScapCommandGuard(jdbc);
+        var resolver=mock(ScapResolver.class);
+        when(resolver.resolve(any())).thenAnswer(invocation->{
+            ScapPackage content=invocation.getArgument(0);
+            return new ScapResolver.Resolved(content,JsonUtils.write(Map.of("resolver","protocol fixture; native resolution tested separately","sourceCanonicalSha256",content.sha256())));
+        });
+        packages=transactional(new ScapPackageService(jdbc,tasks,resolver,manager));guard=new ScapCommandGuard(jdbc);
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,status,machine_id) VALUES('linux','Linux fixture',1,'ubuntu 24.04',1,'scap-fixture')");
         ready("ready",PIN);
     }

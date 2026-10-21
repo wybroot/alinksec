@@ -13,6 +13,8 @@ CREATE TABLE t_scap_package (
     status TEXT NOT NULL CHECK(status IN ('candidate','approved','published','withdrawn','rejected')),
     revision INTEGER NOT NULL DEFAULT 0,
     source_sha256 TEXT NOT NULL,
+    source_zip TEXT NOT NULL,
+    resolution TEXT NOT NULL,
     content_sha256 TEXT NOT NULL,
     content_zip TEXT NOT NULL,
     metadata TEXT NOT NULL,

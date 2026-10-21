@@ -53,7 +53,7 @@ export const fetchScapTasks = (page = 1) => get(`/api/baseline/scap/tasks?page=$
 export const fetchScapTask = id => get(`/api/baseline/scap/tasks/${encodeURIComponent(id)}`)
 export const createScapTask = data => post('/api/baseline/scap/tasks', data)
 export async function downloadScap(path, filename) {
-  if (!/^\/api\/baseline\/scap\/(packages|tasks)\/[A-Za-z0-9-]+\/(content|agents\/[A-Za-z0-9_.:-]+\/evidence)$/.test(path)) throw new Error('导出路径无效')
+  if (!/^\/api\/baseline\/scap\/(packages|tasks)\/[A-Za-z0-9-]+\/(source|content|agents\/[A-Za-z0-9_.:-]+\/evidence)$/.test(path)) throw new Error('导出路径无效')
   const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } })
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '导出失败')
   const bytes = await response.arrayBuffer()

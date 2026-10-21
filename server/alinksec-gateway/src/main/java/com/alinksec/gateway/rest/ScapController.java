@@ -32,6 +32,7 @@ public class ScapController {
         return ApiResult.ok(packages.decide(id,decision,actor(request)));
     }
     @GetMapping("/packages/{id}/content") public ResponseEntity<byte[]> downloadContent(@PathVariable String id) {return attachment(packages.content(id),"application/zip","scap-content.zip");}
+    @GetMapping("/packages/{id}/source") public ResponseEntity<byte[]> downloadSource(@PathVariable String id) {return attachment(packages.source(id),"application/zip","scap-original.zip");}
     @GetMapping("/targets") public ApiResult<List<Map<String,Object>>> targets() {return ApiResult.ok(ScapReadiness.targets(jdbc));}
     @PostMapping("/tasks") public ApiResult<Map<String,String>> create(@RequestBody Selection selection,HttpServletRequest request) {
         return ApiResult.ok(Map.of("taskId",tasks.create(selection.packageId(),selection.agentIds(),selection.name(),actor(request),false)));

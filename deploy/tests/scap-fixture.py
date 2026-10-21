@@ -9,9 +9,11 @@ from pathlib import Path
 import re
 from xml.sax.saxutils import escape
 import json
+import os
 import platform
 import sys
 import zipfile
+import xml.etree.ElementTree as E
 
 BENCHMARK = 'xccdf_org.alinksec_benchmark_native'
 PROFILE = 'xccdf_org.alinksec_profile_native'
@@ -122,6 +124,16 @@ def create(root):
     # exact same namespace URIs and Profile semantics.
     start=xml.index('<Benchmark ');end=xml.index('</Benchmark>')+len('</Benchmark>')
     section=re.sub(r'<(/?)([A-Za-z][A-Za-z0-9-]*)(?=[ >])',r'<\1xccdf:\2',xml[start:end])
+    resolved = os.getenv('ALINKSEC_SCAP_RESOLVED_BENCHMARK')
+    if resolved:
+        # This is the output of the actual production OpenSCAP resolver, not
+        # a fixture-specific implementation of Profile inheritance. Checks and
+        # CPE observations below remain native to each target OS.
+        section=Path(resolved).read_text(encoding='utf-8')
+        element=E.fromstring(section)
+        if element.tag!='{http://checklists.nist.gov/xccdf/1.2}Benchmark' or element.attrib.get('id')!=BENCHMARK or element.attrib.get('resolved') not in ['true','1'] or any('extends' in node.attrib for node in element.iter()):
+            raise RuntimeError('Native fixture requires complete standard resolution')
+        section=re.sub(r'^\s*<\?xml[^?]*\?>','',section)
     xml=xml[:start]+section+xml[end:]
     manifest = dict(schemaVersion=1, code='ALINKSEC-SCAP-NATIVE', version='1', name='Native SCAP fixture',
         osType=2 if platform.system()=='Windows' else 1, osVersionPattern='.*',

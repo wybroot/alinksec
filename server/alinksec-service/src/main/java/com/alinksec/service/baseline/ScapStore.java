@@ -50,6 +50,12 @@ final class ScapStore {
                 || !JsonUtils.read(metadata(content)).equals(JsonUtils.read(String.valueOf(row.get("metadata")))))
             throw new IllegalArgumentException("SCAP 内容或审核元数据摘要不匹配");
         var m=content.manifest();
+        String original=row.get("source_zip").toString();
+        if (original.length()>3*1024*1024) throw new IllegalArgumentException("SCAP 原始内容无效");
+        var source=ScapPackage.read(Base64.getDecoder().decode(original));
+        var resolution=JsonUtils.read(row.get("resolution").toString());
+        if (!ScapPackage.digest(Base64.getDecoder().decode(original)).equals(row.get("source_sha256"))||!source.manifest().equals(m)
+                || !source.sha256().equals(resolution.path("sourceCanonicalSha256").asText())) throw new IllegalArgumentException("SCAP 原始内容和标准解析来源不匹配");
         for (var field:Map.of("code","code","version","version","name","name","os_version_pattern","osVersionPattern").entrySet())
             if (!m.path(field.getValue()).asText().equals(row.get(field.getKey()))) throw new IllegalArgumentException("SCAP 内容身份不匹配");
         if (((Number)row.get("os_type")).intValue()!=m.path("osType").intValue()) throw new IllegalArgumentException("SCAP 系统身份不匹配");

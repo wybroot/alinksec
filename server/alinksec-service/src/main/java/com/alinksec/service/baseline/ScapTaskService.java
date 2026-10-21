@@ -49,6 +49,7 @@ public class ScapTaskService {
         Map<String,Object> snapshot=new LinkedHashMap<>();
         snapshot.put("packageId",packageId);snapshot.put("sourceSha256",row.get("source_sha256"));
         snapshot.put("contentSha256",content.sha256());snapshot.put("content",JsonUtils.read(ScapStore.metadata(content)));
+        snapshot.put("resolution",JsonUtils.read(row.get("resolution").toString()));
         snapshot.put("agentIds",List.copyOf(agents));
         Map<String,String> runtimePins=new LinkedHashMap<>();
         for (var target:targets) runtimePins.put(target.get("agent_id").toString(),JsonUtils.read(target.get("coverage").toString()).path("runtime_sha256").asText());

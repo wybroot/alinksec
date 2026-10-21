@@ -48,9 +48,11 @@
           <el-descriptions-item label="适用系统">{{ selected.os_type === 2 ? 'Windows' : 'Linux' }} · {{ selected.os_version_pattern }}</el-descriptions-item>
           <el-descriptions-item label="导入文件 SHA256"><span class="hash">{{ selected.source_sha256 }}</span></el-descriptions-item>
           <el-descriptions-item label="下发内容 SHA256"><span class="hash">{{ selected.content_sha256 }}</span></el-descriptions-item>
+          <el-descriptions-item label="标准解析">{{ selected.resolution?.resolver || '—' }} · 已解析 XCCDF 继承关系</el-descriptions-item>
         </el-descriptions>
         <div class="toolbar">
-          <el-button @click="download(`/api/baseline/scap/packages/${selected.id}/content`, 'scap-content.zip')">下载审核内容</el-button>
+          <el-button @click="download(`/api/baseline/scap/packages/${selected.id}/source`, 'scap-original.zip')">下载原始内容</el-button>
+          <el-button @click="download(`/api/baseline/scap/packages/${selected.id}/content`, 'scap-content.zip')">下载下发内容</el-button>
           <el-button v-if="selected.last_test_task" @click="viewTask({ id: selected.last_test_task })">查看最近测试</el-button>
         </div>
         <template v-if="admin && ['candidate', 'approved', 'published'].includes(selected.status)">
