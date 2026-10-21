@@ -6,6 +6,25 @@ import (
 	"time"
 )
 
+func (c *Client) scapProbeLoop(ctx context.Context) {
+	if !c.cfg.SCAP.Enabled {
+		return
+	}
+	tick := time.NewTicker(4 * time.Minute)
+	defer tick.Stop()
+	for {
+		if c.beginBulk() {
+			c.scap.Probe(ctx)
+			c.bulkBusy.Store(false)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
 func (c *Client) executeScapScan(ctx context.Context, command *pb.CmdScapScan, received *pb.RptAck) []*pb.RptAck {
 	if !c.beginBulk() {
 		return c.resourceBusy(received)

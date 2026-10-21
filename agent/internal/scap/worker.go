@@ -210,7 +210,32 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 		stdout, stderr := &cappedBuffer{limit: 64 << 10}, &cappedBuffer{limit: 4096}
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
-		if err := cmd.Run(); err != nil {
+		if err := cmd.Start(); err != nil {
+			return "", issue("scap_native_failed")
+		}
+		finished := make(chan error, 1)
+		go func() { finished <- cmd.Wait() }()
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		var nativeErr error
+		waiting := true
+		for waiting {
+			select {
+			case nativeErr = <-finished:
+				waiting = false
+			case <-tick.C:
+				if err := workspaceBudget(directory); err != nil {
+					cmd.Process.Kill()
+					<-finished
+					return "", err
+				}
+			case <-ctx.Done():
+				cmd.Process.Kill()
+				<-finished
+				return "", ctx.Err()
+			}
+		}
+		if nativeErr != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
@@ -244,7 +269,17 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 	if os.WriteFile(archive, input.Archive, 0600) != nil {
 		return result, issue("scap_worker_failed")
 	}
-	if _, err = run("--installScap", archive, input.Profile); err != nil {
+	if _, err = run("--installScap", archive); err != nil {
+		return result, err
+	}
+	profile, benchmark := input.Profile, input.Benchmark
+	if parts := strings.SplitN(profile, "_profile_", 2); len(parts) == 2 {
+		profile = parts[1]
+	}
+	if parts := strings.SplitN(benchmark, "_benchmark_", 2); len(parts) == 2 {
+		benchmark = parts[1]
+	}
+	if _, err = run("--setProfile", profile, benchmark); err != nil {
 		return result, err
 	}
 	if _, err = run("--userDir", reports); err != nil {
@@ -293,4 +328,39 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 	}
 	result.SourceSHA256 = Digest(source)
 	return result, nil
+}
+
+func workspaceBudget(directory string) error {
+	var total int64
+	count := 0
+	return filepath.WalkDir(directory, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return issue("scap_worker_failed")
+		}
+		count++
+		if count > 8192 {
+			return issue("scap_resource_limit")
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return issue("scap_resource_limit")
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return issue("scap_worker_failed")
+		}
+		total += info.Size()
+		if total > 640<<20 || info.Size() > 128<<20 {
+			return issue("scap_resource_limit")
+		}
+		return nil
+	})
 }

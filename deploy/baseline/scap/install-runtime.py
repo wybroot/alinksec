@@ -52,14 +52,19 @@ def main():
             size = 0
             while block := response.read(1 << 20):
                 size += len(block)
-                if size > 128 << 20:
-                    raise RuntimeError('SCC download exceeds 128 MiB')
+                if size > 256 << 20:
+                    raise RuntimeError('SCC download exceeds 256 MiB')
                 out.write(block)
         temporary.replace(archive)
-    bundle = checked(archive.read_bytes(), digest)
-    with zipfile.ZipFile(io.BytesIO(bundle)) as z:
+    checksum = hashlib.sha256()
+    with archive.open('rb') as stream:
+        while block := stream.read(1 << 20):
+            checksum.update(block)
+    if checksum.hexdigest() != digest:
+        raise RuntimeError('Official SCC bundle SHA256 mismatch')
+    with zipfile.ZipFile(archive) as z:
         entries = [e for e in z.infolist() if Path(e.filename).name == inner_name]
-        if len(entries) != 1 or entries[0].file_size > 128 << 20:
+        if len(entries) != 1 or entries[0].file_size > 256 << 20:
             raise RuntimeError('Missing bounded native SCC runtime')
         inner = checked(z.read(entries[0]), inner_digest)
     extracted = root/'extracted'

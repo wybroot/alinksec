@@ -327,7 +327,7 @@ func (c *Client) Run(ctx context.Context) error {
 	ctx = runCtx
 	go c.clamav.Run(ctx)
 	go c.yara.Run(ctx)
-	go c.scap.Run(ctx)
+	go c.scapProbeLoop(ctx)
 	if c.windowsLogin != nil {
 		go func() {
 			if err := c.windowsLogin.Run(ctx); err != nil {
