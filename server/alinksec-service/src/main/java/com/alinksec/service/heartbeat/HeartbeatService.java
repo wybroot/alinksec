@@ -56,6 +56,7 @@ public class HeartbeatService {
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
         agentRepository.heartbeat(agentId, hb.getAgentVersion(), hb.getPolicyVersion());
         agentRepository.virusContract(agentId,hb.getVirusExecutionContract(),hb.getDbVersion());
+        agentRepository.signatureUpdateContract(agentId,hb.getSignatureUpdateContract());
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
         agentRepository.isolationContract(agentId,hb.getIsolationContract());
         agentRepository.weakPasswordContract(agentId,hb.getWeakPasswordContract());

@@ -88,7 +88,7 @@ public record SignaturePackage(String version, Map<String, Hash> hashes, List<Js
         }
         return hashes;
     }
-    private static String readLine(BufferedReader reader) throws IOException {
+    static String readLine(BufferedReader reader) throws IOException {
         StringBuilder text = new StringBuilder();
         int value;
         while ((value = reader.read()) != -1 && value != '\n') {

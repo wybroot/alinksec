@@ -190,6 +190,12 @@ message CmdSignatureUpdate {
   string db_version   = 1;    // 病毒特征库版本（心跳比对，落后即触发）
   string download_url = 2;    // MinIO 预签名 URL（1h）
   string sha256       = 3;
+  uint32 update_contract = 4; // 1: exact content identity, adjacent delta, full fallback
+  string delta_url = 5;
+  string delta_sha256 = 6;
+  string base_version = 7;
+  string base_content_sha256 = 8;
+  string content_sha256 = 9; // SHA256 of the three lowercase member SHA256 strings
 }
 
 message CmdVulnFix {
@@ -248,6 +254,7 @@ message RptHeartbeat {
   string clamav_status = 19; // readiness and reported version, not a corpus digest
   uint32 yara_contract = 20; // 1 only with native YARA and bounded isolated workers
   string yara_status = 21; // native version plus exact pinned rule source SHA256
+  uint32 signature_update_contract = 22; // 1: bounded delta reconstruction and full fallback
 }
 
 message RptIsolationState {

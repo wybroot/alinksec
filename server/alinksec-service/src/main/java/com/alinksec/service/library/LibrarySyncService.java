@@ -315,7 +315,7 @@ public class LibrarySyncService {
             row.put("coverage", "malwarebazaar".equals(source.getType()) ? "recent-60m" : "nvd".equals(source.getType()) ? "modified-window" : "misp".equals(source.getType()) ? "curated-snapshot" : "configured-feed");
             sources.add(row);
         }
-        var virusRows = jdbc.queryForList("SELECT db_version,hash_count,rule_count,imported_at FROM t_virus_db ORDER BY id DESC LIMIT 1");
+        var virusRows = jdbc.queryForList("SELECT db_version,hash_count,rule_count,imported_at,size,content_sha256,delta_base_version,delta_size FROM t_virus_db ORDER BY id DESC LIMIT 1");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sources", sources); result.put("running", busy.get()); result.put("storage", props.getStorage().getBackend());
         result.put("signature", virusRows.isEmpty() ? Map.of() : virusRows.get(0));

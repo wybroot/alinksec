@@ -117,19 +117,27 @@ public class LibraryCatalog {
                     out.putNextEntry(new ZipEntry(entry.getKey())); Files.copy(entry.getValue(), out); out.closeEntry();
                 }
             }
+            if (Files.size(zip)>(20L<<20)) throw new IllegalArgumentException("压缩特征包超过Agent的20MiB上限，保留原版本");
+            String content=SignatureDelta.identity(zip).digest();
+            var previous=jdbc.queryForList("SELECT db_version,package_key,sha256 FROM t_virus_db ORDER BY id DESC LIMIT 1");
             String key = version + ".zip";
             files.put("signature", key, zip);
+            List<String> publishedKeys=new ArrayList<>(); publishedKeys.add(key);
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                     new org.springframework.transaction.support.TransactionSynchronization() {
                         @Override public void afterCompletion(int status) {
-                            if (status!=STATUS_COMMITTED) try { files.delete("signature",key); }
+                            if (status!=STATUS_COMMITTED) for (String candidate:publishedKeys) try { files.delete("signature",candidate); }
                             catch (IOException e) { org.slf4j.LoggerFactory.getLogger(LibraryCatalog.class).warn("Unreferenced signature candidate cleanup deferred"); }
                         }
                     });
+            DeltaPublication delta=prepareDelta(previous,zip,version);
+            if (!delta.key().isEmpty()) publishedKeys.add(delta.key());
             jdbc.update("""
-                    INSERT INTO t_virus_db(db_version,package_key,sha256,size,hash_count,rule_count,imported_by)
-                    VALUES (?,?,?,?,?,?,?)
-                    """, version, key, SignaturePackage.sha256(zip), Files.size(zip), hashCount, ruleRows.size(), actor);
+                    INSERT INTO t_virus_db(db_version,package_key,sha256,size,hash_count,rule_count,imported_by,
+                      content_sha256,delta_base_version,delta_base_content_sha256,delta_key,delta_sha256,delta_size)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, version, key, SignaturePackage.sha256(zip), Files.size(zip), hashCount, ruleRows.size(), actor,
+                    content,delta.baseVersion(),delta.baseContent(),delta.key(),delta.sha256(),delta.size());
             jdbc.update("""
                     INSERT INTO t_security_feed_state(source_id,kind,status,cursor,version,entry_count,success_at)
                     VALUES ('_signature-release','internal','success',?,?,?,?)
@@ -138,6 +146,39 @@ public class LibraryCatalog {
                     """, fingerprint, version, hashCount, Instant.now().toString());
             return Map.of("dbVersion", version, "hashCount", hashCount, "ruleCount", ruleRows.size(), "changed", true);
         } finally { Files.deleteIfExists(hashes); Files.deleteIfExists(rules); Files.deleteIfExists(zip); }
+    }
+    private record DeltaPublication(String baseVersion,String baseContent,String key,String sha256,long size) {
+        static DeltaPublication none() { return new DeltaPublication("","","","",0); }
+    }
+    private DeltaPublication prepareDelta(List<Map<String,Object>> previous,Path target,String version) {
+        if (previous.isEmpty()) return DeltaPublication.none();
+        Path base=null,patch=null;
+        try {
+            base=files.temporary(".zip"); patch=files.temporary(".zip");
+            var row=previous.get(0);
+            var download=files.download("signature",String.valueOf(row.get("package_key")));
+            if (download==null) return DeltaPublication.none();
+            try (var in=download.resource().getInputStream(); var out=Files.newOutputStream(base)) {
+                if (download.size()>(20L<<20)) return DeltaPublication.none();
+                byte[] buffer=new byte[8192]; long count=0; int n;
+                while ((n=in.read(buffer))!=-1) { count+=n; if (count>(20L<<20)) throw new IOException("Base exceeds limits"); out.write(buffer,0,n); }
+            }
+            if (!SignaturePackage.sha256(base).equals(row.get("sha256"))) throw new IOException("Base package digest mismatch");
+            var difference=SignatureDelta.build(base,target,patch,props.getMaxHashes());
+            if (!difference.base().version().equals(row.get("db_version"))) throw new IOException("Base package version mismatch");
+            long size=Files.size(patch),full=Files.size(target);
+            if (size*5>=full*4 || full-size<256) return DeltaPublication.none();
+            String key=version+".delta.zip";
+            String digest=SignaturePackage.sha256(patch);
+            files.put("signature",key,patch);
+            return new DeltaPublication(difference.base().version(),difference.base().digest(),key,digest,size);
+        } catch (IOException | IllegalArgumentException e) {
+            org.slf4j.LoggerFactory.getLogger(LibraryCatalog.class).warn("Optional signature delta unavailable; publishing complete release: {}",e.getClass().getSimpleName());
+            return DeltaPublication.none();
+        } finally {
+            for (Path path:new Path[]{base,patch}) if (path!=null) try { Files.deleteIfExists(path); }
+            catch (IOException e) { org.slf4j.LoggerFactory.getLogger(LibraryCatalog.class).warn("Signature delta temporary cleanup deferred"); }
+        }
     }
     public synchronized int cves(String source, List<JsonNode> documents) {
         return cves(source, documents, null);
@@ -357,14 +398,15 @@ public class LibraryCatalog {
         var protectedIds = jdbc.queryForList("SELECT id FROM t_virus_db ORDER BY id DESC LIMIT ?", Long.class, props.getRetainVersions());
         if (protectedIds.isEmpty()) return 0;
         var candidates = jdbc.queryForList("""
-                SELECT id,package_key FROM t_virus_db WHERE id < ? AND imported_at < ?
+                SELECT id,package_key,delta_key FROM t_virus_db WHERE id < ? AND imported_at < ?
                   AND NOT EXISTS (SELECT 1 FROM t_agent_download_token t
-                    WHERE t.resource_type='virus-db' AND t.resource_key=t_virus_db.package_key AND t.expire_at > ?)
+                    WHERE t.resource_type='virus-db' AND (t.resource_key=t_virus_db.package_key OR t.resource_key=t_virus_db.delta_key) AND t.expire_at > ?)
                 ORDER BY id LIMIT 100
                 """, protectedIds.get(protectedIds.size() - 1), database.timestampBefore(java.time.Duration.ofDays(props.getRetainDays())), database.timestamp(Instant.now()));
         int removed = 0;
         for (var row : candidates) {
             files.delete("signature", (String) row.get("package_key"));
+            if (!String.valueOf(row.get("delta_key")).isEmpty()) files.delete("signature",String.valueOf(row.get("delta_key")));
             removed += jdbc.update("DELETE FROM t_virus_db WHERE id=?", row.get("id"));
         }
         return removed;
