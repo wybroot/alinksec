@@ -10,17 +10,19 @@ func (c *Client) scapProbeLoop(ctx context.Context) {
 	if !c.cfg.SCAP.Enabled {
 		return
 	}
-	tick := time.NewTicker(4 * time.Minute)
-	defer tick.Stop()
 	for {
+		delay := 5 * time.Second
 		if c.beginBulk() {
 			c.scap.Probe(ctx)
 			c.bulkBusy.Store(false)
+			delay = 4 * time.Minute
 		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-tick.C:
+		case <-timer.C:
 		}
 	}
 }

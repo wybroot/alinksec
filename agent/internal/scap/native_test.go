@@ -25,7 +25,7 @@ func TestNativeScapWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range manifest.Files {
-		if !safePath(file.Path) {
+		if !safeRuntimePath(file.Path) {
 			t.Fatalf("official runtime path is outside supported boundary: %q", file.Path)
 		}
 	}

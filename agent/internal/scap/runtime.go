@@ -42,6 +42,10 @@ func validHash(s string) bool {
 	return true
 }
 
+// Official Windows SCC ships libstdc++-6.dll. Only the pinned runtime permits
+// '+' in file names; imported content retains its stricter transport grammar.
+func safeRuntimePath(name string) bool { return safePath(strings.ReplaceAll(name, "+", "_")) }
+
 // Only pinned files enter the disposable executable directory. Unlisted
 // modules, content and loader hooks in the installation are never inherited.
 func cloneRuntime(ctx context.Context, cfg Config, destination string) (string, error) {
@@ -73,7 +77,7 @@ func cloneRuntime(ctx context.Context, cfg Config, destination string) (string, 
 			return "", ctx.Err()
 		}
 		fold := strings.ToLower(file.Path)
-		if !safePath(file.Path) || seen[file.Path] || folded[fold] || strings.HasPrefix(file.Path, "Resources/Content/") || file.Size < 0 || file.Size > 128<<20 || !validHash(file.SHA256) {
+		if !safeRuntimePath(file.Path) || seen[file.Path] || folded[fold] || strings.HasPrefix(file.Path, "Resources/Content/") || file.Size < 0 || file.Size > 128<<20 || !validHash(file.SHA256) {
 			return "", issue("scap_config_invalid")
 		}
 		seen[file.Path] = true

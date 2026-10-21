@@ -101,6 +101,8 @@ jobs:
           ALINKSEC_SCAP_RESULT_DIR: ${{ github.workspace }}/.tmp/scap-native/execution/reports
       - name: Check actual production Agent SCAP worker
         run: python deploy/tests/scap-agent-native.py
+      - name: Check actual Agent enrollment, mTLS SCAP commands and durable replay
+        run: python deploy/tests/scap-agent-native.py --roundtrip
       - name: Retain native interpreter identity
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,6 +113,7 @@ jobs:
             .tmp/scap-native/runtime-manifest.json
             .tmp/scap-native/options-template.xml
             .tmp/scap-native/agent.json
+            .tmp/scap-native/roundtrip.json
             .tmp/scap-resolved/provenance.json
             .tmp/scap-native/execution/result.json
             .tmp/scap-native/execution/options-after-install.xml
@@ -1003,8 +1006,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "26"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "70"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "27"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "76"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

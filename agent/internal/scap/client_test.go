@@ -36,7 +36,7 @@ func TestRuntimeCloneChecksEveryModuleAndRejectsUnlistedFiles(t *testing.T) {
 	if filepath.Separator == '\\' {
 		executable = "cscc.exe"
 	}
-	files := map[string][]byte{executable: []byte("trusted launcher"), "options.xml": []byte("<options/>"), "lib/module.pm": []byte("trusted module")}
+	files := map[string][]byte{executable: []byte("trusted launcher"), "options.xml": []byte("<options/>"), "lib/module.pm": []byte("trusted module"), "lib64/libstdc++-6.dll": []byte("pinned native library")}
 	manifest := runtimeManifest{SchemaVersion: 1, Engine: "SCC", Version: "5.15", Platform: runtime.GOOS + "-" + runtime.GOARCH, Executable: executable}
 	for name, data := range files {
 		path := filepath.Join(root, filepath.FromSlash(name))
