@@ -16,6 +16,19 @@ func TestNativeScapWorker(t *testing.T) {
 	}
 	dir := filepath.Dir(os.Getenv("ALINKSEC_SCAP_TEST_BIN"))
 	pin := os.Getenv("ALINKSEC_SCAP_TEST_RUNTIME_SHA256")
+	manifestBytes, err := os.ReadFile(filepath.Join(dir, "alinksec-runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest runtimeManifest
+	if err = json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range manifest.Files {
+		if !safePath(file.Path) {
+			t.Fatalf("official runtime path is outside supported boundary: %q", file.Path)
+		}
+	}
 	archive, err := os.ReadFile(os.Getenv("ALINKSEC_SCAP_FIXTURE_ZIP"))
 	if err != nil {
 		t.Fatal(err)

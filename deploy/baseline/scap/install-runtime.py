@@ -109,6 +109,8 @@ def main():
                     executable=binary.name, files=files)
     manifest_bytes = (json.dumps(manifest, ensure_ascii=True, separators=(',',':'))+'\n').encode('utf-8')
     (runtime/'alinksec-runtime.json').write_bytes(manifest_bytes)
+    (root/'runtime-manifest.json').write_bytes(manifest_bytes)
+    (root/'options-template.xml').write_bytes((runtime/'options.xml').read_bytes())
     runtime_digest = hashlib.sha256(manifest_bytes).hexdigest()
     # Running help/version uses the complete native runtime; it does not scan.
     command = [str(binary), '--version']

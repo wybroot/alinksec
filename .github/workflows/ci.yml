@@ -108,6 +108,8 @@ jobs:
           name: scap-native-${{ matrix.platform }}
           path: |
             .tmp/scap-native/install.json
+            .tmp/scap-native/runtime-manifest.json
+            .tmp/scap-native/options-template.xml
             .tmp/scap-native/agent.json
             .tmp/scap-resolved/provenance.json
             .tmp/scap-native/execution/result.json
@@ -421,7 +423,7 @@ jobs:
       - name: Check rule provenance, backport declarations and unsafe historical references in the production web bundle
         working-directory: web
         run: node test/vulnerability-provenance-browser.mjs
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux openscap-scanner
       - run: mvn -B package
         env:
           ALINKSEC_PATCH_NATIVE_REQUIRED: "true"

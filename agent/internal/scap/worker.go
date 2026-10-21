@@ -252,7 +252,7 @@ func executeNative(ctx context.Context, input workerInput) (workerOutput, error)
 	if err != nil {
 		return result, err
 	}
-	if !strings.Contains(version, "scc version: 5.12 date:") {
+	if !strings.Contains(version, "scc version: 5.15 date:") {
 		return result, issue("scap_engine_version")
 	}
 	if input.Probe {
