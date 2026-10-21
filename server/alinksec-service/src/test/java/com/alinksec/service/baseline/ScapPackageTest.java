@@ -60,7 +60,7 @@ class ScapPackageTest {
         String path=System.getenv("ALINKSEC_SCAP_FIXTURE_ZIP");
         org.junit.jupiter.api.Assumptions.assumeTrue(path!=null&&!path.isBlank(),"requires real native standards fixture");
         var content=ScapPackage.read(Files.readAllBytes(Path.of(path)));
-        assertEquals(5,content.rules().size());assertEquals(2,content.profiles().size());
+        assertEquals(5,content.rules().size());assertEquals(3,content.profiles().size());
         assertEquals("xccdf_org.alinksec_profile_native",content.manifest().path("profileId").asText());
         assertArrayEquals(content.archive(),ScapPackage.read(content.archive()).archive());
     }

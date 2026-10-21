@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 
@@ -37,11 +38,12 @@ public class HeartbeatService {
     private final com.alinksec.service.protect.FileWatchService fileWatch;
     private final com.alinksec.service.virus.ClamavService clamav;
     private final com.alinksec.service.virus.YaraService yara;
+    private final JdbcTemplate jdbc;
 
     public HeartbeatService(AgentRepository agentRepository, CommandService commandService,
                             AlinkSecProperties props, PolicyStoreService policyStore,
                             VirusDbService virusDbService, com.alinksec.service.protect.WindowsLoginService windowsLogin,
-                            com.alinksec.service.protect.FileWatchService fileWatch, com.alinksec.service.virus.ClamavService clamav, com.alinksec.service.virus.YaraService yara) {
+                            com.alinksec.service.protect.FileWatchService fileWatch, com.alinksec.service.virus.ClamavService clamav, com.alinksec.service.virus.YaraService yara, JdbcTemplate jdbc) {
         this.agentRepository = agentRepository;
         this.commandService = commandService;
         this.props = props;
@@ -51,6 +53,7 @@ public class HeartbeatService {
         this.fileWatch = fileWatch;
         this.clamav = clamav;
         this.yara = yara;
+        this.jdbc = jdbc;
     }
 
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
@@ -66,6 +69,7 @@ public class HeartbeatService {
         fileWatch.heartbeat(agentId,hb);
         clamav.heartbeat(agentId,hb);
         yara.heartbeat(agentId,hb);
+        com.alinksec.service.baseline.ScapReadiness.heartbeat(jdbc,agentId,hb);
 
         String current = policyStore.currentVersion();
         if (!current.equals(hb.getPolicyVersion())) {

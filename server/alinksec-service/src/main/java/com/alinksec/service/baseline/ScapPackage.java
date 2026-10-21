@@ -104,7 +104,7 @@ public record ScapPackage(byte[] archive, String sha256, String sourceSha256, Js
                 if (xccdf(element) && "check".equals(local)
                         && !Set.of("http://oval.mitre.org/XMLSchema/oval-definitions-5", "http://scap.nist.gov/schema/ocil/2", "http://scap.nist.gov/schema/ocil/2.0").contains(element.getAttribute("system")))
                     throw invalid("只允许 OVAL 声明式检查或 OCIL 人工问题");
-                if ("check-content".equals(local) || local != null && local.matches("(?i).*(shellcommand|powershell|cmdlet).*"))
+                if ("check-content".equals(local) || local != null && local.matches("(?i)(.*(shellcommand|powershell|cmdlet).*|sql_.*|sql57_.*)"))
                     throw invalid("核查内容不得包含脚本探针");
                 if ("http://www.w3.org/2001/XInclude".equals(element.getNamespaceURI()) || element.hasAttributeNS(XMLConstants.XML_NS_URI, "base"))
                     throw invalid("核查内容不得包含 XInclude 或外部基路径");

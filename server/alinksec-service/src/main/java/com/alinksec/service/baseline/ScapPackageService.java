@@ -1,0 +1,92 @@
+package com.alinksec.service.baseline;
+
+import com.alinksec.common.util.JsonUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@Service
+public class ScapPackageService {
+    private final JdbcTemplate jdbc;
+    private final ScapTaskService tasks;
+    public ScapPackageService(JdbcTemplate jdbc,ScapTaskService tasks) {this.jdbc=jdbc;this.tasks=tasks;}
+    public record Decision(Integer revision,String action,String note,List<String> agentIds) {}
+
+    public List<Map<String,Object>> list() {
+        return jdbc.queryForList("SELECT id,code,version,name,os_type,os_version_pattern,status,revision,source_sha256,content_sha256,created_by,created_at FROM t_scap_package ORDER BY created_at DESC,id DESC LIMIT 1000");
+    }
+    public Map<String,Object> detail(String id) {
+        var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
+        ScapStore.packageContent(row);row.remove("content_zip");row.put("metadata",JsonUtils.read(row.get("metadata").toString()));
+        row.put("reviews",jdbc.queryForList("SELECT revision,action,note,actor,created_at FROM t_scap_package_review WHERE package_id=? ORDER BY revision",id));
+        String task=row.get("last_test_task")==null?null:row.get("last_test_task").toString();
+        row.put("testReady",ScapTaskService.testReady(jdbc,task));
+        if (task!=null) row.put("testTask",tasks.detail(task));
+        return row;
+    }
+    public byte[] content(String id) {
+        return ScapStore.packageContent(ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id)).archive();
+    }
+    @Transactional
+    public Map<String,Object> importContent(byte[] bytes,Long actor) {
+        ScapStore.actor(actor);
+        var content=ScapPackage.read(bytes);var m=content.manifest();String code=m.path("code").asText(),version=m.path("version").asText();
+        ScapStore.gate(jdbc,code);
+        var existing=jdbc.queryForList("SELECT id,content_sha256 FROM t_scap_package WHERE code=? AND version=?",code,version);
+        if (!existing.isEmpty()) {
+            if (existing.get(0).get("content_sha256").equals(content.sha256())) return detail(existing.get(0).get("id").toString());
+            throw new IllegalArgumentException("同一内容编号和版本已存在不同内容，请使用新版本");
+        }
+        String id=UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO t_scap_package(id,code,version,name,os_type,os_version_pattern,status,revision,source_sha256,content_sha256,content_zip,metadata,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id,code,version,m.path("name").asText(),m.path("osType").intValue(),m.path("osVersionPattern").asText(),"candidate",0,content.sourceSha256(),content.sha256(),Base64.getEncoder().encodeToString(content.archive()),ScapStore.metadata(content),actor);
+        jdbc.update("INSERT INTO t_scap_package_review(package_id,revision,action,note,actor) VALUES(?,?,?,?,?)",id,0,"import","导入离线内容，等待审核",actor);
+        return detail(id);
+    }
+    @Transactional
+    public Map<String,Object> decide(String id,Decision decision,Long actor) {
+        ScapStore.actor(actor);
+        if (decision==null||decision.revision()==null||decision.revision()<0||decision.action()==null) throw new IllegalArgumentException("缺少版本状态或审核操作");
+        String note=ScapStore.note(decision.note());
+        var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
+        ScapStore.gate(jdbc,row.get("code").toString());row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
+        ScapStore.packageContent(row);
+        int revision=((Number)row.get("revision")).intValue();
+        if (decision.revision()!=revision) throw new IllegalArgumentException("内容状态已变化，请刷新后重试");
+        String status=row.get("status").toString(),next=status,test=null;
+        switch (decision.action()) {
+            case "approve","reject" -> {
+                if (!status.equals("candidate")) throw new IllegalArgumentException("仅待审核内容可批准或拒绝");
+                next=decision.action().equals("approve")?"approved":"rejected";
+            }
+            case "test" -> {
+                if (!status.equals("approved")) throw new IllegalArgumentException("仅已审核内容可下发测试");
+                test=tasks.create(id,decision.agentIds(),"SCAP 内容测试",actor,true);
+            }
+            case "publish" -> {
+                if (!status.equals("approved")||!ScapTaskService.testReady(jdbc,row.get("last_test_task")==null?null:row.get("last_test_task").toString()))
+                    throw new IllegalArgumentException("需先完成当前候选内容的原生测试，排除执行异常和未知结果");
+                var previous=jdbc.queryForList("SELECT id,revision FROM t_scap_package WHERE code=? AND status='published' AND id<>?",row.get("code"),id);
+                for (var old:previous) {
+                    int oldRevision=((Number)old.get("revision")).intValue()+1;
+                    jdbc.update("UPDATE t_scap_package SET status='withdrawn',revision=? WHERE id=?",oldRevision,old.get("id"));
+                    jdbc.update("INSERT INTO t_scap_package_review(package_id,revision,action,note,actor) VALUES(?,?,?,?,?)",old.get("id"),oldRevision,"superseded","由已测试版本替代: "+row.get("version"),actor);
+                }
+                next="published";
+            }
+            case "withdraw" -> {
+                if (!List.of("approved","published").contains(status)) throw new IllegalArgumentException("仅已审核或已发布内容可撤回");
+                next="withdrawn";
+            }
+            default -> throw new IllegalArgumentException("未知的 SCAP 内容操作");
+        }
+        if (jdbc.update("UPDATE t_scap_package SET status=?,revision=?,last_test_task=COALESCE(?,last_test_task) WHERE id=? AND revision=?",next,revision+1,test,id,revision)!=1)
+            throw new IllegalArgumentException("内容状态已变化，请刷新后重试");
+        jdbc.update("INSERT INTO t_scap_package_review(package_id,revision,action,note,actor) VALUES(?,?,?,?,?)",id,revision+1,decision.action(),note,actor);
+        return detail(id);
+    }
+}

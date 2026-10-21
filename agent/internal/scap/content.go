@@ -246,7 +246,7 @@ func inspectXML(data []byte) (*xmlInfo, error) {
 				info.ids[id] = true
 			}
 			lower := strings.ToLower(local)
-			if local == "check-content" || strings.Contains(lower, "shellcommand") || strings.Contains(lower, "powershell") || strings.Contains(lower, "cmdlet") || isXCCDF(space) && local == "fix" {
+			if local == "check-content" || strings.Contains(lower, "shellcommand") || strings.Contains(lower, "powershell") || strings.Contains(lower, "cmdlet") || strings.HasPrefix(lower, "sql_") || strings.HasPrefix(lower, "sql57_") || isXCCDF(space) && local == "fix" {
 				return nil, errors.New("scap_executable_content")
 			}
 			if isXCCDF(space) && local == "check" {
