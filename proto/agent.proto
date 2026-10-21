@@ -106,6 +106,7 @@ message CmdScapScan {
   string content_sha256 = 4;
   string benchmark_id = 5;
   string profile_id = 6;
+  string runtime_sha256 = 7; // expected locally approved runtime from recent readiness
 }
 
 message CmdVulnScan {
@@ -268,6 +269,8 @@ message RptHeartbeat {
   uint32 yara_contract = 20; // 1 only with native YARA and bounded isolated workers
   string yara_status = 21; // native version plus exact pinned rule source SHA256
   uint32 signature_update_contract = 22; // 1: bounded delta reconstruction and full fallback
+  uint32 scap_contract = 23; // 1: pinned offline native SCAP interpreter and exact XCCDF outcomes
+  string scap_status = 24; // bounded readiness; not a compliance certificate
 }
 
 message RptIsolationState {

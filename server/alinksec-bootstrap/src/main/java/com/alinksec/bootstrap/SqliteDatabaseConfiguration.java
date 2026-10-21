@@ -65,7 +65,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V023__clamav_engine.sql",
                 "db/common/V024__native_yara_engine.sql",
                 "db/common/V025__signature_delta.sql",
-                "db/common/V026__baseline_compliance_review.sql"
+                "db/common/V026__baseline_compliance_review.sql",
+                "db/common/V027__scap_interpreter.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

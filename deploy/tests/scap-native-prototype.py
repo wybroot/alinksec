@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise actual SCC semantics in a private runtime and disposable fixture."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,7 +33,7 @@ def main():
     settings = dict(downloadExternalFiles='0', appCheckForUpdates='0', contentCheckForUpdates='0',
         appUpdateURL='',contentRepository='', ignoreCPEOVALResults='0',
         saveResultsForNotApplicableContent='1', answerOCILwithSCAP='0',
-        validateContentOnInstall='1', validateContent='1', validateDigitalSignature='0',
+        validateContentOnInstall='1', validateContent='1', validateDigitalSignature='0',failOnXMLDSig='0',
         contentDevModeSkipValidation='0', reviewType='local', newInstall='0',filterSCAPContentPerFamily='0',
         sharedOptions='1', customPathLocal=str(root/'reports'), keepXCCDFXML='1', keepOVALXML='0',
         keepOCILXML='0', keepCPEXML='0',keepARFXML='0', saveDISACKL='0', saveDISACKLB='0',
@@ -55,6 +56,13 @@ def main():
             evidence['commands'].append({'args':args,'exit':result.returncode,'stdout':result.stdout[-16000:],'stderr':result.stderr[-16000:]})
             if result.returncode:
                 raise RuntimeError('Native SCC command failed')
+            if args[0]=='--installScap':
+                installed=runtime/'Resources'/'Content'/'SCAP12_Content'/'native-ds.xml'
+                evidence['sourceXmlSha256']=hashlib.sha256((root/'fixture'/'native-ds.xml').read_bytes()).hexdigest()
+                evidence['installedXmlSha256']=hashlib.sha256(installed.read_bytes()).hexdigest() if installed.exists() else ''
+                shutil.copyfile(runtime/'options.xml',root/'options-after-install.xml')
+                if evidence['sourceXmlSha256']!=evidence['installedXmlSha256']:
+                    raise RuntimeError('Native installed source differs from reviewed XML')
         if prefix:
             subprocess.run([*prefix,'chown','-R',f'{os.getuid()}:{os.getgid()}',str(root)],check=True,timeout=30)
         ns={'x':'http://checklists.nist.gov/xccdf/1.2'}
@@ -66,7 +74,7 @@ def main():
                     if rule in evidence['outcomes']:
                         raise RuntimeError('Duplicate native rule result')
                     evidence['outcomes'][rule]=result.find('x:result',ns).text
-        expected={fixture.PREFIX+name:value for name,value in dict(external='pass',failure='fail',compound='pass',unselected='notselected').items()}
+        expected={fixture.PREFIX+name:value for name,value in dict(external='pass',failure='fail',compound='pass',unselected='notselected',platform='notapplicable').items()}
         if evidence['outcomes']!=expected:
             raise RuntimeError('Native Profile/OVAL outcomes differ: '+str(evidence['outcomes']))
         evidence['accepted']=True

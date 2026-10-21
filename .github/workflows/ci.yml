@@ -40,6 +40,22 @@ jobs:
           cache-dependency-path: agent/go.sum
       - name: Extract and verify official native SCAP interpreter
         run: python deploy/tests/scap-install.py .tmp/scap-native
+      - name: Create disposable standards fixture
+        run: python deploy/tests/scap-fixture.py .tmp/scap-native/execution/fixture
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'linux-amd64'
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - name: Check server SCAP import boundary
+        if: matrix.platform == 'linux-amd64'
+        run: mvn -B -pl alinksec-service -am -Dtest=ScapPackageTest -Dsurefire.failIfNoSpecifiedTests=false test
+        working-directory: server
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/scap-native/execution/fixture/content.zip
       - name: Check native XCCDF Profile and OVAL variable semantics
         run: python deploy/tests/scap-native-prototype.py .tmp/scap-native/execution
       - name: Check Agent content boundary and complete native result parsing
@@ -56,7 +72,9 @@ jobs:
           path: |
             .tmp/scap-native/install.json
             .tmp/scap-native/execution/result.json
+            .tmp/scap-native/execution/options-after-install.xml
             .tmp/scap-native/execution/reports
+            server/alinksec-service/target/surefire-reports/*ScapPackageTest*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

@@ -111,7 +111,7 @@ func TestNativeScapEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("actual native XCCDF result: %v", err)
 		}
-		expected := map[string]string{"external": "pass", "failure": "fail", "compound": "pass", "unselected": "notselected"}
+		expected := map[string]string{"external": "pass", "failure": "fail", "compound": "pass", "unselected": "notselected", "platform": "notapplicable"}
 		if len(rules) != len(expected) || len(scores) == 0 {
 			t.Fatal("incomplete native evidence")
 		}
