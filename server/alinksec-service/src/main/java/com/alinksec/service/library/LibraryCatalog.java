@@ -224,7 +224,9 @@ public class LibraryCatalog {
                     provenance.put("verification", "parsed_transport_document");
                 }
                 var old = jdbc.queryForList("SELECT document,provenance FROM t_security_cve WHERE source_id=? AND cve_id=?", source, id);
-                if (old.isEmpty() || !serialized.equals(old.get(0).get("document")))
+                if (old.isEmpty() || !serialized.equals(old.get(0).get("document"))
+                        || !nativeProvenance.isEmpty() && !JsonUtils.read(old.get(0).get("provenance").toString()).path("raw_documents")
+                                .equals(JsonUtils.mapper().valueToTree(nativeProvenance.get("raw_documents"))))
                     event(source, id, "import", actor, document.path("withdrawal_reason").asText(""), serialized, provenance);
                 jdbc.update("""
                         INSERT INTO t_security_cve(source_id,cve_id,document,matchable,provenance) VALUES (?,?,?,?,?)

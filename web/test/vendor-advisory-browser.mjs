@@ -62,6 +62,7 @@ try {
   const event = page.waitForEvent('download')
   await page.getByRole('button', { name: '下载原件并校验摘要', exact: true }).click()
   assert.equal(hash(readFileSync(await (await event).path())), document.sha256)
+  await expect(page.locator('.el-message')).toHaveCount(0)
   await shot('native-document-desktop.png')
   checks.push('captured-SQLite-REST-document-and-origin-provenance; verified-original-byte-download; applicability-boundaries-visible; admin-sync')
   tamper = true
@@ -81,6 +82,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 }); await shot('native-document-mobile.png')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   await detail.getByRole('button', { name: 'Close this dialog' }).click()
+  await expect(detail).toBeHidden()
   await shot('native-archive-mobile.png')
   checks.push('mobile-document-and-archive-dialogs-have-no-page-overflow')
   unavailable = true

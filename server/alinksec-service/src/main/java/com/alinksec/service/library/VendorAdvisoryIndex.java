@@ -97,7 +97,7 @@ final class VendorAdvisoryIndex {
         return List.copyOf(result.values());
     }
     static void add(Map<String,Candidate> result, Candidate candidate) {
-        if (result.put(candidate.id(), candidate) != null || result.size() > 4096) throw invalid();
+        if (result.put(candidate.id(), candidate) != null || result.size() > 32768) throw invalid();
     }
     static IllegalArgumentException invalid() { return new IllegalArgumentException("厂商公告索引、范围或配置校验失败"); }
 }

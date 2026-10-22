@@ -144,7 +144,7 @@
       <el-pagination v-model:current-page="advisories.page" :total="advisories.total" :page-size="20" layout="prev, pager, next" @current-change="loadAdvisories" />
     </el-dialog>
     <el-dialog :model-value="!!advisoryDetail" title="厂商公告原件记录" :width="compact ? 'calc(100% - 24px)' : '680px'" @close="advisoryDetail = null">
-      <template v-if="advisoryDetail">
+      <div v-if="advisoryDetail" class="native-detail">
         <el-alert :title="advisoryDetail.verification" type="info" :closable="false" />
         <p>{{ advisoryDetail.document_id }} · {{ advisoryDetail.publisher }} · {{ types[advisoryDetail.format] }}</p>
         <p>{{ advisoryDetail.title }}</p>
@@ -157,7 +157,7 @@
         <el-alert v-if="advisoryDownloadError" :title="advisoryDownloadError" type="error" :closable="false" />
         <el-button v-if="advisoryDetail.raw_available" :loading="advisoryDownloading" @click="downloadAdvisory">下载原件并校验摘要</el-button>
         <p v-else>原件已按保留策略清理，原始摘要和导入记录仍保留。</p>
-      </template>
+      </div>
     </el-dialog>
     <el-dialog v-model="schedule.visible" title="同步计划" :width="compact ? 'calc(100% - 24px)' : '540px'" :close-on-click-modal="!schedule.saving" :show-close="!schedule.saving">
       <el-form label-width="110px">
@@ -360,6 +360,7 @@ onUnmounted(() => { clearInterval(timer); viewport.removeEventListener('change',
 </script>
 
 <style scoped>
+.native-detail p { margin: 10px 0; line-height: 1.6; }
 .declaration { border-top: 1px solid #e2e8f0; padding: 12px 0; }
 .digest { overflow-wrap: anywhere; }
 .document-description { white-space: pre-wrap; overflow-wrap: anywhere; }

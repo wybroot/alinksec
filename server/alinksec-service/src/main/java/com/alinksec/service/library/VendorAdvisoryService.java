@@ -165,7 +165,7 @@ public final class VendorAdvisoryService {
         byte[] bytes=Base64.getDecoder().decode(encoded);
         if (bytes.length>(4<<20) || !sha(bytes).equals(expected)) throw VendorAdvisoryIndex.invalid();
         JsonNode rows=VendorAdvisoryIndex.json(bytes).path("candidates");
-        if (!rows.isArray() || rows.size()>4096) throw VendorAdvisoryIndex.invalid();
+        if (!rows.isArray() || rows.size()>32768) throw VendorAdvisoryIndex.invalid();
         var result=new ArrayList<VendorAdvisoryIndex.Candidate>();
         for (var row:rows) result.add(new VendorAdvisoryIndex.Candidate(row.path("id").asText(),row.path("address").asText(),Instant.parse(row.path("updated").asText())));
         return result;
