@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS t_vendor_document (
   rule_count INTEGER NOT NULL,
   imported_at VARCHAR(40) NOT NULL,
   checked_at VARCHAR(40) NOT NULL,
+  discovery_updated_at VARCHAR(40) NOT NULL DEFAULT '1970-01-01T00:00:00Z',
   etag VARCHAR(512) NOT NULL DEFAULT '',
   last_modified VARCHAR(128) NOT NULL DEFAULT '',
   UNIQUE(source_id,document_id,configuration_sha256,sha256)

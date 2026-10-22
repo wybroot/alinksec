@@ -67,7 +67,7 @@ public final class VendorAdvisoryService {
         VendorAdvisoryIndex.Candidate direct=VendorAdvisoryIndex.direct(source);
         List<VendorAdvisoryIndex.Candidate> candidates=direct==null?discover(source,budget):List.of(direct);
         Map<String,Map<String,Object>> current=new HashMap<>();
-        for (var row:jdbc.queryForList("SELECT document_id,vendor_updated_at,checked_at,origin,etag,last_modified FROM t_vendor_document WHERE source_id=? AND current_version=1",source.getId()))
+        for (var row:jdbc.queryForList("SELECT document_id,vendor_updated_at,discovery_updated_at,checked_at,origin,etag,last_modified FROM t_vendor_document WHERE source_id=? AND current_version=1",source.getId()))
             current.put(row.get("document_id").toString(),row);
         var pending=new ArrayList<VendorAdvisoryIndex.Candidate>();
         Set<String> discovered=new HashSet<>();
@@ -79,7 +79,7 @@ public final class VendorAdvisoryService {
         for (var row:current.values()) {
             String id=row.get("document_id").toString();
             if (!discovered.contains(id)) {
-                var item=new VendorAdvisoryIndex.Candidate(id,row.get("origin").toString(),Instant.EPOCH);
+                var item=new VendorAdvisoryIndex.Candidate(id,row.get("origin").toString(),Instant.parse(row.get("discovery_updated_at").toString()));
                 if (needsCheck(item,row)) pending.add(item);
             }
         }
@@ -95,13 +95,13 @@ public final class VendorAdvisoryService {
             if (response.status()==304) {
                 if (old.isEmpty()) throw VendorAdvisoryIndex.invalid();
                 catalog.nativeTransaction(source.getId(),()-> {
-                    jdbc.update("UPDATE t_vendor_document SET checked_at=? WHERE source_id=? AND document_id=? AND current_version=1",Instant.now().toString(),source.getId(),item.id());
+                    jdbc.update("UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=? WHERE source_id=? AND document_id=? AND current_version=1",Instant.now().toString(),item.updated().toString(),source.getId(),item.id());
                     return null;
                 });
             } else {
                 var parsed=VendorAdvisoryAdapter.parse(source,response.raw());
                 if (!parsed.id().equals(item.id())) throw VendorAdvisoryIndex.invalid();
-                store(source,item.address(),response,parsed);
+                store(source,item.address(),item.updated(),response,parsed);
             }
             checked++;
             progress(source.getId(),candidates.size(),pending.size()-checked,checked);
@@ -109,7 +109,7 @@ public final class VendorAdvisoryService {
         return jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id=?",Integer.class,source.getId());
     }
     private static boolean needsCheck(VendorAdvisoryIndex.Candidate item, Map<String,Object> old) {
-        return old==null || item.updated().isAfter(Instant.parse(old.get("vendor_updated_at").toString()))
+        return old==null || item.updated().isAfter(Instant.parse(old.get("discovery_updated_at").toString()))
                 || Instant.parse(old.get("checked_at").toString()).isBefore(Instant.now().minusSeconds(86_400));
     }
     private void progress(String source,int discovered,int pending,int checked) {
@@ -170,12 +170,12 @@ public final class VendorAdvisoryService {
         for (var row:rows) result.add(new VendorAdvisoryIndex.Candidate(row.path("id").asText(),row.path("address").asText(),Instant.parse(row.path("updated").asText())));
         return result;
     }
-    private void store(LibraryProperties.Source source,String origin,Response response,VendorAdvisoryAdapter.Document document) {
+    private void store(LibraryProperties.Source source,String origin,Instant discoveredUpdate,Response response,VendorAdvisoryAdapter.Document document) {
         String sourceId=source.getId(),digest=sha(response.raw()),fingerprint=VendorAdvisoryIndex.fingerprint(source);
         catalog.nativeTransaction(sourceId,()-> {
             var old=jdbc.queryForList("SELECT id,sha256,vendor_updated_at FROM t_vendor_document WHERE source_id=? AND document_id=? AND current_version=1",sourceId,document.id());
             if (!old.isEmpty() && digest.equals(old.get(0).get("sha256"))) {
-                jdbc.update("UPDATE t_vendor_document SET checked_at=?,etag=?,last_modified=? WHERE id=?",Instant.now().toString(),response.etag(),response.modified(),old.get(0).get("id"));
+                jdbc.update("UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=?,etag=?,last_modified=? WHERE id=?",Instant.now().toString(),discoveredUpdate.toString(),response.etag(),response.modified(),old.get(0).get("id"));
                 return null;
             }
             if (!old.isEmpty() && !document.updated().equals(Instant.EPOCH)
@@ -197,6 +197,7 @@ public final class VendorAdvisoryService {
                         origin,originKind(source,origin),digest,response.raw().length,Base64.getEncoder().encodeToString(response.raw()),document.cves().size(),ruleCount,now,now,response.etag(),response.modified());
             } else jdbc.update("UPDATE t_vendor_document SET current_version=1,raw_base64=?,checked_at=?,etag=?,last_modified=? WHERE id=?",
                     Base64.getEncoder().encodeToString(response.raw()),now,response.etag(),response.modified(),archive);
+            jdbc.update("UPDATE t_vendor_document SET discovery_updated_at=? WHERE id=?",discoveredUpdate.toString(),archive);
             pruneRaw(sourceId,document.id());
             Long bytes=jdbc.queryForObject("SELECT COALESCE(sum(size_bytes),0) FROM t_vendor_document WHERE raw_base64 IS NOT NULL",Long.class);
             if (bytes>limits.getMaxArchiveBytes()) throw new IllegalArgumentException("厂商公告原件容量已满，已有文档保留");

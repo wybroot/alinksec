@@ -5,6 +5,11 @@
 # MISP can use its native adapter below. OpenCTI still requires a curated export bridge.
 # Console enabled/interval overrides persist in the database; restore deployment configuration to reset.
 alinksec:
+  vendor-advisories:
+    max-archive-bytes: 268435456
+    max-document-bytes: 33554432
+    documents-per-sync: 2
+    retain-raw-versions: 2
   libraries:
     storage:
       backend: local
@@ -16,6 +21,37 @@ alinksec:
       # access-key: ${ALINKSEC_LIBRARY_S3_ACCESS_KEY:}
       # secret-key: ${ALINKSEC_LIBRARY_S3_SECRET_KEY:}
     sources:
+      # Native formats require no API key. Blank URL selects the official endpoint.
+      # Identity/scope is pinned on first sync: use a new ID after changes, retire the old source.
+      - id: ubuntu-usn
+        type: ubuntu-usn
+        enabled: false
+        interval-ms: 7200000
+        initial-days: 7
+        vendor-pages: 5
+      - id: debian-tracker
+        type: debian-tracker
+        enabled: false
+        interval-ms: 7200000
+        vendor-packages: [openssl, curl, expat]
+        # Explicit SOURCE packages; their states never become binary-package findings.
+      - id: redhat-csaf
+        type: redhat-csaf
+        enabled: false
+        interval-ms: 7200000
+        initial-days: 7
+        # Only map a publisher product ID after checking the actual managed distribution release.
+        # Unmapped products remain metadata. Fixed EVRs never imply all older EVRs are affected.
+        # vendor-products:
+        #   - product-id: AppStream-9.3.0.Z.MAIN
+        #     distro-id: rhel
+        #     distro-version: '9.3'
+      - id: msrc-cvrf
+        type: msrc-cvrf
+        enabled: false
+        interval-ms: 7200000
+        initial-days: 7
+        # CVRF products/KB/builds are metadata; use native Windows Update for live applicability.
       - id: misp
         type: misp
         enabled: false

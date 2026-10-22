@@ -1166,6 +1166,18 @@ jobs:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_VENDOR_NATIVE_SAMPLES: ${{ github.workspace }}/.tmp/vendor-native-samples
           ALINKSEC_VENDOR_ADVISORY_FIXTURES: ${{ github.workspace }}/.tmp/vendor-advisory-fixtures
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm test && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - name: Check native archive console against captured REST responses
+        run: node test/vendor-advisory-browser.mjs
+        working-directory: web
       - name: Retain native documents, SHA-256 and parser reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -1174,6 +1186,7 @@ jobs:
           path: |
             .tmp/vendor-native-samples
             .tmp/vendor-advisory-fixtures
+            .tmp/vendor-advisory-browser
             server/**/target/surefire-reports/*VendorAdvisory*
           include-hidden-files: true
           if-no-files-found: error

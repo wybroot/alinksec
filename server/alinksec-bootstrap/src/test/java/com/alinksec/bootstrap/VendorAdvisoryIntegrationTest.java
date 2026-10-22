@@ -36,7 +36,7 @@ class VendorAdvisoryIntegrationTest {
     HikariDataSource pool; JdbcTemplate jdbc; LibraryProperties props; LibraryFiles files;
     LibraryCatalog catalog; LibrarySyncService sync; LibrarySchedule schedules; VendorAdvisoryProperties limits;
     VendorAdvisoryService service; LibraryProperties.Source source; HttpServer http; ExecutorService workers;
-    MockMvc mvc; String base,id,cve; boolean pg;
+    MockMvc mvc; String base,id,cve; boolean pg; Long actor;
     final Map<String,byte[]> bodies=new ConcurrentHashMap<>();
     final AtomicInteger requests=new AtomicInteger(),conditional=new AtomicInteger(),redirectTarget=new AtomicInteger();
     volatile int status=200; volatile boolean force304;
@@ -49,6 +49,7 @@ class VendorAdvisoryIntegrationTest {
         config.setMaximumPoolSize(3);config.setMinimumIdle(1);pool=new HikariDataSource(config);
         if (!pg) new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor().postProcessAfterInitialization(pool,"dataSource");
         jdbc=new JdbcTemplate(pool);
+        actor=jdbc.queryForObject("INSERT INTO t_user(username,password_hash,role_id,status) VALUES (?,'unused',1,1) RETURNING id",Long.class,"native-"+UUID.randomUUID());
         String suffix=UUID.randomUUID().toString().replace("-","");id="vendor-"+suffix;
         cve="CVE-2098-"+Long.toUnsignedString(UUID.randomUUID().getMostSignificantBits()).substring(0,12);
         http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);workers=Executors.newCachedThreadPool();http.setExecutor(workers);
@@ -79,6 +80,7 @@ class VendorAdvisoryIntegrationTest {
             for (String table:List.of("t_vendor_contribution","t_vendor_document","t_vendor_sync_state","t_security_governance_event","t_security_cve","t_security_feed_run","t_security_feed_state","t_security_feed_schedule","t_security_source_lifecycle"))
                 jdbc.update("DELETE FROM "+table+" WHERE source_id=?",id);
             jdbc.update("DELETE FROM t_cve_db WHERE cve_id=?",cve);
+            jdbc.update("DELETE FROM t_user WHERE id=?",actor);
         }
         if(files!=null)files.close();if(pool!=null)pool.close();
     }
@@ -90,7 +92,7 @@ class VendorAdvisoryIntegrationTest {
     }
     List<Map<String,Object>> archives() { return jdbc.queryForList("SELECT * FROM t_vendor_document WHERE source_id=? ORDER BY imported_at DESC,id DESC",id); }
     JsonNode declaration() { return JsonUtils.read(jdbc.queryForObject("SELECT document FROM t_security_cve WHERE source_id=? AND cve_id=?",String.class,id,cve)); }
-    String token(String role) { return JwtUtil.sign(SECRET,Map.of("uid",7,"username","fixture","role",role),3600); }
+    String token(String role) { return JwtUtil.sign(SECRET,Map.of("uid",actor,"username","fixture","role",role),3600); }
     JsonNode getData(String path,String role) throws Exception {
         var result=mvc.perform(get(path).header("Authorization","Bearer "+token(role))).andReturn();assertEquals(200,result.getResponse().getStatus());
         return JsonUtils.mapper().readTree(result.getResponse().getContentAsByteArray()).path("data");
@@ -131,7 +133,7 @@ class VendorAdvisoryIntegrationTest {
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);String archive=archives().get(0).get("id").toString();
         source.setUrl(base+"/other/notices/USN-1-1.json");int prior=requests.get();assertThrows(IllegalArgumentException.class,()->service.sync(source));assertEquals(prior,requests.get());
-        source.setUrl(base+"/notices/USN-1-1.json");catalog.retire(id,7L,"Fixture retired");
+        source.setUrl(base+"/notices/USN-1-1.json");catalog.retire(id,actor,"Fixture retired");
         assertThrows(IllegalArgumentException.class,()->service.sync(source));assertNotNull(service.raw(id,archive));assertEquals(1,archives().size());
     }
     @Test void archiveAndContributionChangesRollbackTogetherWhenMergedCveExceedsCapacity() throws Exception {
