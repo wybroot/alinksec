@@ -36,6 +36,7 @@ class VendorAdvisoryIntegrationTest {
     HikariDataSource pool; JdbcTemplate jdbc; LibraryProperties props; LibraryFiles files;
     LibraryCatalog catalog; LibrarySyncService sync; LibrarySchedule schedules; VendorAdvisoryProperties limits;
     VendorAdvisoryService service; LibraryProperties.Source source; HttpServer http; ExecutorService workers;
+    VulnMatchService assetMatcher;
     MockMvc mvc; String base,id,cve; boolean pg; Long actor;
     final Map<String,byte[]> bodies=new ConcurrentHashMap<>();
     final AtomicInteger requests=new AtomicInteger(),conditional=new AtomicInteger(),redirectTarget=new AtomicInteger();
@@ -68,7 +69,8 @@ class VendorAdvisoryIntegrationTest {
         files=new LibraryFiles(props,platform);catalog=new LibraryCatalog(jdbc,props,files,new DatabaseDialect(platform),new DataSourceTransactionManager(pool));
         schedules=new LibrarySchedule(props,jdbc);limits=new VendorAdvisoryProperties();
         var downloader=new FeedDownload(files,props);
-        sync=new LibrarySyncService(props,catalog,mock(VirusDbService.class),downloader,jdbc,mock(VulnMatchService.class),schedules,limits);
+        assetMatcher=mock(VulnMatchService.class);
+        sync=new LibrarySyncService(props,catalog,mock(VirusDbService.class),downloader,jdbc,assetMatcher,schedules,limits);
         service=sync.nativeAdvisories(id);sync.validate();
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
         mvc=MockMvcBuilders.standaloneSetup(new LibraryController(sync,catalog,props,schedules)).setControllerAdvice(new RestExceptionHandler())
@@ -131,6 +133,17 @@ class VendorAdvisoryIntegrationTest {
         assertEquals(frozen,JsonUtils.write(declaration()));assertEquals(1,archives().size());
         jdbc.update("DELETE FROM t_vendor_contribution WHERE source_id=?",id);jdbc.update("DELETE FROM t_vendor_document WHERE source_id=?",id);
         force304=true;assertThrows(Exception.class,()->service.sync(source));assertEquals(0,archives().size());
+    }
+    @Test void partiallyCommittedRoundRechecksAssetsAndReportsDurableCounts() {
+        source.setUrl(base);String now=Instant.now().toString();
+        bodies.put("/notices.json",bytes(Map.of("notices",List.of(Map.of("id","USN-1-1","published",now),Map.of("id","USN-1-2","published",now)))));
+        bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted before failure",true));
+        bodies.put("/notices/USN-1-2.json",bytes(Map.of("id","invalid")));
+        sync.sync(source);verify(assetMatcher).matchAll(0);
+        assertEquals(1,archives().size());var state=jdbc.queryForMap("SELECT * FROM t_security_feed_state WHERE source_id=?",id);
+        assertEquals("failed",state.get("status"));assertEquals(1,((Number)state.get("entry_count")).intValue());
+        assertEquals(1,((Number)service.state(id).get("pending_count")).intValue());
+        assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_run WHERE source_id=?",String.class,id));
     }
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);String archive=archives().get(0).get("id").toString();

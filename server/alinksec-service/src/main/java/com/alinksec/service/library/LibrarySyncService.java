@@ -109,6 +109,8 @@ public class LibrarySyncService {
     private void sync(LibraryProperties.Source source, String triggerType) {
         String id = source.getId();
         if (catalog.isRetired(id)) throw new IllegalArgumentException("来源已退役");
+        long nativeBefore=VendorAdvisoryAdapter.TYPES.contains(source.getType())
+                ? jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class) : -1;
         jdbc.update("""
                 INSERT INTO t_security_feed_state(source_id,kind,checked_at,status) VALUES (?,?,?,'running')
                 ON CONFLICT(source_id) DO UPDATE SET kind=EXCLUDED.kind,checked_at=EXCLUDED.checked_at,status='running',error=''
@@ -121,7 +123,6 @@ public class LibrarySyncService {
             if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) {
                 int count=vendors.sync(source);
                 success(id,count,"","","");
-                matcher.matchAll(0);
                 return;
             }
             if ("nvd".equals(source.getType())) { syncNvd(source); return; }
@@ -181,6 +182,14 @@ public class LibrarySyncService {
             jdbc.update("UPDATE t_security_feed_state SET status='failed',failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END,error=? WHERE source_id=?", message, id);
             log.warn("Library sync failed: source={} type={}", id, e.getClass().getSimpleName());
         } finally {
+            // A later document can fail after an earlier document committed. Recheck those changes too.
+            if (nativeBefore>=0 && jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class)!=nativeBefore) {
+                try { matcher.matchAll(0); }
+                catch (Exception e) {
+                    jdbc.update("UPDATE t_security_feed_state SET status='failed',error='公告已入库，资产重新比对失败，请重新扫描',failure_count=failure_count+1 WHERE source_id=?",id);
+                    log.warn("Native advisory asset recheck failed: source={} type={}",id,e.getClass().getSimpleName());
+                }
+            }
             var state = jdbc.queryForMap("SELECT status,entry_count,error FROM t_security_feed_state WHERE source_id=?", id);
             jdbc.update("UPDATE t_security_feed_run SET finished_at=?,status=?,entry_count=?,error=? WHERE id=?",
                     Instant.now().toString(), state.get("status"), state.get("entry_count"), state.get("error"), runId);
