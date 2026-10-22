@@ -3,14 +3,47 @@
 package scap
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"unsafe"
 )
 
 func workerLimits() error        { return nil }
 func configureProcess(*exec.Cmd) {}
+func makeNativeWorkspace() (string, error) {
+	// Set the protected, inheritable DACL at creation time. Windows ignores
+	// Unix 0700 bits, and a shared service TEMP must not expose cloned modules
+	// or results, even between directory creation and a later ACL rewrite.
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	if err != nil {
+		return "", err
+	}
+	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	for attempt := 0; attempt < 10; attempt++ {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return "", err
+		}
+		path := filepath.Join(nativeTempRoot(), "alinksec-scap-"+hex.EncodeToString(nonce[:]))
+		name, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			return "", err
+		}
+		err = windows.CreateDirectory(name, &attributes)
+		if err == nil {
+			return path, nil
+		}
+		if !errors.Is(err, windows.ERROR_ALREADY_EXISTS) && !errors.Is(err, windows.ERROR_FILE_EXISTS) {
+			return "", err
+		}
+	}
+	return "", issue("scap_worker_failed")
+}
 func nativeWorkspacePath(path string) (string, error) {
 	// GetTempPath may return a DOS 8.3 alias (e.g. RUNNER~1). SCC's trusted
 	// options schema rejects '~'; resolve the existing private directory using

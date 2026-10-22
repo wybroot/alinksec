@@ -131,7 +131,7 @@ func runWorker(ctx context.Context, input workerInput) (workerOutput, error) {
 	}
 	// The parent owns the workspace and removes it after killing the complete
 	// native process tree, including on timeout or an abruptly killed worker.
-	workspace, err := os.MkdirTemp(nativeTempRoot(), "alinksec-scap-")
+	workspace, err := makeNativeWorkspace()
 	if err != nil {
 		return result, issue("scap_worker_failed")
 	}

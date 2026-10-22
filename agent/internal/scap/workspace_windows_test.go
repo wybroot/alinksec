@@ -4,9 +4,46 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+func TestNativeWorkspaceStartsWithPrivateInheritableDACL(t *testing.T) {
+	path, err := makeNativeWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(path)
+	file := filepath.Join(path, "native-module")
+	if err := os.WriteFile(file, []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{path, file} {
+		sd, err := windows.GetNamedSecurityInfo(name, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dacl, _, err := sd.DACL()
+		if err != nil || dacl == nil || dacl.AceCount != 2 {
+			t.Fatal("native workspace is not restricted to SYSTEM and administrators", err)
+		}
+		control, _, err := sd.Control()
+		if err != nil || name == path && control&windows.SE_DACL_PROTECTED == 0 {
+			t.Fatal("native workspace inherits its parent's DACL", err)
+		}
+		for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+			var ace *windows.ACCESS_ALLOWED_ACE
+			if err := windows.GetAce(dacl, i, &ace); err != nil {
+				t.Fatal(err)
+			}
+			sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+			if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || !sid.IsWellKnown(windows.WinLocalSystemSid) && !sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+				t.Fatal("untrusted principal can access native workspace")
+			}
+		}
+	}
+}
 
 func TestNativeWorkspaceExpandsDOSAlias(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Private Native Workspace")
