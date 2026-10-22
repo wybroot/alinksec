@@ -183,7 +183,8 @@ public class LibrarySyncService {
             log.warn("Library sync failed: source={} type={}", id, e.getClass().getSimpleName());
         } finally {
             // A later document can fail after an earlier document committed. Recheck those changes too.
-            if (nativeBefore>=0 && jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class)!=nativeBefore) {
+            if (nativeBefore>=0 && ("success".equals(jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id=?",String.class,id))
+                    || jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class)!=nativeBefore)) {
                 try { matcher.matchAll(0); }
                 catch (Exception e) {
                     jdbc.update("UPDATE t_security_feed_state SET status='failed',error='公告已入库，资产重新比对失败，请重新扫描',failure_count=failure_count+1 WHERE source_id=?",id);

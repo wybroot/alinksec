@@ -144,6 +144,13 @@ class VendorAdvisoryIntegrationTest {
         assertEquals("failed",state.get("status"));assertEquals(1,((Number)state.get("entry_count")).intValue());
         assertEquals(1,((Number)service.state(id).get("pending_count")).intValue());
         assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_run WHERE source_id=?",String.class,id));
+        bodies.put("/notices/USN-1-2.json",usn("USN-1-2","Accepted on retry",true));
+        doThrow(new IllegalStateException("private matcher diagnostic")).when(assetMatcher).matchAll(0);
+        sync.sync(source);assertEquals(2,archives().size());
+        String message=jdbc.queryForObject("SELECT error FROM t_security_feed_state WHERE source_id=?",String.class,id);
+        assertTrue(message.contains("资产重新比对失败"));assertFalse(message.contains("private"));
+        doNothing().when(assetMatcher).matchAll(0);sync.sync(source);verify(assetMatcher,times(3)).matchAll(0);
+        assertEquals("success",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id=?",String.class,id));
     }
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);String archive=archives().get(0).get("id").toString();
