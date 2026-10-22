@@ -95,6 +95,7 @@ try {
   await review.getByPlaceholder('填写审核、测试或发布说明').fill('在系统匹配且原生引擎就绪的主机上验证全部规则')
   await review.getByRole('button', { name: '下发内容测试', exact: true }).click()
   await expect(review.getByRole('button', { name: '查看最近测试', exact: true })).toBeVisible()
+  await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
   await page.screenshot({ path: root + '/package-review-desktop.png', fullPage: true, animations: 'disabled' })
   checks.push('original-upload-and-source-derived-hash-downloads; admin-review-revision; ready-matching-OS-test-targets; pending-test-cannot-publish')
   await review.getByRole('button', { name: '查看最近测试', exact: true }).click()
@@ -104,6 +105,7 @@ try {
   await expect(result.getByText(/urn:xccdf:scoring:default：12.5 \/ 100/)).toBeVisible()
   const evidence = await download(result.getByRole('button', { name: '导出核查证据', exact: true }), Buffer.from(fixtures.nineEvidence))
   assert.equal(JSON.parse(evidence).counts.error, 1)
+  await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
   await page.screenshot({ path: root + '/nine-outcomes-desktop.png', fullPage: true, animations: 'disabled' })
   tamper = true
   await result.getByRole('button', { name: '导出核查证据', exact: true }).click()
@@ -112,6 +114,7 @@ try {
   checks.push('nine-standard-outcomes-remain-distinct; native-weighted-score-and-evidence-digests; corrupt-download-blocked')
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile viewport overflow')
+  await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
   await page.screenshot({ path: root + '/nine-outcomes-mobile.png', fullPage: true, animations: 'disabled' })
   checks.push('mobile-standard-results-fit-viewport')
   unavailable = true
@@ -158,6 +161,7 @@ try {
   await page.getByRole('tab', { name: '引擎就绪状态', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: 'SCAP stale' })).toContainText('状态已过期')
   await expect(page.getByRole('row').filter({ hasText: 'SCAP unavailable' })).toContainText('不可用')
+  await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
   await page.screenshot({ path: root + '/readiness-desktop.png', fullPage: true, animations: 'disabled' })
   checks.push('viewer-read-download-without-write-controls; stale-and-unavailable-readiness-visible')
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])

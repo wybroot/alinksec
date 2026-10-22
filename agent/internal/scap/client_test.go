@@ -18,6 +18,7 @@ func TestNativeEnvironmentKeepsIdentityWithoutModuleInjection(t *testing.T) {
 	t.Setenv("USERNAME", "service-user")
 	t.Setenv("USERDOMAIN", "service-domain")
 	t.Setenv("COMPUTERNAME", "service-host")
+	t.Setenv("SYSTEMDRIVE", "C:")
 	t.Setenv("USERPROFILE", `C:\Users\service-user`)
 	env := map[string]string{}
 	for _, entry := range cleanEnvironment() {
@@ -30,7 +31,7 @@ func TestNativeEnvironmentKeepsIdentityWithoutModuleInjection(t *testing.T) {
 		}
 	}
 	if runtime.GOOS == "windows" {
-		if env["LANG"] != "C" || env["USERNAME"] != "service-user" || env["USERDOMAIN"] != "service-domain" || env["COMPUTERNAME"] != "service-host" || env["USERPROFILE"] != `C:\Users\service-user` {
+		if env["LANG"] != "C" || env["SYSTEMDRIVE"] != "C:" || env["USERNAME"] != "service-user" || env["USERDOMAIN"] != "service-domain" || env["COMPUTERNAME"] != "service-host" || env["USERPROFILE"] != `C:\Users\service-user` {
 			t.Fatal("Windows native identity environment missing")
 		}
 	}

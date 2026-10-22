@@ -110,7 +110,7 @@ func cleanEnvironment() []string {
 		// SCC reads these identity/home values directly. Keep the allowlist
 		// narrow: Perl/module search paths and arbitrary parent variables must
 		// never enter the pinned runtime.
-		for _, key := range []string{"COMPUTERNAME", "USERDOMAIN", "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		for _, key := range []string{"SYSTEMDRIVE", "COMPUTERNAME", "USERDOMAIN", "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
 			if value := os.Getenv(key); value != "" {
 				env = append(env, key+"="+value)
 			}
