@@ -135,7 +135,7 @@ public class BaselineUpstreamService {
                     accept(context,source,index,bytes,fetched.etag(),fetched.modified());
                 }
             }
-            var pending=jdbc.queryForList("SELECT * FROM t_baseline_upstream_release WHERE source_id=? AND remote_status='active' AND state IN ('pending','failed') AND attempts<3 ORDER BY code,version LIMIT 2",id);
+            var pending=jdbc.queryForList("SELECT r.* FROM t_baseline_upstream_release r JOIN t_baseline_upstream_receipt a ON a.id=r.current_receipt WHERE r.source_id=? AND r.remote_status='active' AND r.state IN ('pending','failed') AND r.attempts<3 AND a.expires_at>? AND a.config_hash=? ORDER BY r.code,r.version LIMIT 2",id,System.currentTimeMillis(),context.config());
             for(var release:pending){
                 if(Thread.currentThread().isInterrupted()||System.currentTimeMillis()>=context.deadline())throw new Failure("worker_interrupted");
                 try{importRelease(context,release);imported++;}catch(Failure e){failRelease(context,release,e.code);outcome="partial";issue=e.code;}
@@ -223,7 +223,7 @@ public class BaselineUpstreamService {
             if(!configured(context.source()).fingerprint().equals(context.config())||!gate.get("lease_owner").equals(context.owner()))return;
             long now=System.currentTimeMillis();
             jdbc.update("UPDATE t_baseline_upstream_attempt SET outcome=?,issue=?,imported=?,finished_at=? WHERE id=? AND outcome='running'",outcome,issue,imported,now,context.attempt());
-            long remaining=jdbc.queryForObject("SELECT count(*) FROM t_baseline_upstream_release WHERE source_id=? AND remote_status='active' AND state IN ('pending','failed') AND attempts<3",Long.class,context.source());
+            long remaining=jdbc.queryForObject("SELECT count(*) FROM t_baseline_upstream_release r JOIN t_baseline_upstream_receipt a ON a.id=r.current_receipt WHERE r.source_id=? AND r.remote_status='active' AND r.state IN ('pending','failed') AND r.attempts<3 AND a.expires_at>? AND a.config_hash=?",Long.class,context.source(),now,context.config());
             jdbc.update("UPDATE t_baseline_upstream_source SET last_checked=?,last_outcome=?,next_poll=CASE WHEN ? > 0 THEN ? ELSE next_poll END WHERE id=?",now,issue.isEmpty()?outcome:issue,remaining,now+60_000,context.source());
             jdbc.update("UPDATE t_baseline_upstream_gate SET lease_owner='',lease_until=0 WHERE id=1");pruneAttempts(context.source());
         });

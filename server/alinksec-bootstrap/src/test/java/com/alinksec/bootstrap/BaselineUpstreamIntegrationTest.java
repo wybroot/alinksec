@@ -140,6 +140,7 @@ class BaselineUpstreamIntegrationTest {
         int calls=artifactRequests.get();run();assertEquals(calls,artifactRequests.get());
         index(2,entry);service.retry(sourceId,releases().get(0).get("id").toString(),7L);artifacts.put(new java.net.URI(entry.path("url").asText()).getPath(),bytes);assertEquals("success",run().get("outcome"));assertEquals("imported",releases().get(0).get("state"));assertNotEquals(releases().get(0).get("first_receipt"),releases().get(0).get("import_receipt"));assertEquals(releases().get(0).get("current_receipt"),releases().get(0).get("import_receipt"));
         artifactStatus=302;var second=release("baseline","2",1,baseline("2",1));index(3,entry,second);assertEquals("artifact_download",run().get("issue"));assertEquals(1,releases().stream().filter(r->r.get("state").equals("imported")).count());
+        jdbc.update("UPDATE t_baseline_upstream_receipt SET expires_at=? WHERE source_id=? AND sequence=3",System.currentTimeMillis()-1,sourceId);int prior=artifactRequests.get();index(4,entry);assertEquals("success",run().get("outcome"));assertEquals(prior,artifactRequests.get());assertTrue(((Number)service.detail(sourceId).get("next_poll")).longValue()>System.currentTimeMillis()+3_000_000);
     }
     @Test void disableDuringDownloadAndCompetingLeaseCannotCommitStaleContent()throws Exception{
         index(1,release("baseline","1",1,baseline("1",1)));artifactStarted=new CountDownLatch(1);artifactContinue=new CountDownLatch(1);
