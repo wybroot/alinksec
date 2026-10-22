@@ -150,6 +150,16 @@ class BaselineUpstreamIntegrationTest {
         jdbc.update("UPDATE t_baseline_upstream_gate SET lease_owner='other-process',lease_until=? WHERE id=1",System.currentTimeMillis()+240_000);int before=requests.get();assertEquals("worker_busy",run().get("issue"));assertEquals(before,requests.get());
         jdbc.update("UPDATE t_baseline_upstream_gate SET lease_until=0 WHERE id=1");assertEquals("success",run().get("outcome"));assertEquals("imported",releases().get(0).get("state"));
     }
+    @Test void orphanedQueueAndRunningRecordsRecoverWithoutWaitingForNextSourcePoll()throws Exception{
+        index(1,release("baseline","1",1,baseline("1",1)));assertEquals("success",run().get("outcome"));Thread.sleep(30);
+        long now=System.currentTimeMillis();
+        for(String state:List.of("queued","running"))jdbc.update("INSERT INTO t_baseline_upstream_attempt(id,source_id,trigger_type,actor,started_at,outcome) VALUES(?,?,'scheduled',0,?,?)",UUID.randomUUID().toString(),sourceId,now-300_000,state);
+        jdbc.update("UPDATE t_baseline_upstream_gate SET lease_owner='dead-process',lease_until=? WHERE id=1",now-1);
+        service.tick();assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_baseline_upstream_attempt WHERE source_id=? AND outcome IN ('running','queued')",Integer.class,sourceId));
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM t_baseline_upstream_attempt WHERE source_id=? AND issue='worker_interrupted'",Integer.class,sourceId));
+        assertTrue(((Number)service.detail(sourceId).get("next_poll")).longValue()>System.currentTimeMillis()+3_000_000);
+        assertEquals("success",run().get("outcome"));assertEquals(1,releases().size());assertEquals(0L,jdbc.queryForObject("SELECT lease_until FROM t_baseline_upstream_gate WHERE id=1",Long.class));
+    }
     @Test void restUsesJwtRolesOptimisticRevisionsAndVerifiedDownloads()throws Exception{
         String prefix="/api/baseline/upstreams/"+sourceId;
         assertEquals(401,mvc.perform(get(prefix)).andReturn().getResponse().getStatus());

@@ -84,6 +84,8 @@ public class BaselineUpstreamService {
         });return detail(sourceId);
     }
     @Scheduled(fixedDelay=60_000,initialDelay=60_000) public void tick(){
+        // Reap orphaned queue records even when the next source poll is hours away.
+        jdbc.update("UPDATE t_baseline_upstream_attempt SET outcome='interrupted',issue='worker_interrupted',finished_at=? WHERE outcome IN ('running','queued') AND started_at<=?",System.currentTimeMillis(),System.currentTimeMillis()-LEASE_MS);
         if(busy.get())return;
         var due=jdbc.queryForList("SELECT id FROM t_baseline_upstream_source WHERE enabled=1 AND configured=1 AND next_poll<=? ORDER BY next_poll,id LIMIT 1",System.currentTimeMillis());
         if(!due.isEmpty())try{enqueue(due.get(0).get("id").toString(),"scheduled",0L);}catch(IllegalArgumentException ignored){/* another trigger already owns this worker */}
@@ -103,6 +105,9 @@ public class BaselineUpstreamService {
         return tx.execute(status->{
             long now=System.currentTimeMillis();String owner=UUID.randomUUID().toString();
             BaselineUpstreamGuard.lock(jdbc);var state=state(id);
+            var queued=one("SELECT outcome,started_at FROM t_baseline_upstream_attempt WHERE id=?",attempt);
+            if(!queued.get("outcome").equals("queued"))return null;
+            if(number(queued,"started_at")<=now-LEASE_MS){jdbc.update("UPDATE t_baseline_upstream_attempt SET outcome='interrupted',issue='worker_interrupted',finished_at=? WHERE id=?",now,attempt);return null;}
             if(number(state,"enabled")!=1||number(state,"configured")!=1||number(state,"revision")!=expectedRevision){
                 jdbc.update("UPDATE t_baseline_upstream_attempt SET outcome='interrupted',issue='source_changed',finished_at=? WHERE id=?",now,attempt);return null;
             }
