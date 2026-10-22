@@ -131,7 +131,13 @@ func (c *Client) Scan(ctx context.Context, commandID string, command *pb.CmdScap
 		return finish(issue("scap_busy"))
 	}
 	c.mu.Lock()
-	c.status.State = "running"
+	// A queued command can arrive before the startup probe. Keep starting
+	// until a real worker establishes identity; running heartbeats require it.
+	if c.status.Version == "5.15" && c.status.RuntimeSHA256 == c.cfg.RuntimeSHA256 && c.status.ObservedAt > 0 {
+		c.status.State = "running"
+	} else {
+		c.status.State = "starting"
+	}
 	c.mu.Unlock()
 	seconds := c.cfg.TimeoutSec
 	if seconds == 0 {

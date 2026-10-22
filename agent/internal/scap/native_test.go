@@ -51,6 +51,31 @@ func TestNativeScapWorker(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
+	// Cover delivery before the startup probe, using actual native execution.
+	// Every observed heartbeat status must satisfy the server identity contract.
+	command := &pb.CmdScapScan{TaskId: "native-worker-fixture", ExecutionContract: 1, ContentZip: archive, ContentSha256: content.SHA256, BenchmarkId: content.Manifest.BenchmarkID, ProfileId: content.Manifest.ProfileID, RuntimeSha256: pin}
+	completed := make(chan *pb.RptScapResult, 1)
+	go func() { completed <- client.Scan(ctx, "native-worker-command", command) }()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	var result *pb.RptScapResult
+	waiting := true
+	for waiting {
+		select {
+		case result = <-completed:
+			waiting = false
+		case <-ticker.C:
+			status := client.Status()
+			if status.State == "running" && (status.Version != "5.15" || status.RuntimeSHA256 != pin || status.ObservedAt == 0) {
+				t.Fatalf("first native scan announced an unverified running identity: %+v", status)
+			}
+		case <-ctx.Done():
+			t.Fatal("first native scan timed out", ctx.Err())
+		}
+	}
+	if result.State == "complete" && (client.Status().Version != "5.15" || client.Status().RuntimeSHA256 != pin || client.Status().State != "ready") {
+		t.Fatal("native scan did not establish the observed identity")
+	}
 	if err = client.Probe(ctx); err != nil {
 		// Only the explicit native CI test prints this bounded version-only
 		// diagnostic. Production errors and reports retain fixed issue codes.
@@ -76,8 +101,6 @@ func TestNativeScapWorker(t *testing.T) {
 	if client.Status().Version != "5.15" || client.Status().RuntimeSHA256 != pin || client.Status().State != "ready" {
 		t.Fatal("native identity not bound to pin")
 	}
-	command := &pb.CmdScapScan{TaskId: "native-worker-fixture", ExecutionContract: 1, ContentZip: archive, ContentSha256: content.SHA256, BenchmarkId: content.Manifest.BenchmarkID, ProfileId: content.Manifest.ProfileID, RuntimeSha256: pin}
-	result := client.Scan(ctx, "native-worker-command", command)
 	record := map[string]any{"evidenceKind": "actual Agent bounded SCC worker with disposable host file; no remediation", "result": result, "status": client.Status()}
 	if file := os.Getenv("ALINKSEC_SCAP_NATIVE_EVIDENCE_FILE"); file != "" {
 		if err = os.MkdirAll(filepath.Dir(file), 0700); err != nil {
