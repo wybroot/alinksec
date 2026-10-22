@@ -163,11 +163,16 @@ class BaselineUpstreamIntegrationTest {
     @Test void restUsesJwtRolesOptimisticRevisionsAndVerifiedDownloads()throws Exception{
         String prefix="/api/baseline/upstreams/"+sourceId;
         assertEquals(401,mvc.perform(get(prefix)).andReturn().getResponse().getStatus());
-        for(String role:List.of("viewer","operator")){assertEquals(200,mvc.perform(get(prefix).header("Authorization","Bearer "+token(role))).andReturn().getResponse().getStatus());assertEquals(403,mvc.perform(post(prefix+"/sync").header("Authorization","Bearer "+token(role))).andReturn().getResponse().getStatus());}
+        for(String role:List.of("viewer","operator")){
+            for(String path:List.of(prefix,prefix.replace("/baseline","/%62aseline"),prefix.replace("/upstreams","/%75pstreams"),prefix.replace("/baseline","/baseline;scope=test"))){
+                assertEquals(200,mvc.perform(get(java.net.URI.create(path)).header("Authorization","Bearer "+token(role))).andReturn().getResponse().getStatus());
+                assertEquals(403,mvc.perform(post(java.net.URI.create(path+"/sync")).header("Authorization","Bearer "+token(role))).andReturn().getResponse().getStatus());
+            }
+        }
         String plan=JsonUtils.write(Map.of("revision",0,"enabled",true,"intervalMs",3_600_000,"note","admin plan"));
         assertEquals(200,mvc.perform(put(prefix+"/schedule").header("Authorization","Bearer "+token("admin")).contentType("application/json").content(plan)).andReturn().getResponse().getStatus());
         assertEquals(400,mvc.perform(put(prefix+"/schedule").header("Authorization","Bearer "+token("admin")).contentType("application/json").content(plan)).andReturn().getResponse().getStatus());
-        index(1,release("baseline","1",1,baseline("1",1)));var result=mvc.perform(post(prefix+"/sync").header("Authorization","Bearer "+token("admin"))).andReturn();assertEquals(200,result.getResponse().getStatus());await(response(result).path("data").path("attemptId").asText());
+        index(1,release("baseline","1",1,baseline("1",1)));var result=mvc.perform(post(java.net.URI.create(prefix.replace("/baseline","/%62aseline")+"/sync")).header("Authorization","Bearer "+token("admin"))).andReturn();assertEquals(200,result.getResponse().getStatus());await(response(result).path("data").path("attemptId").asText());
         var release=releases().get(0);var downloaded=mvc.perform(get(prefix+"/releases/"+release.get("id")+"/artifact").header("Authorization","Bearer "+token("viewer"))).andReturn().getResponse();
         assertEquals(200,downloaded.getStatus());assertEquals("no-store",downloaded.getHeader("Cache-Control"));assertEquals("nosniff",downloaded.getHeader("X-Content-Type-Options"));assertEquals(release.get("sha256"),downloaded.getHeader("X-Content-SHA256"));assertArrayEquals(service.artifact(sourceId,release.get("id").toString()),downloaded.getContentAsByteArray());
         var snapshots=new LinkedHashMap<String,Object>();snapshots.put("imported",snapshot(release));
