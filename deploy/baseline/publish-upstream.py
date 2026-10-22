@@ -119,6 +119,8 @@ def main(argv=None):
     if args.private_key.resolve().is_relative_to(output):
         parser.error("signing key must stay outside the published directory")
     output.mkdir(parents=True, exist_ok=True)
+    if args.previous is None and (output / "index.json").exists():
+        args.previous = output / "index.json"
     # Temporary files contain payloads and public material only; OpenSSL reads the external key.
     with tempfile.TemporaryDirectory(prefix="alinksec-publisher-") as name:
         temporary = pathlib.Path(name)

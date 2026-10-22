@@ -47,6 +47,8 @@ class BaselineUpstreamIntegrationTest {
     AtomicInteger requests=new AtomicInteger(),conditional=new AtomicInteger(),artifactRequests=new AtomicInteger();
     volatile CountDownLatch artifactStarted,artifactContinue;
     volatile int artifactStatus=200;
+    volatile boolean forcedNotModified;
+    FeedDownload downloader;
     static final String SECRET="upstream-integration-secret-at-least-32-bytes";
     @BeforeEach void setup()throws Exception{
         boolean pg="postgres".equals(System.getProperty("alinksec.integration.database"));
@@ -60,7 +62,7 @@ class BaselineUpstreamIntegrationTest {
         http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);httpWorkers=Executors.newCachedThreadPool();http.setExecutor(httpWorkers);
         http.createContext("/index.json",exchange->{
             requests.incrementAndGet();String etag="\""+ScapPackage.digest(index.get())+"\"";
-            if(etag.equals(exchange.getRequestHeaders().getFirst("If-None-Match"))){conditional.incrementAndGet();exchange.sendResponseHeaders(304,-1);}
+            if(forcedNotModified||etag.equals(exchange.getRequestHeaders().getFirst("If-None-Match"))){conditional.incrementAndGet();exchange.sendResponseHeaders(304,-1);}
             else{byte[] bytes=index.get();exchange.getResponseHeaders().set("ETag",etag);exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);}exchange.close();
         });
         http.createContext("/artifacts/",exchange->{
@@ -77,7 +79,7 @@ class BaselineUpstreamIntegrationTest {
         var tasks=transactional(new BaselineTaskService(jdbc,commands,new DatabaseDialect(platform)));baseline=transactional(new BaselinePackageService(jdbc,tasks));
         var resolver=mock(ScapResolver.class);when(resolver.resolve(any())).thenAnswer(call->{ScapPackage content=call.getArgument(0);return new ScapResolver.Resolved(content,JsonUtils.write(Map.of("resolver","protocol fixture","sourceCanonicalSha256",content.sha256())));});
         scap=transactional(new ScapPackageService(jdbc,transactional(new ScapTaskService(jdbc,commands,new DatabaseDialect(platform))),resolver,manager));
-        var library=new LibraryProperties();library.setWorkDir(root.resolve("downloads").toString());var downloader=new FeedDownload(new LibraryFiles(library,platform),library);
+        var library=new LibraryProperties();library.setWorkDir(root.resolve("downloads").toString());downloader=new FeedDownload(new LibraryFiles(library,platform),library);
         service=new BaselineUpstreamService(jdbc,manager,props,downloader,baseline,scap);service.initialize();
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
         mvc=MockMvcBuilders.standaloneSetup(new BaselineUpstreamController(service),new BaselineController(null,null,baseline,null))
@@ -165,6 +167,30 @@ class BaselineUpstreamIntegrationTest {
 
     }
     Map<String,Object> snapshot(Map<String,Object> release){return Map.of("sources",service.list(),"detail",service.detail(sourceId),"candidate",baseline.detail(release.get("package_id").toString()),"artifactBase64",Base64.getEncoder().encodeToString(service.artifact(sourceId,release.get("id").toString())),"receiptBase64",Base64.getEncoder().encodeToString(service.receipt(sourceId,release.get("first_receipt").toString())));}
+    @Test void quotaFailureIsAtomicAndExplicitRetryCanRecover()throws Exception{
+        props.setMaxArtifactBytes(2L<<20);
+        var entries=new ArrayList<ObjectNode>();
+        for(String version:List.of("1","2")){
+            var doc=(ObjectNode)JsonUtils.mapper().readTree(baseline(version,1));var original=(ObjectNode)doc.path("items").get(0);var items=doc.putArray("items");
+            for(int n=0;n<400;n++)items.add(original.deepCopy().put("code","CAP-"+n).put("ruleId","capacity-rule-"+n).put("remediation","x".repeat(4000)));
+            entries.add(release("baseline",version,1,JsonUtils.write(doc).getBytes(StandardCharsets.UTF_8)));
+        }
+        index(1,entries.toArray(ObjectNode[]::new));assertEquals("artifact_capacity",run().get("issue"));
+        var failed=releases().stream().filter(r->r.get("state").equals("failed")).findFirst().orElseThrow();assertNull(failed.get("package_id"));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_baseline_package WHERE code=?",Integer.class,code));
+        props.setMaxArtifactBytes(4L<<20);service.retry(sourceId,failed.get("id").toString(),7L);assertEquals("success",run().get("outcome"));assertEquals(2,releases().stream().filter(r->r.get("state").equals("imported")).count());
+    }
+    @Test void trustRotationPreservesSequenceAndRequiresFreshIndexAndExplicitEnable()throws Exception{
+        var entry=release("baseline","1",1,baseline("1",1));index(1,entry);assertEquals("success",run().get("outcome"));String pkg=releases().get(0).get("package_id").toString(),firstReceipt=releases().get(0).get("first_receipt").toString();
+        Thread.sleep(30);service.close();keys=KeyPairGenerator.getInstance("Ed25519").generateKeyPair();publisher.setPublicKey(Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
+        service=new BaselineUpstreamService(jdbc,manager,props,downloader,baseline,scap);service.initialize();
+        assertEquals(0,((Number)service.detail(sourceId).get("enabled")).intValue());assertEquals(1L,((Number)service.detail(sourceId).get("sequence")).longValue());
+        assertThrows(IllegalArgumentException.class,()->baseline.review(pkg,true,"stale trust",7L));
+        long revision=((Number)service.detail(sourceId).get("revision")).longValue();service.schedule(sourceId,new BaselineUpstreamService.Schedule(revision,true,3_600_000,"reviewed rotated key"),7L);
+        index(1,entry);assertEquals("index_rollback",run().get("issue"));index(2,entry);assertEquals("success",run().get("outcome"));
+        assertEquals(firstReceipt,releases().get(0).get("first_receipt"));assertNotEquals(firstReceipt,releases().get(0).get("current_receipt"));assertEquals("approved",baseline.review(pkg,true,"fresh trust verified",7L).get("status"));
+        jdbc.update("UPDATE t_baseline_upstream_receipt SET expires_at=? WHERE source_id=?",System.currentTimeMillis()-1,sourceId);forcedNotModified=true;assertEquals("index_expired",run().get("issue"));
+    }
     @Test void actualNativeScapResolutionRetainsSignedOriginalAndDerivedIdentity()throws Exception{
         String fixture=System.getenv("ALINKSEC_SCAP_FIXTURE_ZIP");Assumptions.assumeTrue(fixture!=null,"native resolution runs in the dedicated upstream CI job");
         service.close();var platform=new AlinkSecProperties();platform.getDatabase().setType("sqlite");var library=new LibraryProperties();library.setWorkDir(root.resolve("native-downloads").toString());

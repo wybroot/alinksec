@@ -51,6 +51,7 @@
         <el-table-column label="操作人" width="120"><template #default="{ row }">{{ row.actor ? `用户 ${row.actor}` : '系统' }}</template></el-table-column>
         <el-table-column label="结果" min-width="190"><template #default="{ row }">{{ label(row.outcome) }}{{ row.issue ? ` · ${label(row.issue)}` : '' }}</template></el-table-column>
         <el-table-column prop="imported" label="导入数量" width="100" />
+        <el-table-column prop="note" label="操作说明" min-width="180" />
       </el-table>
     </section>
   </div>

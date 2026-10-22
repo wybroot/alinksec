@@ -1118,7 +1118,7 @@ jobs:
         run: python3 -B -m unittest discover -s deploy/tests -p test_baseline_upstream_tools.py -v
       - name: Check signed HTTP indexes, transaction races, REST roles and real native SCAP import
         working-directory: server
-        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=BaselineUpstreamIndexTest,BaselineUpstreamIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=BaselineUpstreamIndexTest,BaselineUpstreamDownloadTest,BaselineUpstreamIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/baseline-upstream-native/content.zip

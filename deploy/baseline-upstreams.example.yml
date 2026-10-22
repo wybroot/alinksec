@@ -1,0 +1,20 @@
+# Mount as /app/data/baseline-upstreams.yml, or set ALINKSEC_BASELINE_UPSTREAM_CONFIG.
+# Fixed publisher allowlist: only administrators of the deployment edit keys/URLs/scopes.
+alinksec:
+  baseline-upstream:
+    max-artifact-bytes: 67108864
+    sources:
+      - id: internal-compliance
+        name: 内部等保基线发布源
+        enabled: false
+        interval-ms: 3600000
+        url: https://baseline.example.invalid/index.json
+        # Base64 X.509 SubjectPublicKeyInfo DER for an Ed25519 public key.
+        # Replace before use; the server rejects an invalid key at startup.
+        public-key: REPLACE_WITH_PUBLISHER_PUBLIC_KEY
+        scopes:
+          - baseline:ALINKSEC-MLPS2-L2-LINUX
+          - baseline:ALINKSEC-MLPS2-L2-WINDOWS
+          - baseline:ALINKSEC-MLPS2-L3-LINUX
+          - baseline:ALINKSEC-MLPS2-L3-WINDOWS
+          # Add exact SCAP package codes as needed: scap:YOUR-BENCHMARK

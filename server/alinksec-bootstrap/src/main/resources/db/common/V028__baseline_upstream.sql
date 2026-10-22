@@ -32,6 +32,6 @@ CREATE TABLE t_baseline_upstream_attempt (
     id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES t_baseline_upstream_source(id),
     trigger_type TEXT NOT NULL, actor BIGINT NOT NULL, started_at BIGINT NOT NULL,
     finished_at BIGINT, outcome TEXT NOT NULL, issue TEXT NOT NULL DEFAULT '',
-    imported INTEGER NOT NULL DEFAULT 0
+    note TEXT NOT NULL DEFAULT '', imported INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_baseline_upstream_attempt ON t_baseline_upstream_attempt(source_id,started_at);

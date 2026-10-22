@@ -70,7 +70,7 @@ public class BaselineUpstreamService {
         ScapStore.actor(actor);configured(id);if(change==null)throw new IllegalArgumentException("缺少更新计划");BaselineUpstreamProperties.interval(change.intervalMs());ScapStore.note(change.note());
         tx.executeWithoutResult(status->{BaselineUpstreamGuard.lock(jdbc);
             if(jdbc.update("UPDATE t_baseline_upstream_source SET enabled=?,interval_ms=?,revision=revision+1,next_poll=0 WHERE id=? AND revision=?",change.enabled()?1:0,change.intervalMs(),id,change.revision())!=1)throw new IllegalArgumentException("上游计划已变化，请刷新后重试");
-            recordControl(id,"schedule",actor);
+            recordControl(id,"schedule",actor,change.note().strip());
         });return detail(id);
     }
     public Map<String,String> trigger(String id,Long actor){ScapStore.actor(actor);configured(id);requireEnabled(state(id));return enqueue(id,"manual",actor);}
@@ -80,7 +80,7 @@ public class BaselineUpstreamService {
             var row=one("SELECT * FROM t_baseline_upstream_release WHERE id=? AND source_id=?",releaseId,sourceId);
             if(!row.get("state").equals("failed")||!row.get("remote_status").equals("active"))throw new IllegalArgumentException("仅活动的失败版本可以重试");
             jdbc.update("UPDATE t_baseline_upstream_release SET state='pending',attempts=0,issue='' WHERE id=?",releaseId);
-            jdbc.update("UPDATE t_baseline_upstream_source SET next_poll=0 WHERE id=?",sourceId);recordControl(sourceId,"retry",actor);
+            jdbc.update("UPDATE t_baseline_upstream_source SET next_poll=0 WHERE id=?",sourceId);recordControl(sourceId,"retry",actor,"管理员重新尝试失败版本 "+releaseId);
         });return detail(sourceId);
     }
     @Scheduled(fixedDelay=60_000,initialDelay=60_000) public void tick(){
@@ -230,7 +230,7 @@ public class BaselineUpstreamService {
     }
     public byte[] receipt(String source,String id){return Base64.getDecoder().decode(one("SELECT envelope FROM t_baseline_upstream_receipt WHERE id=? AND source_id=?",id,source).get("envelope").toString());}
     public byte[] artifact(String source,String id){var row=one("SELECT artifact,sha256 FROM t_baseline_upstream_release WHERE id=? AND source_id=?",id,source);if(row.get("artifact")==null)throw new IllegalArgumentException("该版本尚未保存下载原件");byte[] bytes=Base64.getDecoder().decode(row.get("artifact").toString());if(!ScapPackage.digest(bytes).equals(row.get("sha256")))throw new IllegalArgumentException("上游原件摘要不匹配");return bytes;}
-    private void recordControl(String id,String action,long actor){long now=System.currentTimeMillis();jdbc.update("INSERT INTO t_baseline_upstream_attempt(id,source_id,trigger_type,actor,started_at,finished_at,outcome) VALUES(?,?,?,?,?,?,'success')",UUID.randomUUID().toString(),id,action,actor,now,now);pruneAttempts(id);}
+    private void recordControl(String id,String action,long actor,String note){long now=System.currentTimeMillis();jdbc.update("INSERT INTO t_baseline_upstream_attempt(id,source_id,trigger_type,actor,started_at,finished_at,outcome,note) VALUES(?,?,?,?,?,?,'success',?)",UUID.randomUUID().toString(),id,action,actor,now,now,note);pruneAttempts(id);}
     private void pruneAttempts(String id){jdbc.update("DELETE FROM t_baseline_upstream_attempt WHERE source_id=? AND outcome<>'running' AND id NOT IN (SELECT id FROM t_baseline_upstream_attempt WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 100)",id,id);}
     private BaselineUpstreamProperties.Source configured(String id){var source=catalog.get(id);if(source==null)throw new IllegalArgumentException("上游未在服务器配置中启用");return source;}
     private Map<String,Object> state(String id){return one("SELECT * FROM t_baseline_upstream_source WHERE id=?",id);}
