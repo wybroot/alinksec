@@ -4,7 +4,9 @@ spring:
   profiles:
     default: postgres
   config:
-    import: optional:file:${ALINKSEC_LIBRARY_CONFIG:./data/libraries.yml}
+    import:
+      - optional:file:${ALINKSEC_LIBRARY_CONFIG:./data/libraries.yml}
+      - optional:file:${ALINKSEC_BASELINE_UPSTREAM_CONFIG:./data/baseline-upstreams.yml}
   servlet:
     multipart:
       max-file-size: 500MB
@@ -15,6 +17,9 @@ server:
   port: 8080   # M2 REST API 占位
 
 alinksec:
+  baseline-upstream:
+    max-artifact-bytes: 67108864
+    sources: []
   libraries:
     work-dir: ${ALINKSEC_LIBRARY_WORK_DIR:./data/libraries}
     max-download-bytes: 67108864

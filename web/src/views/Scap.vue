@@ -41,6 +41,7 @@
 
     <el-dialog v-model="packageVisible" title="SCAP 内容审核" width="min(960px, calc(100vw - 32px))">
       <template v-if="selected">
+        <BaselineUpstreamProvenance :entries="selected.upstream" />
         <el-descriptions :column="1" border>
           <el-descriptions-item label="内容">{{ selected.name }} · {{ selected.version }} · {{ label(selected.status) }}</el-descriptions-item>
           <el-descriptions-item label="Benchmark">{{ selected.metadata.manifest.benchmarkId }}</el-descriptions-item>
@@ -114,7 +115,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import BaselineUpstreamProvenance from '../components/BaselineUpstreamProvenance.vue'
+const route = useRoute()
 import { ElMessage } from 'element-plus'
 import { getUser, fetchScapPackages, fetchScapPackage, importScapPackage, decideScapPackage, fetchScapTargets, fetchScapTasks, fetchScapTask, createScapTask, downloadScap } from '../api'
 
@@ -155,7 +159,8 @@ async function create() {
 }
 async function changePage(value) { page.value = value; await refresh() }
 async function download(path, name) { try { await downloadScap(path, name) } catch (e) { ElMessage.error(e.message) } }
-onMounted(refresh)
+onMounted(async () => { await refresh(); if (typeof route.query.package === 'string') await viewPackage({ id: route.query.package }) })
+watch(() => route.query.package, value => { if (typeof value === 'string') viewPackage({ id: value }) })
 </script>
 
 <style scoped>

@@ -63,6 +63,22 @@ export async function downloadScap(path, filename) {
   const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url)
 }
 
+export const fetchBaselineUpstreams = () => get('/api/baseline/upstreams')
+export const fetchBaselineUpstream = id => get(`/api/baseline/upstreams/${encodeURIComponent(id)}`)
+export const updateBaselineUpstream = (id, plan) => put(`/api/baseline/upstreams/${encodeURIComponent(id)}/schedule`, plan)
+export const syncBaselineUpstream = id => post(`/api/baseline/upstreams/${encodeURIComponent(id)}/sync`, {})
+export const retryBaselineUpstream = (id, release) => post(`/api/baseline/upstreams/${encodeURIComponent(id)}/releases/${encodeURIComponent(release)}/retry`, {})
+export async function downloadBaselineUpstream(path, filename) {
+  if (!/^\/api\/baseline\/upstreams\/[A-Za-z0-9_.-]+\/(receipts\/[A-Za-z0-9-]+|releases\/[A-Za-z0-9-]+\/artifact)$/.test(path)) throw new Error('导出路径无效')
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '导出失败')
+  const bytes = await response.arrayBuffer()
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (digest !== response.headers.get('X-Content-SHA256')) throw new Error('导出内容摘要不匹配')
+  const url = URL.createObjectURL(new Blob([bytes], { type: response.headers.get('Content-Type') }))
+  const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url)
+}
+
 export const fetchWindowsUpdateHosts = (page = 1) => get(`/api/fix/windows/hosts?page=${page}&size=20`)
 export const fetchWindowsUpdateCandidates = agentId => get(`/api/fix/windows/candidates?agentId=${encodeURIComponent(agentId)}`)
 export const scanWindowsUpdates = agentIds => post('/api/fix/windows/scans', { agentIds })

@@ -26,6 +26,7 @@ public class ScapPackageService {
     public Map<String,Object> detail(String id) {
         var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
         ScapStore.packageContent(row);row.remove("content_zip");row.remove("source_zip");row.put("metadata",JsonUtils.read(row.get("metadata").toString()));row.put("resolution",JsonUtils.read(row.get("resolution").toString()));
+        row.put("upstream",BaselineUpstreamGuard.provenance(jdbc,"scap",id));
         row.put("reviews",jdbc.queryForList("SELECT revision,action,note,actor,created_at FROM t_scap_package_review WHERE package_id=? ORDER BY revision",id));
         String task=row.get("last_test_task")==null?null:row.get("last_test_task").toString();
         row.put("testReady",ScapTaskService.testReady(jdbc,task));
@@ -50,12 +51,26 @@ public class ScapPackageService {
         if (!content.manifest().equals(source.manifest())) throw new IllegalArgumentException("标准解析不得更改内容身份");
         return transaction.execute(status->saveResolved(bytes,source,resolved,actor));
     }
-    private Map<String,Object> sameSource(Map<String,Object> existing,ScapPackage source) {
+    record Prepared(byte[] bytes,ScapPackage source,ScapResolver.Resolved resolved) {}
+    Prepared prepareUpstream(byte[] bytes) {
+        var source=ScapPackage.read(bytes);
+        var found=jdbc.queryForList("SELECT * FROM t_scap_package WHERE code=? AND version=?",source.manifest().path("code").asText(),source.manifest().path("version").asText());
+        if(!found.isEmpty()){sameSource(found.get(0),source);return new Prepared(bytes,source,null);}
+        var resolved=resolver.resolve(source);
+        if(!resolved.content().manifest().equals(source.manifest()))throw new IllegalArgumentException("标准解析不得更改内容身份");
+        return new Prepared(bytes,source,resolved);
+    }
+    Map<String,Object> saveUpstream(Prepared prepared) {
+        // Actor 0 denotes the scheduled system importer, never a human reviewer.
+        if(prepared.resolved()!=null)return saveResolved(prepared.bytes(),prepared.source(),prepared.resolved(),0L);
+        var m=prepared.source().manifest();return sameSource(ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE code=? AND version=?",m.path("code").asText(),m.path("version").asText()),prepared.source());
+    }
+    Map<String,Object> sameSource(Map<String,Object> existing,ScapPackage source) {
         ScapStore.packageContent(existing);
         if (JsonUtils.read(existing.get("resolution").toString()).path("sourceCanonicalSha256").asText().equals(source.sha256())) return detail(existing.get("id").toString());
         throw new IllegalArgumentException("同一内容编号和版本已存在不同内容，请使用新版本");
     }
-    private Map<String,Object> saveResolved(byte[] bytes,ScapPackage source,ScapResolver.Resolved resolved,Long actor) {
+    Map<String,Object> saveResolved(byte[] bytes,ScapPackage source,ScapResolver.Resolved resolved,Long actor) {
         var content=resolved.content();var m=content.manifest();String code=m.path("code").asText(),version=m.path("version").asText();
         ScapStore.gate(jdbc,code);
         var existing=jdbc.queryForList("SELECT * FROM t_scap_package WHERE code=? AND version=?",code,version);
@@ -70,6 +85,8 @@ public class ScapPackageService {
     public Map<String,Object> decide(String id,Decision decision,Long actor) {
         ScapStore.actor(actor);
         if (decision==null||decision.revision()==null||decision.revision()<0||decision.action()==null) throw new IllegalArgumentException("缺少版本状态或审核操作");
+        BaselineUpstreamGuard.lock(jdbc);
+        if (List.of("approve","test","publish").contains(decision.action())) BaselineUpstreamGuard.requireAdoptable(jdbc,"scap",id);
         String note=ScapStore.note(decision.note());
         var row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);
         ScapStore.gate(jdbc,row.get("code").toString());row=ScapStore.one(jdbc,"SELECT * FROM t_scap_package WHERE id=?",id);

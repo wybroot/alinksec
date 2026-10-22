@@ -17,10 +17,15 @@ public class FeedDownload {
     private final LibraryProperties props;
     public FeedDownload(LibraryFiles files, LibraryProperties props) { this.files = files; this.props = props; }
     public Result fetch(String address, Map<String, String> headers, String form) throws IOException {
-        return request(address, headers, form, "application/x-www-form-urlencoded");
+        return request(address, headers, form, "application/x-www-form-urlencoded", props.getMaxDownloadBytes(), 120_000, false);
     }
     public Result postJson(String address, Map<String, String> headers, String json) throws IOException {
-        return request(address, headers, json, "application/json");
+        return request(address, headers, json, "application/json", props.getMaxDownloadBytes(), 120_000, false);
+    }
+    /** Short bounded GET used by signed baseline indexes and artifacts. */
+    public Result fetchBounded(String address, Map<String,String> headers, long limit, int timeoutMs) throws IOException {
+        if (limit < 1 || timeoutMs < 100 || timeoutMs > 30_000) throw new IllegalArgumentException("下载边界无效");
+        return request(address, headers, null, null, Math.min(limit, props.getMaxDownloadBytes()), timeoutMs, true);
     }
     public static URI validateAddress(String address) {
         URI uri;
@@ -31,15 +36,16 @@ public class FeedDownload {
         if ((!"https".equals(uri.getScheme()) && !loopback) || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null) throw new IllegalArgumentException("远端数据源必须使用 HTTPS");
         return uri;
     }
-    private Result request(String address, Map<String, String> headers, String body, String contentType) throws IOException {
+    private Result request(String address, Map<String, String> headers, String body, String contentType, long limit, int timeoutMs, boolean bounded) throws IOException {
+        long started = System.nanoTime();
         URI uri = validateAddress(address);
         Path tmp = files.temporary(".download");
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) uri.toURL().openConnection();
             connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(15_000);
+            connection.setConnectTimeout(bounded ? Math.min(timeoutMs, 5_000) : 10_000);
+            connection.setReadTimeout(bounded ? Math.min(timeoutMs, 3_000) : 15_000);
             connection.setRequestProperty("User-Agent", "ALinkSec-LibrarySync/0.0.2");
             headers.forEach(connection::setRequestProperty);
             if (body != null) {
@@ -51,14 +57,15 @@ public class FeedDownload {
             }
             int status = connection.getResponseCode();
             if (status != 200 && status != 304) throw new IOException("远端返回 HTTP " + status);
-            if (connection.getContentLengthLong() > props.getMaxDownloadBytes()) throw new IOException("远端数据超过下载大小上限");
+            if (connection.getContentLengthLong() > limit) throw new IOException("远端数据超过下载大小上限");
             if (status == 200) {
-                long deadline = System.nanoTime() + 120_000_000_000L;
+                long deadline = (bounded ? started : System.nanoTime()) + timeoutMs * 1_000_000L;
                 try (InputStream in = connection.getInputStream(); OutputStream out = Files.newOutputStream(tmp)) {
                     byte[] buffer = new byte[8192]; int n; long size = 0;
+                    if (System.nanoTime() > deadline) throw new IOException("远端下载超过时间上限");
                     while ((n = in.read(buffer)) != -1) {
                         size += n;
-                        if (size > props.getMaxDownloadBytes() || System.nanoTime() > deadline) throw new IOException("远端下载超过大小或时间上限");
+                        if (size > limit || System.nanoTime() > deadline) throw new IOException("远端下载超过大小或时间上限");
                         out.write(buffer, 0, n);
                     }
                     if (connection.getContentLengthLong() >= 0 && size != connection.getContentLengthLong())

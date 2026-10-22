@@ -52,6 +52,7 @@ public class BaselinePackageService {
         Map<String, Object> result = new LinkedHashMap<>(row(id));
         JsonNode doc = JsonUtils.read(String.valueOf(result.get("document")));
         result.put("document", doc);
+        result.put("upstream", BaselineUpstreamGuard.provenance(jdbc,"baseline",id));
         result.put("complianceCoverage", BaselineComplianceCatalog.coverage(doc));
         JsonNode previous = null;
         if (result.get("base_package_id") != null) previous = JsonUtils.read(String.valueOf(row(String.valueOf(result.get("base_package_id"))).get("document")));
@@ -85,6 +86,8 @@ public class BaselinePackageService {
 
     @Transactional
     public Map<String, Object> review(String id, boolean approve, String note, Long user) {
+        BaselineUpstreamGuard.lock(jdbc);
+        if (approve) BaselineUpstreamGuard.requireAdoptable(jdbc,"baseline",id);
         Map<String, Object> pkg = locked(id);
         require("candidate".equals(pkg.get("status")), "只有待审核版本可以审核");
         note = note(note); if (approve) ensureBase(pkg);
@@ -111,6 +114,8 @@ public class BaselinePackageService {
 
     @Transactional
     public Map<String, Object> test(String id, List<String> agents, Long user) {
+        BaselineUpstreamGuard.lock(jdbc);
+        BaselineUpstreamGuard.requireAdoptable(jdbc,"baseline",id);
         Map<String, Object> pkg = locked(id);
         require("approved".equals(pkg.get("status")), "只有已审核候选版本可以测试");
         require(agents != null && !agents.isEmpty() && agents.size() <= 10, "测试需选择 1 至 10 台主机");
@@ -126,6 +131,8 @@ public class BaselinePackageService {
 
     @Transactional
     public Map<String, Object> publish(String id, String note, Long user) {
+        BaselineUpstreamGuard.lock(jdbc);
+        BaselineUpstreamGuard.requireAdoptable(jdbc,"baseline",id);
         Map<String, Object> pkg = locked(id);
         require("approved".equals(pkg.get("status")), "只有已审核候选版本可以发布");
         validateStoredPackage(pkg);
