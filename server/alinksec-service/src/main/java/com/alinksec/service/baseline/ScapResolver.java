@@ -36,7 +36,7 @@ public class ScapResolver {
                 for(Path path:List.of(directory,input)) {Files.setAttribute(path,"unix:uid",65534);Files.setAttribute(path,"unix:gid",65534);}
             }
             String version=run(directory,List.of("/usr/bin/oscap","--version")).lines().findFirst().orElse("");
-            if (!version.matches("OpenSCAP command line tool \\(oscap\\) [0-9]+\\.[0-9]+\\.[0-9]+.*")||version.length()>256) throw new IOException("unrecognized resolver");
+            if (!supportedVersion(version)) throw new IOException("OpenSCAP 1.3.9 or newer is required");
             run(directory,List.of("/usr/bin/oscap","xccdf","resolve","--force","-o",output.toString(),input.toString()));
             if (!Files.isRegularFile(output,LinkOption.NOFOLLOW_LINKS)||Files.size(output)>ScapPackage.MAX_EXPANDED)throw new IOException("resolution output limit");
             byte[] resolved=Files.readAllBytes(output);Element normalized=ScapPackage.xml(resolved).getDocumentElement();
@@ -55,8 +55,14 @@ public class ScapResolver {
             provenance.put("sourceCanonicalSha256",source.sha256());provenance.put("algorithm","XCCDF standard loading and inheritance; OpenSCAP xccdf resolve --force");
             provenance.put("signaturePolicy",signed?"original_preserved_derived_signature_removed":"source_unsigned");
             return new Resolved(content,JsonUtils.write(provenance));
-        } catch (IOException|TransformerException e) {throw new IllegalArgumentException("XCCDF 标准解析失败，请检查内容、继承关系和服务端 OpenSCAP 安装");}
+        } catch (IOException|TransformerException e) {throw new IllegalArgumentException("XCCDF 标准解析失败，请检查内容、继承关系和服务端 OpenSCAP（1.3.9 或更高版本）安装");}
         finally {try {if(directory!=null)try(var paths=Files.walk(directory)){for(Path path:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(path);}}catch(IOException ignored){}SLOT.release();}
+    }
+    static boolean supportedVersion(String version) {
+        var match=java.util.regex.Pattern.compile("OpenSCAP command line tool \\(oscap\\) ([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3}).*").matcher(version);
+        if (version.length()>256||!match.matches())return false;
+        int value=Integer.parseInt(match.group(1))*1000000+Integer.parseInt(match.group(2))*1000+Integer.parseInt(match.group(3));
+        return value>=1003009;
     }
     private static boolean root()throws IOException{return ((Number)Files.getAttribute(Path.of("/proc/self"),"unix:uid")).intValue()==0;}
     static Map<String,byte[]> files(byte[] archive)throws IOException{

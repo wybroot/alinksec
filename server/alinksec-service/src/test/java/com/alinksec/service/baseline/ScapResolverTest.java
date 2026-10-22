@@ -11,6 +11,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Calls the actual production resolver. The platform jobs consume this exact
  * resolved Benchmark and independently exercise native OVAL probes and SCC. */
 class ScapResolverTest {
+    @Test void rejectsResolverVersionsBeforeValidatedInheritanceSupport() {
+        for(String version:List.of("1.2.17","1.3.8","0.99.99"))assertFalse(ScapResolver.supportedVersion("OpenSCAP command line tool (oscap) "+version));
+        for(String version:List.of("1.3.9","1.3.10","1.4.0","2.0.0"))assertTrue(ScapResolver.supportedVersion("OpenSCAP command line tool (oscap) "+version));
+        assertFalse(ScapResolver.supportedVersion("other tool 1.3.9"));
+    }
     @Test void resolvesInheritedSelectionsWithNativeOpenScapAndPreservesSource() throws Exception {
         String fixture=System.getenv("ALINKSEC_SCAP_FIXTURE_ZIP");
         org.junit.jupiter.api.Assumptions.assumeTrue(fixture!=null&&System.getenv("ALINKSEC_SCAP_RESOLVE_OUTPUT")!=null,"requires native standard resolver job");

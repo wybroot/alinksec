@@ -42,7 +42,7 @@ V027 为 SQLite／PostgreSQL 增加六张独立表；旧基线任务与等保条
 
 ## 安装与启用
 
-服务端镜像包含发行版提供的 OpenSCAP 和 util-linux。当前 Jammy 镜像由 `libopenscap8` 提供 `/usr/bin/oscap`；Ubuntu 24.04 的原生验证安装 `openscap-scanner`。裸 JAR 部署同样需要 `/usr/bin/oscap`、`setsid`、`prlimit`、`setpriv`。解析在临时目录中完成，最多一个解析进程；root 服务端会降为 nobody 执行解析。外层设置地址空间、数据段、CPU、文件大小、描述符和 15 秒单次执行上限。原生解析发生在数据库写事务之前。
+服务端镜像使用 Eclipse Temurin 21 JRE 的 Ubuntu 24.04 Noble 基础，安装 `openscap-scanner` 和 util-linux；与原生验证使用相同的 OpenSCAP 1.3.9 标准解析能力。裸 JAR 部署需要 OpenSCAP 1.3.9 或更高版本，以及 `/usr/bin/oscap`、`setsid`、`prlimit`、`setpriv`。更早版本在实际测试中丢失继承规则选择，因此拒绝使用；两种数据库的 REST 集成测试均检查解析后的完整选择及变量。解析在临时目录中完成，最多一个解析进程；root 服务端会降为 nobody 执行解析。外层设置地址空间、数据段、CPU、文件大小、描述符和 15 秒单次执行上限。原生解析发生在数据库写事务之前。
 
 Agent 默认未启用 SCC。管理员手动运行 `python3 deploy/baseline/scap/install-runtime.py <安装目录>`（Windows 使用对应 Python 命令），安装器从发布者固定地址获取 SCC 5.15，校验官方 bundle、内部归档和 CLI 的 SHA256，生成 `alinksec-runtime.json`。保留整个原生运行目录及 Documentation 中的许可证和第三方说明；不会安装系统服务或启用随包附带的基准内容。此步骤属于显式本地安装，不是自动更新机制。
 
@@ -76,4 +76,4 @@ Agent 与其他重任务共用执行槽并纳入资源反馈。Linux 限制每�
 
 Java 测试覆盖真实迁移和事务、错误绑定、完整结果集合、错误状态、迟到报告及审核发布门槛。SQLite／PostgreSQL REST 与网页用明确标记的协议结果夹具覆盖九种结果、角色、修订竞争、下载摘要、撤回后快照、就绪状态和移动布局；这些夹具不是原生合规证明。模块状态、完整 CI 和原始产物验收记录保存在模块检查点；全部必需验证完成后才合并。
 
-参考：[NIST XCCDF 1.2](https://csrc.nist.gov/publications/detail/nistir/7275/rev-4/final)、[OpenSCAP 原生 resolve 实现](https://github.com/OpenSCAP/openscap/blob/main/utils/oscap-xccdf.c)、[NIWC Atlantic SCC](https://www.niwcatlantic.navy.mil/Technology/SCAP/)、[SCC 5.15 发布者摘要](https://dl.dod.cyber.mil/wp-content/uploads/stigs/txt/SCC_5.15_Checksums.txt)、[Ubuntu Jammy oscap 文件来源](https://packages.ubuntu.com/jammy-updates/arm64/libopenscap8/filelist)。
+参考：[NIST XCCDF 1.2](https://csrc.nist.gov/publications/detail/nistir/7275/rev-4/final)、[OpenSCAP 原生 resolve 实现](https://github.com/OpenSCAP/openscap/blob/main/utils/oscap-xccdf.c)、[NIWC Atlantic SCC](https://www.niwcatlantic.navy.mil/Technology/SCAP/)、[SCC 5.15 发布者摘要](https://dl.dod.cyber.mil/wp-content/uploads/stigs/txt/SCC_5.15_Checksums.txt)、[Temurin 官方镜像清单](https://raw.githubusercontent.com/docker-library/official-images/master/library/eclipse-temurin)。

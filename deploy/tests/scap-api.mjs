@@ -39,6 +39,7 @@ export async function captureScap({ mode, sql, ok, request, tokens }) {
   }
   assert.deepEqual(await attachment(prefix + '/source', digest(source)), source)
   const content = await attachment(prefix + '/content', captured.candidate.content_sha256)
+  execFileSync('python3', [fileURLToPath(new URL('scap-resolved-fixture.py', import.meta.url))], { input: content, timeout: 10_000, maxBuffer: 65536 })
   captured.sourceBase64 = source.toString('base64'); captured.contentBase64 = content.toString('base64')
   const decide = (row, action, token = tokens.admin, agentIds = []) => ({ ...options, token, body: { revision: row.revision, action, note: 'Reviewed offline standard content; disposable REST protocol fixture', agentIds } })
   for (const role of ['operator', 'viewer']) assert.equal((await request(prefix + '/decision', decide(captured.candidate, 'approve', tokens[role]))).status, 403)
