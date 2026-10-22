@@ -6,7 +6,8 @@ import com.alinksec.service.scan.VulnerabilityScope;
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
-import java.io.IOException;
+import java.io.*;
+import java.util.zip.GZIPInputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
@@ -89,7 +90,9 @@ public final class VendorAdvisoryAdapter {
         var builder = new Builder("tracker", "Debian Security Team", "Debian Security Tracker", "",
                 Instant.EPOCH);
         var seen = new HashSet<String>();
-        try (var parser = JSON.createParser(raw)) {
+        InputStream decoded = new ByteArrayInputStream(raw);
+        if (raw.length > 2 && raw[0] == (byte) 0x1f && raw[1] == (byte) 0x8b) decoded = new GZIPInputStream(decoded);
+        try (var parser = JSON.createParser(new InflatedLimit(decoded))) {
             if (parser.nextToken() != JsonToken.START_OBJECT) throw invalid();
             while (parser.nextToken() != JsonToken.END_OBJECT) {
                 if (parser.currentToken() != JsonToken.FIELD_NAME) throw invalid();
@@ -125,6 +128,15 @@ public final class VendorAdvisoryAdapter {
             if (parser.nextToken() != null) throw invalid();
         }
         return builder.finish();
+    }
+
+    /** The large full tracker is streamed; unselected source-package records are not materialized. */
+    private static final class InflatedLimit extends FilterInputStream {
+        private long count;
+        InflatedLimit(InputStream in) { super(in); }
+        private void add(long size) throws IOException { if (size > 0 && (count += size) > (256L << 20)) throw new IOException("Tracker inflated size limit"); }
+        @Override public int read() throws IOException { int value = in.read(); if (value >= 0) add(1); return value; }
+        @Override public int read(byte[] bytes, int offset, int length) throws IOException { int size = in.read(bytes, offset, length); add(size); return size; }
     }
 
     private static Document redhat(LibraryProperties.Source source, JsonNode root) {

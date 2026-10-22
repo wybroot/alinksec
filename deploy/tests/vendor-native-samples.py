@@ -28,7 +28,7 @@ def main():
     for kind, url in SAMPLES.items():
         target = root / (kind + ".json")
         start, size, digest = time.monotonic(), 0, hashlib.sha256()
-        request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "ALinkSec-Native-Format-Validation/1"})
+        request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "ALinkSec-Native-Format-Validation/1", "Accept-Encoding": "gzip" if kind == "debian-tracker" else "identity"})
         with opener.open(request, timeout=20) as response, target.open("wb") as output:
             assert response.status == 200 and response.geturl() == url
             while block := response.read(65536):
@@ -38,7 +38,7 @@ def main():
                     raise ValueError("Publisher sample response limit")
                 digest.update(block)
                 output.write(block)
-        manifest.append({"format": kind, "url": url, "bytes": size, "sha256": digest.hexdigest()})
+        manifest.append({"format": kind, "url": url, "bytes": size, "sha256": digest.hexdigest(), "contentEncoding": "gzip" if target.read_bytes()[:2] == b"\x1f\x8b" else "identity"})
     (root / "manifest.json").write_text(json.dumps({
         "capturedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "scope": "Actual public native publisher bytes; no claim of publisher signature verification or live host patch applicability.",
