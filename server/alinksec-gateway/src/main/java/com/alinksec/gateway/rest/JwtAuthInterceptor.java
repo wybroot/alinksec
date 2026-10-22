@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成） */
     private static final List<String> ADMIN_WRITE_PREFIXES = List.of(
-            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/baseline/packages", "/api/baseline/scap/packages");
+            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
 
     /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
     private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit");
@@ -57,18 +58,22 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         try {
             Map<String, Object> claims = JwtUtil.verify(secretHolder.secret(), auth.substring(7));
             String role = String.valueOf(claims.get("role"));
+            // Static URI segments can be encoded or carry matrix parameters.
+            // Authorize the controller pattern that Spring actually matched.
+            Object matched = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+            String path = matched == null ? request.getRequestURI() : matched.toString();
             request.setAttribute("uid", ((Number) claims.get("uid")).longValue());
             request.setAttribute("username", claims.get("username"));
             request.setAttribute("role", role);
-            if (ADMIN_ONLY_PREFIXES.stream().anyMatch(request.getRequestURI()::startsWith)
+            if (ADMIN_ONLY_PREFIXES.stream().anyMatch(path::startsWith)
                     && !"admin".equals(role)) {
                 reject(response, HttpStatus.FORBIDDEN, 40301, "Administrator access is required");
                 return false;
             }
             // 写操作角色校验（读操作三角色均放行；自服务写操作如登出对所有角色放行）
             if (WRITE_METHODS.contains(request.getMethod().toUpperCase())
-                    && !SELF_WRITE_URIS.contains(request.getRequestURI())
-                    && !canWrite(role, request.getRequestURI())) {
+                    && !SELF_WRITE_URIS.contains(path)
+                    && !canWrite(role, path)) {
                 reject(response, HttpStatus.FORBIDDEN, 40301,
                         "viewer".equals(role) ? "只读角色无写权限" : "该操作需要管理员权限");
                 return false;

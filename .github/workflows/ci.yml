@@ -12,6 +12,10 @@ on:
         description: Run only native Windows Agent validation
         type: boolean
         default: false
+      upstream_only:
+        description: Run only signed baseline upstream validation
+        type: boolean
+        default: false
       scap_only:
         description: Run only native SCAP interpreter validation
         type: boolean
@@ -19,7 +23,7 @@ on:
 
 jobs:
   scap-resolver:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -57,7 +61,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-scap:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only
     needs: scap-resolver
     strategy:
       fail-fast: false
@@ -124,7 +128,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   windows-agent:
-    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -348,7 +352,7 @@ jobs:
           retention-days: 14
 
   build-and-test:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -443,8 +447,12 @@ jobs:
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
           ALINKSEC_YARA_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/yara-fixtures
+          ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
           ALINKSEC_SIGNATURE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/signature-fixtures
         working-directory: server
+      - name: Check signed baseline source updates in production pages
+        working-directory: web
+        run: node test/baseline-upstream-browser.mjs
       - name: Check source governance with captured database lifecycle responses
         working-directory: web
         run: node test/source-governance-browser.mjs
@@ -803,6 +811,8 @@ jobs:
             .tmp/baseline-browser-artifacts
             .tmp/compliance-browser
             .tmp/scap-browser
+            .tmp/baseline-upstream-browser
+            .tmp/baseline-upstream-fixtures
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
@@ -904,7 +914,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   native-yara:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
     name: native-yara (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -961,7 +971,7 @@ jobs:
           retention-days: 14
 
   schema:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1009,8 +1019,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "27"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "76"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "28"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "81"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1045,7 +1055,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -1062,6 +1072,7 @@ jobs:
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
           ALINKSEC_YARA_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/yara-fixtures
+          ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
           ALINKSEC_SIGNATURE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/signature-fixtures
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
@@ -1069,6 +1080,8 @@ jobs:
         with:
           name: source-governance-postgres
           path: |
+            .tmp/baseline-upstream-fixtures
+            server/**/target/surefire-reports/*BaselineUpstream*
             .tmp/source-governance-fixtures
             .tmp/detection-capabilities-fixtures
             .tmp/weakpwd-fixtures
@@ -1080,4 +1093,50 @@ jobs:
             .tmp/yara-fixtures
             .tmp/signature-fixtures
           include-hidden-files: true
+          if-no-files-found: error
+
+  baseline-upstream:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
+      - run: python3 deploy/tests/scap-fixture.py .tmp/baseline-upstream-native
+      - name: Check publisher crypto and immutable release identities
+        run: python3 -B -m unittest discover -s deploy/tests -p test_baseline_upstream_tools.py -v
+      - name: Check signed HTTP indexes, transaction races, REST roles and real native SCAP import
+        working-directory: server
+        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=BaselineUpstreamIndexTest,BaselineUpstreamDownloadTest,BaselineUpstreamIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/baseline-upstream-native/content.zip
+          ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
+      - run: npm ci && npm test && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - name: Check production upstream pages with database lifecycle responses
+        run: node test/baseline-upstream-browser.mjs
+        working-directory: web
+      - name: Retain signed upstream validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-upstream-evidence
+          path: |
+            .tmp/baseline-upstream-fixtures
+            .tmp/baseline-upstream-browser
+            server/**/target/surefire-reports/*BaselineUpstream*
           if-no-files-found: error

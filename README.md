@@ -520,6 +520,7 @@ validation reference is in English.
 | [16 · Open-source Platform Integration](docs/16-开源安全平台对接指南.md) | Native MISP and export scripts, OpenCTI/vulnerability conversion and authentication |
 | [17 · Security Data Integration Roadmap](docs/17-安全数据接入与演进.md) | Console schedules, execution history and baseline/vulnerability adaptation stages |
 | [18 · Baseline Template Review](docs/18-基线模板审核与系统适配.md) | Linux/Windows candidates, applicability, review, test, publication and task snapshots |
+| [69 · Baseline Upstream Updates](docs/69-基线模板上游自动更新.md) | Signed publishers, scheduled discovery, candidate imports, withdrawal and retries |
 | [20 · Legacy Baseline Content Review](docs/20-旧基线模板内容审核.md) | Retirement of 60 legacy rules, reviewed observations and unsupported scope |
 | [37 · Shadow Account Defaults](docs/37-Shadow新账户口令有效期与预警默认声明核查.md) | Ubuntu24 finite new-account aging declarations, isolated native comparison and explicit existing-account limits |
 | [38 · Bash Global Startup Declarations](docs/38-Bash全局启动与历史声明核查.md) | Five finite Ubuntu24 timeout, mask and history declarations with separate login/nonlogin scope |

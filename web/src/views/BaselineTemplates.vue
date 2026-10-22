@@ -32,6 +32,7 @@
       <div v-loading="detailLoading" style="max-height:calc(80vh - 130px);overflow-y:auto">
         <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" />
         <template v-if="detail">
+          <BaselineUpstreamProvenance :entries="detail.upstream" />
           <h3>{{ detail.document.name }} · {{ detail.version }} · {{ status(detail.status) }}</h3>
           <p>{{ os(detail.document.osType) }} · {{ detail.document.product }} · {{ detail.document.osVersionPattern }}</p>
           <p>来源：<a :href="detail.document.source.url" target="_blank" rel="noopener noreferrer">{{ detail.document.source.name }}</a> · {{ detail.document.source.version }}</p>
@@ -82,7 +83,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import BaselineUpstreamProvenance from '../components/BaselineUpstreamProvenance.vue'
+const route = useRoute()
 import { ElMessage } from 'element-plus'
 import { getUser, fetchBaselineTemplates, fetchBaselinePackages, fetchBaselinePackage, importBaselinePackage, reviewBaselinePackage, testBaselinePackage, publishBaselinePackage, withdrawBaselinePackage } from '../api'
 const admin = computed(() => getUser()?.role === 'admin')
@@ -124,7 +128,8 @@ async function act(action) {
   } catch (e) { ElMessage.error(e.message) }
   finally { busy.value = false }
 }
-onMounted(load)
+onMounted(async () => { await load(); if (typeof route.query.package === 'string') await open(route.query.package) })
+watch(() => route.query.package, value => { if (typeof value === 'string') open(value) })
 </script>
 
 <style scoped>
