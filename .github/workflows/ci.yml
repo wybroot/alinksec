@@ -1084,6 +1084,7 @@ jobs:
         with:
           name: source-governance-postgres
           path: |
+            server/**/target/surefire-reports/*VendorAdvisory*
             .tmp/baseline-upstream-fixtures
             server/**/target/surefire-reports/*BaselineUpstream*
             .tmp/source-governance-fixtures
