@@ -53,6 +53,8 @@ try {
   await page.getByPlaceholder('填写本次调整原因').fill('已核对签名来源与包范围')
   await page.getByRole('button', { name: '保存更新计划', exact: true }).click(); assert.equal(writes.at(-1).action, 'schedule')
   await page.getByRole('button', { name: '立即同步', exact: true }).click(); await expect(page.getByText('同步已提交，请查看更新记录')).toBeVisible()
+  await expect(page.locator('.el-loading-mask')).toHaveCount(0); await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
+  await page.locator('main.content').evaluate(el => { el.scrollTop = 0 })
   await page.screenshot({ path: root + '/imported-desktop.png', fullPage: true, animations: 'disabled' })
   checks.push('signed-source-key-scope-provenance; real-byte-verified-artifact-and-envelope-downloads; optimistic-admin-schedule; explicit-sync')
   await page.getByRole('button', { name: '查看候选版本', exact: true }).click()
@@ -63,6 +65,8 @@ try {
   await expect(page.getByText(/原件大小或摘要不匹配/).first()).toBeVisible()
   await page.getByRole('button', { name: '重新尝试', exact: true }).click(); await expect(page.getByText('版本已加入下一轮重试')).toBeVisible()
   await expect(page.getByText('上游已撤回', { exact: true })).toBeVisible()
+  await expect(page.locator('.el-loading-mask')).toHaveCount(0); await expect(page.locator('.el-message')).toHaveCount(0, { timeout: 10000 })
+  await page.getByRole('heading', { name: '发现的版本', exact: true }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: root + '/failed-withdrawn-desktop.png', fullPage: true, animations: 'disabled' })
   checks.push('captured-real-failure-and-withdrawal-states; explicit-admin-retry')
   stage = 'withdrawn'; await page.goto(base + '/baseline-templates?package=' + fixture.withdrawn.candidate.id)
@@ -75,6 +79,8 @@ try {
   }
   checks.push('viewer-and-operator-readonly-controls')
   await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: root + '/viewer-mobile.png', fullPage: true, animations: 'disabled' })
+  await page.getByRole('heading', { name: '发现的版本', exact: true }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: root + '/viewer-versions-mobile.png', fullPage: true, animations: 'disabled' })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   checks.push('mobile-has-no-page-horizontal-overflow')
   role = 'admin'; await page.evaluate(() => sessionStorage.setItem('role', 'admin')); stage = 'paused'; await page.goto(base + '/baseline-upstreams'); await expect(page.getByRole('button', { name: '立即同步', exact: true })).toBeDisabled()
@@ -83,5 +89,5 @@ try {
   unavailable = true;await page.getByRole('button', { name: '刷新', exact: true }).click();await expect(page.getByText('更新来源暂不可用', { exact: true })).toBeVisible()
   checks.push('tampered-download-blocked; fetch-error-visible')
   assert.deepEqual(errors, []);assert.deepEqual(unexpected, [])
-  writeFileSync(root + '/result.json', JSON.stringify({ checks, writes, errors, unexpected, screenshots: ['imported-desktop.png', 'failed-withdrawn-desktop.png', 'withdrawn-candidate-desktop.png', 'viewer-mobile.png'], fixtureSource: 'SQLite integration HTTP publisher and actual REST/database lifecycle responses' }, null, 2))
+  writeFileSync(root + '/result.json', JSON.stringify({ checks, writes, errors, unexpected, screenshots: ['imported-desktop.png', 'failed-withdrawn-desktop.png', 'withdrawn-candidate-desktop.png', 'viewer-mobile.png', 'viewer-versions-mobile.png'], fixtureSource: 'SQLite integration HTTP publisher and actual REST/database lifecycle responses' }, null, 2))
 } finally { await browser?.close(); await new Promise(done => server.close(done)) }

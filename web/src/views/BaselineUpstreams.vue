@@ -1,6 +1,6 @@
 <template>
   <div class="upstreams-page">
-    <div class="header"><div><h2>基线来源更新</h2><p>从已配置的签名来源发现新版本，导入后进入候选审核。</p></div><el-button :loading="loading" @click="refresh">刷新</el-button></div>
+    <div class="header"><div><h2>基线来源更新</h2><p>从已配置的签名来源发现新版本，导入后进入候选审核。</p></div><el-button :loading="loading" @click="refresh(true)">刷新</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-empty v-if="!loading && !sources.length && !error" description="尚未配置基线更新来源，请在服务器配置来源、公钥及允许的包编号。" />
     <el-table v-if="sources.length" :data="sources" stripe highlight-current-row @row-click="select">
@@ -39,7 +39,8 @@
         <el-table-column label="操作" min-width="200"><template #default="{ row }"><div class="buttons">
           <el-button v-if="row.package_id" link type="primary" @click="candidate(row)">查看候选版本</el-button>
           <el-button v-if="admin && row.state === 'failed' && row.remote_status === 'active'" link :disabled="busy || !detail.enabled || running" @click="retry(row)">重新尝试</el-button>
-          <el-button link @click="downloadReceipt(row.first_receipt)">导入签名凭据</el-button>
+          <el-button link @click="downloadReceipt(row.first_receipt)">首次签名凭据</el-button>
+          <el-button v-if="row.import_receipt && row.import_receipt !== row.first_receipt && row.import_receipt !== row.current_receipt" link @click="downloadReceipt(row.import_receipt)">导入签名凭据</el-button>
           <el-button v-if="row.current_receipt !== row.first_receipt" link @click="downloadReceipt(row.current_receipt)">当前签名凭据</el-button>
           <el-button v-if="row.package_id" link @click="downloadArtifact(row)">下载原件</el-button>
         </div></template></el-table-column>
@@ -63,13 +64,14 @@ import { ElMessage } from 'element-plus'
 import { getUser, fetchBaselineUpstreams, fetchBaselineUpstream, updateBaselineUpstream, syncBaselineUpstream, retryBaselineUpstream, downloadBaselineUpstream } from '../api'
 const route = useRoute(), router = useRouter(), admin = computed(() => getUser()?.role === 'admin')
 const sources = ref([]), selected = ref(null), detail = ref(null), loading = ref(false), busy = ref(false), error = ref('')
-const enabled = ref(false), hours = ref(1), note = ref('')
+const enabled = ref(false), hours = ref(1), note = ref(''), planRevision = ref(null)
 const expired = computed(() => detail.value?.receipt && detail.value.receipt.expires_at <= Date.now())
 const running = computed(() => detail.value?.attempts?.some(a => ['queued','running'].includes(a.outcome)))
 let timer, generation = 0, disposed = false
 const time = n => n ? new Date(Number(n)).toLocaleString() : '—'
 const label = value => ({ success: '成功', partial: '部分版本未导入', failed: '失败', imported: '已导入候选', pending: '等待导入', running: '执行中', queued: '等待执行', worker_busy: '其他服务器正在同步，等待下一轮', interrupted: '执行中断', manual: '手动同步', scheduled: '定时同步', schedule: '调整计划', retry: '重试版本', index_invalid: '签名、有效期或内容范围校验失败', index_expired: '签名索引已过期', index_rollback: '拒绝旧序号或同序号不同内容', index_new_sequence_required: '来源配置变更后需要新索引序号', release_changed: '同版本内容发生变更或尝试恢复已撤回版本', release_capacity: '版本记录已达容量上限', artifact_capacity: '原件存储已达容量上限', artifact_download: '原件下载失败', artifact_digest: '原件大小或摘要不匹配', artifact_identity: '包编号、版本或系统不匹配', artifact_invalid: '包内容或原生解析无效', artifact_import: '候选导入失败', package_already_adopted: '该版本已进入审核流程，无法重新绑定来源', package_already_bound: '该候选已绑定其他来源记录', source_changed: '来源计划或配置已变化', worker_interrupted: '更新中断，等待重试', release_unavailable: '版本已撤回或索引过期', sync_failed: '更新失败，请检查来源和服务器连接' }[value] || value || '尚未检查')
-async function refresh() {
+function applyPlan(value) { enabled.value = !!value.enabled; hours.value = value.interval_ms / 3600000; planRevision.value = value.revision }
+async function refresh(resetPlan = false) {
   if (loading.value) return
   loading.value = true; error.value = ''
   const token = generation
@@ -79,14 +81,14 @@ async function refresh() {
     sources.value = list
     if (selected.value) {
       selected.value = list.find(s => s.id === selected.value.id) || null
-      if (selected.value) { const value = await fetchBaselineUpstream(selected.value.id); if (!disposed && token === generation) detail.value = value }
+      if (selected.value) { const value = await fetchBaselineUpstream(selected.value.id); if (!disposed && token === generation) { detail.value = value; if (resetPlan) { applyPlan(value); note.value = '' } } }
     }
   } catch (e) { if (!disposed && token === generation) error.value = e.message }
   finally { loading.value = false }
 }
 async function select(source) {
   const token = ++generation; selected.value = source; detail.value = null; note.value = ''; error.value = ''
-  try { const value = await fetchBaselineUpstream(source.id); if (disposed || token !== generation) return; detail.value = value; enabled.value = !!value.enabled; hours.value = value.interval_ms / 3600000 }
+  try { const value = await fetchBaselineUpstream(source.id); if (disposed || token !== generation) return; detail.value = value; applyPlan(value) }
   catch (e) { if (!disposed && token === generation) error.value = e.message }
 }
 async function act(action) {
@@ -95,7 +97,7 @@ async function act(action) {
   try { await action(); await refresh() } catch (e) { ElMessage.error(e.message) }
   finally { busy.value = false }
 }
-function save() { if (!detail.value || !note.value.trim()) return; const id = selected.value.id, plan = { revision: detail.value.revision, enabled: enabled.value, intervalMs: hours.value * 3600000, note: note.value }; return act(async () => { await updateBaselineUpstream(id, plan); note.value = ''; ElMessage.success('更新计划已保存') }) }
+function save() { if (!detail.value || !note.value.trim()) return; const id = selected.value.id, plan = { revision: planRevision.value, enabled: enabled.value, intervalMs: hours.value * 3600000, note: note.value }; return act(async () => { const value = await updateBaselineUpstream(id, plan); applyPlan(value); note.value = ''; ElMessage.success('更新计划已保存') }) }
 function sync() { return act(async () => { await syncBaselineUpstream(selected.value.id); ElMessage.success('同步已提交，请查看更新记录') }) }
 function retry(row) { return act(async () => { await retryBaselineUpstream(selected.value.id, row.id); ElMessage.success('版本已加入下一轮重试') }) }
 function candidate(row) { router.push({ path: row.kind === 'scap' ? '/scap' : '/baseline-templates', query: { package: row.package_id } }) }

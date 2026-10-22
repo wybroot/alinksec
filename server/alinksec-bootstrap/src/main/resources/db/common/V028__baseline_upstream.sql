@@ -24,6 +24,7 @@ CREATE TABLE t_baseline_upstream_release (
     size_bytes BIGINT NOT NULL, remote_status TEXT NOT NULL CHECK(remote_status IN ('active','withdrawn')),
     first_receipt TEXT NOT NULL REFERENCES t_baseline_upstream_receipt(id),
     current_receipt TEXT NOT NULL REFERENCES t_baseline_upstream_receipt(id),
+    import_receipt TEXT REFERENCES t_baseline_upstream_receipt(id),
     state TEXT NOT NULL CHECK(state IN ('pending','imported','failed')), attempts INTEGER NOT NULL DEFAULT 0,
     issue TEXT NOT NULL DEFAULT '', package_id TEXT, artifact TEXT, imported_at BIGINT,
     UNIQUE(source_id,kind,code,version), UNIQUE(kind,package_id)

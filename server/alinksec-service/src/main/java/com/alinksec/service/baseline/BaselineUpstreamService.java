@@ -59,7 +59,7 @@ public class BaselineUpstreamService {
         state.put("receipt",state.get("receipt_id")==null?null:one("SELECT id,sequence,payload_sha256,key_sha256,expires_at,fetched_at FROM t_baseline_upstream_receipt WHERE id=?",state.get("receipt_id")));
         state.put("releases",jdbc.queryForList("""
                 SELECT r.id,r.kind,r.code,r.version,r.os_type,r.sha256,r.size_bytes,r.remote_status,r.state,r.attempts,r.issue,r.package_id,r.imported_at,
-                       r.first_receipt,r.current_receipt,a.sequence,a.key_sha256,a.payload_sha256,a.expires_at
+                       r.first_receipt,r.current_receipt,r.import_receipt,a.sequence,a.key_sha256,a.payload_sha256,a.expires_at
                 FROM t_baseline_upstream_release r JOIN t_baseline_upstream_receipt a ON a.id=r.current_receipt WHERE r.source_id=? ORDER BY a.sequence DESC,r.code,r.version
                 """,id));
         state.put("attempts",jdbc.queryForList("SELECT * FROM t_baseline_upstream_attempt WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 100",id));
@@ -180,7 +180,7 @@ public class BaselineUpstreamService {
             // Keep all release evidence plus the newest 20 otherwise unreferenced indexes per source.
             jdbc.update("""
                     DELETE FROM t_baseline_upstream_receipt WHERE source_id=? AND id NOT IN (SELECT first_receipt FROM t_baseline_upstream_release)
-                    AND id NOT IN (SELECT current_receipt FROM t_baseline_upstream_release) AND id NOT IN (SELECT receipt_id FROM t_baseline_upstream_source WHERE receipt_id IS NOT NULL)
+                    AND id NOT IN (SELECT current_receipt FROM t_baseline_upstream_release) AND id NOT IN (SELECT import_receipt FROM t_baseline_upstream_release WHERE import_receipt IS NOT NULL) AND id NOT IN (SELECT receipt_id FROM t_baseline_upstream_source WHERE receipt_id IS NOT NULL)
                     AND id NOT IN (SELECT id FROM t_baseline_upstream_receipt WHERE source_id=? ORDER BY sequence DESC LIMIT 20)
                     """,context.source(),context.source());
         });
@@ -208,7 +208,7 @@ public class BaselineUpstreamService {
             if(!pkg.get("status").equals("candidate"))throw new Failure("package_already_adopted");
             var bound=jdbc.queryForList("SELECT id FROM t_baseline_upstream_release WHERE kind=? AND package_id=?",kind,pkg.get("id"));
             if(!bound.isEmpty())throw new Failure("package_already_bound");
-            jdbc.update("UPDATE t_baseline_upstream_release SET state='imported',issue='',package_id=?,artifact=?,imported_at=? WHERE id=?",pkg.get("id"),Base64.getEncoder().encodeToString(bytes),System.currentTimeMillis(),id);
+            jdbc.update("UPDATE t_baseline_upstream_release SET state='imported',issue='',package_id=?,artifact=?,imported_at=?,import_receipt=current_receipt WHERE id=?",pkg.get("id"),Base64.getEncoder().encodeToString(bytes),System.currentTimeMillis(),id);
         });}catch(Failure e){throw e;}catch(Exception e){throw new Failure("artifact_import");}
     }
     private void requireRelease(Map<String,Object> release){

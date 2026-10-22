@@ -222,7 +222,6 @@ jobs:
         run: go test -v -count=1 -timeout=3m -run '^TestNativeSignature' ./internal/virusscan ./cmd/agent
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
-          ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
           ALINKSEC_SIGNATURE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/signature-fixtures
           ALINKSEC_SIGNATURE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
           ALINKSEC_SIGNATURE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/signature-native/native.json
@@ -696,7 +695,6 @@ jobs:
         run: go test -v -count=1 -timeout=3m -run '^TestNativeSignature' ./internal/virusscan ./cmd/agent
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
-          ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
           ALINKSEC_SIGNATURE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/signature-fixtures
           ALINKSEC_SIGNATURE_AGENT_BIN: ${{ github.workspace }}/.tmp/alinksec-agent
           ALINKSEC_SIGNATURE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/signature-native/native.json

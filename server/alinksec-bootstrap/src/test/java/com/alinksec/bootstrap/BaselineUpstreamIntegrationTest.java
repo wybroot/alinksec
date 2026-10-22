@@ -138,8 +138,8 @@ class BaselineUpstreamIntegrationTest {
         byte[] bytes=baseline("1",1);var entry=release("baseline","1",1,bytes);artifacts.put(new java.net.URI(entry.path("url").asText()).getPath(),"corrupt".getBytes(StandardCharsets.UTF_8));index(1,entry);
         for(int n=0;n<3;n++)assertEquals("artifact_digest",run().get("issue"));assertEquals(3,((Number)releases().get(0).get("attempts")).intValue());assertNull(releases().get(0).get("package_id"));
         int calls=artifactRequests.get();run();assertEquals(calls,artifactRequests.get());
-        service.retry(sourceId,releases().get(0).get("id").toString(),7L);artifacts.put(new java.net.URI(entry.path("url").asText()).getPath(),bytes);assertEquals("success",run().get("outcome"));assertEquals("imported",releases().get(0).get("state"));
-        artifactStatus=302;var second=release("baseline","2",1,baseline("2",1));index(2,entry,second);assertEquals("artifact_download",run().get("issue"));assertEquals(1,releases().stream().filter(r->r.get("state").equals("imported")).count());
+        index(2,entry);service.retry(sourceId,releases().get(0).get("id").toString(),7L);artifacts.put(new java.net.URI(entry.path("url").asText()).getPath(),bytes);assertEquals("success",run().get("outcome"));assertEquals("imported",releases().get(0).get("state"));assertNotEquals(releases().get(0).get("first_receipt"),releases().get(0).get("import_receipt"));assertEquals(releases().get(0).get("current_receipt"),releases().get(0).get("import_receipt"));
+        artifactStatus=302;var second=release("baseline","2",1,baseline("2",1));index(3,entry,second);assertEquals("artifact_download",run().get("issue"));assertEquals(1,releases().stream().filter(r->r.get("state").equals("imported")).count());
     }
     @Test void disableDuringDownloadAndCompetingLeaseCannotCommitStaleContent()throws Exception{
         index(1,release("baseline","1",1,baseline("1",1)));artifactStarted=new CountDownLatch(1);artifactContinue=new CountDownLatch(1);
@@ -188,7 +188,7 @@ class BaselineUpstreamIntegrationTest {
         assertThrows(IllegalArgumentException.class,()->baseline.review(pkg,true,"stale trust",7L));
         long revision=((Number)service.detail(sourceId).get("revision")).longValue();service.schedule(sourceId,new BaselineUpstreamService.Schedule(revision,true,3_600_000,"reviewed rotated key"),7L);
         index(1,entry);assertEquals("index_rollback",run().get("issue"));index(2,entry);assertEquals("success",run().get("outcome"));
-        assertEquals(firstReceipt,releases().get(0).get("first_receipt"));assertNotEquals(firstReceipt,releases().get(0).get("current_receipt"));assertEquals("approved",baseline.review(pkg,true,"fresh trust verified",7L).get("status"));
+        assertEquals(firstReceipt,releases().get(0).get("first_receipt"));assertEquals(firstReceipt,releases().get(0).get("import_receipt"));assertNotEquals(firstReceipt,releases().get(0).get("current_receipt"));assertEquals("approved",baseline.review(pkg,true,"fresh trust verified",7L).get("status"));
         jdbc.update("UPDATE t_baseline_upstream_receipt SET expires_at=? WHERE source_id=?",System.currentTimeMillis()-1,sourceId);forcedNotModified=true;assertEquals("index_expired",run().get("issue"));
     }
     @Test void actualNativeScapResolutionRetainsSignedOriginalAndDerivedIdentity()throws Exception{
