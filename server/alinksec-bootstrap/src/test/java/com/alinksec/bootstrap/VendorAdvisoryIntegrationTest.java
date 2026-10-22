@@ -149,7 +149,7 @@ class VendorAdvisoryIntegrationTest {
         sync.sync(source);assertEquals(2,archives().size());
         String message=jdbc.queryForObject("SELECT error FROM t_security_feed_state WHERE source_id=?",String.class,id);
         assertTrue(message.contains("资产重新比对失败"));assertFalse(message.contains("private"));
-        doNothing().when(assetMatcher).matchAll(0);sync.sync(source);verify(assetMatcher,times(3)).matchAll(0);
+        doReturn(0).when(assetMatcher).matchAll(0);sync.sync(source);verify(assetMatcher,times(3)).matchAll(0);
         assertEquals("success",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id=?",String.class,id));
     }
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
