@@ -33,11 +33,18 @@ public class LibrarySyncService {
     private final JdbcTemplate jdbc;
     private final VulnMatchService matcher;
     private final LibrarySchedule schedules;
+    private final VendorAdvisoryService vendors;
     private final AtomicBoolean busy = new AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "library-sync"); t.setDaemon(true); return t; });
     public LibrarySyncService(LibraryProperties props, LibraryCatalog catalog, VirusDbService virus, FeedDownload download, JdbcTemplate jdbc, VulnMatchService matcher, LibrarySchedule schedules) {
+        this(props,catalog,virus,download,jdbc,matcher,schedules,new VendorAdvisoryProperties());
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public LibrarySyncService(LibraryProperties props, LibraryCatalog catalog, VirusDbService virus, FeedDownload download,
+                              JdbcTemplate jdbc, VulnMatchService matcher, LibrarySchedule schedules, VendorAdvisoryProperties nativeLimits) {
         this.props = props; this.catalog = catalog; this.virus = virus; this.download = download; this.jdbc = jdbc;
         this.matcher = matcher; this.schedules = schedules;
+        this.vendors = new VendorAdvisoryService(catalog,download,jdbc,nativeLimits);
     }
     public void recheckAssets() { worker.execute(() -> matcher.matchAll(0)); }
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 86_400_000)
@@ -52,9 +59,10 @@ public class LibrarySyncService {
                 || props.getMaxCvesPerImport() < 1 || props.getRetainVersions() < 2 || props.getRetainDays() < 1) throw new IllegalArgumentException("安全库容量或保留配置非法");
         for (var source : props.getSources()) {
             if (!source.getId().matches("[A-Za-z0-9-]{1,64}") || "manual".equals(source.getId()) || !ids.add(source.getId())
-                    || !Set.of("hashes", "signature-zip", "malwarebazaar", "misp", "cve-json", "nvd").contains(source.getType())
+                    || (!Set.of("hashes", "signature-zip", "malwarebazaar", "misp", "cve-json", "nvd").contains(source.getType()) && !VendorAdvisoryAdapter.TYPES.contains(source.getType()))
                     || source.getIntervalMs() < 300_000 || source.getInitialDays() < 1 || source.getInitialDays() > 120) throw new IllegalArgumentException("安全库数据源配置非法");
             LibrarySchedule.validateInterval(source.getType(), source.getIntervalMs());
+            if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) vendors.validate(source);
             for (var product : source.getProducts()) {
                 if (!product.getCpePrefix().matches("cpe:2\\.3:a:[^:]+:[^:]+:") || product.getName().isBlank() || product.getOs().isBlank()
                         || product.getAssetSource().isBlank() || Set.of("rpm", "dpkg").contains(product.getAssetSource())) throw new NvdProgressException("NVD 应用映射需明确软件名、系统和非发行版软件来源");
@@ -85,8 +93,11 @@ public class LibrarySyncService {
         for (var source : props.getSources()) {
             var plan = schedules.effective(source);
             if (!plan.enabled()) continue;
-            var rows = jdbc.queryForList("SELECT checked_at,failure_count FROM t_security_feed_state WHERE source_id=?", source.getId());
+            var rows = jdbc.queryForList("SELECT checked_at,failure_count,status FROM t_security_feed_state WHERE source_id=?", source.getId());
             Instant next = LibrarySchedule.nextCheck(plan, rows.isEmpty() ? Map.of() : rows.get(0));
+            if (VendorAdvisoryAdapter.TYPES.contains(source.getType()) && !rows.isEmpty()
+                    && "success".equals(rows.get(0).get("status")) && ((Number)vendors.state(source.getId()).getOrDefault("pending_count",0)).intValue()>0)
+                next=Instant.parse(rows.get(0).get("checked_at").toString()).plusSeconds(60);
             if (next.isBefore(earliest)) { due = source; earliest = next; }
         }
         if (due != null) {
@@ -106,6 +117,12 @@ public class LibrarySyncService {
         jdbc.update("INSERT INTO t_security_feed_run(id,source_id,trigger_type,started_at,status) VALUES (?,?,?,?,'running')",
                 runId, id, triggerType, Instant.now().toString());
         try {
+            if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) {
+                int count=vendors.sync(source);
+                success(id,count,"","","");
+                matcher.matchAll(0);
+                return;
+            }
             if ("nvd".equals(source.getType())) { syncNvd(source); return; }
             if ("misp".equals(source.getType())) {
                 var result = catalog.signatures(id, MispAdapter.fetch(source, download, props), true, null);
@@ -307,6 +324,11 @@ public class LibrarySyncService {
                 try { catchingUp=Instant.parse(checkpoint).isBefore(Instant.now().minusSeconds(120)); }
                 catch (java.time.DateTimeException ignored) { catchingUp=true; }
             }
+            if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) {
+                Map<String,Object> nativeState=vendors.state(source.getId());
+                row.put("nativeAdvisories",nativeState);
+                catchingUp=((Number)nativeState.getOrDefault("pending_count",0)).intValue()>0;
+            }
             row.put("catchingUp",catchingUp);
             Object last = row.get("success_at");
             row.put("stale", last == null || Instant.parse((String) last).plusMillis(plan.intervalMs() * 2).isBefore(Instant.now()));
@@ -329,6 +351,11 @@ public class LibrarySyncService {
         result.put("unattributedCveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_source_id='' OR rule_digest=''", Long.class));
         result.put("manualSignature", jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='manual'", Integer.class));
         return result;
+    }
+    public VendorAdvisoryService nativeAdvisories(String id) {
+        var source=schedules.source(id);
+        if (!VendorAdvisoryAdapter.TYPES.contains(source.getType())) throw new IllegalArgumentException("该来源不是厂商原生公告");
+        return vendors;
     }
     public List<Map<String, Object>> history(String id) {
         schedules.source(id);

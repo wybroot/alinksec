@@ -67,7 +67,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V025__signature_delta.sql",
                 "db/common/V026__baseline_compliance_review.sql",
                 "db/common/V027__scap_interpreter.sql",
-                "db/common/V028__baseline_upstream.sql"
+                "db/common/V028__baseline_upstream.sql",
+                "db/common/V029__native_vendor_advisories.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

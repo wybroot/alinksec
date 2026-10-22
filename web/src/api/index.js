@@ -96,6 +96,21 @@ export const fetchLibraryGovernance = (id, page = 1) => get(`/api/libraries/sour
 export const synchronizeLibrary = (id) => post(`/api/libraries/sources/${encodeURIComponent(id)}/sync`, {})
 export const updateLibrarySchedule = (id, plan) => put(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`, plan)
 export const resetLibrarySchedule = (id) => del(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`)
+export const fetchVendorAdvisories = (id, page = 1) => get(`/api/libraries/sources/${encodeURIComponent(id)}/advisories?page=${page}&size=20`)
+export const fetchVendorAdvisory = (id, documentId) => get(`/api/libraries/sources/${encodeURIComponent(id)}/advisories/${encodeURIComponent(documentId)}`)
+export async function downloadVendorAdvisory(source, document) {
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(source) || !/^[a-f0-9-]{36}$/.test(document.id) || !/^[a-f0-9]{64}$/.test(document.sha256)) throw new Error('公告下载标识无效')
+  const response = await fetch(`/api/libraries/sources/${source}/advisories/${document.id}/raw`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (response.status === 401) { clearSession(); location.href = '/login'; throw new Error('登录已过期') }
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '原件下载失败')
+  const bytes = await response.arrayBuffer()
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (digest !== document.sha256 || digest !== response.headers.get('X-Content-SHA256')) throw new Error('公告原件摘要不匹配')
+  const gzip = new Uint8Array(bytes)[0] === 0x1f && new Uint8Array(bytes)[1] === 0x8b
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
+  const link = window.document.createElement('a'); link.href = url; link.download = `advisory-${document.id}.json${gzip ? '.gz' : ''}`; link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 export const fetchLibraryRuns = (id) => get(`/api/libraries/sources/${encodeURIComponent(id)}/runs`)
 export const importCveLibrary = (file) => upload('/api/libraries/cves/import', file)
 

@@ -57,6 +57,10 @@ public class LibrarySchedule {
             return "请在部署配置中设置该平台的只读认证密钥";
         if ("misp".equals(source.getType()) && !source.getMispTag().matches("[A-Za-z0-9][A-Za-z0-9:._=-]{0,127}"))
             return "请在部署配置中设置明确的 MISP 审核标签";
+        if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) {
+            try { VendorAdvisoryIndex.validate(source); return ""; }
+            catch (IllegalArgumentException e) { return "请检查厂商公告地址、包范围及显式产品映射，原生来源不接收认证密钥"; }
+        }
         if (source.getUrl().isBlank()) {
             return java.util.Set.of("nvd", "malwarebazaar").contains(source.getType()) ? "" : "请在部署配置中设置数据源地址";
         }

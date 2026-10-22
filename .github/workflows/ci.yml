@@ -1023,8 +1023,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "28"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "81"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "29"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "84"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1059,7 +1059,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest
+          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -1161,10 +1161,11 @@ jobs:
         run: python3 deploy/tests/vendor-native-samples.py .tmp/vendor-native-samples
       - name: Check strict native formats against original publisher bytes
         working-directory: server
-        run: mvn -B -T1 -pl alinksec-service -am -Dtest=VendorAdvisoryAdapterTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=VendorAdvisoryAdapterTest,VendorAdvisoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_VENDOR_NATIVE_SAMPLES: ${{ github.workspace }}/.tmp/vendor-native-samples
+          ALINKSEC_VENDOR_ADVISORY_FIXTURES: ${{ github.workspace }}/.tmp/vendor-advisory-fixtures
       - name: Retain native documents, SHA-256 and parser reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -1172,6 +1173,7 @@ jobs:
           name: vendor-advisory-evidence
           path: |
             .tmp/vendor-native-samples
+            .tmp/vendor-advisory-fixtures
             server/**/target/surefire-reports/*VendorAdvisory*
           include-hidden-files: true
           if-no-files-found: error
