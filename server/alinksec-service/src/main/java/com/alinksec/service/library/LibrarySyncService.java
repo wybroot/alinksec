@@ -117,6 +117,7 @@ public class LibrarySyncService {
         jdbc.update("INSERT INTO t_security_feed_run(id,source_id,trigger_type,started_at,status) VALUES (?,?,?,?,'running')",
                 runId, id, triggerType, Instant.now().toString());
         try {
+            if (!vendors.configurationIssue(source).isBlank()) throw new IllegalArgumentException("厂商来源配置与已固定身份不符");
             if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) {
                 int count=vendors.sync(source);
                 success(id,count,"","","");
@@ -318,7 +319,8 @@ public class LibrarySyncService {
             row.put("id", source.getId()); row.put("type", source.getType()); row.put("enabled", plan.enabled()); row.put("intervalMs", plan.intervalMs());
             row.put("scheduleOverridden", plan.overridden()); row.put("minIntervalMs", LibrarySchedule.minimumInterval(source.getType()));
             row.put("retired",catalog.isRetired(source.getId()));
-            row.put("configurationIssue", VendorAdvisoryAdapter.TYPES.contains(source.getType()) ? vendors.configurationIssue(source) : LibrarySchedule.configurationIssue(source));
+            String nativeIssue=vendors.configurationIssue(source);
+            row.put("configurationIssue", nativeIssue.isBlank() ? LibrarySchedule.configurationIssue(source) : nativeIssue);
             var states = jdbc.queryForList("SELECT checked_at,success_at,status,error,entry_count,cursor,failure_count,nvd_window_seconds FROM t_security_feed_state WHERE source_id=?", source.getId());
             if (!states.isEmpty()) row.putAll(states.get(0)); else row.put("status", "never");
             boolean catchingUp=false;

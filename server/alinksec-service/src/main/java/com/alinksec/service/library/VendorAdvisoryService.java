@@ -255,6 +255,9 @@ public final class VendorAdvisoryService {
         catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
     public String configurationIssue(LibraryProperties.Source source) {
+        if (!VendorAdvisoryAdapter.TYPES.contains(source.getType()))
+            return jdbc.queryForObject("SELECT count(*) FROM t_vendor_sync_state WHERE source_id=?",Integer.class,source.getId())>0
+                    ? "厂商来源类型已变更，请退役旧来源并使用新来源标识" : "";
         try { validate(source); }
         catch (IllegalArgumentException e) { return "请检查厂商公告地址、包范围及显式产品映射"; }
         var pinned=jdbc.queryForList("SELECT configuration_sha256 FROM t_vendor_sync_state WHERE source_id=?",String.class,source.getId());

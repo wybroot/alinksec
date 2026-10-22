@@ -135,7 +135,10 @@ class VendorAdvisoryIntegrationTest {
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);String archive=archives().get(0).get("id").toString();
         source.setUrl(base+"/other/notices/USN-1-1.json");int prior=requests.get();assertThrows(IllegalArgumentException.class,()->service.sync(source));assertEquals(prior,requests.get());
-        source.setUrl(base+"/notices/USN-1-1.json");catalog.retire(id,actor,"Fixture retired");
+        source.setUrl(base+"/notices/USN-1-1.json");source.setType("cve-json");
+        sync.sync(source);assertEquals(prior,requests.get());assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id=?",String.class,id));
+        assertTrue(service.configurationIssue(source).contains("来源标识"));assertThrows(IllegalArgumentException.class,()->schedules.update(id,true,7_200_000L));
+        source.setType("ubuntu-usn");catalog.retire(id,actor,"Fixture retired");
         assertThrows(IllegalArgumentException.class,()->service.sync(source));assertNotNull(service.raw(id,archive));assertEquals(1,archives().size());
     }
     @Test void archiveAndContributionChangesRollbackTogetherWhenMergedCveExceedsCapacity() throws Exception {
