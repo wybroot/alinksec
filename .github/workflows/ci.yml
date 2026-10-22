@@ -12,6 +12,10 @@ on:
         description: Run only native Windows Agent validation
         type: boolean
         default: false
+      vendor_only:
+        description: Run only native vendor advisory validation
+        type: boolean
+        default: false
       upstream_only:
         description: Run only signed baseline upstream validation
         type: boolean
@@ -23,7 +27,7 @@ on:
 
 jobs:
   scap-resolver:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -61,7 +65,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-scap:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only
     needs: scap-resolver
     strategy:
       fail-fast: false
@@ -128,7 +132,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   windows-agent:
-    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -352,7 +356,7 @@ jobs:
           retention-days: 14
 
   build-and-test:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -914,7 +918,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   native-yara:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only
     name: native-yara (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -971,7 +975,7 @@ jobs:
           retention-days: 14
 
   schema:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1096,7 +1100,7 @@ jobs:
           if-no-files-found: error
 
   baseline-upstream:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.vendor_only
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1139,4 +1143,35 @@ jobs:
             .tmp/baseline-upstream-fixtures
             .tmp/baseline-upstream-browser
             server/**/target/surefire-reports/*BaselineUpstream*
+          if-no-files-found: error
+
+  vendor-advisories:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - name: Capture bounded original public publisher documents
+        run: python3 deploy/tests/vendor-native-samples.py .tmp/vendor-native-samples
+      - name: Check strict native formats against original publisher bytes
+        working-directory: server
+        run: mvn -B -T1 -pl alinksec-service -am -Dtest=VendorAdvisoryAdapterTest -Dsurefire.failIfNoSpecifiedTests=false test
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_VENDOR_NATIVE_SAMPLES: ${{ github.workspace }}/.tmp/vendor-native-samples
+      - name: Retain native documents, SHA-256 and parser reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-advisory-evidence
+          path: |
+            .tmp/vendor-native-samples
+            server/**/target/surefire-reports/*VendorAdvisory*
+          include-hidden-files: true
           if-no-files-found: error
