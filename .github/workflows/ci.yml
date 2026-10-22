@@ -1080,6 +1080,8 @@ jobs:
         with:
           name: source-governance-postgres
           path: |
+            .tmp/baseline-upstream-fixtures
+            server/**/target/surefire-reports/*BaselineUpstream*
             .tmp/source-governance-fixtures
             .tmp/detection-capabilities-fixtures
             .tmp/weakpwd-fixtures
