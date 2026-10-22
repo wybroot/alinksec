@@ -160,7 +160,7 @@ public final class VendorAdvisoryAdapter {
             double score = 0;
             for (var metric : vulnerability.path("scores")) {
                 for (String version : List.of("cvss_v4", "cvss_v3", "cvss_v2"))
-                    if (metric.path(version).has("baseScore")) score = Math.max(score, metric.path(version).path("baseScore").asDouble(-1));
+                    if (metric.path(version).has("baseScore")) score = Math.max(score, checkedScore(metric.path(version).path("baseScore")));
             }
             String description = "";
             for (var note : vulnerability.path("notes"))
@@ -255,16 +255,15 @@ public final class VendorAdvisoryAdapter {
 
     private static Document microsoft(JsonNode root) {
         JsonNode tracking = root.path("DocumentTracking");
-        String id = required(tracking.path("Identification").path("ID"), "Value", 128);
-        if (!id.matches("[0-9]{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)")
-                || !root.path("Vulnerability").isArray()) throw invalid();
+        String id = VendorAdvisoryIndex.monthId(required(tracking.path("Identification").path("ID"), "Value", 128));
+        if (!root.path("Vulnerability").isArray()) throw invalid();
         var builder = new Builder(id, "Microsoft", text(root.path("DocumentTitle"), "Value", 512),
                 text(tracking, "Version", 128), timestamp(required(tracking, "CurrentReleaseDate", 128)));
         for (var vulnerability : root.path("Vulnerability")) {
             String cve = required(vulnerability, "CVE", 32);
             double score = 0;
             for (var metric : vulnerability.path("CVSSScoreSets"))
-                if (metric.has("BaseScore")) score = Math.max(score, metric.path("BaseScore").asDouble(-1));
+                if (metric.has("BaseScore")) score = Math.max(score, checkedScore(metric.path("BaseScore")));
             ObjectNode document = builder.cve(cve, text(vulnerability.path("Title"), "Value", 512), score);
             document.put("title", text(vulnerability.path("Title"), "Value", 512));
             ObjectNode fact = document.withArray("vendor_advisories").addObject();
@@ -288,6 +287,11 @@ public final class VendorAdvisoryAdapter {
             }
         }
         return builder.finish();
+    }
+    private static double checkedScore(JsonNode value) {
+        double score=value.asDouble(-1);
+        if (!value.isNumber() || !Double.isFinite(score) || score<0 || score>10) throw invalid();
+        return score;
     }
     private static ArrayNode boundedStrings(JsonNode values, int maximum) {
         if (values.isMissingNode() || values.isNull()) return JSON.createArrayNode();

@@ -37,7 +37,7 @@ class VendorAdvisoryIndexTest {
         var redhat=VendorAdvisoryIndex.redhat(Files.readAllBytes(root.resolve("redhat-index.json")),VendorAdvisoryIndex.DEFAULTS.get("redhat-csaf"),Instant.now().minusSeconds(7*86_400));
         assertFalse(redhat.isEmpty());assertTrue(redhat.stream().allMatch(r->r.address().startsWith("https://security.access.redhat.com/data/csaf/v2/advisories/")));
         var microsoft=VendorAdvisoryIndex.microsoft(Files.readAllBytes(root.resolve("msrc-index.json")),VendorAdvisoryIndex.DEFAULTS.get("msrc-cvrf"),Instant.EPOCH);
-        assertFalse(microsoft.isEmpty());assertTrue(microsoft.stream().allMatch(r->r.address().matches("https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/[0-9]{4}-[A-Z][a-z]{2}")));
+        assertFalse(microsoft.isEmpty());assertTrue(microsoft.stream().allMatch(r->r.address().startsWith("https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/") && r.id().equals(VendorAdvisoryIndex.monthId(r.id()))));
         var ubuntu=VendorAdvisoryIndex.json(Files.readAllBytes(root.resolve("ubuntu-index.json"))).path("notices");assertEquals(1,ubuntu.size());
         assertTrue(ubuntu.get(0).path("id").asText().matches("USN-[0-9]+-[0-9]+"));
     }

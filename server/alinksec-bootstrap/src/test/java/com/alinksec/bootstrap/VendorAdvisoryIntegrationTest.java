@@ -159,6 +159,17 @@ class VendorAdvisoryIntegrationTest {
         jdbc.update("UPDATE t_vendor_document SET raw_base64=? WHERE id=?",Base64.getEncoder().encodeToString("tampered".getBytes(StandardCharsets.UTF_8)),current.get("id"));
         assertThrows(IllegalStateException.class,()->service.raw(id,current.get("id").toString()));assertEquals(3,service.documents(id,1,20).get("total"));
     }
+    @Test void archiveBudgetRollbackKeepsPreviousBodyCurrentFlagAndContributions() throws Exception {
+        bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);
+        var original=archives().get(0);String frozen=JsonUtils.write(declaration());limits.setMaxArchiveBytes(32L<<20);
+        // Inject existing archive usage at the configured limit, without allocating a large dummy payload.
+        jdbc.update("UPDATE t_vendor_document SET size_bytes=? WHERE id=?",32L<<20,original.get("id"));
+        bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Over budget",true));assertThrows(IllegalArgumentException.class,()->service.sync(source));
+        assertEquals(1,archives().size());assertEquals(1,((Number)archives().get(0).get("current_version")).intValue());
+        assertEquals(frozen,JsonUtils.write(declaration()));assertEquals(original.get("sha256"),digest(service.raw(id,original.get("id").toString())));
+        jdbc.update("UPDATE t_vendor_document SET size_bytes=? WHERE id=?",((Number)original.get("size_bytes")).longValue(),original.get("id"));
+        service.sync(source);assertEquals(2,archives().size());
+    }
     @Test void compressedTrackerIsArchivedAsReceivedAndOnlySelectedSourcePackagesBecomeMetadata() throws Exception {
         source.setType("debian-tracker");source.setUrl(base+"/tracker/data/json");source.setVendorPackages(List.of("openssl"));
         byte[] json=bytes(Map.of("openssl",Map.of(cve,Map.of("description","Source status","releases",Map.of("bookworm",Map.of("status","resolved","fixed_version","3.0.0","urgency","medium"))))));

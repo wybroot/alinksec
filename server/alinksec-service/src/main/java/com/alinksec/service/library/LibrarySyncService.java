@@ -173,6 +173,8 @@ public class LibrarySyncService {
             }
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            if (VendorAdvisoryAdapter.TYPES.contains(source.getType()))
+                jdbc.update("UPDATE t_security_feed_state SET entry_count=(SELECT count(*) FROM t_security_cve WHERE source_id=?) WHERE source_id=?",id,id);
             // Messages from parsers/HTTP libraries may contain a URL, API key or response body.
             String message = e instanceof NvdProgressException ? e.getMessage() : e instanceof IllegalArgumentException ? "数据格式、认证或容量校验失败，已有库保留" : "远端访问或发布失败，已有库保留";
             jdbc.update("UPDATE t_security_feed_state SET status='failed',failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END,error=? WHERE source_id=?", message, id);

@@ -19,6 +19,11 @@ final class VendorAdvisoryIndex {
     static final ObjectMapper JSON = new ObjectMapper(JsonFactory.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(40).maxStringLength(2 << 20).build()).build());
+    static final String MONTH_ID="[0-9]{4}-(?i:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:-[A-Z])?";
+    static String monthId(String id) {
+        if (!id.matches(MONTH_ID)) throw invalid();
+        return id.substring(0,5)+id.substring(5,6).toUpperCase(Locale.ROOT)+id.substring(6,8).toLowerCase(Locale.ROOT)+id.substring(8);
+    }
     record Candidate(String id, String address, Instant updated) {}
     static String address(LibraryProperties.Source source) {
         return source.getUrl().isBlank() ? DEFAULTS.get(source.getType()) : source.getUrl().replaceAll("/+$", "");
@@ -56,8 +61,8 @@ final class VendorAdvisoryIndex {
             String name = path.substring(path.lastIndexOf('/') + 1, path.length() - 5);
             return new Candidate(name.replace("rhsa-", "RHSA-").replace('_', ':'), address, Instant.EPOCH);
         }
-        if ("msrc-cvrf".equals(source.getType()) && path.matches(".*/cvrf/[0-9]{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"))
-            return new Candidate(path.substring(path.lastIndexOf('/') + 1), address, Instant.EPOCH);
+        if ("msrc-cvrf".equals(source.getType()) && path.matches(".*/cvrf/"+MONTH_ID))
+            return new Candidate(monthId(path.substring(path.lastIndexOf('/') + 1)), address, Instant.EPOCH);
         return null;
     }
     static JsonNode json(byte[] raw) throws java.io.IOException {
@@ -90,9 +95,9 @@ final class VendorAdvisoryIndex {
         Map<String,Candidate> result = new LinkedHashMap<>();
         for (JsonNode row : rows) {
             String id = row.path("ID").asText();
-            if (!id.matches("[0-9]{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)")) throw invalid();
+            String canonicalId=monthId(id);
             Instant updated = VendorAdvisoryAdapter.timestamp(row.path("CurrentReleaseDate").asText());
-            if (!updated.isBefore(cutoff)) add(result, new Candidate(id, base + "/cvrf/" + id, updated));
+            if (!updated.isBefore(cutoff)) add(result, new Candidate(canonicalId, base + "/cvrf/" + id, updated));
         }
         return List.copyOf(result.values());
     }
