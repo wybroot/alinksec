@@ -87,6 +87,7 @@ async function refresh(resetPlan = false) {
   finally { loading.value = false }
 }
 async function select(source) {
+  if (busy.value) return
   const token = ++generation; selected.value = source; detail.value = null; note.value = ''; error.value = ''
   try { const value = await fetchBaselineUpstream(source.id); if (disposed || token !== generation) return; detail.value = value; applyPlan(value) }
   catch (e) { if (!disposed && token === generation) error.value = e.message }
@@ -97,7 +98,7 @@ async function act(action) {
   try { await action(); await refresh() } catch (e) { ElMessage.error(e.message) }
   finally { busy.value = false }
 }
-function save() { if (!detail.value || !note.value.trim()) return; const id = selected.value.id, plan = { revision: planRevision.value, enabled: enabled.value, intervalMs: hours.value * 3600000, note: note.value }; return act(async () => { const value = await updateBaselineUpstream(id, plan); applyPlan(value); note.value = ''; ElMessage.success('更新计划已保存') }) }
+function save() { if (!detail.value || !note.value.trim()) return; const id = selected.value.id, plan = { revision: planRevision.value, enabled: enabled.value, intervalMs: hours.value * 3600000, note: note.value }; return act(async () => { const value = await updateBaselineUpstream(id, plan); if (selected.value?.id === id) { applyPlan(value); note.value = '' } ElMessage.success('更新计划已保存') }) }
 function sync() { return act(async () => { await syncBaselineUpstream(selected.value.id); ElMessage.success('同步已提交，请查看更新记录') }) }
 function retry(row) { return act(async () => { await retryBaselineUpstream(selected.value.id, row.id); ElMessage.success('版本已加入下一轮重试') }) }
 function candidate(row) { router.push({ path: row.kind === 'scap' ? '/scap' : '/baseline-templates', query: { package: row.package_id } }) }
