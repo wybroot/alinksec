@@ -12,9 +12,119 @@ on:
         description: Run only native Windows Agent validation
         type: boolean
         default: false
+      scap_only:
+        description: Run only native SCAP interpreter validation
+        type: boolean
+        default: false
 
 jobs:
+  scap-resolver:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - name: Install standard XCCDF resolver
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
+      - name: Create original inherited standards fixture
+        run: python deploy/tests/scap-fixture.py .tmp/scap-fixture
+      - name: Check import, standard inheritance resolution and lifecycle transactions
+        run: mvn -B -pl alinksec-bootstrap -am -Dtest=ScapPackageTest,ScapResolverTest,ScapIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        working-directory: server
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/scap-fixture/content.zip
+          ALINKSEC_SCAP_RESOLVE_OUTPUT: ${{ github.workspace }}/.tmp/scap-resolver
+      - name: Collect resolver test reports
+        if: always()
+        run: |
+          mkdir -p .tmp/scap-resolver/reports
+          cp server/alinksec-service/target/surefire-reports/*Scap* .tmp/scap-resolver/reports/ 2>/dev/null || true
+          cp server/alinksec-bootstrap/target/surefire-reports/*Scap* .tmp/scap-resolver/reports/ 2>/dev/null || true
+      - name: Retain source and resolved standard content
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scap-resolution
+          path: .tmp/scap-resolver
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  native-scap:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    needs: scap-resolver
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - runner: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      ALINKSEC_SCAP_RESOLVED_BENCHMARK: ${{ github.workspace }}/.tmp/scap-resolved/benchmark.xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: scap-resolution
+          path: .tmp/scap-resolved
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Extract and verify official native SCAP interpreter
+        run: python deploy/tests/scap-install.py .tmp/scap-native
+      - name: Create disposable standards fixture
+        run: python deploy/tests/scap-fixture.py .tmp/scap-native/execution/fixture
+      - name: Check native XCCDF Profile and OVAL variable semantics
+        run: python deploy/tests/scap-native-prototype.py .tmp/scap-native/execution
+      - name: Compile and check Agent execution boundaries
+        if: always()
+        run: go test -v -count=1 ./internal/scap ./internal/comm ./internal/config
+        working-directory: agent
+      - name: Check Agent content boundary and complete native result parsing
+        run: go test -v -count=1 ./internal/scap
+        working-directory: agent
+        env:
+          ALINKSEC_SCAP_FIXTURE_ZIP: ${{ github.workspace }}/.tmp/scap-native/execution/fixture/content.zip
+          ALINKSEC_SCAP_RESULT_DIR: ${{ github.workspace }}/.tmp/scap-native/execution/reports
+      - name: Check actual production Agent SCAP worker
+        run: python deploy/tests/scap-agent-native.py
+      - name: Check actual Agent enrollment, mTLS SCAP commands and durable replay
+        run: python deploy/tests/scap-agent-native.py --roundtrip
+      - name: Retain native interpreter identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scap-native-${{ matrix.platform }}
+          path: |
+            .tmp/scap-native/install.json
+            .tmp/scap-native/runtime-manifest.json
+            .tmp/scap-native/options-template.xml
+            .tmp/scap-native/agent.json
+            .tmp/scap-native/roundtrip.json
+            .tmp/scap-resolved/provenance.json
+            .tmp/scap-native/execution/result.json
+            .tmp/scap-native/execution/fixture/content.zip
+            .tmp/scap-native/execution/fixture/native-ds.xml
+            .tmp/scap-native/execution/options-after-install.xml
+            .tmp/scap-native/execution/reports
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   windows-agent:
+    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -24,7 +134,8 @@ jobs:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
       - name: Check Windows Agent and service lifecycle
-        run: go test -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/windowsupdate ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        # These packages share native firewall/service state and PowerShell.
+        run: go test -p 1 -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/windowsupdate ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
         working-directory: agent
       - name: Extract pinned native ClamAV test engine
         run: python deploy/tests/clamav-install.py .tmp/clamav-native
@@ -237,7 +348,7 @@ jobs:
           retention-days: 14
 
   build-and-test:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -318,7 +429,7 @@ jobs:
       - name: Check rule provenance, backport declarations and unsafe historical references in the production web bundle
         working-directory: web
         run: node test/vulnerability-provenance-browser.mjs
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux openscap-scanner
       - run: mvn -B package
         env:
           ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
@@ -375,6 +486,9 @@ jobs:
       - name: Check complete compliance catalogs and human evidence review in production pages
         working-directory: web
         run: node test/compliance-browser.mjs
+      - name: Check standard SCAP lifecycle, nine outcomes and immutable evidence in production pages
+        working-directory: web
+        run: node test/scap-browser.mjs
       - name: Check real SQLite maintenance and restored application
         timeout-minutes: 10
         run: |
@@ -688,6 +802,7 @@ jobs:
             .tmp/vulnerability-provenance-browser
             .tmp/baseline-browser-artifacts
             .tmp/compliance-browser
+            .tmp/scap-browser
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
@@ -789,7 +904,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   native-yara:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     name: native-yara (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -846,7 +961,7 @@ jobs:
           retention-days: 14
 
   schema:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -894,8 +1009,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "26"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "70"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "27"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "76"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

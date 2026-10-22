@@ -82,6 +82,7 @@ message Command {
     CmdWindowsLoginReceipt windows_login_receipt = 22; // committed event receipt; no cmd_id/ACK
     CmdWindowsUpdateScan windows_update_scan = 23;
     CmdWindowsUpdateReceipt windows_update_receipt = 24; // committed outcomes; no cmd_id/ACK
+    CmdScapScan scap_scan = 25;
   }
 }
 
@@ -94,6 +95,18 @@ message CmdBaselineCheck {
 message BaselineCheckSpec {
   string item_id = 1;    // t_baseline_item.id
   string check = 2;      // check JSON：{type, target, regex/operator/expected/cmd/...}
+}
+
+// One immutable, bounded offline bundle; no engine path, CLI arguments or URL
+// can be supplied by a task. The native interpreter is configured locally.
+message CmdScapScan {
+  string task_id = 1;
+  uint32 execution_contract = 2; // 1
+  bytes content_zip = 3; // <= 2 MiB
+  string content_sha256 = 4;
+  string benchmark_id = 5;
+  string profile_id = 6;
+  string runtime_sha256 = 7; // expected locally approved runtime from recent readiness
 }
 
 message CmdVulnScan {
@@ -229,6 +242,7 @@ message Report {
     RptFixResult      fix_result      = 19;
     RptIsolationState isolation_state = 20; // live state only; never offline replay
     RptWindowsUpdate windows_update = 21;
+    RptScapResult scap_result = 22;
   }
 }
 
@@ -255,6 +269,8 @@ message RptHeartbeat {
   uint32 yara_contract = 20; // 1 only with native YARA and bounded isolated workers
   string yara_status = 21; // native version plus exact pinned rule source SHA256
   uint32 signature_update_contract = 22; // 1: bounded delta reconstruction and full fallback
+  uint32 scap_contract = 23; // 1: pinned offline native SCAP interpreter and exact XCCDF outcomes
+  string scap_status = 24; // bounded readiness; not a compliance certificate
 }
 
 message RptIsolationState {
@@ -357,6 +373,38 @@ message DiskInfo {
 message RptBaselineResult {
   string task_id = 1;
   repeated BaselineItemResult items = 2;
+}
+
+message RptScapResult {
+  string task_id = 1;
+  string command_id = 2;
+  uint32 execution_contract = 3;
+  string content_sha256 = 4;
+  string benchmark_id = 5;
+  string profile_id = 6;
+  string engine = 7; // SCC
+  string engine_version = 8;
+  string runtime_sha256 = 9;
+  string state = 10; // complete / failed
+  string issue = 11; // fixed reason code; no raw host values or CLI output
+  uint64 duration_ms = 12;
+  string source_result_sha256 = 13;
+  repeated ScapRuleResult rules = 14;
+  repeated ScapScore scores = 15;
+}
+
+message ScapRuleResult {
+  string rule_id = 1;
+  // The nine XCCDF results are preserved verbatim, including notapplicable,
+  // notchecked, notselected, unknown, error, informational and fixed.
+  string result = 2;
+  double weight = 3;
+}
+
+message ScapScore {
+  string system = 1;
+  double value = 2;
+  double maximum = 3;
 }
 
 message BaselineItemResult {

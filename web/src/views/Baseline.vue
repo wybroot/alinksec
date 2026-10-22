@@ -8,6 +8,7 @@
       <div class="toolbar">
         <el-button type="primary" @click="openCreate">+ 发起核查</el-button>
         <el-button plain @click="$router.push('/baseline-templates')">基线模板</el-button>
+        <el-button plain @click="$router.push('/scap')">XCCDF / OVAL 核查</el-button>
         <el-button plain @click="openPatchRepo">离线补丁仓库</el-button>
         <div class="spacer"></div>
         <span style="font-size:12px;color:#94a3b8">{{ lastSummary }}</span>

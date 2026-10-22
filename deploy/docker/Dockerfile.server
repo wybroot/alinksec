@@ -9,10 +9,10 @@ RUN --mount=type=cache,id=alinksec-maven,target=/root/.m2/repository,sharing=loc
     MAVEN_OPTS="-Xmx320m -XX:MaxMetaspaceSize=160m -XX:ActiveProcessorCount=1" \
     mvn -B -ntp -T1 -f /build/server/pom.xml -DskipTests clean package
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:21-jre-noble
 
 # Package headers are read with fixed tools, bounded resources and reduced privileges.
-RUN apt-get update && apt-get install -y --no-install-recommends rpm dpkg util-linux \
+RUN apt-get update && apt-get install -y --no-install-recommends rpm dpkg util-linux openscap-scanner \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

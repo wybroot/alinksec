@@ -35,6 +35,7 @@ import (
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/resources"
 	"github.com/alinksec/alinksec-agent/internal/scan"
+	"github.com/alinksec/alinksec-agent/internal/scap"
 	"github.com/alinksec/alinksec-agent/internal/sysmetrics"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"github.com/alinksec/alinksec-agent/internal/virusscan"
@@ -45,17 +46,19 @@ import (
 
 // Client Agent 通信客户端：注册 + 主通道双向流
 type Client struct {
-	cfg         *config.Config
-	workDir     string
-	state       *State
-	queue       *OfflineQueue
-	dedup       *cmdDedup
-	log         *slog.Logger
-	configStore *configguard.Store
-	resources   *resources.Governor
-	clamav      *clamav.Client
-	yara        *yara.Client
-	bulkBusy    atomic.Bool
+	cfg           *config.Config
+	workDir       string
+	state         *State
+	queue         *OfflineQueue
+	dedup         *cmdDedup
+	log           *slog.Logger
+	configStore   *configguard.Store
+	resources     *resources.Governor
+	clamav        *clamav.Client
+	yara          *yara.Client
+	scap          *scap.Client
+	scapJournalMu sync.Mutex
+	bulkBusy      atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
@@ -114,6 +117,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		resources:       resources.New(cfg.Resources),
 		clamav:          clamav.New(cfg.ClamAV),
 		yara:            yara.New(cfg.YARA, configguard.ReadFile),
+		scap:            scap.New(cfg.SCAP, workDir),
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
@@ -324,6 +328,7 @@ func (c *Client) Run(ctx context.Context) error {
 	ctx = runCtx
 	go c.clamav.Run(ctx)
 	go c.yara.Run(ctx)
+	go c.scapProbeLoop(ctx)
 	if c.windowsLogin != nil {
 		go func() {
 			if err := c.windowsLogin.Run(ctx); err != nil {
@@ -618,6 +623,8 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			ClamavStatus:            c.clamav.StatusJSON(),
 			YaraContract:            yara.Contract(),
 			YaraStatus:              c.yara.StatusJSON(),
+			ScapContract:            scap.Contract(),
+			ScapStatus:              c.scap.StatusJSON(),
 			WeakPasswordContract:    scan.WeakPasswordContract(),
 			WindowsLoginContract:    windowslogin.ExecutionContract(),
 			WindowsLoginStatus:      c.windowsLoginStatus(),
@@ -669,6 +676,15 @@ func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx c
 		}
 	}
 	// 幂等：已处理过的指令直接重发上次 ACK
+	if cmd.GetScapScan() != nil {
+		previous, err := c.scapFinal(cmd.GetCmdId(), cmd.GetScapScan(), nil)
+		if err != nil {
+			return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "SCAP 指令记录不可用或内容身份冲突"}}
+		}
+		if previous != nil {
+			return []*pb.RptAck{previous}
+		}
+	}
 	if prev := c.dedup.Get(cmd.GetCmdId()); prev != nil {
 		if terminal(prev) {
 			return []*pb.RptAck{prev}
@@ -726,6 +742,8 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_RUNNING, Message: "asset collection running"}}
 	case *pb.Command_BaselineCheck:
 		return c.executeBaselineCheck(p.BaselineCheck, received)
+	case *pb.Command_ScapScan:
+		return c.executeScapScan(sctx, p.ScapScan, received)
 	case *pb.Command_VulnScan:
 		return c.executeVulnScan(p.VulnScan, received)
 	case *pb.Command_VirusScan:

@@ -44,6 +44,25 @@ async function request(path, options = {}) {
 const get = (path) => request(path)
 const post = (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) })
 
+export const fetchScapPackages = () => get('/api/baseline/scap/packages')
+export const fetchScapPackage = id => get(`/api/baseline/scap/packages/${encodeURIComponent(id)}`)
+export const importScapPackage = file => upload('/api/baseline/scap/packages/import', file)
+export const decideScapPackage = (id, data) => post(`/api/baseline/scap/packages/${encodeURIComponent(id)}/decision`, data)
+export const fetchScapTargets = () => get('/api/baseline/scap/targets')
+export const fetchScapTasks = (page = 1) => get(`/api/baseline/scap/tasks?page=${page}&size=20`)
+export const fetchScapTask = id => get(`/api/baseline/scap/tasks/${encodeURIComponent(id)}`)
+export const createScapTask = data => post('/api/baseline/scap/tasks', data)
+export async function downloadScap(path, filename) {
+  if (!/^\/api\/baseline\/scap\/(packages|tasks)\/[A-Za-z0-9-]+\/(source|content|agents\/[A-Za-z0-9_.:-]+\/evidence)$/.test(path)) throw new Error('导出路径无效')
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '导出失败')
+  const bytes = await response.arrayBuffer()
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (digest !== response.headers.get('X-Content-SHA256')) throw new Error('导出内容摘要不匹配')
+  const url = URL.createObjectURL(new Blob([bytes], { type: response.headers.get('Content-Type') }))
+  const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url)
+}
+
 export const fetchWindowsUpdateHosts = (page = 1) => get(`/api/fix/windows/hosts?page=${page}&size=20`)
 export const fetchWindowsUpdateCandidates = agentId => get(`/api/fix/windows/candidates?agentId=${encodeURIComponent(agentId)}`)
 export const scanWindowsUpdates = agentIds => post('/api/fix/windows/scans', { agentIds })

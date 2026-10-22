@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { captureCompliance } from './baseline-compliance-api.mjs'
+import { captureScap } from './scap-api.mjs'
 
 const mode = process.env.ALINKSEC_SMOKE_DB
 assert.ok(['postgres', 'sqlite'].includes(mode), 'Set ALINKSEC_SMOKE_DB to postgres or sqlite')
@@ -58,13 +59,20 @@ function sql(statement) {
   return execFileSync('docker', [...composeArgs, ...args], { encoding: 'utf8', timeout: 60_000 }).trim()
 }
 
-function request(path, { token, method = 'GET', body, rawBody, extraHeaders = {} } = {}) {
+function request(path, { token, method = 'GET', body, rawBody, extraHeaders = {}, binary = false, timeout = 10_000 } = {}) {
   return new Promise((resolve, reject) => {
     const payload = rawBody ?? (body === undefined ? undefined : JSON.stringify(body))
     const headers = { ...extraHeaders }
     if (token) headers.Authorization = `Bearer ${token}`
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     const req = transport.request(new URL(path, baseUrl), { ca, method, headers }, res => {
+      if (binary) {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('error', reject)
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, bytes: Buffer.concat(chunks) }))
+        return
+      }
       let text = ''
       res.setEncoding('utf8')
       res.on('data', chunk => { text += chunk })
@@ -75,7 +83,7 @@ function request(path, { token, method = 'GET', body, rawBody, extraHeaders = {}
       })
     })
     req.on('error', reject)
-    req.setTimeout(10_000, () => req.destroy(new Error(`${method} ${path}: timeout`)))
+    req.setTimeout(timeout, () => req.destroy(new Error(`${method} ${path}: timeout`)))
     req.end(payload)
   })
 }
@@ -111,6 +119,7 @@ before(async () => {
   assert.equal(sql("SELECT count(*) FROM t_user WHERE username LIKE 'ci-smoke-%';"), '0')
   assert.equal(sql("SELECT count(*) FROM t_scan_task WHERE task_no = 'ci-smoke-scan';"), '0')
   assert.equal(sql("SELECT count(*) FROM t_notify_channel WHERE name = 'ci-smoke-disabled-webhook';"), '0')
+  assert.equal(sql("SELECT count(*) FROM t_scap_package WHERE code='ALINKSEC-SCAP-REST-FIXTURE';"), '0')
   auditStartId = sql('SELECT COALESCE(MAX(id), 0) FROM t_audit_log;')
   assert.match(auditStartId, /^\d+$/)
   const hosts = Array.from({ length: 105 }, (_, i) => {
@@ -142,6 +151,14 @@ before(async () => {
 
 after(() => {
   if (!seeded) return
+  sql(`BEGIN;
+    DELETE FROM t_scap_task_agent WHERE task_id IN (SELECT t.id FROM t_scap_task t JOIN t_scap_package p ON p.id=t.package_id WHERE p.code='ALINKSEC-SCAP-REST-FIXTURE');
+    DELETE FROM t_scap_task WHERE package_id IN (SELECT id FROM t_scap_package WHERE code='ALINKSEC-SCAP-REST-FIXTURE');
+    DELETE FROM t_scap_package_review WHERE package_id IN (SELECT id FROM t_scap_package WHERE code='ALINKSEC-SCAP-REST-FIXTURE');
+    DELETE FROM t_scap_package WHERE code='ALINKSEC-SCAP-REST-FIXTURE';
+    DELETE FROM t_scap_package_gate WHERE code='ALINKSEC-SCAP-REST-FIXTURE';
+    DELETE FROM t_scap_status WHERE agent_id LIKE 'ci-smoke-scap-%';
+    COMMIT;`)
   for (const pkg of baselinePackages) sql(`BEGIN;
     DELETE FROM t_baseline_package WHERE id='${pkg.id}';
     DELETE FROM t_baseline_package_gate WHERE code='${pkg.code}';
@@ -1524,5 +1541,6 @@ test(`${mode}: baseline candidates, mixed systems, snapshots and publication lif
   pamAuth.withdrawn = await ok(`${authPrefix}/withdraw`, { ...options, body: { note: 'Fixture cleanup' } }); assert.equal(pamAuth.withdrawn.status, 'withdrawn')
   const directory = fileURLToPath(new URL('../../.tmp/', import.meta.url)); mkdirSync(directory, { recursive: true })
   fixtures.compliance = await captureCompliance({ mode, sql, ok, request, tokens, baselinePackages, baselineTaskIds })
+  fixtures.scap = await captureScap({ mode, sql, ok, request, tokens })
   writeFileSync(`${directory}/baseline-browser-fixtures-${mode}.json`, JSON.stringify(fixtures, null, 2))
 })
