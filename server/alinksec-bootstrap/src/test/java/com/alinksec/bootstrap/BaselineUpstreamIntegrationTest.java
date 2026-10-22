@@ -182,12 +182,12 @@ class BaselineUpstreamIntegrationTest {
     }
     @Test void trustRotationPreservesSequenceAndRequiresFreshIndexAndExplicitEnable()throws Exception{
         var entry=release("baseline","1",1,baseline("1",1));index(1,entry);assertEquals("success",run().get("outcome"));String pkg=releases().get(0).get("package_id").toString(),firstReceipt=releases().get(0).get("first_receipt").toString();
-        Thread.sleep(30);var staleService=service;service.close();keys=KeyPairGenerator.getInstance("Ed25519").generateKeyPair();publisher.setPublicKey(Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
+        Thread.sleep(30);var staleService=service;keys=KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        // The old process retains its independent static config and old signing key.
+        var rotated=new BaselineUpstreamProperties.Source();rotated.setId(sourceId);rotated.setName(publisher.getName());rotated.setUrl(publisher.getUrl());rotated.setScopes(publisher.getScopes());rotated.setEnabled(true);rotated.setPublicKey(Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
+        publisher=rotated;props=new BaselineUpstreamProperties();props.setSources(List.of(rotated));
         service=new BaselineUpstreamService(jdbc,manager,props,downloader,baseline,scap);service.initialize();
-        // Separate static config object models an old process still pinned to the former key.
-        var oldConfig=new BaselineUpstreamProperties.Source();oldConfig.setId(sourceId);oldConfig.setName("Old server");oldConfig.setUrl(base+"/index.json");oldConfig.setScopes(publisher.getScopes());oldConfig.setPublicKey(Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic().getEncoded()));
-        var previousKey=publisher.getPublicKey();publisher.setPublicKey(oldConfig.getPublicKey());
-        assertTrue(assertThrows(IllegalArgumentException.class,()->staleService.trigger(sourceId,7L)).getMessage().contains("配置"));publisher.setPublicKey(previousKey);
+        try{assertTrue(assertThrows(IllegalArgumentException.class,()->staleService.trigger(sourceId,7L)).getMessage().contains("配置"));}finally{staleService.close();}
         assertEquals(0,((Number)service.detail(sourceId).get("enabled")).intValue());assertEquals(1L,((Number)service.detail(sourceId).get("sequence")).longValue());
         assertThrows(IllegalArgumentException.class,()->baseline.review(pkg,true,"stale trust",7L));
         long revision=((Number)service.detail(sourceId).get("revision")).longValue();service.schedule(sourceId,new BaselineUpstreamService.Schedule(revision,true,3_600_000,"reviewed rotated key"),7L);
