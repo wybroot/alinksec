@@ -1161,7 +1161,7 @@ jobs:
         run: python3 deploy/tests/vendor-native-samples.py .tmp/vendor-native-samples
       - name: Check strict native formats against original publisher bytes
         working-directory: server
-        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=VendorAdvisoryAdapterTest,VendorAdvisoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=VendorAdvisoryAdapterTest,VendorAdvisoryIndexTest,VendorAdvisoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_VENDOR_NATIVE_SAMPLES: ${{ github.workspace }}/.tmp/vendor-native-samples

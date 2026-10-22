@@ -77,6 +77,8 @@ class VendorAdvisoryIntegrationTest {
     @AfterEach void close() throws Exception {
         if (sync!=null) sync.close();if (http!=null) http.stop(0);if (workers!=null) workers.shutdownNow();
         if (jdbc!=null) {
+            for (String table:List.of("t_vuln_finding","t_asset_software")) jdbc.update("DELETE FROM "+table+" WHERE agent_id=?",id+"-host");
+            jdbc.update("DELETE FROM t_agent WHERE agent_id=?",id+"-host");
             for (String table:List.of("t_vendor_contribution","t_vendor_document","t_vendor_sync_state","t_security_governance_event","t_security_cve","t_security_feed_run","t_security_feed_state","t_security_feed_schedule","t_security_source_lifecycle"))
                 jdbc.update("DELETE FROM "+table+" WHERE source_id=?",id);
             jdbc.update("DELETE FROM t_cve_db WHERE cve_id=?",cve);
@@ -163,6 +165,45 @@ class VendorAdvisoryIntegrationTest {
         var output=new ByteArrayOutputStream();try(var gzip=new GZIPOutputStream(output)){gzip.write(json);}byte[] raw=output.toByteArray();bodies.put("/tracker/data/json",raw);
         service.sync(source);assertTrue(declaration().path("affected").isEmpty());assertEquals("source",declaration().path("vendor_advisories").get(0).path("package_scope").asText());
         assertArrayEquals(raw,service.raw(id,archives().get(0).get("id").toString()));
+    }
+    @Test void redhatChangesDiscoveryAndExplicitBinaryStatusDriveExactVersionFindingsOnly() throws Exception {
+        source.setType("redhat-csaf");source.setUrl(base);
+        var product=new LibraryProperties.VendorProduct();product.setProductId("rhel-product");product.setDistroId("rhel");product.setDistroVersion("9.3");source.setVendorProducts(List.of(product));
+        String now=Instant.now().toString();
+        bodies.put("/changes.csv",("\"2024/rhsa-2024_0001.json\",\""+now+"\"\n").getBytes(StandardCharsets.UTF_8));
+        ObjectNode advisory=(ObjectNode)JsonUtils.read("""
+                {"document":{"csaf_version":"2.0","title":"Native RPM boundary","tracking":{"id":"RHSA-2024:0001","version":"1","current_release_date":"2026-10-01T01:02:03Z"}},
+                 "product_tree":{"branches":[{"product":{"product_id":"binary","name":"thunderbird-0:115.6.0-1.el9_3.x86_64","product_identification_helper":{"purl":"pkg:rpm/redhat/thunderbird@115.6.0-1.el9_3?arch=x86_64"}}}],
+                 "relationships":[{"category":"default_component_of","product_reference":"binary","relates_to_product_reference":"rhel-product","full_product_name":{"product_id":"installed"}}]},
+                 "vulnerabilities":[{"cve":"REPLACE","product_status":{"known_affected":["installed"]},"scores":[{"cvss_v3":{"baseScore":8.8}}]}]}
+                """.replace("REPLACE",cve));
+        bodies.put("/2024/rhsa-2024_0001.json",bytes(advisory));service.sync(source);
+        assertEquals("=0:115.6.0-1.el9_3",declaration().path("affected").get(0).path("vrange").asText());
+        assertEquals("",declaration().path("affected").get(0).path("fixed_version").asText());
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,os_version,machine_id,software_collection_status,distro_id,distro_version) VALUES (?, 'native-fixture',1,'fixture',?,'complete','rhel','9.3')",id+"-host",id);
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES (?,'thunderbird','0:115.6.0-1.el9_3','rpm','x86_64')",id+"-host");
+        var matcher=new VulnMatchService(jdbc,new DataSourceTransactionManager(pool));matcher.matchAgent(id+"-host",0);
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id=? AND cve_id=? AND current_match=true",Integer.class,id+"-host",cve));
+        jdbc.update("UPDATE t_asset_software SET version='0:115.5.0-1.el9_3' WHERE agent_id=?",id+"-host");matcher.matchAgent(id+"-host",0);
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id=? AND current_match=true",Integer.class,id+"-host"));
+        jdbc.update("UPDATE t_asset_software SET version='0:115.6.0-1.el9_3' WHERE agent_id=?",id+"-host");
+        ((ObjectNode)advisory.path("vulnerabilities").get(0)).putObject("product_status").putArray("fixed").add("installed");
+        bodies.put("/2024/rhsa-2024_0001.json",bytes(advisory));jdbc.update("UPDATE t_vendor_document SET checked_at=? WHERE source_id=?",Instant.EPOCH.toString(),id);service.sync(source);matcher.matchAgent(id+"-host",0);
+        assertEquals("not_affected",declaration().path("affected").get(0).path("evidence").path("assessment").asText());
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_vuln_finding WHERE agent_id=? AND current_match=true",Integer.class,id+"-host"));
+    }
+    @Test void microsoftUpdatesConstructValidatedMonthlyPathsAndIgnoreRemoteCvrfUrls() throws Exception {
+        source.setType("msrc-cvrf");source.setUrl(base);
+        String now=Instant.now().toString();
+        bodies.put("/updates",bytes(Map.of("value",List.of(Map.of("ID","2024-Apr","CurrentReleaseDate",now,"CvrfUrl",base+"/redirect-target")))));
+        bodies.put("/cvrf/2024-Apr",bytes(Map.of("DocumentTracking",Map.of("Identification",Map.of("ID",Map.of("Value","2024-Apr")),"CurrentReleaseDate",now,"Version","1"),
+                "DocumentTitle",Map.of("Value","Microsoft monthly fixture"),"Vulnerability",List.of(Map.of("CVE",cve,"Title",Map.of("Value","KB metadata"),
+                "Remediations",List.of(Map.of("Type",2,"Description",Map.of("Value","5030000"),"FixedBuild","10.0.1","ProductID",List.of("windows-product"))))))));
+        service.sync(source);assertEquals(0,redirectTarget.get());assertTrue(declaration().path("affected").isEmpty());
+        assertEquals("5030000",declaration().path("vendor_advisories").get(0).path("remediations").get(0).path("description").asText());
+        assertEquals(1,archives().size());
+        bodies.put("/updates",bytes(Map.of("value",List.of(Map.of("ID","../redirect-target","CurrentReleaseDate",now)))));
+        assertThrows(IllegalArgumentException.class,()->service.sync(source));assertEquals(0,redirectTarget.get());assertEquals(1,archives().size());
     }
     @Test void resolvedRoutesPermitReadOnlyRawAccessAndRejectViewerAndOperatorMutations() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Role boundary",true));sync.sync(source);

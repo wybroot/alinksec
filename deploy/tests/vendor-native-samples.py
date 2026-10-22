@@ -13,6 +13,9 @@ SAMPLES = {
     "ubuntu-usn": "https://ubuntu.com/security/notices/USN-6727-1.json",
     "debian-tracker": "https://security-tracker.debian.org/tracker/data/json",
     "redhat-csaf": "https://security.access.redhat.com/data/csaf/v2/advisories/2024/rhsa-2024_0001.json",
+    "ubuntu-index": "https://ubuntu.com/security/notices.json?limit=1&offset=0",
+    "redhat-index": "https://security.access.redhat.com/data/csaf/v2/advisories/changes.csv",
+    "msrc-index": "https://api.msrc.microsoft.com/cvrf/v3.0/updates",
     "msrc-cvrf": "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2024-Apr",
 }
 
@@ -34,7 +37,7 @@ def main():
             while block := response.read(65536):
                 size += len(block)
                 total += len(block)
-                if size > 32 << 20 or total > 64 << 20 or time.monotonic() - start > 45:
+                if size > ((4 if kind.endswith("-index") else 32) << 20) or total > 64 << 20 or time.monotonic() - start > 45:
                     raise ValueError("Publisher sample response limit")
                 digest.update(block)
                 output.write(block)
