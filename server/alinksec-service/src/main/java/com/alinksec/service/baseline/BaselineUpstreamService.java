@@ -146,7 +146,7 @@ public class BaselineUpstreamService {
     }
     private void assertCurrent(Context context){
         BaselineUpstreamGuard.lock(jdbc);var gate=one("SELECT lease_owner,lease_until FROM t_baseline_upstream_gate WHERE id=1");var source=state(context.source());
-        if(!gate.get("lease_owner").equals(context.owner())||number(gate,"lease_until")<=System.currentTimeMillis()||number(source,"revision")!=context.revision()||!source.get("config_hash").equals(context.config())||number(source,"enabled")!=1||number(source,"configured")!=1||Thread.currentThread().isInterrupted()||System.currentTimeMillis()>=context.deadline())throw new Failure("source_changed");
+        if(!configured(context.source()).fingerprint().equals(context.config())||!gate.get("lease_owner").equals(context.owner())||number(gate,"lease_until")<=System.currentTimeMillis()||number(source,"revision")!=context.revision()||!source.get("config_hash").equals(context.config())||number(source,"enabled")!=1||number(source,"configured")!=1||Thread.currentThread().isInterrupted()||System.currentTimeMillis()>=context.deadline())throw new Failure("source_changed");
     }
     private boolean validReceipt(Map<String,Object> state,String config,long now){
         if(state.get("receipt_id")==null)return false;
@@ -220,7 +220,7 @@ public class BaselineUpstreamService {
     private void finish(Context context,String outcome,String issue,int imported){
         tx.executeWithoutResult(status->{
             BaselineUpstreamGuard.lock(jdbc);var gate=one("SELECT lease_owner FROM t_baseline_upstream_gate WHERE id=1");
-            if(!gate.get("lease_owner").equals(context.owner()))return;
+            if(!configured(context.source()).fingerprint().equals(context.config())||!gate.get("lease_owner").equals(context.owner()))return;
             long now=System.currentTimeMillis();
             jdbc.update("UPDATE t_baseline_upstream_attempt SET outcome=?,issue=?,imported=?,finished_at=? WHERE id=? AND outcome='running'",outcome,issue,imported,now,context.attempt());
             long remaining=jdbc.queryForObject("SELECT count(*) FROM t_baseline_upstream_release WHERE source_id=? AND remote_status='active' AND state IN ('pending','failed') AND attempts<3",Long.class,context.source());
@@ -231,8 +231,8 @@ public class BaselineUpstreamService {
     public byte[] receipt(String source,String id){return Base64.getDecoder().decode(one("SELECT envelope FROM t_baseline_upstream_receipt WHERE id=? AND source_id=?",id,source).get("envelope").toString());}
     public byte[] artifact(String source,String id){var row=one("SELECT artifact,sha256 FROM t_baseline_upstream_release WHERE id=? AND source_id=?",id,source);if(row.get("artifact")==null)throw new IllegalArgumentException("该版本尚未保存下载原件");byte[] bytes=Base64.getDecoder().decode(row.get("artifact").toString());if(!ScapPackage.digest(bytes).equals(row.get("sha256")))throw new IllegalArgumentException("上游原件摘要不匹配");return bytes;}
     private void recordControl(String id,String action,long actor,String note){long now=System.currentTimeMillis();jdbc.update("INSERT INTO t_baseline_upstream_attempt(id,source_id,trigger_type,actor,started_at,finished_at,outcome,note) VALUES(?,?,?,?,?,?,'success',?)",UUID.randomUUID().toString(),id,action,actor,now,now,note);pruneAttempts(id);}
-    private void pruneAttempts(String id){jdbc.update("DELETE FROM t_baseline_upstream_attempt WHERE source_id=? AND outcome<>'running' AND id NOT IN (SELECT id FROM t_baseline_upstream_attempt WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 100)",id,id);}
-    private BaselineUpstreamProperties.Source configured(String id){var source=catalog.get(id);if(source==null)throw new IllegalArgumentException("上游未在服务器配置中启用");return source;}
+    private void pruneAttempts(String id){jdbc.update("DELETE FROM t_baseline_upstream_attempt WHERE source_id=? AND outcome NOT IN ('running','queued') AND id NOT IN (SELECT id FROM t_baseline_upstream_attempt WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 100)",id,id);}
+    private BaselineUpstreamProperties.Source configured(String id){var source=catalog.get(id);if(source==null)throw new IllegalArgumentException("上游未在服务器配置中启用");var state=state(id);if(number(state,"configured")!=1||!source.fingerprint().equals(state.get("config_hash")))throw new IllegalArgumentException("本机上游配置与当前信任配置不一致，请统一服务器配置后重试");return source;}
     private Map<String,Object> state(String id){return one("SELECT * FROM t_baseline_upstream_source WHERE id=?",id);}
     private Map<String,Object> one(String sql,Object... args){var rows=jdbc.queryForList(sql,args);if(rows.size()!=1)throw new IllegalArgumentException("基线上游记录不存在");return rows.get(0);}
     private static long number(Map<String,Object> row,String key){return ((Number)row.get(key)).longValue();}
