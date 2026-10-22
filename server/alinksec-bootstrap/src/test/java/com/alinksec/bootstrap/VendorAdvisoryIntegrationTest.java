@@ -131,7 +131,7 @@ class VendorAdvisoryIntegrationTest {
     @Test void nativeScopeIsPinnedAndRetirementBlocksFurtherCommitsButKeepsRawEvidence() throws Exception {
         bodies.put("/notices/USN-1-1.json",usn("USN-1-1","Accepted",true));service.sync(source);String archive=archives().get(0).get("id").toString();
         source.setUrl(base+"/other/notices/USN-1-1.json");int prior=requests.get();assertThrows(IllegalArgumentException.class,()->service.sync(source));assertEquals(prior,requests.get());
-        source.setUrl(base+"/notices/USN-1-1.json");catalog.retireSource(id,7L,"Fixture retired");
+        source.setUrl(base+"/notices/USN-1-1.json");catalog.retire(id,7L,"Fixture retired");
         assertThrows(IllegalArgumentException.class,()->service.sync(source));assertNotNull(service.raw(id,archive));assertEquals(1,archives().size());
     }
     @Test void archiveAndContributionChangesRollbackTogetherWhenMergedCveExceedsCapacity() throws Exception {

@@ -119,7 +119,7 @@ public final class VendorAdvisoryService {
     private List<VendorAdvisoryIndex.Candidate> discover(LibraryProperties.Source source,Budget budget) throws IOException {
         Map<String,Object> state=jdbc.queryForMap("SELECT * FROM t_vendor_sync_state WHERE source_id=?",source.getId());
         if (((Number)state.get("pending_count")).intValue()>0 && !state.get("index_base64").toString().isBlank())
-            return decodePlan(state.get("index_base64").toString());
+            return decodePlan(state.get("index_base64").toString(),state.get("index_sha256").toString());
         String base=VendorAdvisoryIndex.address(source);
         Instant cutoff=Instant.now().minus(Duration.ofDays(source.getInitialDays()));
         List<VendorAdvisoryIndex.Candidate> candidates;
@@ -147,7 +147,7 @@ public final class VendorAdvisoryService {
             Response response=fetch(base+suffix,conditional(state),4<<20,budget);
             if (response.status()==304) {
                 if (state.get("index_base64").toString().isBlank()) throw VendorAdvisoryIndex.invalid();
-                return decodePlan(state.get("index_base64").toString());
+                return decodePlan(state.get("index_base64").toString(),state.get("index_sha256").toString());
             }
             candidates="redhat-csaf".equals(source.getType())?VendorAdvisoryIndex.redhat(response.raw(),base,cutoff)
                     :VendorAdvisoryIndex.microsoft(response.raw(),base,cutoff);
@@ -161,9 +161,9 @@ public final class VendorAdvisoryService {
                 Base64.getEncoder().encodeToString(bytes),sha(bytes),etag,modified,source.getId());
         return candidates;
     }
-    private List<VendorAdvisoryIndex.Candidate> decodePlan(String encoded) throws IOException {
+    private List<VendorAdvisoryIndex.Candidate> decodePlan(String encoded,String expected) throws IOException {
         byte[] bytes=Base64.getDecoder().decode(encoded);
-        if (bytes.length>(4<<20)) throw VendorAdvisoryIndex.invalid();
+        if (bytes.length>(4<<20) || !sha(bytes).equals(expected)) throw VendorAdvisoryIndex.invalid();
         JsonNode rows=VendorAdvisoryIndex.json(bytes).path("candidates");
         if (!rows.isArray() || rows.size()>4096) throw VendorAdvisoryIndex.invalid();
         var result=new ArrayList<VendorAdvisoryIndex.Candidate>();
@@ -252,6 +252,13 @@ public final class VendorAdvisoryService {
     static String sha(byte[] raw) {
         try { return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(raw)); }
         catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+    public String configurationIssue(LibraryProperties.Source source) {
+        try { validate(source); }
+        catch (IllegalArgumentException e) { return "请检查厂商公告地址、包范围及显式产品映射"; }
+        var pinned=jdbc.queryForList("SELECT configuration_sha256 FROM t_vendor_sync_state WHERE source_id=?",String.class,source.getId());
+        return !pinned.isEmpty() && !pinned.get(0).equals(VendorAdvisoryIndex.fingerprint(source))
+                ? "厂商来源身份或范围已变更，请退役旧来源并使用新来源标识" : "";
     }
     public Map<String,Object> state(String source) {
         var rows=jdbc.queryForList("SELECT discovered_count,pending_count,checked_count,updated_at FROM t_vendor_sync_state WHERE source_id=?",source);

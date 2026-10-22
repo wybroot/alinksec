@@ -316,7 +316,7 @@ public class LibrarySyncService {
             row.put("id", source.getId()); row.put("type", source.getType()); row.put("enabled", plan.enabled()); row.put("intervalMs", plan.intervalMs());
             row.put("scheduleOverridden", plan.overridden()); row.put("minIntervalMs", LibrarySchedule.minimumInterval(source.getType()));
             row.put("retired",catalog.isRetired(source.getId()));
-            row.put("configurationIssue", LibrarySchedule.configurationIssue(source));
+            row.put("configurationIssue", VendorAdvisoryAdapter.TYPES.contains(source.getType()) ? vendors.configurationIssue(source) : LibrarySchedule.configurationIssue(source));
             var states = jdbc.queryForList("SELECT checked_at,success_at,status,error,entry_count,cursor,failure_count,nvd_window_seconds FROM t_security_feed_state WHERE source_id=?", source.getId());
             if (!states.isEmpty()) row.putAll(states.get(0)); else row.put("status", "never");
             boolean catchingUp=false;
@@ -333,6 +333,8 @@ public class LibrarySyncService {
             Object last = row.get("success_at");
             row.put("stale", last == null || Instant.parse((String) last).plusMillis(plan.intervalMs() * 2).isBefore(Instant.now()));
             row.put("nextCheckAt", plan.enabled() ? LibrarySchedule.nextCheck(plan, row).toString() : null);
+            if (plan.enabled() && VendorAdvisoryAdapter.TYPES.contains(source.getType()) && catchingUp && "success".equals(row.get("status")))
+                row.put("nextCheckAt",Instant.parse(row.get("checked_at").toString()).plusSeconds(60).toString());
             row.put("retryDelayMs", LibrarySchedule.delay(plan, row.get("failure_count") instanceof Number count ? count.intValue() : 0));
             row.put("coverage", "malwarebazaar".equals(source.getType()) ? "recent-60m" : "nvd".equals(source.getType()) ? "modified-window" : "misp".equals(source.getType()) ? "curated-snapshot" : "configured-feed");
             sources.add(row);
