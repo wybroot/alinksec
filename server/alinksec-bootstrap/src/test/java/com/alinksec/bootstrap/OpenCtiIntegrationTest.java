@@ -218,7 +218,7 @@ class OpenCtiIntegrationTest {
         response=q->{entered.countDown();try{if(!proceed.await(10,TimeUnit.SECONDS))throw new IllegalStateException("fixture latch");}catch(InterruptedException e){throw new IllegalStateException(e);}return bytes(page(List.of(node(2,otherHash)),false,1,"cursor-2"));};
         var future=workers.submit(()->{assertThrows(IllegalArgumentException.class,()->service.sync(source));});
         try{assertTrue(entered.await(5,TimeUnit.SECONDS));catalog.retire(id,actor,"Fixture retired");}finally{proceed.countDown();}
-        future.get(10,TimeUnit.SECONDS);assertEquals(prior,snapshot());assertEquals(0,service.state(id).get("effective_hashes"));assertEquals(false,service.detail(id,iid(1)).get("effective"));
+        future.get(10,TimeUnit.SECONDS);assertEquals(prior,snapshot());assertEquals(0,service.state(id).get("candidate_hashes"));assertEquals(false,service.detail(id,iid(1)).get("effective"));
     }
     @Test void staleInFlightSnapshotCannotOverwriteANewerCompleteSnapshot() throws Exception {
         service.sync(source);var entered=new CountDownLatch(1);var proceed=new CountDownLatch(1);var first=new AtomicInteger();

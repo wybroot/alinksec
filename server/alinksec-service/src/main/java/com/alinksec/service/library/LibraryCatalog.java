@@ -24,10 +24,12 @@ public class LibraryCatalog {
     private final LibraryFiles files;
     private final DatabaseDialect database;
     private final TransactionTemplate transaction;
+    private final LibrarySelection selection;
     public LibraryCatalog(JdbcTemplate jdbc, LibraryProperties props, LibraryFiles files,
                           DatabaseDialect database, PlatformTransactionManager manager) {
         this.jdbc = jdbc; this.props = props; this.files = files; this.database = database;
         transaction = new TransactionTemplate(manager);
+        selection = new LibrarySelection(jdbc);
     }
     public synchronized Map<String, Object> signatures(String source, SignaturePackage pkg, boolean replace, Long actor) throws IOException {
         return storeSignatures(source,pkg,replace,actor,false);
@@ -37,6 +39,7 @@ public class LibraryCatalog {
         return storeSignatures(source,pkg,true,null,true);
     }
     private Map<String,Object> storeSignatures(String source,SignaturePackage pkg,boolean replace,Long actor,boolean allowEmpty)throws IOException {
+        if(!allowEmpty && pkg.hashes().isEmpty() && pkg.rules().isEmpty())throw new IllegalArgumentException("拒绝导入空特征库");
         try {
             return transaction.execute(status -> {
                 try {
@@ -57,9 +60,7 @@ public class LibraryCatalog {
                             INSERT INTO t_security_rule(source_id,name,document) VALUES (?,?,?)
                             ON CONFLICT(source_id,name) DO UPDATE SET document=EXCLUDED.document
                             """, source, rule.path("name").asText(), JsonUtils.write(rule));
-                    int count = jdbc.queryForObject("SELECT count(DISTINCT sha256) FROM t_security_hash WHERE source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)", Integer.class);
-                    if (count > props.getMaxHashes()) throw new IllegalArgumentException("合并哈希库超过容量上限，已有库保留");
-                    return publishSignatures(actor, "manual".equals(source) ? pkg.version() : "", allowEmpty);
+                    return publishSignatures(actor, "manual".equals(source) ? pkg.version() : "", allowEmpty,true);
                 } catch (IOException e) { throw new UncheckedIOException(e); }
             });
         } catch (UncheckedIOException e) { throw e.getCause(); }
@@ -81,32 +82,38 @@ public class LibraryCatalog {
         jdbc.update("INSERT INTO t_security_feed_state(source_id,kind,status) VALUES ('_legacy-signature','internal','success')");
     }
     private Map<String, Object> publishSignatures(Long actor, String proposedVersion, boolean allowEmpty) throws IOException {
+        return publishSignatures(actor,proposedVersion,allowEmpty,false);
+    }
+    private Map<String, Object> publishSignatures(Long actor, String proposedVersion, boolean allowEmpty,boolean rejectExcessCandidates) throws IOException {
         Path hashes = files.temporary(".txt"), rules = files.temporary(".json"), zip = files.temporary(".zip");
         try {
-            int hashCount = jdbc.queryForObject("SELECT count(DISTINCT sha256) FROM t_security_hash WHERE source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)", Integer.class);
+            int[] selectedHashes={0},candidateGroups={0};
             try (BufferedWriter writer = Files.newBufferedWriter(hashes, StandardCharsets.UTF_8)) {
-                jdbc.query("""
-                        SELECT sha256,name,severity FROM (
-                          SELECT sha256,name,severity,ROW_NUMBER() OVER(PARTITION BY sha256
-                          ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id) AS priority
-                          FROM t_security_hash WHERE source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)
-                        ) h WHERE priority=1 ORDER BY sha256
-                        """, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    try { writer.write(rs.getString(1) + " " + rs.getString(2) + " " + rs.getInt(3) + "\n"); }
+                selection.each("hash",choice -> {
+                    if(rejectExcessCandidates && !choice.contextComplete())throw new IllegalArgumentException("单条情报当前来源超过128个，请先退役多余来源");
+                    candidateGroups[0]++;
+                    if(!choice.effective())return;
+                    if(++selectedHashes[0]>props.getMaxHashes())throw new IllegalArgumentException("合并哈希库超过容量上限，已有库保留");
+                    var row=choice.proposed();
+                    try { writer.write(row.get("sha256")+" "+row.get("name")+" "+row.get("severity")+"\n"); }
                     catch (IOException e) { throw new UncheckedIOException(e); }
                 });
             }
-            var ruleRows = jdbc.queryForList("""
-                    SELECT document FROM (
-                      SELECT document,name,ROW_NUMBER() OVER(PARTITION BY name
-                      ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id) AS priority
-                      FROM t_security_rule WHERE source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)
-                    ) r WHERE priority=1 ORDER BY name
-                    """);
-            if (ruleRows.size() > 2000) throw new IllegalArgumentException("合并规则数量超过上限");
-            Files.writeString(rules, JsonUtils.write(Map.of("rules", ruleRows.stream().map(r -> JsonUtils.read((String) r.get("document"))).toList())));
+            int hashCount=selectedHashes[0];
+            var ruleRows=new ArrayList<JsonNode>();long[] ruleBytes={0};
+            selection.each("rule",choice -> {
+                if(rejectExcessCandidates && !choice.contextComplete())throw new IllegalArgumentException("单条情报当前来源超过128个，请先退役多余来源");
+                candidateGroups[0]++;
+                if(!choice.effective())return;
+                String document=choice.proposed().get("document").toString();
+                ruleBytes[0]+=document.getBytes(StandardCharsets.UTF_8).length;
+                if(ruleRows.size()>=2000 || ruleBytes[0]>2L<<20)throw new IllegalArgumentException("合并规则数量或内容超过上限");
+                ruleRows.add(JsonUtils.read(document));
+            });
+            ruleRows.sort(Comparator.comparing(node->node.path("name").asText()));
+            Files.writeString(rules, JsonUtils.write(Map.of("rules",ruleRows)));
             if(Files.size(rules)>2L<<20 || Files.size(hashes)+Files.size(rules)>(64L<<20)-(64L<<10)) throw new IllegalArgumentException("合并特征超过Agent规则或解压容量，保留原版本");
-            if (!allowEmpty && hashCount == 0 && ruleRows.isEmpty()) throw new IllegalArgumentException("拒绝发布空特征库");
+            if (!allowEmpty && candidateGroups[0]==0) throw new IllegalArgumentException("拒绝发布空特征库");
             String fingerprint = SignaturePackage.sha256(hashes) + SignaturePackage.sha256(rules);
             var state = jdbc.queryForList("SELECT cursor,version FROM t_security_feed_state WHERE source_id = '_signature-release'");
             if (!state.isEmpty() && fingerprint.equals(state.get(0).get("cursor"))) {
@@ -151,6 +158,7 @@ public class LibraryCatalog {
                     ON CONFLICT(source_id) DO UPDATE SET cursor=EXCLUDED.cursor,version=EXCLUDED.version,
                     entry_count=EXCLUDED.entry_count,success_at=EXCLUDED.success_at
                     """, fingerprint, version, hashCount, Instant.now().toString());
+            jdbc.update("UPDATE t_security_selection_delivery SET signature_release_id=(SELECT MAX(id) FROM t_virus_db),signature_pending=1 WHERE id=1");
             return Map.of("dbVersion", version, "hashCount", hashCount, "ruleCount", ruleRows.size(), "changed", true);
         } finally { Files.deleteIfExists(hashes); Files.deleteIfExists(rules); Files.deleteIfExists(zip); }
     }
@@ -250,10 +258,15 @@ public class LibraryCatalog {
                         INSERT INTO t_security_cve(source_id,cve_id,document,matchable,provenance) VALUES (?,?,?,?,?)
                         ON CONFLICT(source_id,cve_id) DO UPDATE SET document=EXCLUDED.document,matchable=EXCLUDED.matchable,provenance=EXCLUDED.provenance
                         """, source, id, serialized, hasComparableRules(document) ? 1 : 0, JsonUtils.write(provenance));
+                if(jdbc.queryForObject("SELECT count(*) FROM t_security_cve c LEFT JOIN t_security_source_lifecycle l ON l.source_id=c.source_id WHERE c.cve_id=? AND COALESCE(l.retired,0)=0",Long.class,id)>128)
+                    throw new IllegalArgumentException("单条情报当前来源超过128个，请先退役多余来源");
                 if ("withdrawn".equals(document.path("status").asText())) revokeReviews(source,id);
                 rebuildCve(id);
             }
-            if (!documents.isEmpty()) jdbc.update("UPDATE t_vuln_rule_state SET revision=revision+1 WHERE id=1");
+            if (!documents.isEmpty()) {
+                jdbc.update("UPDATE t_vuln_rule_state SET revision=revision+1 WHERE id=1");
+                markMatchingDelivery();
+            }
             return documents.size();
         });
     }
@@ -262,9 +275,13 @@ public class LibraryCatalog {
         if (source==null || !source.matches("[A-Za-z0-9_-]{1,64}") || source.startsWith("_"))
             throw new IllegalArgumentException("来源标识非法");
         // Serialize effective source selection even across separate service/catalog instances.
-        jdbc.update("UPDATE t_vuln_rule_state SET revision=revision WHERE id=1");
+        lockAuthority();
         jdbc.update("INSERT INTO t_security_source_lifecycle(source_id) VALUES (?) ON CONFLICT(source_id) DO UPDATE SET source_id=EXCLUDED.source_id",source);
         if (isRetired(source)) throw new IllegalArgumentException("来源已退役，请使用新的来源标识");
+    }
+    private void lockAuthority() {
+        if(jdbc.update("UPDATE t_vuln_rule_state SET revision=revision WHERE id=1")!=1)
+            throw new IllegalStateException("来源治理状态缺失");
     }
     private void lockSignatureRelease() {
         jdbc.update("""
@@ -283,29 +300,31 @@ public class LibraryCatalog {
     }
     /** Whole-CVE priority stays explicit. A selected withdrawn declaration is a tombstone, not fallback authority. */
     private void rebuildCve(String id) {
-        var candidates=jdbc.queryForList("""
-                SELECT source_id,document,provenance,locally_withdrawn FROM t_security_cve WHERE cve_id=?
-                  AND source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)
-                ORDER BY CASE WHEN source_id='manual' THEN 0 ELSE 1 END,source_id LIMIT 1
-                """,id);
-        var previous=jdbc.queryForList("SELECT rule_source_id,rule_digest,rule_status FROM t_cve_db WHERE cve_id=?",id);
-        if (candidates.isEmpty()) {
-            if (!previous.isEmpty() && !"retired".equals(previous.get(0).get("rule_status"))) {
+        var choice=selection.item("cve",id);
+        var previous=jdbc.queryForList("SELECT rule_source_id,rule_digest,rule_status,provenance FROM t_cve_db WHERE cve_id=?",id);
+        if (choice.proposed()==null) {
+            String state=choice.candidates().isEmpty()?"retired":"quarantined";
+            if (!previous.isEmpty()) {
                 String source=String.valueOf(previous.get(0).get("rule_source_id"));
-                jdbc.update("UPDATE t_cve_db SET affected=?,rule_status='retired',rule_digest=? WHERE cve_id=?",
-                        "[]",VulnerabilityEvidence.ruleDigest(source,id,JsonUtils.read("[]")),id);
+                var provenance=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.read(previous.get(0).get("provenance").toString());
+                provenance.set("selection",JsonUtils.mapper().valueToTree(choice.summary()));provenance.put("lifecycle",state);
+                jdbc.update("UPDATE t_cve_db SET affected=?,rule_status=?,rule_digest=?,provenance=? WHERE cve_id=?",
+                        "[]",state,VulnerabilityEvidence.ruleDigest(source,id,JsonUtils.read("[]")),JsonUtils.write(provenance),id);
+                revokeReviews(source,id);
                 invalidateCve(id);
             }
             return;
         }
-        var selected=candidates.get(0);
+        var selected=choice.proposed();
         JsonNode document=JsonUtils.read((String)selected.get("document"));
         String source=(String)selected.get("source_id");
         boolean withdrawn=((Number)selected.get("locally_withdrawn")).intValue()==1 || "withdrawn".equals(document.path("status").asText());
-        JsonNode affected=withdrawn?JsonUtils.read("[]"):document.path("affected");
-        String state=withdrawn?"withdrawn":"active", digest=VulnerabilityEvidence.ruleDigest(source,id,affected);
+        JsonNode affected=withdrawn || !choice.effective()?JsonUtils.read("[]"):document.path("affected");
+        String state=!choice.effective()?("suppressed".equals(choice.reason())?"suppressed":"stale_decision".equals(choice.reason())?"review_required":"no_eligible_source".equals(choice.reason())?"quarantined":"conflict"):withdrawn?"withdrawn":"active";
+        String digest=VulnerabilityEvidence.ruleDigest(source,id,affected);
         var provenance=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.read((String)selected.get("provenance"));
         provenance.put("lifecycle",state); provenance.put("locally_withdrawn",((Number)selected.get("locally_withdrawn")).intValue()==1);
+        provenance.set("selection",JsonUtils.mapper().valueToTree(choice.summary()));
         jdbc.update("""
                 INSERT INTO t_cve_db(cve_id,title,severity,cvss,affected,description,published_at,rule_source_id,rule_digest,provenance,rule_status)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(cve_id) DO UPDATE SET title=EXCLUDED.title,
@@ -317,15 +336,24 @@ public class LibraryCatalog {
                 document.hasNonNull("published_at")?database.timestamp(Instant.parse(document.path("published_at").asText())):null,
                 source,digest,JsonUtils.write(provenance),state);
         if (previous.isEmpty() || !source.equals(previous.get(0).get("rule_source_id")) || !digest.equals(previous.get(0).get("rule_digest"))
-                || !state.equals(previous.get(0).get("rule_status"))) invalidateCve(id);
+                || !state.equals(previous.get(0).get("rule_status"))
+                || !choice.contextDigest().equals(JsonUtils.read(previous.get(0).get("provenance").toString()).path("selection").path("contextDigest").asText())
+                || ((Number)choice.decision().get("revision")).longValue()!=JsonUtils.read(previous.get(0).get("provenance").toString()).path("selection").path("decision").path("revision").asLong()) {
+            if(!previous.isEmpty())revokeReviews(previous.get(0).get("rule_source_id").toString(),id);
+            invalidateCve(id);
+        }
     }
     private void revokeReviews(String source,String id) {
-        jdbc.update("UPDATE t_patch_review SET revoked_at=?,revocation_note='来源声明已撤销或退役' WHERE rule_source_id=? AND cve_id=? AND revoked_at IS NULL",
+        jdbc.update("UPDATE t_patch_review SET revoked_at=?,revocation_note='来源声明、选择依据或治理策略已变化，请重新审核' WHERE rule_source_id=? AND cve_id=? AND revoked_at IS NULL",
                 Instant.now().toString(),source,id);
     }
     private void invalidateCve(String id) {
         jdbc.update("UPDATE t_vuln_rule_state SET revision=revision+1 WHERE id=1");
         jdbc.update("UPDATE t_vuln_finding SET current_match=false WHERE cve_id=?",id);
+        markMatchingDelivery();
+    }
+    private void markMatchingDelivery() {
+        jdbc.update("UPDATE t_security_selection_delivery SET rule_revision=(SELECT revision FROM t_vuln_rule_state WHERE id=1),match_pending=1 WHERE id=1");
     }
     public synchronized void cveWindow(String source,List<JsonNode> documents,Instant end) {
         transaction.executeWithoutResult(status -> {
@@ -403,6 +431,7 @@ public class LibraryCatalog {
         var result=new ArrayList<Map<String,Object>>();
         for (String id:ids) {
             var row=new LinkedHashMap<String,Object>(sourceCounts(id)); row.put("id",id); row.put("retired",isRetired(id));
+            row.put("policy",selection.policy(id));
             row.put("configured",props.getSources().stream().anyMatch(s -> s.getId().equals(id)));
             var lifecycle=jdbc.queryForList("SELECT retired_at,retired_by,retirement_note FROM t_security_source_lifecycle WHERE source_id=?",id);
             if (!lifecycle.isEmpty()) row.putAll(lifecycle.get(0)); result.add(row);
@@ -423,6 +452,144 @@ public class LibraryCatalog {
         var rows=jdbc.queryForList("SELECT * FROM t_security_governance_event WHERE source_id=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",source,size,(long)(page-1)*size);
         for (var row:rows) row.put("snapshot",JsonUtils.read((String)row.get("snapshot")));
         return Map.of("list",rows,"total",total==null?0:total);
+    }
+
+    public Map<String,Object> sourcePolicy(String source) { return selection.policy(source); }
+    public synchronized Map<String,Object> setSourcePolicy(String source,String tier,Integer priority,Boolean quarantined,
+                                                          Long expectedRevision,Long actor,String note) throws IOException {
+        LibrarySelection.sourceId(source); String reason=decisionNote(actor,note);
+        if(tier==null || !LibrarySelection.TIERS.contains(tier) || priority==null || priority<0 || priority>100
+                || quarantined==null || expectedRevision==null || expectedRevision<0)
+            throw new IllegalArgumentException("须明确来源信任等级、0至100优先级、隔离状态及当前修订号");
+        try {
+            return transaction.execute(status -> {
+                requireAdministrator(actor); lockActiveSource(source);
+                var counts=sourceCounts(source);
+                boolean known="manual".equals(source) || props.getSources().stream().anyMatch(s->source.equals(s.getId()))
+                        || counts.values().stream().anyMatch(n->((Number)n).longValue()>0);
+                if(!known)throw new IllegalArgumentException("来源不存在");
+                var before=selection.policy(source);
+                long revision=((Number)before.get("revision")).longValue();
+                if(revision!=expectedRevision)throw new IllegalArgumentException("来源策略已变化，请刷新后重新确认");
+                if(tier.equals(before.get("tier")) && priority.equals(before.get("priority")) && quarantined.equals(before.get("quarantined")))
+                    throw new IllegalArgumentException("来源策略没有变化");
+                if(revision==0 && jdbc.queryForObject("SELECT count(*) FROM t_security_source_policy",Long.class)>=128)
+                    throw new IllegalArgumentException("来源策略超过128个上限");
+                var ids=jdbc.queryForList("SELECT cve_id FROM t_security_cve WHERE source_id=? ORDER BY cve_id LIMIT 50001",String.class,source);
+                if(ids.size()>50000)throw new IllegalArgumentException("来源包含超过50000条CVE，请缩小治理范围后再操作");
+                try {
+                    boolean signatures="manual".equals(source) || ((Number)counts.get("hashes")).longValue()+((Number)counts.get("rules")).longValue()>0;
+                    if(signatures) { lockSignatureRelease(); adoptLegacySignature(false); }
+                    jdbc.update("""
+                            INSERT INTO t_security_source_policy(source_id,tier,priority,quarantined,revision,actor,updated_at,note)
+                            VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(source_id) DO UPDATE SET tier=EXCLUDED.tier,
+                            priority=EXCLUDED.priority,quarantined=EXCLUDED.quarantined,revision=EXCLUDED.revision,
+                            actor=EXCLUDED.actor,updated_at=EXCLUDED.updated_at,note=EXCLUDED.note
+                            """,source,LibrarySelection.TIERS.indexOf(tier),priority,quarantined?1:0,revision+1,actor,Instant.now().toString(),reason);
+                    for(String id:ids)rebuildCve(id);
+                    Map<String,Object> release=signatures?publishSignatures(actor,"",true):Map.of("changed",false);
+                    var after=selection.policy(source);
+                    selectionEvent("source",source,"policy",actor,reason,Map.of("before",before,"after",after,"declarations",counts,"recheckedCves",ids.size(),"publication",release));
+                    return Map.of("sourceId",source,"policy",after,"recheckedCves",ids.size(),"publication",release,"delivery",selectionDelivery());
+                } catch(IOException e) { throw new UncheckedIOException(e); }
+            });
+        } catch(UncheckedIOException e) { throw e.getCause(); }
+    }
+    public Map<String,Object> selections(String kind,String keyword,boolean multiple,int page,int size) {
+        if(page<1 || size<1 || size>100)throw new IllegalArgumentException("分页范围非法");
+        return selection.keys(kind,keyword,multiple,page,size);
+    }
+    public Map<String,Object> selectionDetail(String kind,String key) {
+        var choice=selection.item(kind,key); var result=new LinkedHashMap<>(choice.summary());
+        result.put("candidates",choice.candidates()); return result;
+    }
+    public Map<String,Object> selectionCandidate(String kind,String key,String source) {
+        return transaction.execute(status -> {lockAuthority();return candidateSnapshot(kind,key,source);});
+    }
+    private Map<String,Object> candidateSnapshot(String kind,String key,String source) {
+        var choice=selection.item(kind,key);LibrarySelection.sourceId(source);
+        var candidate=choice.candidates().stream().filter(c->source.equals(c.get("sourceId"))).findFirst()
+                .orElseThrow(()->new IllegalArgumentException("当前候选来源不存在，请刷新列表"));
+        var result=new LinkedHashMap<String,Object>();result.put("candidate",candidate);result.put("contextDigest",choice.contextDigest());
+        // Fixed table names only; all caller-provided identifiers remain bound parameters.
+        var rows=switch(kind) {
+            case "hash" -> jdbc.queryForList("SELECT sha256,name,severity FROM t_security_hash WHERE source_id=? AND sha256=?",source,key);
+            case "rule" -> jdbc.queryForList("SELECT document FROM t_security_rule WHERE source_id=? AND name=?",source,key);
+            case "cve" -> jdbc.queryForList("SELECT document,provenance,locally_withdrawn FROM t_security_cve WHERE source_id=? AND cve_id=?",source,key);
+            default -> throw new IllegalArgumentException("来源选择类型非法");
+        };
+        if(rows.size()!=1)throw new IllegalArgumentException("候选内容已变化，请刷新");
+        var row=rows.get(0);
+        if(row.containsKey("document"))row.put("document",JsonUtils.read(row.get("document").toString()));
+        if(row.containsKey("provenance"))row.put("provenance",JsonUtils.read(row.get("provenance").toString()));
+        result.put("declaration",row); return result;
+    }
+    public synchronized Map<String,Object> decideSelection(String kind,String key,String action,String source,
+                                                           String context,Long expectedRevision,Long actor,String note) throws IOException {
+        LibrarySelection.validate(kind,key);String reason=decisionNote(actor,note);
+        if(action==null || !Set.of("automatic","select","suppress").contains(action) || context==null || !context.matches("[a-f0-9]{64}")
+                || expectedRevision==null || expectedRevision<0)throw new IllegalArgumentException("处理方式、候选摘要或修订号非法");
+        if("select".equals(action))LibrarySelection.sourceId(source);
+        else if(source!=null && !source.isBlank())throw new IllegalArgumentException("仅指定来源操作可以提供来源标识");
+        try {
+            return transaction.execute(status -> {
+                requireAdministrator(actor);lockAuthority();
+                try {if(!"cve".equals(kind)) {lockSignatureRelease();adoptLegacySignature(false);}}
+                catch(IOException e) {throw new UncheckedIOException(e);}
+                var before=selection.item(kind,key);
+                if(!before.contextComplete())throw new IllegalArgumentException("单条情报当前来源超过128个，请先退役多余来源再复核");
+                if(!context.equals(before.contextDigest()) || ((Number)before.decision().get("revision")).longValue()!=expectedRevision)
+                    throw new IllegalArgumentException("候选内容、策略或处理决定已变化，请刷新后重新确认");
+                if(before.candidates().isEmpty() && (!"automatic".equals(action) || expectedRevision==0))throw new IllegalArgumentException("当前条目没有候选来源");
+                if("select".equals(action) && before.candidates().stream().noneMatch(c->source.equals(c.get("sourceId")) && !Boolean.TRUE.equals(c.get("quarantined"))))
+                    throw new IllegalArgumentException("指定来源不存在、已隔离或已退役");
+                if(expectedRevision==0 && jdbc.queryForObject("SELECT count(*) FROM t_security_item_decision",Long.class)>=10000)
+                    throw new IllegalArgumentException("条目处理记录超过10000条上限");
+                try {
+                    // Reset retains a monotonic revision tombstone, preventing stale clients from passing an ABA check.
+                    jdbc.update("""
+                            INSERT INTO t_security_item_decision(kind,item_key,action,selected_source,context_digest,revision,actor,decided_at,note)
+                            VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(kind,item_key) DO UPDATE SET action=EXCLUDED.action,
+                            selected_source=EXCLUDED.selected_source,context_digest=EXCLUDED.context_digest,revision=EXCLUDED.revision,
+                            actor=EXCLUDED.actor,decided_at=EXCLUDED.decided_at,note=EXCLUDED.note
+                            """,kind,key,action,"select".equals(action)?source:"",context,expectedRevision+1,actor,Instant.now().toString(),reason);
+                    Map<String,Object> release=Map.of("changed",false);
+                    if("cve".equals(kind))rebuildCve(key); else release=publishSignatures(actor,"",true);
+                    var after=selection.item(kind,key);
+                    selectionEvent(kind,key,action,actor,reason,Map.of("before",before.summary(),"after",after.summary(),"candidates",after.candidates(),"publication",release));
+                    var result=new LinkedHashMap<>(after.summary());result.put("candidates",after.candidates());result.put("publication",release);result.put("delivery",selectionDelivery());return result;
+                } catch(IOException e) {throw new UncheckedIOException(e);}
+            });
+        } catch(UncheckedIOException e) {throw e.getCause();}
+    }
+    private void selectionEvent(String kind,String key,String operation,Long actor,String note,Map<String,Object> snapshot) {
+        String serialized=JsonUtils.write(snapshot);
+        if(serialized.getBytes(StandardCharsets.UTF_8).length>64*1024)throw new IllegalArgumentException("治理审计快照超过64KiB上限");
+        jdbc.update("INSERT INTO t_security_selection_event(id,kind,item_key,operation,actor,recorded_at,note,snapshot) VALUES (?,?,?,?,?,?,?,?)",
+                UUID.randomUUID().toString(),kind,key,operation,actor,Instant.now().toString(),note,serialized);
+        jdbc.update("""
+                DELETE FROM t_security_selection_event WHERE kind=? AND item_key=? AND id NOT IN
+                (SELECT id FROM t_security_selection_event WHERE kind=? AND item_key=? ORDER BY recorded_at DESC,id DESC LIMIT 50)
+                """,kind,key,kind,key);
+    }
+    public Map<String,Object> selectionHistory(String kind,String key,int page,int size) {
+        if("source".equals(kind))LibrarySelection.sourceId(key);else LibrarySelection.validate(kind,key);
+        if(page<1 || size<1 || size>50)throw new IllegalArgumentException("分页范围非法");
+        Long total=jdbc.queryForObject("SELECT count(*) FROM t_security_selection_event WHERE kind=? AND item_key=?",Long.class,kind,key);
+        var rows=jdbc.queryForList("SELECT * FROM t_security_selection_event WHERE kind=? AND item_key=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",kind,key,size,(long)(page-1)*size);
+        for(var row:rows)row.put("snapshot",JsonUtils.read(row.get("snapshot").toString()));
+        return Map.of("list",rows,"total",total==null?0:total);
+    }
+    public Map<String,Object> selectionDelivery() {
+        return jdbc.queryForMap("SELECT signature_release_id,signature_pending,rule_revision,match_pending FROM t_security_selection_delivery WHERE id=1");
+    }
+    public void acknowledgeSelectionDelivery(long signatureRelease,long ruleRevision,boolean signatures,boolean matching) {
+        // One statement, no lost update when another catalog instance commits newer work during delivery.
+        jdbc.update("""
+                UPDATE t_security_selection_delivery SET
+                  signature_pending=CASE WHEN ?=1 AND signature_release_id<=? THEN 0 ELSE signature_pending END,
+                  match_pending=CASE WHEN ?=1 AND rule_revision<=? THEN 0 ELSE match_pending END WHERE id=1
+                """,signatures?1:0,signatureRelease,matching?1:0,ruleRevision);
     }
 
     /** Retain current/recent releases and every artifact referenced by pending delivery or valid tokens. */
@@ -530,13 +697,15 @@ public class LibraryCatalog {
             row.put("provenance", JsonUtils.read((String) row.get("provenance")));
             JsonNode affected = JsonUtils.read((String) row.get("affected"));
             row.put("affected", affected);
+            var choice=selection.item("cve",String.valueOf(row.get("cve_id")));
+            if(!choice.candidates().isEmpty())row.put("selection",choice.summary());
             boolean declared = !String.valueOf(row.get("rule_source_id")).isEmpty()
                     && row.get("rule_digest").equals(VulnerabilityEvidence.ruleDigest(String.valueOf(row.get("rule_source_id")), String.valueOf(row.get("cve_id")), affected));
             boolean supported = false;
             if (declared) for (var rule : affected) {
                 if (rule.path("evidence").isObject() && VulnerabilityEvidence.comparable(rule)) { supported = true; break; }
             }
-            row.put("evaluation", supported ? "declared" : "metadata_only");
+            row.put("evaluation",!choice.candidates().isEmpty() && !choice.effective()?"source_held":supported ? "declared" : "metadata_only");
         }
         return Map.of("list", rows, "total", total == null ? 0 : total);
     }

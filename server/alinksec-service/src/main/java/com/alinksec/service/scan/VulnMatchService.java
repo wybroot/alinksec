@@ -109,6 +109,11 @@ public class VulnMatchService {
             JsonNode rules = JsonUtils.read(cve.getString("affected"));
             String ruleSource = cve.getString("rule_source_id"), ruleDigest = cve.getString("rule_digest");
             boolean recorded = !ruleSource.isEmpty() && ruleDigest.equals(VulnerabilityEvidence.ruleDigest(ruleSource, cveId, rules));
+            var selection=JsonUtils.read(cve.getString("provenance")).path("selection");
+            if(selection.isObject() ? !selection.path("effective").asBoolean() :
+                    recorded && !new com.alinksec.service.library.LibrarySelection(jdbc).allowsCve(cveId,ruleSource,ruleDigest)) {
+                coverage.selectionHeld(); return;
+            }
             coverage.assess(cveId,rules,ruleSource,ruleDigest,recorded);
             Map<String, Candidate> candidates = new LinkedHashMap<>();
             for (JsonNode rule : rules) {
@@ -165,6 +170,8 @@ public class VulnMatchService {
         // assessment ends. Pending task IDs remain available for authenticated results.
         jdbc.update("UPDATE t_vuln_finding AS f SET status=4 WHERE agent_id=? AND status IN (0,1) AND current_match=false AND NOT " + pendingRepair,agentId);
         coverage.persist(jdbc,agentId,taskId);
+        if(ruleRevision!=jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class))
+            throw new IllegalStateException("漏洞来源依据在比对过程中已变化，请重试");
         log.info("漏洞比对完成: agent={} task={} software={} findings={}", agentId, taskId, software.size(), inserted[0]);
     }
 
@@ -180,6 +187,11 @@ public class VulnMatchService {
             }
         }
         return agents.size();
+    }
+    /** Governance delivery stays pending if even one host transaction fails. */
+    public void matchAllForSelection() {
+        for(String id:jdbc.queryForList("SELECT agent_id FROM t_agent WHERE deleted=false ORDER BY agent_id",String.class))
+            matchAgent(id,0);
     }
 
     /* ==================== 来源对应的完整软件包版本与旧上游规则 ==================== */

@@ -73,7 +73,7 @@ try {
   assert.equal(stage, 'active'); scenarios.push('failed-decision-keeps-active-state')
   rejectDecision = false
   await decision('撤销本地声明', '撤销公告声明', 'Browser fixture withdrawal')
-  await expect(ruleDialog).toContainText('当前声明已撤销或来源已退役')
+  await expect(ruleDialog).toContainText('当前来源依据暂停采用、已撤销或已退役')
   await expect(ruleDialog.getByRole('button', { name: '恢复本地声明', exact: true })).toHaveCount(1)
   await page.screenshot({ path: root + '/withdrawn-declaration.png', fullPage: true, animations: 'disabled' })
   scenarios.push('withdrawal-keeps-original-declaration-and-priority')

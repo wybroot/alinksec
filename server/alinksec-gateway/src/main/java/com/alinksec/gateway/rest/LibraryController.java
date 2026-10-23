@@ -28,6 +28,35 @@ public class LibraryController {
     }
     @GetMapping("/cves/{cveId}/declarations")
     public ApiResult<?> declarations(@PathVariable String cveId) { return ApiResult.ok(catalog.declarations(cveId)); }
+    public record SourcePolicyRequest(String tier,Integer priority,Boolean quarantined,Long revision,String note) {}
+    @GetMapping("/sources/{id}/policy")
+    public ApiResult<?> sourcePolicy(@PathVariable String id) {return ApiResult.ok(catalog.sourcePolicy(id));}
+    @PutMapping("/sources/{id}/policy")
+    public ApiResult<?> sourcePolicy(@PathVariable String id,@RequestBody SourcePolicyRequest body,HttpServletRequest request) throws Exception {
+        var result=catalog.setSourcePolicy(id,body.tier(),body.priority(),body.quarantined(),body.revision(),actor(request),body.note());
+        sync.selectionChanged();return ApiResult.ok(result);
+    }
+    @GetMapping("/selections")
+    public ApiResult<?> selections(@RequestParam(defaultValue="cve")String kind,@RequestParam(required=false)String keyword,
+                                  @RequestParam(defaultValue="false")boolean multiple,@RequestParam(defaultValue="1")int page,
+                                  @RequestParam(defaultValue="20")int size) {
+        return ApiResult.ok(catalog.selections(kind,keyword,multiple,page,size));
+    }
+    @GetMapping("/selection")
+    public ApiResult<?> selection(@RequestParam String kind,@RequestParam String key) {return ApiResult.ok(catalog.selectionDetail(kind,key));}
+    @GetMapping("/selection/candidate")
+    public ApiResult<?> candidate(@RequestParam String kind,@RequestParam String key,@RequestParam String source) {
+        return ApiResult.ok(catalog.selectionCandidate(kind,key,source));
+    }
+    @GetMapping("/selection/history")
+    public ApiResult<?> selectionHistory(@RequestParam String kind,@RequestParam String key,@RequestParam(defaultValue="1")int page,
+                                        @RequestParam(defaultValue="20")int size) {return ApiResult.ok(catalog.selectionHistory(kind,key,page,size));}
+    public record SelectionRequest(String kind,String key,String action,String source,String contextDigest,Long revision,String note) {}
+    @PostMapping("/selection/decision")
+    public ApiResult<?> selectionDecision(@RequestBody SelectionRequest body,HttpServletRequest request) throws Exception {
+        var result=catalog.decideSelection(body.kind(),body.key(),body.action(),body.source(),body.contextDigest(),body.revision(),actor(request),body.note());
+        sync.selectionChanged();return ApiResult.ok(result);
+    }
     public record GovernanceRequest(Boolean withdraw, String documentDigest, String note) {}
     @PostMapping("/sources/{id}/cves/{cveId}/decision")
     public ApiResult<?> decision(@PathVariable String id, @PathVariable String cveId,

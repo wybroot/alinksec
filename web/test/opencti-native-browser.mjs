@@ -11,7 +11,7 @@ const load = name => JSON.parse(readFileSync(resolve(fixtures, name + '.json')))
 const status = load('status'), indicators = load('indicators'), indicator = load('indicator')
 const source = status.sources.find(item => item.id === indicator.sourceId), prefix = '/api/libraries/sources/' + source.id
 assert.equal(createHash('sha256').update(JSON.stringify(indicator.document)).digest('hex'), indicator.document_sha256)
-assert.equal(indicators.state.visible_count, 3); assert.equal(indicators.state.effective_hashes, 1)
+assert.equal(indicators.state.visible_count, 3); assert.equal(indicators.state.candidate_hashes, 1)
 mkdirSync(root, { recursive: true })
 const server = createServer((req, res) => {
   let file
@@ -36,7 +36,7 @@ try {
     if (method === 'GET' && path === '/api/libraries') return ok(status)
     if (method === 'GET' && path === prefix + '/indicators') {
       if (unavailable) return route.fulfill({ status: 503, json: { code: 503, msg: '指标依据暂不可用' } })
-      if (empty) return ok({ ...indicators, total: 0, items: [], state: { ...indicators.state, visible_count: 0, effective_hashes: 0, hash_count: 0, statistics: {} } })
+      if (empty) return ok({ ...indicators, total: 0, items: [], state: { ...indicators.state, visible_count: 0, candidate_hashes: 0, hash_count: 0, statistics: {} } })
       if (expiry) return ok({ ...indicators, state: { ...indicators.state, expiry_pending: true, delivery_deferred: 1 } })
       return ok(indicators)
     }
@@ -58,7 +58,7 @@ try {
   await openList(); await expect(list).toContainText(indicators.state.snapshot_sha256)
   await expect(list).toContainText('不支持的模式'); await expect(list).toContainText('上游已撤销'); await expect(list).toContainText('离线 Agent')
   await shot('opencti-snapshot-desktop.png'); await openDetail()
-  await expect(detail).toContainText('已纳入当前发布贡献'); await expect(detail).toContainText('未验证情报内容真实性')
+  await expect(detail).toContainText('当前全局选择已采用此来源'); await expect(detail).toContainText('未验证情报内容真实性')
   checks.push('database-captured-full-snapshot-decisions-and-selected-field-digest; admin-sync; delivery-boundary-visible')
   for (const next of ['viewer', 'operator']) {
     role = next; await page.evaluate(value => sessionStorage.setItem('role', value), role); await page.goto(base + '/libraries')

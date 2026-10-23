@@ -36,6 +36,7 @@ public class LibrarySyncService {
     private final VendorAdvisoryService vendors;
     private final OpenCtiService opencti;
     private final AtomicBoolean busy = new AtomicBoolean();
+    private final AtomicBoolean selectionQueued = new AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "library-sync"); t.setDaemon(true); return t; });
     public LibrarySyncService(LibraryProperties props, LibraryCatalog catalog, VirusDbService virus, FeedDownload download, JdbcTemplate jdbc, VulnMatchService matcher, LibrarySchedule schedules) {
         this(props,catalog,virus,download,jdbc,matcher,schedules,new VendorAdvisoryProperties());
@@ -53,6 +54,27 @@ public class LibrarySyncService {
         this.opencti = new OpenCtiService(catalog,download,jdbc,openctiLimits);
     }
     public void recheckAssets() { worker.execute(() -> matcher.matchAll(0)); }
+    public void selectionChanged() {
+        // The catalog already committed a durable pending marker; executor shutdown cannot lose that work.
+        if(!selectionQueued.compareAndSet(false,true))return;
+        try { worker.execute(()->{try{retrySelectionDelivery();}finally{selectionQueued.set(false);}}); }
+        catch(RejectedExecutionException e) { selectionQueued.set(false);log.warn("Source governance delivery remains pending after executor shutdown"); }
+    }
+    public void retrySelectionDelivery() {
+        retrySelectionDelivery(true);
+    }
+    private void retrySelectionDelivery(boolean signaturesAllowed) {
+        var pending=catalog.selectionDelivery();
+        long release=((Number)pending.get("signature_release_id")).longValue(),revision=((Number)pending.get("rule_revision")).longValue();
+        if(signaturesAllowed && ((Number)pending.get("signature_pending")).intValue()==1) {
+            try { virus.pushToAllAgents();catalog.acknowledgeSelectionDelivery(release,revision,true,false); }
+            catch(RuntimeException e) { log.warn("Source governance signature delivery deferred: {}",e.getClass().getSimpleName()); }
+        }
+        if(((Number)pending.get("match_pending")).intValue()==1) {
+            try { matcher.matchAllForSelection();catalog.acknowledgeSelectionDelivery(release,revision,false,true); }
+            catch(RuntimeException e) { log.warn("Source governance asset reassessment deferred: {}",e.getClass().getSimpleName()); }
+        }
+    }
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 86_400_000)
     public void cleanupVersions() {
         if (busy.get()) return;
@@ -118,11 +140,19 @@ public class LibrarySyncService {
         if (due != null) {
             try { trigger(due.getId(), "scheduled"); }
             catch (IllegalArgumentException ignored) { /* An administrator may have paused it since selection. */ }
+        } else {
+            var pending=catalog.selectionDelivery();
+            if((((Number)pending.get("signature_pending")).intValue()==1 || ((Number)pending.get("match_pending")).intValue()==1)
+                    && busy.compareAndSet(false,true)) {
+                try { worker.execute(()->{try{retrySelectionDelivery();}finally{busy.set(false);}}); }
+                catch(RuntimeException e) {busy.set(false);throw e;}
+            }
         }
     }
     public void sync(LibraryProperties.Source source) { sync(source, "manual"); }
     private void sync(LibraryProperties.Source source, String triggerType) {
         String id = source.getId();
+        boolean signatureAttempted=false;
         if (catalog.isRetired(id)) throw new IllegalArgumentException("来源已退役");
         long nativeBefore=VendorAdvisoryAdapter.TYPES.contains(source.getType())
                 ? jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class) : -1;
@@ -137,7 +167,7 @@ public class LibrarySyncService {
             if (!vendors.configurationIssue(source).isBlank()) throw new IllegalArgumentException("厂商来源配置与已固定身份不符");
             if(!opencti.configurationIssue(source).isEmpty())throw OpenCtiAdapter.failure(OpenCtiAdapter.Problem.SCOPE);
             if("opencti".equals(source.getType())){
-                var result=opencti.sync(source);deliverOpenCti(result);
+                var result=opencti.sync(source);signatureAttempted=deliverOpenCti(result);
                 success(id,((Number)result.get("entryCount")).intValue(),"","","");
                 return;
             }
@@ -149,7 +179,7 @@ public class LibrarySyncService {
             if ("nvd".equals(source.getType())) { syncNvd(source); return; }
             if ("misp".equals(source.getType())) {
                 var result = catalog.signatures(id, MispAdapter.fetch(source, download, props), true, null);
-                if (Boolean.TRUE.equals(result.get("changed"))) virus.pushToAllAgents();
+                if (Boolean.TRUE.equals(result.get("changed"))) {signatureAttempted=true;pushSelectionSignatures();}
                 int count = jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id=?", Integer.class, id);
                 success(id, count, "", "", "");
                 return;
@@ -181,7 +211,7 @@ public class LibrarySyncService {
                         else { try (var in = Files.newInputStream(fetched.file())) { pkg = new SignaturePackage("", SignaturePackage.readHashes(in, props.getMaxHashes()), List.of()); } }
                         if (!pkg.hashes().isEmpty() || !pkg.rules().isEmpty()) {
                             var result = catalog.signatures(id, pkg, replace, null);
-                            if (Boolean.TRUE.equals(result.get("changed"))) virus.pushToAllAgents();
+                            if (Boolean.TRUE.equals(result.get("changed"))) {signatureAttempted=true;pushSelectionSignatures();}
                         } else if (!"malwarebazaar".equals(source.getType())) throw new IllegalArgumentException("远端返回空特征数据，已有库保留");
                     }
                 } else if (state.get("success_at") == null) throw new IllegalArgumentException("数据源首次同步不能返回 304");
@@ -216,16 +246,22 @@ public class LibrarySyncService {
             jdbc.update("UPDATE t_security_feed_run SET finished_at=?,status=?,entry_count=?,error=? WHERE id=?",
                     Instant.now().toString(), state.get("status"), state.get("entry_count"), state.get("error"), runId);
             jdbc.update("DELETE FROM t_security_feed_run WHERE source_id=? AND id NOT IN (SELECT id FROM t_security_feed_run WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 50)", id, id);
+            retrySelectionDelivery(!signatureAttempted);
         }
     }
-    private void deliverOpenCti(Map<String,Object> result){
+    private void pushSelectionSignatures() {
+        var pending=catalog.selectionDelivery();long release=((Number)pending.get("signature_release_id")).longValue();
+        virus.pushToAllAgents();catalog.acknowledgeSelectionDelivery(release,0,true,false);
+    }
+    private boolean deliverOpenCti(Map<String,Object> result){
         String id=result.get("sourceId").toString();
-        if(!Boolean.TRUE.equals(result.get("changed"))&&((Number)opencti.state(id).getOrDefault("delivery_deferred",0)).intValue()==0)return;
-        try{virus.pushToAllAgents();opencti.deliveryDeferred(id,false);}
+        if(!Boolean.TRUE.equals(result.get("changed"))&&((Number)opencti.state(id).getOrDefault("delivery_deferred",0)).intValue()==0)return false;
+        try{pushSelectionSignatures();opencti.deliveryDeferred(id,false);}
         catch(RuntimeException e){
             opencti.deliveryDeferred(id,true);
             log.warn("OpenCTI committed; Agent delivery deferred to push/heartbeat retry: source={}",id);
         }
+        return true;
     }
     private SignaturePackage malwareBazaar(java.nio.file.Path file) throws IOException {
         JsonNode root = JsonUtils.mapper().readTree(file.toFile());
@@ -398,6 +434,7 @@ public class LibrarySyncService {
         Set<String> nativeIndicatorSources=new HashSet<>(jdbc.queryForList("SELECT source_id FROM t_opencti_source",String.class));
         for(var row:governanceSources)row.put("nativeOpenCti",nativeIndicatorSources.contains(row.get("id")));
         result.put("governanceSources",governanceSources);
+        result.put("selectionDelivery",catalog.selectionDelivery());
         result.put("managedCveCount", counts.get("total")); result.put("matchableCveCount", counts.get("matchable"));
         result.put("unattributedCveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_source_id='' OR rule_digest=''", Long.class));
         result.put("manualSignature", jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='manual'", Integer.class));

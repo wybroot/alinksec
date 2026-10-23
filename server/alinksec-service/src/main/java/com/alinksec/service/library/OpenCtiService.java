@@ -143,7 +143,8 @@ public final class OpenCtiService {
         if(rows.isEmpty())return Map.of("identityBound",false,"maxIndicators",limits.getMaxIndicators(),"maxPages",limits.getMaxPages());
         var row=new LinkedHashMap<String,Object>(rows.get(0));row.put("identityBound",true);
         row.put("policy",JsonUtils.read(row.get("policy").toString()));row.put("statistics",JsonUtils.read(row.get("statistics").toString()));
-        boolean retired=catalog.isRetired(id);row.put("retired",retired);row.put("effective_hashes",retired?0:row.get("hash_count"));
+        boolean retired=catalog.isRetired(id);row.put("retired",retired);row.put("candidate_hashes",retired?0:row.get("hash_count"));
+        row.put("source_policy",catalog.sourcePolicy(id));
         row.put("expiry_pending",!retired&&jdbc.queryForObject("SELECT count(*) FROM t_opencti_indicator WHERE source_id=? AND included=1 AND expires_at>=0 AND expires_at<=?",Long.class,id,clock.instant().toEpochMilli())>0);
         return row;
     }
@@ -157,7 +158,7 @@ public final class OpenCtiService {
         for(var row:rows){
             var entry=new LinkedHashMap<String,Object>(row);var doc=verifiedDocument(entry);
             for(String field:List.of("name","confidence","valid_from","valid_until","revoked","x_opencti_detection","objectLabel"))entry.put(field,doc.path(field));
-            entry.put("effective",!retired&&((Number)entry.get("included")).intValue()==1);entries.add(entry);
+            entry.put("effective",!retired&&selectedHash(id,entry));entries.add(entry);
         }
         return Map.of("sourceId",id,"state",state(id),"items",entries,"total",jdbc.queryForObject("SELECT count(*) FROM t_opencti_indicator WHERE source_id=?",Long.class,id),"page",page,"size",size);
     }
@@ -166,7 +167,12 @@ public final class OpenCtiService {
         var rows=jdbc.queryForList("SELECT indicator_id,document,document_sha256,sha256,included,reason FROM t_opencti_indicator WHERE source_id=? AND indicator_id=?",id,indicatorId);
         if(rows.isEmpty())throw new IllegalArgumentException("当前快照中不存在该指标");
         var row=new LinkedHashMap<String,Object>(rows.get(0));row.put("document",verifiedDocument(row));
-        row.put("effective",!catalog.isRetired(id)&&((Number)row.get("included")).intValue()==1);row.put("sourceId",id);row.put("state",state(id));return row;
+        row.put("effective",!catalog.isRetired(id)&&selectedHash(id,row));row.put("sourceId",id);row.put("state",state(id));return row;
+    }
+    private boolean selectedHash(String id,Map<String,Object> row) {
+        if(((Number)row.get("included")).intValue()!=1)return false;
+        var choice=catalog.selectionDetail("hash",row.get("sha256").toString());
+        return Boolean.TRUE.equals(choice.get("effective")) && id.equals(choice.get("selectedSource"));
     }
     private static com.fasterxml.jackson.databind.JsonNode verifiedDocument(Map<String,Object> row){
         String document=row.remove("document").toString();

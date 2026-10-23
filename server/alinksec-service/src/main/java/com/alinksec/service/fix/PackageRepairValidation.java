@@ -72,6 +72,8 @@ final class PackageRepairValidation {
     void evidence(Map<String,Object> finding) {
         var rules=jdbc.queryForList("SELECT rule_source_id,rule_digest,CAST(affected AS TEXT) AS affected FROM t_cve_db WHERE cve_id=?",finding.get("cve_id"));
         if (!"declared".equals(finding.get("evidence_status")) || rules.size()!=1
+                || !new com.alinksec.service.library.LibrarySelection(jdbc).allowsCve(String.valueOf(finding.get("cve_id")),
+                    String.valueOf(finding.get("rule_source_id")),String.valueOf(finding.get("rule_digest")))
                 || !Objects.equals(finding.get("rule_source_id"),rules.get(0).get("rule_source_id"))
                 || !Objects.equals(finding.get("rule_digest"),rules.get(0).get("rule_digest"))
                 || !String.valueOf(finding.get("rule_digest")).matches("[a-f0-9]{64}")
