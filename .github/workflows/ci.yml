@@ -1089,6 +1089,7 @@ jobs:
           name: source-governance-postgres
           path: |
             server/**/target/surefire-reports/*OpenCti*
+            server/**/target/surefire-reports/*AgentChannelSecurity*
             server/**/target/surefire-reports/*VendorAdvisory*
             .tmp/baseline-upstream-fixtures
             server/**/target/surefire-reports/*BaselineUpstream*

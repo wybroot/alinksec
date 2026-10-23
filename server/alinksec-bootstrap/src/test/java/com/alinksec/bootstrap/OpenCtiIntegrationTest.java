@@ -36,6 +36,7 @@ class OpenCtiIntegrationTest {
     LibraryCatalog catalog; LibrarySyncService sync; LibrarySchedule schedules; OpenCtiProperties limits;
     OpenCtiService service; LibraryProperties.Source source; FeedDownload downloader; VirusDbService virus;
     HttpServer http; ExecutorService workers; MockMvc mvc; String base,id,hash,otherHash; boolean pg; Long actor;
+    long previousReleaseId; List<Map<String,Object>> previousReleaseStates;
     volatile int status=200; volatile String principal="11111111-1111-4111-8111-111111111111";
     volatile Function<JsonNode,byte[]> response;
     final AtomicInteger requests=new AtomicInteger(),redirectTarget=new AtomicInteger();
@@ -48,6 +49,8 @@ class OpenCtiIntegrationTest {
         config.setMaximumPoolSize(3);config.setMinimumIdle(1);pool=new HikariDataSource(config);
         if(!pg)new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor().postProcessAfterInitialization(pool,"dataSource");
         jdbc=new JdbcTemplate(pool);
+        previousReleaseId=jdbc.queryForObject("SELECT COALESCE(max(id),0) FROM t_virus_db",Long.class);
+        previousReleaseStates=jdbc.queryForList("SELECT * FROM t_security_feed_state WHERE source_id IN ('_signature-release','_legacy-signature')");
         actor=jdbc.queryForObject("INSERT INTO t_user(username,password_hash,role_id,status) VALUES (?,'unused',1,1) RETURNING id",Long.class,"opencti-"+UUID.randomUUID());
         id="opencti-"+UUID.randomUUID();hash=sha(id);otherHash=sha(id+"other");
         http=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);workers=Executors.newCachedThreadPool();http.setExecutor(workers);
@@ -79,6 +82,14 @@ class OpenCtiIntegrationTest {
     @AfterEach void cleanup() throws Exception {
         if(sync!=null)sync.close();if(http!=null)http.stop(0);if(workers!=null)workers.shutdownNow();
         if(jdbc!=null){
+            // These tests exercise committed multi-connection publication. Restore the shared
+            // PostgreSQL release metadata too, so later channel tests do not receive our fixture DB.
+            jdbc.update("DELETE FROM t_virus_db WHERE id>?",previousReleaseId);
+            jdbc.update("DELETE FROM t_security_feed_state WHERE source_id IN ('_signature-release','_legacy-signature')");
+            if(previousReleaseStates!=null)for(var row:previousReleaseStates){
+                var columns=new ArrayList<>(row.keySet());
+                jdbc.update("INSERT INTO t_security_feed_state ("+String.join(",",columns.stream().map(c->"\""+c+"\"").toList())+") VALUES ("+String.join(",",Collections.nCopies(columns.size(),"?"))+")",columns.stream().map(row::get).toArray());
+            }
             for(String sid:List.of(id,id+"-other"))for(String table:List.of("t_opencti_indicator","t_opencti_source","t_security_hash","t_security_rule","t_security_governance_event","t_security_feed_run","t_security_feed_state","t_security_feed_schedule","t_security_source_lifecycle"))
                 jdbc.update("DELETE FROM "+table+" WHERE source_id=?",sid);
             jdbc.update("DELETE FROM t_user WHERE id=?",actor);
