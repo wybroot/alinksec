@@ -80,7 +80,7 @@ try {
   const query = () => panel.getByRole('button', { name: '查询来源选择', exact: true }).click()
   const open = async () => { await panel.getByRole('button', { name: '查看与复核', exact: true }).click(); await expect(detail).toContainText(fixture.cve) }
   async function chooseZ() {
-    await detail.getByText('指定来源', { exact: true }).click(); await detail.getByRole('combobox', { name: '采用来源' }).click()
+    await detail.getByText('指定来源', { exact: true }).click(); await detail.locator('.el-form-item').filter({ hasText: '采用来源' }).locator('.el-select__wrapper').click()
     await page.getByRole('option', { name: fixture.z, exact: true }).click()
     await detail.getByRole('textbox').fill('Independent applicability review')
   }
@@ -102,7 +102,7 @@ try {
   failDecision = false; await detail.getByRole('button', { name: 'Close this dialog' }).click()
   const sourceRow = panel.locator('.el-table').first().getByRole('row').filter({ hasText: fixture.z })
   await sourceRow.getByRole('button', { name: '管理策略', exact: true }).click(); await expect(policy).toContainText('当前修订 0')
-  await policy.getByRole('combobox', { name: '信任等级' }).click(); await page.getByRole('option', { name: '优先采用', exact: true }).click()
+  await policy.locator('.el-form-item').filter({ hasText: '信任等级' }).locator('.el-select__wrapper').click(); await page.getByRole('option', { name: '优先采用', exact: true }).click()
   await policy.getByRole('spinbutton').fill('50'); await policy.getByRole('switch').click(); await policy.getByRole('textbox').fill('Independent quarantine review')
   await policy.getByRole('button', { name: '保存来源策略', exact: true }).click(); await expect(policy).toBeHidden()
   await expect(sourceRow).toContainText('已隔离'); assert.equal(writes.length, 2)
