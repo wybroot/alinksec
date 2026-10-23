@@ -84,6 +84,14 @@ public class LibraryController {
     }
     @GetMapping("/sources/{id}/runs")
     public ApiResult<?> runs(@PathVariable String id) { return ApiResult.ok(sync.history(id)); }
+    @GetMapping("/sources/{id}/indicators")
+    public ApiResult<?> indicators(@PathVariable String id,@RequestParam(defaultValue="1")int page,@RequestParam(defaultValue="20")int size){
+        return ApiResult.ok(sync.nativeOpenCti(id).indicators(id,page,size));
+    }
+    @GetMapping("/sources/{id}/indicators/{indicatorId}")
+    public ApiResult<?> indicator(@PathVariable String id,@PathVariable String indicatorId){
+        return ApiResult.ok(sync.nativeOpenCti(id).detail(id,indicatorId));
+    }
     @PostMapping("/cves/import")
     public ApiResult<Map<String, Object>> importCves(@RequestParam("file") MultipartFile file, HttpServletRequest request) throws Exception {
         if (file.getSize() > props.getMaxDownloadBytes()) throw new IllegalArgumentException("漏洞文件超过大小上限");

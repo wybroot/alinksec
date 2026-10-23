@@ -61,6 +61,8 @@ public class LibraryProperties {
         private List<String> vendorPackages = new ArrayList<>();
         private List<VendorProduct> vendorProducts = new ArrayList<>();
         private int vendorPages = 5;
+        private String openctiTag = "";
+        private int openctiMinConfidence = 75, openctiSeverity = 4;
         public String getId() { return id; }
         public void setId(String v) { id = v; }
         public String getType() { return type; }
@@ -85,6 +87,12 @@ public class LibraryProperties {
         public void setVendorProducts(List<VendorProduct> v) { vendorProducts = v; }
         public int getVendorPages() { return vendorPages; }
         public void setVendorPages(int v) { vendorPages = v; }
+        public String getOpenctiTag() { return openctiTag; }
+        public void setOpenctiTag(String v) { openctiTag = v; }
+        public int getOpenctiMinConfidence() { return openctiMinConfidence; }
+        public void setOpenctiMinConfidence(int v) { openctiMinConfidence = v; }
+        public int getOpenctiSeverity() { return openctiSeverity; }
+        public void setOpenctiSeverity(int v) { openctiSeverity = v; }
     }
 
     /** Exact publisher product to collected distribution identity; no family/version inference. */

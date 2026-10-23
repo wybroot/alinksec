@@ -45,6 +45,9 @@ public class LibrarySchedule {
         if (enabled && !pinned.isEmpty() && (!VendorAdvisoryAdapter.TYPES.contains(source.getType())
                 || !pinned.get(0).equals(VendorAdvisoryIndex.fingerprint(source))))
             throw new IllegalArgumentException("厂商来源身份或范围已变更，请使用新的来源标识");
+        var opencti=jdbc.queryForList("SELECT configuration_sha256 FROM t_opencti_source WHERE source_id=?",String.class,id);
+        if(enabled&&!opencti.isEmpty()&&(!"opencti".equals(source.getType())||!opencti.get(0).equals(OpenCtiAdapter.fingerprint(source))))
+            throw new IllegalArgumentException("OpenCTI 来源身份或审核范围已变更，请使用新的来源标识");
         jdbc.update("""
                 INSERT INTO t_security_feed_schedule(source_id,enabled,interval_ms,updated_at) VALUES (?,?,?,?)
                 ON CONFLICT(source_id) DO UPDATE SET enabled=EXCLUDED.enabled,interval_ms=EXCLUDED.interval_ms,updated_at=EXCLUDED.updated_at
@@ -57,6 +60,7 @@ public class LibrarySchedule {
         return effective(source);
     }
     public static String configurationIssue(LibraryProperties.Source source) {
+        if("opencti".equals(source.getType()))return OpenCtiAdapter.configurationIssue(source);
         if (("misp".equals(source.getType()) || "malwarebazaar".equals(source.getType())) && source.getApiKey().isBlank())
             return "请在部署配置中设置该平台的只读认证密钥";
         if ("misp".equals(source.getType()) && !source.getMispTag().matches("[A-Za-z0-9][A-Za-z0-9:._=-]{0,127}"))
