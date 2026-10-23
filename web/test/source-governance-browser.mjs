@@ -53,7 +53,7 @@ try {
   await page.getByRole('row').filter({ hasText: fixture.cve }).getByRole('button', { name: '查看依据', exact: true }).click()
   const ruleDialog = page.getByRole('dialog', { name: fixture.cve, exact: true })
   await expect(ruleDialog.getByRole('button', { name: '撤销本地声明', exact: true })).toHaveCount(2)
-  await expect(ruleDialog).toContainText('优先公告撤销后不自动采用较低优先声明')
+  await expect(ruleDialog).toContainText('选中的撤销公告继续阻止较低来源回填')
   await page.screenshot({ path: root + '/active-declarations.png', fullPage: true, animations: 'disabled' })
   await ruleDialog.getByRole('button', { name: '查看原始声明', exact: true }).first().click()
   const original = page.getByRole('dialog', { name: '原始公告声明', exact: true })
