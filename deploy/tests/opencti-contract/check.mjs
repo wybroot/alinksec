@@ -49,11 +49,11 @@ function visit(typeName, selections) {
     assert.equal(selection.kind, Kind.FIELD)
     const actual = original.fields.find(field => field.name.value === selection.name.value)
     assert(actual, `production query field missing upstream: ${typeName}.${selection.name.value}`)
-    const used = new Set(selection.arguments.map(argument => argument.name.value))
-    for (const name of used) assert(actual.arguments.some(argument => argument.name.value === name), `unsupported argument ${name}`)
+    const used = new Set((selection.arguments || []).map(argument => argument.name.value))
+    for (const name of used) assert((actual.arguments || []).some(argument => argument.name.value === name), `unsupported argument ${name}`)
     const field = structuredClone(actual); field.directives = []
     // Preserve actual requested arguments and every required argument; prune unused optional modules.
-    field.arguments = field.arguments.filter(argument => used.has(argument.name.value) || argument.type.kind === Kind.NON_NULL_TYPE && !argument.defaultValue)
+    field.arguments = (field.arguments || []).filter(argument => used.has(argument.name.value) || argument.type.kind === Kind.NON_NULL_TYPE && !argument.defaultValue)
     field.arguments.forEach(argument => { argument.directives = []; leaf(named(argument.type)) })
     const previous = object.fields.find(item => item.name.value === field.name.value)
     if (previous) assert.equal(print(previous), print(field)); else object.fields.push(field)

@@ -87,7 +87,10 @@ try {
   holdDetail = true; await list.getByRole('button', { name: '查看指标依据', exact: true }).first().click()
   await expect.poll(() => detailStarted).toBe(true)
   await list.getByRole('button', { name: 'Close this dialog' }).click(); await expect(list).toBeHidden()
-  await openList(); holdDetail = false; releaseDetail()
+  await openList(); holdDetail = false
+  const lateResponse = page.waitForResponse(response => new URL(response.url()).pathname === prefix + '/indicators/' + indicator.indicator_id)
+  releaseDetail(); await (await lateResponse).finished()
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
   await expect(detail).toBeHidden()
   checks.push('closed-dialog-rejects-late-indicator-response')
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []); assert.deepEqual(writes, ['sync'])
