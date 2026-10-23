@@ -14,6 +14,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
+    @Test void reportReadSaveAndAdminSchedulePermissionsUseMatchedRoutes() throws Exception {
+        for(String role:new String[]{"admin","operator","viewer"}) {
+            for(String path:new String[]{"/api/reports/preview","/api/reports/compliance.xlsx","/api/reports/snapshots/{id}/export.html","/api/reports/schedules"}) {
+                var read=request(role);read.setRequestURI(path);assertTrue(interceptor().preHandle(read,new MockHttpServletResponse(),new Object()));
+            }
+            var save=request(role);save.setMethod("POST");save.setRequestURI("/api/reports/snapshots");assertEquals(!role.equals("viewer"),interceptor().preHandle(save,new MockHttpServletResponse(),new Object()));
+            for(String method:new String[]{"POST","PUT","DELETE"}) {
+                var plan=request(role);plan.setMethod(method);plan.setRequestURI("/api/reports/%73chedules;ignored/item");plan.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,"/api/reports/schedules/{id}");assertEquals(role.equals("admin"),interceptor().preHandle(plan,new MockHttpServletResponse(),new Object()));
+            }
+            var remove=request(role);remove.setMethod("DELETE");remove.setRequestURI("/api/reports/snapshots/id");assertEquals(role.equals("admin"),interceptor().preHandle(remove,new MockHttpServletResponse(),new Object()));
+        }
+    }
+
     @Test void sourceTrustPolicyAndItemDecisionsRequireAdminIncludingEncodedMatchedRoutes() throws Exception {
         for(String role:new String[]{"admin","operator","viewer"}) {
             for(String pattern:new String[]{"/api/libraries/selection/decision","/api/libraries/sources/{id}/policy"}) {

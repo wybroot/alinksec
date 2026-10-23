@@ -12,6 +12,10 @@ on:
         description: Run only native Windows Agent validation
         type: boolean
         default: false
+      reporting_only:
+        description: Run only report statistics, exports and durable schedules
+        type: boolean
+        default: false
       source_trust_only:
         description: Run only source trust and conflict validation
         type: boolean
@@ -35,7 +39,7 @@ on:
 
 jobs:
   scap-resolver:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -73,7 +77,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-scap:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     needs: scap-resolver
     strategy:
       fail-fast: false
@@ -140,7 +144,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   windows-agent:
-    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -364,7 +368,7 @@ jobs:
           retention-days: 14
 
   build-and-test:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     name: build-and-test (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -926,7 +930,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
 
   native-yara:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     name: native-yara (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -983,7 +987,7 @@ jobs:
           retention-days: 14
 
   schema:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1031,8 +1035,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "31"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "90"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "32"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "93"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1115,7 +1119,7 @@ jobs:
           if-no-files-found: error
 
   baseline-upstream:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1161,7 +1165,7 @@ jobs:
           if-no-files-found: error
 
   vendor-advisories:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.opencti_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1207,7 +1211,7 @@ jobs:
           if-no-files-found: error
 
   opencti-native:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.source_trust_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1258,7 +1262,7 @@ jobs:
           if-no-files-found: error
 
   source-trust:
-    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1299,5 +1303,94 @@ jobs:
             server/**/target/surefire-reports/*VulnerabilityWorkflow*
             server/**/target/surefire-reports/*LibraryGovernance*
             server/**/target/surefire-reports/*JwtAuthInterceptor*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  reporting:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: alinksec
+          POSTGRES_PASSWORD: report-owner-fixture
+          POSTGRES_DB: reporting
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alinksec -d reporting"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - name: Check SQLite statistics, authority, snapshot integrity and schedule recovery
+        working-directory: server
+        run: |
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest -Dsurefire.failIfNoSpecifiedTests=false test
+          mkdir -p ../.tmp/report-fixtures/junit-sqlite
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-sqlite/
+          cp alinksec-gateway/target/surefire-reports/TEST-*ReportControllerTest.xml ../.tmp/report-fixtures/junit-sqlite/
+          cp alinksec-gateway/target/surefire-reports/TEST-*JwtAuthInterceptorTest.xml ../.tmp/report-fixtures/junit-sqlite/
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
+      - name: Prepare actual PostgreSQL schema and report reader role
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client poppler-utils fonts-wqy-microhei python3-openpyxl python3-defusedxml
+          psql -v ON_ERROR_STOP=1 -f deploy/sql/001_init.sql
+          bash deploy/migrations/run-migrations.sh
+        env:
+          PGHOST: localhost
+          PGDATABASE: reporting
+          PGUSER: alinksec
+          PGPASSWORD: report-owner-fixture
+          ALINKSEC_APP_DB_USER: alinksec_app
+          ALINKSEC_APP_DB_PASSWORD: report-app-fixture
+          ALINKSEC_BIND_ADDRESS: 127.0.0.1
+          ALINKSEC_MIGRATIONS_DIR: deploy/migrations
+      - name: Check identical PostgreSQL transactions with the restricted application role
+        working-directory: server
+        run: |
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
+          mkdir -p ../.tmp/report-fixtures/junit-postgres
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-postgres/
+        env:
+          MAVEN_OPTS: -Xmx256m
+          ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/reporting?stringtype=unspecified
+          ALINKSEC_INTEGRATION_PG_USER: alinksec_app
+          ALINKSEC_INTEGRATION_PG_PASSWORD: report-app-fixture
+          ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm test && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - name: Independently read actual Excel, CSV, HTML and JSON documents
+        run: /usr/bin/python3 deploy/tests/report-documents.py .tmp/report-fixtures
+      - name: Check actual production report pages and PDF against database captures
+        working-directory: web
+        run: node test/reporting-browser.mjs
+      - name: Retain report documents, database responses and rendered evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporting-evidence
+          path: |
+            .tmp/report-fixtures
+            .tmp/report-browser
           include-hidden-files: true
           if-no-files-found: error

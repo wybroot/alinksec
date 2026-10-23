@@ -27,7 +27,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成） */
     private static final List<String> ADMIN_WRITE_PREFIXES = List.of(
-            "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
+            "/api/reports/schedules", "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
 
     /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
     private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit");
@@ -73,7 +73,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             // 写操作角色校验（读操作三角色均放行；自服务写操作如登出对所有角色放行）
             if (WRITE_METHODS.contains(request.getMethod().toUpperCase())
                     && !SELF_WRITE_URIS.contains(path)
-                    && !canWrite(role, path)) {
+                    && !canWrite(role, path, request.getMethod())) {
                 reject(response, HttpStatus.FORBIDDEN, 40301,
                         "viewer".equals(role) ? "只读角色无写权限" : "该操作需要管理员权限");
                 return false;
@@ -86,11 +86,12 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     }
 
     /** 写权限矩阵：admin 全通过；operator 排除平台管理前缀/后缀（安全处置类放行）；其余（viewer）全拒 */
-    private boolean canWrite(String role, String uri) {
+    private boolean canWrite(String role, String uri, String method) {
         if ("admin".equals(role)) {
             return true;
         }
         if ("operator".equals(role)) {
+            if ("DELETE".equalsIgnoreCase(method) && uri.startsWith("/api/reports/snapshots/")) return false;
             return ADMIN_WRITE_PREFIXES.stream().noneMatch(uri::startsWith)
                     && ADMIN_WRITE_SUFFIXES.stream().noneMatch(uri::endsWith);
         }
