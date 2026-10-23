@@ -12,6 +12,7 @@ agent/alinksec-agent.exe
 
 # ---------- Node / 前端 ----------
 web/node_modules/
+deploy/tests/opencti-contract/node_modules/
 web/dist/
 *.local
 
