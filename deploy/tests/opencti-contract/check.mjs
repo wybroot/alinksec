@@ -12,7 +12,7 @@ const types = new Map(), scalarNames = new Set(['Int', 'Float', 'String', 'Boole
 for (const file of manifest.files) {
   const raw = readFileSync(resolve(folder, basename(file.path)))
   assert.equal(hash(raw), file.sha256)
-  for (const definition of parse(raw.toString()).definitions) {
+  for (const definition of parse(raw.toString(), { noLocation: true }).definitions) {
     if (!definition.name) continue
     const name = definition.name.value, old = types.get(name)
     if (!old) types.set(name, structuredClone(definition))

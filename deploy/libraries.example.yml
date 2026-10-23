@@ -2,9 +2,15 @@
 # Keep credentials in protected deployment configuration. This file contains no real credentials.
 # Open-source platform setup: docs/16-开源安全平台对接指南.md
 # Generic sources only perform HTTPS GET without auth headers. Their api-key is not used.
-# MISP can use its native adapter below. OpenCTI still requires a curated export bridge.
+# MISP and reviewed OpenCTI SHA-256 indicators have native read-only adapters below.
 # Console enabled/interval overrides persist in the database; restore deployment configuration to reset.
 alinksec:
+  opencti:
+    max-indicators: 25000
+    max-pages: 128
+    request-timeout-ms: 10000
+    round-timeout-ms: 180000
+    max-snapshot-bytes: 33554432
   vendor-advisories:
     max-archive-bytes: 268435456
     max-document-bytes: 33554432
@@ -61,6 +67,19 @@ alinksec:
         interval-ms: 1800000
         # Read-only key + curated tag are required. Fetches a complete SHA256 snapshot.
         # Choose either this source or misp-export for the same dataset, not both.
+      - id: opencti
+        type: opencti
+        enabled: false
+        url: https://opencti.example.invalid/graphql
+        api-key: ${ALINKSEC_OPENCTI_KEY:}
+        opencti-tag: alinksec:malicious-file
+        opencti-min-confidence: 75
+        opencti-severity: 4
+        interval-ms: 1800000
+        # Read-only account; full visible Indicator collection with strict local review filtering.
+        # Identity and URL/tag/confidence/severity are pinned; changed scope needs a new source ID.
+        # Complete empty collections revoke this source. Known expiry also runs while paused.
+        # Choose native OpenCTI or opencti-export for a dataset, not both.
       - id: malwarebazaar
         type: malwarebazaar
         enabled: false
