@@ -815,22 +815,32 @@ export function removeNotifyChannel(id) {
   return del(`/api/notify/channels/${id}`)
 }
 
-/** 合规报表下载（浏览器直接拉 CSV，带 JWT header） */
-export async function downloadComplianceReport(from, to) {
-  const headers = {}
-  const token = getToken()
-  if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(`/api/reports/compliance.csv?from=${from}&to=${to}`, { headers })
-  if (!res.ok) throw new Error(`报表导出失败(${res.status})`)
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `alinksec-report-${from}_${to}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+/* ---------------- 报表预览、历史与定时生成 ---------------- */
+const reportParams = query => new URLSearchParams(Object.entries(query || {}).filter(([, value]) => value !== null && value !== undefined && value !== '')).toString()
+export const fetchReportGroups = () => get('/api/hosts/groups')
+export const previewReport = query => get('/api/reports/preview?' + reportParams(query))
+export const saveReportSnapshot = body => post('/api/reports/snapshots', body)
+export const fetchReportHistory = (page = 1) => get(`/api/reports/snapshots?page=${page}&size=20`)
+export const fetchReportSnapshot = id => get('/api/reports/snapshots/' + encodeURIComponent(id))
+export const removeReportSnapshot = id => del('/api/reports/snapshots/' + encodeURIComponent(id))
+export const fetchReportSchedules = () => get('/api/reports/schedules')
+export const saveReportSchedule = (id, body) => id ? put('/api/reports/schedules/' + encodeURIComponent(id), body) : post('/api/reports/schedules', body)
+export const removeReportSchedule = (id, revision) => del(`/api/reports/schedules/${encodeURIComponent(id)}?revision=${revision}`)
+export async function downloadReport(format, query = {}, snapshotId = null) {
+  if (!['csv', 'xlsx', 'html', 'json'].includes(format)) throw new Error('报表格式无效')
+  const path = snapshotId ? `/api/reports/snapshots/${encodeURIComponent(snapshotId)}/export.${format}` : `/api/reports/compliance.${format}?${reportParams(query)}`
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (response.status === 401) { clearSession(); location.href = '/login'; throw new Error('登录已过期') }
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || `报表导出失败(${response.status})`)
+  const bytes = await response.arrayBuffer()
+  if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('报表文件超过 8 MiB 上限')
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (digest !== response.headers.get('X-Content-SHA256')) throw new Error('报表文件摘要不匹配')
+  const url = URL.createObjectURL(new Blob([bytes], { type: response.headers.get('Content-Type') }))
+  const link = document.createElement('a'); link.href = url; link.download = `alinksec-report.${format}`; link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-
+export const downloadComplianceReport = (from, to) => downloadReport('csv', { from, to })
 
 /* ---------------- 实时防护 ---------------- */
 

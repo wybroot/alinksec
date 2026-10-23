@@ -207,11 +207,11 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(90, jdbc.queryForObject("""
+        assertEquals(93, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(31, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(32, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));

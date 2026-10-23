@@ -51,13 +51,7 @@
       </el-tab-pane>
 
       <!-- ============ 合规报表 ============ -->
-      <el-tab-pane label="合规报表" name="report">
-        <div style="display:flex;gap:8px;align-items:center">
-          <el-date-picker v-model="range" type="daterange" range-separator="~" start-placeholder="开始" end-placeholder="结束" style="width:260px" />
-          <el-button type="primary" size="small" @click="exportCsv">导出 CSV（Excel 可开）</el-button>
-          <span class="hint">报表含主机资产概览 / 基线合规率 / 漏洞分布 / 告警处置四部分</span>
-        </div>
-      </el-tab-pane>
+      <el-tab-pane label="合规报表" name="report" lazy><ReportPanel /></el-tab-pane>
 
       <el-tab-pane v-if="isAdmin" label="告警通道" name="notify">
         <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
@@ -117,8 +111,9 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import ReportPanel from '../components/ReportPanel.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, downloadComplianceReport, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
+import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
 
 const tab = ref('upgrade')
 const busy = ref(false)
@@ -196,20 +191,6 @@ const fmtTime = (iso) => {
 }
 
 const methodType = (m) => ({ POST: 'primary', PUT: 'warning', DELETE: 'danger' }[m] || 'info')
-
-/* ---- 报表 ---- */
-const range = ref(null)
-
-async function exportCsv() {
-  const from = range.value?.[0] ? new Date(range.value[0]).toISOString().slice(0, 10) : ''
-  const to = range.value?.[1] ? new Date(range.value[1]).toISOString().slice(0, 10) : ''
-  try {
-    await downloadComplianceReport(from, to)
-    msg('报表已导出')
-  } catch (e) {
-    msg(e?.message || '导出失败', 'error')
-  }
-}
 
 /* ---- 告警通道 ---- */
 const channels = ref([])
