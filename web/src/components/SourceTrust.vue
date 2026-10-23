@@ -31,9 +31,10 @@
   <el-dialog v-model="policy.visible" :title="`${policy.id} · 来源策略`" :width="dialogWidth" :close-on-click-modal="!policy.saving" :close-on-press-escape="!policy.saving" :show-close="!policy.saving" @closed="closePolicy">
     <el-alert v-if="policy.error" :title="policy.error" type="error" :closable="false" />
     <div v-loading="policy.loading">
-      <el-form label-position="top" :disabled="!isAdmin || policy.retired || policy.saving || policy.loading || !policy.loaded">
+      <el-form label-position="top" :disabled="policyDisabled">
         <el-form-item label="信任等级"><el-select v-model="policy.tier" aria-label="信任等级"><el-option v-for="(label, value) in tiers" :key="value" :label="label" :value="value" /></el-select></el-form-item>
-        <el-form-item label="优先级（0 至 100，数字越大越优先）"><el-input-number v-model="policy.priority" :min="0" :max="100" :precision="0" /></el-form-item>
+        <!-- InputNumber snapshots aria-disabled on mount; keep it aligned with the form state. -->
+        <el-form-item label="优先级（0 至 100，数字越大越优先）"><el-input-number :key="policyDisabled" v-model="policy.priority" :min="0" :max="100" :precision="0" /></el-form-item>
         <el-form-item label="隔离此来源"><el-switch v-model="policy.quarantined" /></el-form-item>
         <el-form-item label="变更原因"><el-input v-model="policy.note" type="textarea" maxlength="2000" show-word-limit /></el-form-item>
       </el-form>
@@ -85,6 +86,7 @@ const dialogWidth = computed(() => props.compact ? 'calc(100% - 24px)' : '650px'
 const filter = reactive({ kind: 'cve', keyword: '', multiple: true, page: 1 })
 const list = reactive({ rows: [], total: 0, loading: false, error: '' })
 const policy = reactive({ visible: false, loading: false, saving: false, id: '', events: [], error: '' })
+const policyDisabled = computed(() => !props.isAdmin || policy.retired || policy.saving || policy.loading || !policy.loaded)
 const detail = reactive({ visible: false, loading: false, saving: false, value: null, events: [], error: '', action: 'automatic', source: '', note: '' })
 const candidate = reactive({ value: null, source: '', loading: false, error: '' })
 const eligible = computed(() => detail.value?.candidates?.filter(item => !item.quarantined) || [])
