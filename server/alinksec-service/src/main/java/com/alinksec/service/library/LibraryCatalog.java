@@ -184,6 +184,16 @@ public class LibraryCatalog {
         return cves(source, documents, null);
     }
     public synchronized int cves(String source, List<JsonNode> documents, Long actor) {
+        return storeCves(source, documents, actor, Map.of());
+    }
+    /** Native transport facts are server-generated and cannot be supplied by a manual import. */
+    synchronized int nativeCves(String source, List<JsonNode> documents, Map<String,Object> nativeProvenance) {
+        return storeCves(source, documents, null, nativeProvenance);
+    }
+    synchronized <T> T nativeTransaction(String source, java.util.function.Supplier<T> action) {
+        return transaction.execute(status -> { lockActiveSource(source); return action.get(); });
+    }
+    private int storeCves(String source, List<JsonNode> documents, Long actor, Map<String,Object> nativeProvenance) {
         if (source == null || !source.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException("规则导入来源非法");
         if (documents.size() > props.getMaxCvesPerImport()) throw new IllegalArgumentException("漏洞数据超过单次导入上限");
         var ids = new HashSet<String>();
@@ -208,8 +218,15 @@ public class LibraryCatalog {
                 provenance.put("recorded_at", Instant.now().toString());
                 provenance.put("imported_by", actor);
                 provenance.put("verification", "imported_declaration");
+                if (!nativeProvenance.isEmpty()) {
+                    provenance.putAll(nativeProvenance);
+                    provenance.put("ingestion", "native_vendor_advisory");
+                    provenance.put("verification", "parsed_transport_document");
+                }
                 var old = jdbc.queryForList("SELECT document,provenance FROM t_security_cve WHERE source_id=? AND cve_id=?", source, id);
-                if (old.isEmpty() || !serialized.equals(old.get(0).get("document")))
+                if (old.isEmpty() || !serialized.equals(old.get(0).get("document"))
+                        || !nativeProvenance.isEmpty() && !JsonUtils.read(old.get(0).get("provenance").toString()).path("raw_documents")
+                                .equals(JsonUtils.mapper().valueToTree(nativeProvenance.get("raw_documents"))))
                     event(source, id, "import", actor, document.path("withdrawal_reason").asText(""), serialized, provenance);
                 jdbc.update("""
                         INSERT INTO t_security_cve(source_id,cve_id,document,matchable,provenance) VALUES (?,?,?,?,?)

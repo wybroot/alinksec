@@ -62,6 +62,26 @@ public class LibraryController {
     }
     @DeleteMapping("/sources/{id}/schedule")
     public ApiResult<?> resetSchedule(@PathVariable String id) { return ApiResult.ok(schedules.reset(id)); }
+    @GetMapping("/sources/{id}/advisories")
+    public ApiResult<?> advisories(@PathVariable String id, @RequestParam(defaultValue="1") int page,
+                                   @RequestParam(defaultValue="20") int size) {
+        return ApiResult.ok(sync.nativeAdvisories(id).documents(id,page,size));
+    }
+    @GetMapping("/sources/{id}/advisories/{documentId}")
+    public ApiResult<?> advisory(@PathVariable String id, @PathVariable String documentId) {
+        return ApiResult.ok(sync.nativeAdvisories(id).detail(id,documentId));
+    }
+    @GetMapping("/sources/{id}/advisories/{documentId}/raw")
+    public org.springframework.http.ResponseEntity<byte[]> advisoryRaw(@PathVariable String id, @PathVariable String documentId) {
+        byte[] raw=sync.nativeAdvisories(id).raw(id,documentId);
+        boolean gzip=raw.length>2 && raw[0]==(byte)0x1f && raw[1]==(byte)0x8b;
+        return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Disposition","attachment; filename=advisory"+(gzip?".json.gz":".json"))
+                .header("X-Content-Type-Options","nosniff")
+                .header("Cache-Control","no-store")
+                .header("X-Content-SHA256",sync.nativeAdvisories(id).detail(id,documentId).get("sha256").toString())
+                .contentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM).body(raw);
+    }
     @GetMapping("/sources/{id}/runs")
     public ApiResult<?> runs(@PathVariable String id) { return ApiResult.ok(sync.history(id)); }
     @PostMapping("/cves/import")

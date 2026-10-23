@@ -29,7 +29,7 @@
     </div>
     <div v-if="showRules" class="panel" style="margin-top:16px">
       <h4>漏洞规则与依据</h4>
-      <p class="hint">公告引用和引用摘要来自导入声明，不代表厂商真实性已验证。源码包和上游范围不能直接推断发行版二进制包的回移状态。</p>
+      <p class="hint">公告引用和引用摘要来自导入声明；原生公告同时保留原件和传输来源，均不代表厂商签名已验证。源码包和上游范围不能直接推断发行版二进制包的回移状态。</p>
       <el-input v-model="rulesKeyword" placeholder="CVE 或标题" @keyup.enter="rulesPage = 1; loadRules()" style="max-width:320px" />
       <el-button :loading="rulesLoading" @click="rulesPage = 1; loadRules()">查询</el-button>
       <el-alert v-if="rulesError" :title="rulesError" type="error" :closable="false" />
@@ -105,7 +105,7 @@
       <el-table v-else :data="state.sources" stripe>
         <el-table-column prop="id" label="数据源" min-width="130" />
         <el-table-column label="内容" min-width="150">
-          <template #default="{ row }">{{ types[row.type] || row.type }}<div v-if="row.coverage === 'recent-60m'" class="hint">最近 60 分钟新增情报</div><div v-if="row.coverage === 'modified-window'" class="hint">按修改日期增量同步<div>已完成至 {{ date(row.cursor) }}</div><div v-if="row.nvd_window_seconds">下次窗口最多 {{ Math.round(row.nvd_window_seconds / 60) }} 分钟</div></div><div v-if="row.coverage === 'curated-snapshot'" class="hint">已审核哈希的完整快照</div></template>
+          <template #default="{ row }">{{ types[row.type] || row.type }}<div v-if="row.nativeAdvisories" class="hint">{{ row.nativeAdvisories.archive_documents }} 份当前公告 · {{ row.nativeAdvisories.pending_count || 0 }} 份待检查</div><div v-if="row.coverage === 'recent-60m'" class="hint">最近 60 分钟新增情报</div><div v-if="row.coverage === 'modified-window'" class="hint">按修改日期增量同步<div>已完成至 {{ date(row.cursor) }}</div><div v-if="row.nvd_window_seconds">下次窗口最多 {{ Math.round(row.nvd_window_seconds / 60) }} 分钟</div></div><div v-if="row.coverage === 'curated-snapshot'" class="hint">已审核哈希的完整快照</div></template>
         </el-table-column>
         <el-table-column label="状态" width="140">
           <template #default="{ row }">
@@ -119,15 +119,46 @@
         <el-table-column label="下次检查" min-width="170"><template #default="{ row }">{{ row.enabled && row.status === 'running' ? '本次执行中' : nextCheck(row.nextCheckAt) }}<div v-if="row.failure_count > 1 && row.enabled" class="hint">连续失败 {{ row.failure_count }} 次，已延后重试</div></template></el-table-column>
         <el-table-column prop="entry_count" label="当前条目" width="110" />
         <el-table-column label="说明" min-width="180"><template #default="{ row }">{{ row.configurationIssue || row.error || '—' }}</template></el-table-column>
-        <el-table-column label="操作" :width="isAdmin ? 250 : 100" :fixed="compact ? false : 'right'">
+        <el-table-column label="操作" :width="isAdmin ? 340 : 180" :fixed="compact ? false : 'right'">
           <template #default="{ row }">
             <el-button v-if="isAdmin" link type="primary" :disabled="!row.enabled || !!row.configurationIssue || state.running || syncing" @click="synchronize(row.id)">立即同步</el-button>
             <el-button v-if="isAdmin && !row.retired" link type="primary" @click="editSchedule(row)">同步计划</el-button>
+            <el-button v-if="row.nativeAdvisories" link type="primary" @click="showAdvisories(row.id)">厂商公告</el-button>
             <el-button link type="primary" @click="showHistory(row.id)">执行记录</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
+    <el-dialog v-model="advisories.visible" :title="`${advisories.id} · 厂商公告原件`" :width="compact ? 'calc(100% - 24px)' : '1000px'">
+      <p class="hint">近期范围内发现公告，并复查已导入文档；首次发现数量受部署范围限制。每轮分批抓取，待检查文档会继续处理。公告中的修复包、源码包状态和 KB 信息按原文保留。</p>
+      <el-button :loading="advisories.loading" @click="loadAdvisories">刷新公告</el-button>
+      <p>当前公告 {{ advisories.state.archive_documents || 0 }} · 本轮发现 {{ advisories.state.discovered_count || 0 }} · 待检查 {{ advisories.state.pending_count || 0 }}</p>
+      <el-alert v-if="advisories.error" :title="advisories.error" type="error" :closable="false" />
+      <el-table :data="advisories.rows" v-loading="advisories.loading" empty-text="尚无已归档公告">
+        <el-table-column prop="document_id" label="公告" min-width="170" />
+        <el-table-column prop="publisher" label="发布方" min-width="140" />
+        <el-table-column label="版本" min-width="130"><template #default="{ row }">{{ row.current_version ? '当前文档' : '历史文档' }} · {{ row.vendor_version || '未提供版本号' }}</template></el-table-column>
+        <el-table-column label="声明" min-width="140"><template #default="{ row }">{{ row.cve_count }} CVE / {{ row.rule_count }} 条明确包状态</template></el-table-column>
+        <el-table-column label="操作" min-width="160"><template #default="{ row }"><el-button link @click="openAdvisory(row)">查看原件记录</el-button></template></el-table-column>
+      </el-table>
+      <el-pagination v-model:current-page="advisories.page" :total="advisories.total" :page-size="20" layout="prev, pager, next" @current-change="loadAdvisories" />
+    </el-dialog>
+    <el-dialog :model-value="!!advisoryDetail" title="厂商公告原件记录" :width="compact ? 'calc(100% - 24px)' : '680px'" @close="advisoryDetail = null">
+      <div v-if="advisoryDetail" class="native-detail">
+        <el-alert :title="advisoryDetail.verification" type="info" :closable="false" />
+        <p>{{ advisoryDetail.document_id }} · {{ advisoryDetail.publisher }} · {{ types[advisoryDetail.format] }}</p>
+        <p>{{ advisoryDetail.title }}</p>
+        <p>传输来源：{{ advisoryDetail.origin_kind === 'official_https' ? '官方 HTTPS 地址' : '部署配置的镜像地址' }}</p>
+        <p class="digest">{{ advisoryDetail.origin }}</p>
+        <p>归档 {{ date(advisoryDetail.imported_at) }} · {{ packageSize(advisoryDetail.size_bytes) }}</p>
+        <p>SHA-256</p><p class="digest">{{ advisoryDetail.sha256 }}</p>
+        <p>{{ advisoryDetail.cve_count }} 条 CVE 声明；{{ advisoryDetail.rule_count }} 条包状态规则。修复版本本身不表示所有更早版本受影响，KB 和构建号也不表示主机已安装补丁。</p>
+        <p class="digest">当前由此原件贡献的 CVE（最多显示 200 条）：{{ advisoryDetail.contributions?.join('、') || '无当前贡献' }}</p>
+        <el-alert v-if="advisoryDownloadError" :title="advisoryDownloadError" type="error" :closable="false" />
+        <el-button v-if="advisoryDetail.raw_available" :loading="advisoryDownloading" @click="downloadAdvisory">下载原件并校验摘要</el-button>
+        <p v-else>原件已按保留策略清理，原始摘要和导入记录仍保留。</p>
+      </div>
+    </el-dialog>
     <el-dialog v-model="schedule.visible" title="同步计划" :width="compact ? 'calc(100% - 24px)' : '540px'" :close-on-click-modal="!schedule.saving" :show-close="!schedule.saving">
       <el-form label-width="110px">
         <el-form-item label="数据源">{{ schedule.id }}</el-form-item>
@@ -165,10 +196,39 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchLibraries, fetchLibraryCves, fetchLibraryDeclarations, decideLibraryCve, retireLibrarySource, fetchLibraryGovernance, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, importCveLibrary, importVirusDb, getUser } from '../api'
+import { fetchLibraries, fetchLibraryCves, fetchLibraryDeclarations, decideLibraryCve, retireLibrarySource, fetchLibraryGovernance, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, fetchVendorAdvisories, fetchVendorAdvisory, downloadVendorAdvisory, importCveLibrary, importVirusDb, getUser } from '../api'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 
 const state = ref({ sources: [], signature: {} })
+const advisories = ref({ visible: false, id: '', rows: [], total: 0, page: 1, state: {}, loading: false, error: '' })
+const advisoryDetail = ref(null), advisoryDownloadError = ref(''), advisoryDownloading = ref(false)
+let advisoryRequest = 0
+async function showAdvisories(id) {
+  advisoryRequest++; advisoryDetail.value = null
+  advisories.value = { visible: true, id, rows: [], total: 0, page: 1, state: {}, loading: false, error: '' }
+  await loadAdvisories()
+}
+async function loadAdvisories() {
+  const id = advisories.value.id, request = ++advisoryRequest
+  advisories.value.loading = true; advisories.value.error = ''
+  try { const data = await fetchVendorAdvisories(id, advisories.value.page); if (request === advisoryRequest) Object.assign(advisories.value, { rows: data.items, total: data.total, state: data.state }) }
+  catch (e) { if (request === advisoryRequest) advisories.value.error = e.message }
+  finally { if (request === advisoryRequest) advisories.value.loading = false }
+}
+async function openAdvisory(row) {
+  const id = advisories.value.id, request = ++advisoryRequest
+  advisoryDownloadError.value = ''
+  try { const data = await fetchVendorAdvisory(id, row.id); if (request === advisoryRequest && advisories.value.visible) advisoryDetail.value = data }
+  catch (e) { if (request === advisoryRequest) advisories.value.error = e.message }
+}
+async function downloadAdvisory() {
+  const document = advisoryDetail.value, id = advisories.value.id
+  advisoryDownloading.value = true; advisoryDownloadError.value = ''
+  try { await downloadVendorAdvisory(id, document) }
+  catch (e) { if (advisoryDetail.value?.id === document.id) advisoryDownloadError.value = e.message }
+  finally { advisoryDownloading.value = false }
+}
+
 const showRules = ref(false), ruleRows = ref([]), rulesKeyword = ref(''), rulesPage = ref(1), rulesTotal = ref(0), rulesLoading = ref(false), rulesError = ref(''), ruleDetail = ref(null)
 const declarations = ref([]), declarationsError = ref(''), declarationsLoading = ref(false), declarationDetail = ref(null)
 const governanceBusy = ref(false), governanceEvent = ref(null)
@@ -234,7 +294,7 @@ const user = getUser()
 const role = user?.role ?? user?.roleName
 const isAdmin = role === 'admin'
 const canImport = isAdmin || role === 'operator'
-const types = { hashes: '恶意文件哈希', 'signature-zip': '病毒特征包', malwarebazaar: 'MalwareBazaar', misp: 'MISP 文件情报', 'cve-json': '漏洞比对规则', nvd: 'NVD 漏洞信息' }
+const types = { 'ubuntu-usn': 'Ubuntu USN', 'debian-tracker': 'Debian Security Tracker', 'redhat-csaf': 'Red Hat CSAF 2.0', 'msrc-cvrf': 'Microsoft CVRF 3.0', hashes: '恶意文件哈希', 'signature-zip': '病毒特征包', malwarebazaar: 'MalwareBazaar', misp: 'MISP 文件情报', 'cve-json': '漏洞比对规则', nvd: 'NVD 漏洞信息' }
 const runStatus = { success: '成功', failed: '失败', running: '执行中', interrupted: '重启中断' }
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 const packageSize = value => Number.isFinite(Number(value)) && Number(value) > 0 ? `${(Number(value) / 1024).toFixed(1)} KiB` : '—'
@@ -300,6 +360,7 @@ onUnmounted(() => { clearInterval(timer); viewport.removeEventListener('change',
 </script>
 
 <style scoped>
+.native-detail p { margin: 10px 0; line-height: 1.6; }
 .declaration { border-top: 1px solid #e2e8f0; padding: 12px 0; }
 .digest { overflow-wrap: anywhere; }
 .document-description { white-space: pre-wrap; overflow-wrap: anywhere; }

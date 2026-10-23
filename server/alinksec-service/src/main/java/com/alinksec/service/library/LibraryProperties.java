@@ -58,6 +58,9 @@ public class LibraryProperties {
         private long intervalMs = 3_600_000;
         private int initialDays = 7;
         private List<Product> products = new ArrayList<>();
+        private List<String> vendorPackages = new ArrayList<>();
+        private List<VendorProduct> vendorProducts = new ArrayList<>();
+        private int vendorPages = 5;
         public String getId() { return id; }
         public void setId(String v) { id = v; }
         public String getType() { return type; }
@@ -76,6 +79,23 @@ public class LibraryProperties {
         public void setInitialDays(int v) { initialDays = v; }
         public List<Product> getProducts() { return products; }
         public void setProducts(List<Product> v) { products = v; }
+        public List<String> getVendorPackages() { return vendorPackages; }
+        public void setVendorPackages(List<String> v) { vendorPackages = v; }
+        public List<VendorProduct> getVendorProducts() { return vendorProducts; }
+        public void setVendorProducts(List<VendorProduct> v) { vendorProducts = v; }
+        public int getVendorPages() { return vendorPages; }
+        public void setVendorPages(int v) { vendorPages = v; }
+    }
+
+    /** Exact publisher product to collected distribution identity; no family/version inference. */
+    public static class VendorProduct {
+        private String productId = "", distroId = "", distroVersion = "";
+        public String getProductId() { return productId; }
+        public void setProductId(String v) { productId = v; }
+        public String getDistroId() { return distroId; }
+        public void setDistroId(String v) { distroId = v; }
+        public String getDistroVersion() { return distroVersion; }
+        public void setDistroVersion(String v) { distroVersion = v; }
     }
 
     /** Explicit CPE/application mapping; never infer distro package fixes from upstream CPEs. */
