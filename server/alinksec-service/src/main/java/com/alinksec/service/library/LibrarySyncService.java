@@ -394,7 +394,10 @@ public class LibrarySyncService {
         // Count the selected validated source without loading the entire CVE corpus into memory.
         counts.put("matchable",jdbc.queryForObject("SELECT count(*) FROM t_cve_db c JOIN t_security_cve s ON s.cve_id=c.cve_id AND s.source_id=c.rule_source_id WHERE c.rule_status='active' AND s.matchable=1",Integer.class));
         result.put("withdrawnCveCount",jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_status<>'active'",Integer.class));
-        result.put("governanceSources",catalog.governanceSources());
+        var governanceSources=catalog.governanceSources();
+        Set<String> nativeIndicatorSources=new HashSet<>(jdbc.queryForList("SELECT source_id FROM t_opencti_source",String.class));
+        for(var row:governanceSources)row.put("nativeOpenCti",nativeIndicatorSources.contains(row.get("id")));
+        result.put("governanceSources",governanceSources);
         result.put("managedCveCount", counts.get("total")); result.put("matchableCveCount", counts.get("matchable"));
         result.put("unattributedCveCount", jdbc.queryForObject("SELECT count(*) FROM t_cve_db WHERE rule_source_id='' OR rule_digest=''", Long.class));
         result.put("manualSignature", jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='manual'", Integer.class));
@@ -410,6 +413,7 @@ public class LibrarySyncService {
         return jdbc.queryForList("SELECT id,trigger_type,started_at,finished_at,status,entry_count,error FROM t_security_feed_run WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 50", id);
     }
     public OpenCtiService nativeOpenCti(String id){
+        if(jdbc.queryForObject("SELECT count(*) FROM t_opencti_source WHERE source_id=?",Long.class,id)>0)return opencti;
         if(!"opencti".equals(schedules.source(id).getType()))throw new IllegalArgumentException("该来源不是 OpenCTI 原生指标");
         return opencti;
     }

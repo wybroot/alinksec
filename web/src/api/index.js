@@ -97,6 +97,8 @@ export const synchronizeLibrary = (id) => post(`/api/libraries/sources/${encodeU
 export const updateLibrarySchedule = (id, plan) => put(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`, plan)
 export const resetLibrarySchedule = (id) => del(`/api/libraries/sources/${encodeURIComponent(id)}/schedule`)
 export const fetchVendorAdvisories = (id, page = 1) => get(`/api/libraries/sources/${encodeURIComponent(id)}/advisories?page=${page}&size=20`)
+export const fetchOpenCtiIndicators = (id, page = 1) => get(`/api/libraries/sources/${encodeURIComponent(id)}/indicators?${new URLSearchParams({ page, size: 20 })}`)
+export const fetchOpenCtiIndicator = (id, indicatorId) => get(`/api/libraries/sources/${encodeURIComponent(id)}/indicators/${encodeURIComponent(indicatorId)}`)
 export const fetchVendorAdvisory = (id, documentId) => get(`/api/libraries/sources/${encodeURIComponent(id)}/advisories/${encodeURIComponent(documentId)}`)
 export async function downloadVendorAdvisory(source, document) {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(source) || !/^[a-f0-9-]{36}$/.test(document.id) || !/^[a-f0-9]{64}$/.test(document.sha256)) throw new Error('公告下载标识无效')

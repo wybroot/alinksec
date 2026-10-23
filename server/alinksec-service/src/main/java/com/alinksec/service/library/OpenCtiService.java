@@ -155,7 +155,7 @@ public final class OpenCtiService {
                 """,id,size,(page-1)*size);
         var entries=new ArrayList<Map<String,Object>>();boolean retired=catalog.isRetired(id);
         for(var row:rows){
-            var entry=new LinkedHashMap<String,Object>(row);var doc=JsonUtils.read(entry.remove("document").toString());
+            var entry=new LinkedHashMap<String,Object>(row);var doc=verifiedDocument(entry);
             for(String field:List.of("name","confidence","valid_from","valid_until","revoked","x_opencti_detection","objectLabel"))entry.put(field,doc.path(field));
             entry.put("effective",!retired&&((Number)entry.get("included")).intValue()==1);entries.add(entry);
         }
@@ -165,7 +165,13 @@ public final class OpenCtiService {
         if(!indicatorId.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("指标标识无效");
         var rows=jdbc.queryForList("SELECT indicator_id,document,document_sha256,sha256,included,reason FROM t_opencti_indicator WHERE source_id=? AND indicator_id=?",id,indicatorId);
         if(rows.isEmpty())throw new IllegalArgumentException("当前快照中不存在该指标");
-        var row=new LinkedHashMap<String,Object>(rows.get(0));row.put("document",JsonUtils.read(row.get("document").toString()));
+        var row=new LinkedHashMap<String,Object>(rows.get(0));row.put("document",verifiedDocument(row));
         row.put("effective",!catalog.isRetired(id)&&((Number)row.get("included")).intValue()==1);row.put("sourceId",id);row.put("state",state(id));return row;
+    }
+    private static com.fasterxml.jackson.databind.JsonNode verifiedDocument(Map<String,Object> row){
+        String document=row.remove("document").toString();
+        if(!OpenCtiAdapter.digest(document.getBytes(java.nio.charset.StandardCharsets.UTF_8)).equals(row.get("document_sha256")))
+            throw new IllegalStateException("保留的 OpenCTI 指标字段摘要不一致，请检查持久化存储");
+        return JsonUtils.read(document);
     }
 }

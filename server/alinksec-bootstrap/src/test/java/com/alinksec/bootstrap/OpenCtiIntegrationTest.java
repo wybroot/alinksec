@@ -185,6 +185,7 @@ class OpenCtiIntegrationTest {
         assertEquals("expired",service.detail(id,iid(1)).get("reason"));assertEquals("future",service.detail(id,iid(2)).get("reason"));
         assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id=?",Integer.class,id+"-other"));
         assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_security_governance_event WHERE source_id=? AND operation='opencti_expiry'",Integer.class,id));
+        assertSame(service,sync.nativeOpenCti(id));assertEquals(2,data("/api/libraries/sources/"+id+"/indicators","viewer").path("total").asInt());
     }
     @Test void expiryPublicationFailureIsVisibleAtomicAndRetried() throws Exception {
         Instant then=Instant.now().minusSeconds(120);response=q->bytes(page(List.of(node(1,hash).put("valid_until",then.plusSeconds(30).toString())),false,1,"cursor-1"));
@@ -207,6 +208,30 @@ class OpenCtiIntegrationTest {
         var future=workers.submit(()->{assertThrows(IllegalArgumentException.class,()->service.sync(source));});
         try{assertTrue(entered.await(5,TimeUnit.SECONDS));catalog.retire(id,actor,"Fixture retired");}finally{proceed.countDown();}
         future.get(10,TimeUnit.SECONDS);assertEquals(prior,snapshot());assertEquals(0,service.state(id).get("effective_hashes"));assertEquals(false,service.detail(id,iid(1)).get("effective"));
+    }
+    @Test void staleInFlightSnapshotCannotOverwriteANewerCompleteSnapshot() throws Exception {
+        service.sync(source);var entered=new CountDownLatch(1);var proceed=new CountDownLatch(1);var first=new AtomicInteger();
+        response=q->{if(first.getAndIncrement()==0){entered.countDown();try{if(!proceed.await(10,TimeUnit.SECONDS))throw new IllegalStateException("fixture latch");}catch(InterruptedException e){throw new IllegalStateException(e);}return bytes(page(List.of(node(2,otherHash)),false,1,"cursor-2"));}return bytes(page(List.of(node(3,hash)),false,1,"cursor-3"));};
+        var future=workers.submit(()->assertThrows(OpenCtiAdapter.Failure.class,()->service.sync(source)));
+        try{assertTrue(entered.await(5,TimeUnit.SECONDS));service.sync(source);}finally{proceed.countDown();}
+        future.get(10,TimeUnit.SECONDS);assertEquals(iid(3),service.indicators(id,1,20).get("items") instanceof List<?> list?((Map<?,?>)list.get(0)).get("indicator_id"):null);
+        assertThrows(IllegalArgumentException.class,()->service.detail(id,iid(2)));
+    }
+    @Test void principalAndVersionDriftAcrossPagesAbortBeforeAnyReplacement() throws Exception {
+        service.sync(source);String prior=snapshot(),release=version();
+        for(String kind:List.of("principal","version")){
+            response=q->{if(q.path("variables").path("after").isNull())return bytes(page(List.of(node(2,otherHash)),true,2,"cursor-2"));
+                var next=page(List.of(node(3,otherHash)),false,2,"cursor-3");
+                next.withObject("/data/"+(kind.equals("principal")?"me":"about")).put(kind.equals("principal")?"id":"version",kind.equals("principal")?"44444444-4444-4444-8444-444444444444":"7.261021.2");return bytes(next);};
+            assertThrows(OpenCtiAdapter.Failure.class,()->service.sync(source));assertEquals(prior,snapshot());assertEquals(release,version());
+        }
+    }
+    @Test void currentEvidenceBudgetRejectsOversizedCollectionsAndStoredTamperingIsVisible() throws Exception {
+        service.sync(source);String prior=snapshot(),release=version();limits.setMaxSnapshotBytes(1024);
+        response=q->bytes(page(List.of(node(2,otherHash).put("name","x".repeat(512)),node(3,otherHash)),false,2,"cursor-3"));
+        assertThrows(OpenCtiAdapter.Failure.class,()->service.sync(source));assertEquals(prior,snapshot());assertEquals(release,version());
+        jdbc.update("UPDATE t_opencti_indicator SET document='{}' WHERE source_id=?",id);
+        assertThrows(IllegalStateException.class,()->service.detail(id,iid(1)));assertThrows(IllegalStateException.class,()->service.indicators(id,1,20));
     }
     @Test void readRolesSeeDecisionsAndSelectedEvidenceButCannotChangeSources() throws Exception {
         var unsupported=node(2,otherHash).put("pattern","[file:hashes.'SHA-256' = '"+otherHash+"'] OR [file:name = 'x']");

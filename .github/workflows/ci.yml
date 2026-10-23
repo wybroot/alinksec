@@ -1215,6 +1215,26 @@ jobs:
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_OPENCTI_FIXTURES: ${{ github.workspace }}/.tmp/opencti-fixtures
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            deploy/tests/opencti-contract/package-lock.json
+      - name: Capture and verify immutable official OpenCTI schema
+        run: python3 deploy/tests/opencti-schema-capture.py .tmp/opencti-contract
+      - name: Check actual query against official fields, arguments and enum values
+        run: |
+          npm ci --prefix deploy/tests/opencti-contract --ignore-scripts --no-audit --no-fund
+          node deploy/tests/opencti-contract/check.mjs
+      - run: npm ci && npm test && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - name: Check production indicator pages against database REST responses
+        run: node test/opencti-native-browser.mjs
+        working-directory: web
       - name: Retain native OpenCTI transaction and boundary evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1222,6 +1242,8 @@ jobs:
           name: opencti-native-evidence
           path: |
             .tmp/opencti-fixtures
+            .tmp/opencti-contract
+            .tmp/opencti-browser
             server/**/target/surefire-reports/*OpenCti*
           include-hidden-files: true
           if-no-files-found: error
