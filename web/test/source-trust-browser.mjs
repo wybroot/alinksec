@@ -74,7 +74,10 @@ try {
     unexpected.push(method + ' ' + path); return route.fulfill({ status: 500, json: { code: 50000, msg: 'Unexpected request' } })
   })
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message))
-  const shot = async name => { await page.screenshot({ path: root + '/' + name, fullPage: true, animations: 'disabled' }); screenshots.push(name) }
+  const shot = async name => {
+    await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)
+    await page.screenshot({ path: root + '/' + name, fullPage: true, animations: 'disabled' }); screenshots.push(name)
+  }
   const panel = page.locator('.source-trust'), detail = page.getByRole('dialog', { name: '条目来源选择', exact: true })
   const policy = page.getByRole('dialog', { name: fixture.z + ' · 来源策略', exact: true })
   const query = () => panel.getByRole('button', { name: '查询来源选择', exact: true }).click()
