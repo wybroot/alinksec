@@ -1,6 +1,7 @@
 package virusscan
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -348,6 +349,49 @@ func (q *quarantine) RestoreExpected(ctx context.Context, path, id, expected str
 		return err
 	}
 	return nil
+}
+
+// ExportExpected reads an immutable capture through the same pinned native
+// handles as restore/delete. It neither restores nor changes quarantine state.
+func (q *quarantine) ExportExpected(ctx context.Context, path, id, expected string, limit int64) ([]byte, error) {
+	if limit <= 0 || limit > 1<<20 {
+		return nil, fmt.Errorf("invalid evidence limit")
+	}
+	if err := lockQuarantine(ctx); err != nil {
+		return nil, err
+	}
+	defer unlockQuarantine()
+	dir, err := q.directory()
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	m, err := q.loadMeta(dir, path, id, expected)
+	if err != nil {
+		return nil, err
+	}
+	if m.State != "active" || m.Size > limit {
+		return nil, fmt.Errorf("capture unavailable or exceeds evidence limit")
+	}
+	f, err := openAt(dir, id+".payload", false)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	before, err := f.Stat()
+	if err != nil || !before.Mode().IsRegular() || before.Size() != m.Size {
+		return nil, fmt.Errorf("capture metadata changed")
+	}
+	var data bytes.Buffer
+	if err := copyBounded(ctx, &data, f, limit); err != nil {
+		return nil, err
+	}
+	after, err := f.Stat()
+	sum := sha256.Sum256(data.Bytes())
+	if err != nil || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) || int64(data.Len()) != m.Size || hex.EncodeToString(sum[:]) != m.Sha256 {
+		return nil, fmt.Errorf("capture bytes changed")
+	}
+	return data.Bytes(), nil
 }
 func (q *quarantine) DeleteExpected(ctx context.Context, path, id, expected string) error {
 	_, err := q.DeleteExpectedWithID(ctx, path, id, expected)

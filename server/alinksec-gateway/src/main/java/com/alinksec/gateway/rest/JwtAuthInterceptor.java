@@ -30,7 +30,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             "/api/reports/schedules", "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
 
     /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
-    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit");
+    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit", "/api/evidence");
 
     /** 自服务写操作：任何已认证角色可执行（登出需落审计，不应被写拦截误伤） */
     private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout");

@@ -189,6 +189,38 @@ with tempfile.TemporaryDirectory(prefix='alinksec-operations-ci-') as directory:
         assert 'original deployment recovered and healthy' in failed.stderr
         assert_probe('before-interruption')
         checked('real application rejects invalid CA; failed health automatically restores original DB, CA, JWT, TLS and files')
+        # Exercise the production scheduler against these same real, disposable
+        # services. Its subprocess command is independent of this fixture process.
+        schedule_base = [*base]
+        schedule_base[2] = str(repo / 'deploy/backup_schedule.py')
+
+        def schedule(*arguments, expected=0):
+            completed = subprocess.run([*schedule_base, *map(str, arguments)], capture_output=True,
+                                       text=True, timeout=300)
+            assert completed.returncode == expected, (arguments[0], completed.returncode, completed.stderr)
+            return json.loads(completed.stdout) if expected == 0 else completed
+
+        schedule('configure', '--backup-dir', root / 'automatic', '--interval-minutes', 60, '--keep', 2)
+        first = schedule('run-due')['point']
+        assert schedule('run-due')['result'] == 'not-due'
+        write_probe('after-automatic-checkpoint')
+        selection = schedule('select', first['completedAt'])
+        assert selection['point'] == first['id']
+        assert selection['granularity'] == 'complete-deployment-checkpoint'
+        # The digest makes the reviewed point explicit before any downtime.
+        schedule('restore-at', first['completedAt'], '--expected-manifest-sha256', '0' * 64, '--yes', expected=1)
+        assert_probe('after-automatic-checkpoint')
+        schedule('restore-at', first['completedAt'], '--expected-manifest-sha256', selection['manifestSha256'], '--yes')
+        assert_probe('before-interruption')
+        schedule('run-due', '--force')
+        schedule('run-due', '--force')
+        catalog = schedule('list')
+        assert len(catalog['points']) == 2
+        assert not (root / 'automatic' / first['id']).exists()
+        assert len(list((root / 'automatic').glob('pre-restore-*'))) == 1
+        schedule('disable')
+        assert schedule('run-due', '--force')['result'] == 'disabled'
+        checked('actual scheduled checkpoints, due coalescing, reviewed timestamp recovery, whole-state restore and retention preserve safety snapshots')
         cli('check')
         assert not (Path(args.state_dir) / 'pending.json').exists()
         assert deployment.docker('ps', '--all', '--quiet', '--filter', 'label=io.alinksec.maintenance.binding=' + deployment.binding).strip() == ''

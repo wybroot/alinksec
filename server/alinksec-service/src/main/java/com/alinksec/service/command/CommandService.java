@@ -287,6 +287,7 @@ public class CommandService {
         return switch (cmd.getPayloadCase()) {
             case BASELINE_CHECK -> "baseline_check";
             case SCAP_SCAN -> "scap_scan";
+            case EVIDENCE_COLLECT -> "evidence_collect";
             case VULN_SCAN -> "vuln_scan";
             case POLICY_SYNC -> "policy_sync";
             case PROTECT_ACTION -> "protect_action";

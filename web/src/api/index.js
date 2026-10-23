@@ -44,6 +44,25 @@ async function request(path, options = {}) {
 const get = (path) => request(path)
 const post = (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) })
 
+export const fetchEvidence = () => get('/api/evidence')
+export const fetchEvidenceTargets = () => get('/api/evidence/targets')
+export const fetchEvidenceSamples = agent => get(`/api/evidence/targets/${encodeURIComponent(agent)}/samples`)
+export const collectEvidence = data => post('/api/evidence', data)
+export const removeEvidence = id => request(`/api/evidence/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export async function downloadEvidence(row) {
+  if (!/^[0-9a-f-]{36}$/.test(row.id) || !/^[0-9a-f]{64}$/.test(row.content_sha256)) throw new Error('取证文件标识无效')
+  const response = await fetch(`/api/evidence/${row.id}/download`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '文件下载失败')
+  const bytes = await response.arrayBuffer()
+  if (bytes.byteLength > 1048576 || bytes.byteLength !== Number(row.size_bytes)) throw new Error('文件大小不匹配')
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (hash !== row.content_sha256 || hash !== response.headers.get('X-Content-SHA256')) throw new Error('文件完整性校验失败')
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
+  const link = document.createElement('a'); link.href = url
+  link.download = `alinksec-${row.id}-${row.kind === 'diagnostic' ? 'diagnostic.zip' : 'quarantine.sample.bin'}`
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export const fetchScapPackages = () => get('/api/baseline/scap/packages')
 export const fetchScapPackage = id => get(`/api/baseline/scap/packages/${encodeURIComponent(id)}`)
 export const importScapPackage = file => upload('/api/baseline/scap/packages/import', file)

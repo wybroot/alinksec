@@ -27,6 +27,7 @@ public class ReportDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(ReportDispatcher.class);
 
+    private final com.alinksec.service.evidence.EvidenceService evidence;
     private final HeartbeatService heartbeatService;
     private final AssetService assetService;
     private final SecurityEventService securityEventService;
@@ -50,7 +51,8 @@ public class ReportDispatcher {
                             FixResultService fixResultService,
                             MetricsForwarder metricsForwarder,
                             LogBatchService logBatchService,
-                            JdbcTemplate jdbc, DatabaseDialect database,org.springframework.transaction.PlatformTransactionManager transactionManager,com.alinksec.service.fix.WindowsUpdateService windowsUpdates) {
+                            JdbcTemplate jdbc, DatabaseDialect database,org.springframework.transaction.PlatformTransactionManager transactionManager,com.alinksec.service.fix.WindowsUpdateService windowsUpdates,com.alinksec.service.evidence.EvidenceService evidence) {
+        this.evidence=evidence;
         this.heartbeatService = heartbeatService;
         this.assetService = assetService;
         this.securityEventService = securityEventService;
@@ -68,14 +70,14 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
+        if(report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
             virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
-        if((report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if((report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
@@ -117,6 +119,7 @@ public class ReportDispatcher {
             }
             case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
             case BASELINE_RESULT -> baselineResultService.onResult(agentId, report.getBaselineResult());
+            case EVIDENCE -> evidence.accept(agentId,report);
             case SCAP_RESULT -> com.alinksec.service.baseline.ScapResults.accept(jdbc,agentId,report.getScapResult());
             case SCAN_RESULT -> scanResultService.onResult(agentId, report.getScanResult());
             case VIRUS_RESULT -> virusResultService.onResult(agentId, report.getVirusResult());
@@ -129,6 +132,9 @@ public class ReportDispatcher {
 
     public java.util.List<String> windowsUpdateReceipts(String agent,com.alinksec.proto.RptFixResult result) {
         return com.alinksec.service.fix.WindowsUpdateResult.receipts(jdbc,agent,result);
+    }
+    public java.util.Optional<com.alinksec.proto.CmdEvidenceReceipt> evidenceReceipt(String agent,com.alinksec.proto.Report report) {
+        return evidence.receipt(agent,report);
     }
 
     private static boolean isolationOutcome(com.alinksec.proto.Report report) {

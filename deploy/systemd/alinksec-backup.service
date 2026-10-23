@@ -1,0 +1,16 @@
+[Unit]
+Description=Alinksec automatic complete deployment checkpoint
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+# Install the repository under /opt/alinksec; configure its private schedule first.
+WorkingDirectory=/opt/alinksec
+ExecStart=/usr/bin/python3 /opt/alinksec/deploy/backup_schedule.py --compose-file /opt/alinksec/deploy/docker/docker-compose.lite.yml --env-file /opt/alinksec/deploy/docker/.env.lite --state-dir /var/lib/alinksec-operations run-due
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
