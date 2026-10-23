@@ -74,7 +74,7 @@ try{
     await panel.getByRole('button',{name:label,exact:true}).click();const file=await pending;const path=resolve(root,'download.'+format);await file.saveAs(path);assert.deepEqual(readFileSync(path),readFileSync(resolve(fixtures,'report-sqlite.'+format)));downloads.push({format,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')})
   }
   badDigest=true;await panel.getByRole('button',{name:'导出 CSV',exact:true}).click();await expect(panel).toContainText('报表文件摘要不匹配');badDigest=false;checks.push('four_authenticated_formats_and_digest_rejection')
-  await page.emulateMedia({media:'print'});assert.equal(await panel.locator('.report-history').evaluate(el=>getComputedStyle(el).display),'none');assert.equal(await panel.locator('.report-controls').evaluate(el=>getComputedStyle(el).display),'none')
+  await page.emulateMedia({media:'print'});assert.equal(await panel.locator('.report-history').evaluate(el=>getComputedStyle(el).display),'none');assert.equal(await panel.locator('.report-controls').evaluate(el=>getComputedStyle(el).display),'none');assert.equal(await page.locator('body').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)')
   await page.pdf({path:resolve(root,'report-production.pdf'),format:'A4',landscape:true,printBackground:true})
   const pdf=readFileSync(resolve(root,'report-production.pdf'));assert.equal(pdf.subarray(0,5).toString(),'%PDF-')
   const info=execFileSync('pdfinfo',[resolve(root,'report-production.pdf')],{encoding:'utf8'});writeFileSync(resolve(root,'report-production-info.txt'),info);pdfPages=Number(info.match(/^Pages:\s+(\d+)/m)?.[1]);assert.ok(pdfPages>0&&pdfPages<100)
