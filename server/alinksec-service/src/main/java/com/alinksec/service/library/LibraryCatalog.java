@@ -584,12 +584,19 @@ public class LibraryCatalog {
         return jdbc.queryForMap("SELECT signature_release_id,signature_pending,rule_revision,match_pending FROM t_security_selection_delivery WHERE id=1");
     }
     public void acknowledgeSelectionDelivery(long signatureRelease,long ruleRevision,boolean signatures,boolean matching) {
-        // One statement, no lost update when another catalog instance commits newer work during delivery.
-        jdbc.update("""
-                UPDATE t_security_selection_delivery SET
-                  signature_pending=CASE WHEN ?=1 AND signature_release_id<=? THEN 0 ELSE signature_pending END,
-                  match_pending=CASE WHEN ?=1 AND rule_revision<=? THEN 0 ELSE match_pending END WHERE id=1
-                """,signatures?1:0,signatureRelease,matching?1:0,ruleRevision);
+        transaction.executeWithoutResult(status -> {
+            // Follow publication lock order while clearing native-source status as well as the global marker.
+            lockAuthority();
+            jdbc.update("""
+                    UPDATE t_security_selection_delivery SET
+                      signature_pending=CASE WHEN ?=1 AND signature_release_id<=? THEN 0 ELSE signature_pending END,
+                      match_pending=CASE WHEN ?=1 AND rule_revision<=? THEN 0 ELSE match_pending END WHERE id=1
+                    """,signatures?1:0,signatureRelease,matching?1:0,ruleRevision);
+            if(signatures)jdbc.update("""
+                    UPDATE t_opencti_source SET delivery_deferred=0 WHERE delivery_deferred=1 AND EXISTS
+                      (SELECT 1 FROM t_security_selection_delivery WHERE id=1 AND signature_pending=0 AND signature_release_id<=?)
+                    """,signatureRelease);
+        });
     }
 
     /** Retain current/recent releases and every artifact referenced by pending delivery or valid tokens. */
