@@ -62,9 +62,7 @@ func TestEvidenceExpiryRemovesStoredBytesWhileRetainingAndReplayingLiveFile(t *t
 	if len(stored.Records) != 1 || !bytes.Equal(stored.Records[0].Report, current) || len(stored.Completed) != 1 || stored.Completed[0].ExpiresAt != future {
 		t.Fatal("expiry left private bytes or removed a live completion on disk")
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("expiry lost private journal permissions", err)
-	}
+	assertEvidenceJournalPrivate(t, path)
 }
 
 func TestEvidenceOutboxReplaysSameBytesAcrossRestartUntilExactAuthenticatedReceipt(t *testing.T) {
