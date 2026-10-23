@@ -233,6 +233,20 @@ jobs:
           GOARCH: amd64
       - name: Prepare independent harmless Windows signature release fixtures
         run: python deploy/tests/signature-fixtures.py .tmp/signature-fixtures
+      - name: Check actual Windows evidence, mTLS restart replay and quarantine export
+        run: python deploy/tests/evidence-agent-native.py
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_EVIDENCE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
+      - name: Retain native Windows evidence transfer
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-evidence-windows-amd64
+          path: |
+            .tmp/evidence-native/result.json
+            .tmp/evidence-native/diagnostic.zip
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Check native Windows delta reconstruction and actual Agent update commands
         working-directory: agent
         run: go test -v -count=1 -timeout=3m -run '^TestNativeSignature' ./internal/virusscan ./cmd/agent
@@ -421,7 +435,9 @@ jobs:
       - name: Check SQLite maintenance failure handling
         run: bash deploy/tests/sqlite-maintenance.test.sh
       - name: Check complete maintenance failure, rollback and archive boundaries
-        run: python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_operations.py -v
+        run: |
+          python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_operations.py -v
+          python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_backup_schedule.py -v
       - name: Check security feed and baseline package tools
         run: |
           python3 -B -m unittest discover -s deploy/tests -p 'test_*_tools.py' -v
@@ -707,6 +723,7 @@ jobs:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
       - name: Check Java-published delta reconstruction and actual Linux Agent commands
+        # Evidence and signature checks share this already-built native Agent.
         working-directory: agent
         run: go test -v -count=1 -timeout=3m -run '^TestNativeSignature' ./internal/virusscan ./cmd/agent
         env:
@@ -715,6 +732,20 @@ jobs:
           ALINKSEC_SIGNATURE_AGENT_BIN: ${{ github.workspace }}/.tmp/alinksec-agent
           ALINKSEC_SIGNATURE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/signature-native/native.json
           ALINKSEC_SIGNATURE_AGENT_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/signature-native/agent.json
+      - name: Check actual Linux evidence, mTLS restart replay and quarantine export
+        run: python3 deploy/tests/evidence-agent-native.py
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_EVIDENCE_AGENT_BIN: ${{ github.workspace }}/.tmp/alinksec-agent
+      - name: Retain native Linux evidence transfer
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-evidence-linux-${{ matrix.arch }}
+          path: |
+            .tmp/evidence-native/result.json
+            .tmp/evidence-native/diagnostic.zip
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Retain native Linux signature update evidence
         uses: actions/upload-artifact@v4
         with:
@@ -1035,8 +1066,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "32"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "93"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "33"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "95"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1335,14 +1366,18 @@ jobs:
       - name: Check SQLite statistics, authority, snapshot integrity and schedule recovery
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest -Dsurefire.failIfNoSpecifiedTests=false test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest,EvidenceIntegrationTest,EvidenceControllerTest -Dsurefire.failIfNoSpecifiedTests=false test
           mkdir -p ../.tmp/report-fixtures/junit-sqlite
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*ReportControllerTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*JwtAuthInterceptorTest.xml ../.tmp/report-fixtures/junit-sqlite/
+          mkdir -p ../.tmp/evidence-fixtures/junit-sqlite
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*EvidenceIntegrationTest.xml ../.tmp/evidence-fixtures/junit-sqlite/
+          cp alinksec-gateway/target/surefire-reports/TEST-*EvidenceControllerTest.xml ../.tmp/evidence-fixtures/junit-sqlite/
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
+          ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
       - name: Prepare actual PostgreSQL schema and report reader role
         run: |
           sudo apt-get update -qq
@@ -1361,15 +1396,18 @@ jobs:
       - name: Check identical PostgreSQL transactions with the restricted application role
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,EvidenceIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
           mkdir -p ../.tmp/report-fixtures/junit-postgres
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-postgres/
+          mkdir -p ../.tmp/evidence-fixtures/junit-postgres
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*EvidenceIntegrationTest.xml ../.tmp/evidence-fixtures/junit-postgres/
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/reporting?stringtype=unspecified
           ALINKSEC_INTEGRATION_PG_USER: alinksec_app
           ALINKSEC_INTEGRATION_PG_PASSWORD: report-app-fixture
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
+          ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -1384,6 +1422,19 @@ jobs:
       - name: Check actual production report pages and PDF against database captures
         working-directory: web
         run: node test/reporting-browser.mjs
+      - name: Check central evidence console and exact file downloads
+        working-directory: web
+        run: node test/evidence-browser.mjs
+      - name: Retain central evidence database and browser observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-evidence-console
+          path: |
+            .tmp/evidence-fixtures
+            .tmp/evidence-browser
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Retain report documents, database responses and rendered evidence
         if: always()
         uses: actions/upload-artifact@v4

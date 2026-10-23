@@ -71,7 +71,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V029__native_vendor_advisories.sql",
                 "db/common/V030__native_opencti.sql",
                 "db/common/V031__source_trust_and_conflicts.sql",
-                "db/common/V032__report_snapshots.sql"
+                "db/common/V032__report_snapshots.sql",
+                "db/common/V033__central_evidence.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

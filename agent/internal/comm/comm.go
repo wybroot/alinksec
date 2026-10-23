@@ -58,6 +58,7 @@ type Client struct {
 	yara          *yara.Client
 	scap          *scap.Client
 	scapJournalMu sync.Mutex
+	evidenceMu    sync.Mutex
 	bulkBusy      atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
@@ -435,6 +436,12 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				windowsupdate.Receipt(c.workDir, receipt.GetRecords())
 				continue
 			}
+			if receipt := cmd.GetEvidenceReceipt(); receipt != nil {
+				if err := c.evidenceReceipt(receipt); err != nil {
+					c.log.Error("evidence receipt persistence failed")
+				}
+				continue
+			}
 			if receipt := cmd.GetWindowsLoginReceipt(); receipt != nil {
 				if c.windowsLogin != nil {
 					if err := c.windowsLogin.Receipt(receipt.GetEventIds()); err != nil {
@@ -490,6 +497,8 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 	isolationResults := map[string]string{}
 	configResults := map[string]bool{}
 	windowsLoginResults := map[string]time.Time{}
+	evidenceResults := map[string]time.Time{}
+	lastEvidenceReplay := time.Time{}
 	isolationState := ""
 	nextDrain := time.Time{}
 	for {
@@ -497,6 +506,12 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-upgradeTick.C:
+			if time.Since(lastEvidenceReplay) >= 15*time.Second {
+				if err := c.sendEvidenceResults(stream, generation, evidenceResults); err != nil {
+					return err
+				}
+				lastEvidenceReplay = time.Now()
+			}
 			if err := c.sendWindowsLoginEvents(stream, generation, windowsLoginResults); err != nil {
 				return err
 			}
@@ -625,6 +640,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 			YaraStatus:              c.yara.StatusJSON(),
 			ScapContract:            scap.Contract(),
 			ScapStatus:              c.scap.StatusJSON(),
+			EvidenceContract:        evidenceContract(),
 			WeakPasswordContract:    scan.WeakPasswordContract(),
 			WindowsLoginContract:    windowslogin.ExecutionContract(),
 			WindowsLoginStatus:      c.windowsLoginStatus(),
@@ -744,6 +760,8 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return c.executeBaselineCheck(p.BaselineCheck, received)
 	case *pb.Command_ScapScan:
 		return c.executeScapScan(sctx, p.ScapScan, received)
+	case *pb.Command_EvidenceCollect:
+		return c.executeEvidence(p.EvidenceCollect, received)
 	case *pb.Command_VulnScan:
 		return c.executeVulnScan(p.VulnScan, received)
 	case *pb.Command_VirusScan:

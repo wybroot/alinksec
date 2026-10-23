@@ -33,19 +33,24 @@
   independent CI runners. Keep checks that share ports, containers or state
   ordered within one runner.
 
-- Create each functional module branch from the latest merged and validated `main`.
-- Complete one functional module on its own branch before moving to another.
-- Stay on that module's branch while completing its functionality, system
-  applicability, failure handling, security boundaries, and validation.
-- Record other modules as ordered backlog items; do not begin their
-  implementation during the active module's work.
-- Open a new pull request only after the module's implementation and required
+- The user authorized grouping adjacent, related backlog items on 2026-10-24.
+  Develop modules 20/21 together, then modules 22/23 together, with one branch,
+  review and complete CI validation per group. Preserve the remaining backlog.
+- Create each group branch from the latest merged `main`. When its tree already
+  matches the fully validated feature tree, development may proceed while the
+  exact merged-main CI runs remotely. Track that pending acceptance explicitly
+  and fix any failures before accepting the dependent group.
+- Complete the group's functionality, system applicability, failure handling,
+  security boundaries and validation together. Keep unrelated implementation
+  outside the active group.
+- Open a new pull request only after the group's implementation and required
   validation are complete. Keep an existing pull request in draft while its
-  module is still being improved.
-- After implementation and required validation are complete, merge the module PR
-  into `main` under the user's standing instruction. Verify the merged source and
-  checks, then synchronize local `main` before creating the next module branch.
-- Do not base a new functional module on an unmerged module branch or stack its
-  PR on an unmerged module PR.
+  group is still being improved.
+- After implementation and required validation are complete, merge the group PR
+  into `main` under the user's standing instruction. Verify its merged source,
+  start full merged-main CI and track acceptance. Synchronize canonical local
+  `main` after those checks pass; the next group may proceed under the preceding
+  rule while the exact merged-main checks run remotely.
+- Do not base a group on an unmerged branch or stack its PR on an unmerged PR.
 - Version releases and production deployments require separate user instructions;
   module merge authorization does not authorize either action.

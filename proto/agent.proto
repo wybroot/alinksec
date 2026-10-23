@@ -83,6 +83,8 @@ message Command {
     CmdWindowsUpdateScan windows_update_scan = 23;
     CmdWindowsUpdateReceipt windows_update_receipt = 24; // committed outcomes; no cmd_id/ACK
     CmdScapScan scap_scan = 25;
+    CmdEvidenceCollect evidence_collect = 26;
+    CmdEvidenceReceipt evidence_receipt = 27; // committed file receipt; no cmd_id/ACK
   }
 }
 
@@ -152,6 +154,35 @@ message CmdAgentUpgrade {
 
 message CmdCollectNow {
   repeated string collector_names = 1;  // 立即触发指定采集器（空 = 全部）
+}
+
+// Fixed collection kinds only. A sample is bound to an existing quarantine
+// capture; this command cannot read arbitrary files or execute shell commands.
+message CmdEvidenceCollect {
+  string request_id = 1;
+  uint32 execution_contract = 2; // 1, <= 1 MiB result, durable offline replay
+  string kind = 3; // diagnostic / quarantine_sample
+  string quarantine_id = 4;
+  string original_path = 5;
+  string expected_sha256 = 6;
+  int64 deadline = 7; // UTC epoch milliseconds
+}
+
+message RptEvidence {
+  string request_id = 1;
+  string command_id = 2;
+  uint32 execution_contract = 3;
+  string kind = 4;
+  int64 collected_at = 5;
+  string sha256 = 6;
+  bytes content = 7; // <= 1 MiB; diagnostic ZIP or raw quarantined bytes
+  string error_code = 8; // fixed code, never raw paths/errors/configuration
+}
+
+message CmdEvidenceReceipt {
+  string request_id = 1;
+  string command_id = 2;
+  string content_sha256 = 3;
 }
 
 message CmdAgentControl {
@@ -243,6 +274,7 @@ message Report {
     RptIsolationState isolation_state = 20; // live state only; never offline replay
     RptWindowsUpdate windows_update = 21;
     RptScapResult scap_result = 22;
+    RptEvidence evidence = 23;
   }
 }
 
@@ -271,6 +303,7 @@ message RptHeartbeat {
   uint32 signature_update_contract = 22; // 1: bounded delta reconstruction and full fallback
   uint32 scap_contract = 23; // 1: pinned offline native SCAP interpreter and exact XCCDF outcomes
   string scap_status = 24; // bounded readiness; not a compliance certificate
+  uint32 evidence_contract = 25;
 }
 
 message RptIsolationState {

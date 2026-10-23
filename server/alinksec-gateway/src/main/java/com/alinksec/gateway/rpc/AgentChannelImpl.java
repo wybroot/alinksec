@@ -77,6 +77,8 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                             }
                         } else {
                             dispatcher.dispatch(authenticatedAgentId, report);
+                            if(report.hasEvidence()) dispatcher.evidenceReceipt(authenticatedAgentId,report).ifPresent(receipt->
+                                    registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setEvidenceReceipt(receipt).build()));
                             if(report.hasFixResult()) {
                                 var receipts=dispatcher.windowsUpdateReceipts(authenticatedAgentId,report.getFixResult());
                                 if(!receipts.isEmpty()) registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setWindowsUpdateReceipt(com.alinksec.proto.CmdWindowsUpdateReceipt.newBuilder().addAllRecords(receipts)).build());
@@ -127,6 +129,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                 // previous, newer Agent may have been downgraded while offline.
                 agentRepository.weakPasswordContract(authenticatedAgentId, report.hasHeartbeat()?report.getHeartbeat().getWeakPasswordContract():0);
                 agentRepository.windowsUpdateContract(authenticatedAgentId,report.hasHeartbeat()?report.getHeartbeat().getWindowsUpdateContract():0);
+                agentRepository.evidenceContract(authenticatedAgentId,report.hasHeartbeat()?report.getHeartbeat().getEvidenceContract():0);
                 agentRepository.upgradeContract(authenticatedAgentId,
                         report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
                 agentRepository.isolationContract(authenticatedAgentId,

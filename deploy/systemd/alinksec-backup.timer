@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Alinksec backup schedule every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30
+Unit=alinksec-backup.service
+
+[Install]
+WantedBy=timers.target
