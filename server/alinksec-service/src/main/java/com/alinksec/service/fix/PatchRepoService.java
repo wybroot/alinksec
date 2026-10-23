@@ -167,7 +167,8 @@ public class PatchRepoService {
         if (rows.size() != 1) throw new IllegalArgumentException("当前有效漏洞规则不存在");
         var current = rows.get(0); JsonNode rules = JsonUtils.read(String.valueOf(current.get("affected")));
         String origin = String.valueOf(current.get("rule_source_id")), digest = String.valueOf(current.get("rule_digest"));
-        if (origin.isBlank() || !digest.equals(VulnerabilityEvidence.ruleDigest(origin, cveId, rules)))
+        if (origin.isBlank() || !digest.equals(VulnerabilityEvidence.ruleDigest(origin, cveId, rules))
+                || !new com.alinksec.service.library.LibrarySelection(jdbc).allowsCve(cveId,origin,digest))
             throw new IllegalArgumentException("漏洞规则来源或指纹不完整，请重新导入核对");
         boolean targetDeclared = false;
         for (JsonNode rule : rules) {

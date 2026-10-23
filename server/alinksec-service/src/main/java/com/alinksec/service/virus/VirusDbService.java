@@ -98,6 +98,7 @@ public class VirusDbService {
         for (String agentId : agents) {
             dispatchUpdate(agentId, latest);
         }
+        catalog.acknowledgeSelectionDelivery(((Number)latest.get("id")).longValue(),0,true,false);
         log.info("特征库更新指令已下发: version={} agents={}", latest.get("db_version"), agents.size());
     }
 
@@ -139,7 +140,7 @@ public class VirusDbService {
 
     private Map<String, Object> latestDb() {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT db_version, package_key, sha256 FROM t_virus_db ORDER BY id DESC LIMIT 1
+                SELECT id, db_version, package_key, sha256 FROM t_virus_db ORDER BY id DESC LIMIT 1
                 """);
         return rows.isEmpty() ? null : rows.get(0);
     }

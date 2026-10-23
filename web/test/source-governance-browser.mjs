@@ -53,7 +53,7 @@ try {
   await page.getByRole('row').filter({ hasText: fixture.cve }).getByRole('button', { name: '查看依据', exact: true }).click()
   const ruleDialog = page.getByRole('dialog', { name: fixture.cve, exact: true })
   await expect(ruleDialog.getByRole('button', { name: '撤销本地声明', exact: true })).toHaveCount(2)
-  await expect(ruleDialog).toContainText('优先公告撤销后不自动采用较低优先声明')
+  await expect(ruleDialog).toContainText('选中的撤销公告继续阻止较低来源回填')
   await page.screenshot({ path: root + '/active-declarations.png', fullPage: true, animations: 'disabled' })
   await ruleDialog.getByRole('button', { name: '查看原始声明', exact: true }).first().click()
   const original = page.getByRole('dialog', { name: '原始公告声明', exact: true })
@@ -73,7 +73,7 @@ try {
   assert.equal(stage, 'active'); scenarios.push('failed-decision-keeps-active-state')
   rejectDecision = false
   await decision('撤销本地声明', '撤销公告声明', 'Browser fixture withdrawal')
-  await expect(ruleDialog).toContainText('当前声明已撤销或来源已退役')
+  await expect(ruleDialog).toContainText('当前来源依据暂停采用、已撤销或已退役')
   await expect(ruleDialog.getByRole('button', { name: '恢复本地声明', exact: true })).toHaveCount(1)
   await page.screenshot({ path: root + '/withdrawn-declaration.png', fullPage: true, animations: 'disabled' })
   scenarios.push('withdrawal-keeps-original-declaration-and-priority')

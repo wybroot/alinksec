@@ -14,6 +14,22 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
+    @Test void sourceTrustPolicyAndItemDecisionsRequireAdminIncludingEncodedMatchedRoutes() throws Exception {
+        for(String role:new String[]{"admin","operator","viewer"}) {
+            for(String pattern:new String[]{"/api/libraries/selection/decision","/api/libraries/sources/{id}/policy"}) {
+                var write=request(role);write.setMethod(pattern.endsWith("policy")?"PUT":"POST");
+                write.setRequestURI("/api/libraries/%73election;ignored/decision");
+                write.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,pattern);
+                var response=new MockHttpServletResponse();
+                assertEquals("admin".equals(role),interceptor().preHandle(write,response,new Object()));
+                if(!"admin".equals(role))assertEquals(403,response.getStatus());
+            }
+            for(String path:new String[]{"/api/libraries/selections","/api/libraries/selection/candidate","/api/libraries/selection/history","/api/libraries/sources/provider/policy"}) {
+                var read=request(role);read.setRequestURI(path);assertTrue(interceptor().preHandle(read,new MockHttpServletResponse(),new Object()));
+            }
+        }
+        var response=new MockHttpServletResponse();assertFalse(interceptor().preHandle(new MockHttpServletRequest("POST","/api/libraries/selection/decision"),response,new Object()));assertEquals(401,response.getStatus());
+    }
     @Test void complianceEvidenceReadsAllowAllRolesAndOnlyAdminCanRecordConclusions() throws Exception {
         for (String role : new String[]{"admin", "operator", "viewer"}) {
             var read = request(role); read.setRequestURI("/api/baseline/tasks/1/agents/ubuntu/compliance");

@@ -83,6 +83,8 @@ public class AgentDownloadTokenService {
         var row=rows.get(0);
         try {
             return row.get("review_digest").equals(com.alinksec.service.fix.PatchRepoService.patchDigest(row))
+                    && new com.alinksec.service.library.LibrarySelection(jdbc).allowsCve(String.valueOf(row.get("cve_id")),
+                        String.valueOf(row.get("rule_source_id")),String.valueOf(row.get("rule_digest")))
                     && row.get("rule_digest").equals(com.alinksec.service.scan.VulnerabilityEvidence.ruleDigest(
                     String.valueOf(row.get("rule_source_id")),String.valueOf(row.get("cve_id")),com.alinksec.common.util.JsonUtils.read(String.valueOf(row.get("affected")))));
         } catch (IllegalArgumentException e) { return false; }

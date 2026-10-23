@@ -20,7 +20,7 @@
       </el-descriptions>
       <p v-if="!error" class="hint">支持增量更新且基库一致的 Agent 优先下载差量；基库不符或差量失败时回退完整包，校验失败保留旧库。旧 Agent 使用全量包。此处仅指内置哈希及内部规则库，ClamAV 与原生 YARA 沿用各自的本机配置。</p>
       <el-alert v-if="!loading && !error && (!state.signature?.db_version || Number(state.signature?.hash_count || 0) + Number(state.signature?.rule_count || 0) === 0)" title="当前有效病毒特征为空，缺少病毒识别依据；零特征不代表主机安全。请导入基础特征库或启用有效来源。" type="warning" :closable="false" show-icon style="margin-top:12px" />
-      <p class="hint">人工导入与远端同步可同时使用。远端不可用时，平台和 Agent 继续使用已有库；人工补充的规则优先保留。</p>
+      <p class="hint">人工导入与远端同步可同时使用。来源信任等级和优先级决定采用顺序；未配置策略时人工来源优先。远端不可用时继续使用已有库。</p>
       <p class="hint">漏洞信息只有包含适用的软件和版本条件，才能参与资产比对。补丁包继续在漏洞修复流程中按需使用。</p>
       <el-alert v-if="state.unattributedCveCount" type="warning" :closable="false" :title="`${state.unattributedCveCount} 条历史漏洞缺少入库来源记录，请重新导入并扫描；旧依据保持未知`" style="margin-bottom:12px" />
       <el-button @click="showRules = true; loadRules()">查看漏洞规则依据</el-button>
@@ -36,17 +36,17 @@
       <el-table :data="ruleRows" v-loading="rulesLoading" style="margin-top:12px">
         <el-table-column prop="cve_id" label="CVE" min-width="160" />
         <el-table-column prop="title" label="标题" min-width="180" />
-        <el-table-column label="声明用途" min-width="130"><template #default="{ row }">{{ row.rule_status === 'withdrawn' ? '公告已撤销' : row.rule_status === 'retired' ? '来源已退役' : row.evaluation === 'declared' ? '含可评估声明' : '仅元数据或旧依据缺失' }}</template></el-table-column>
+        <el-table-column label="声明用途" min-width="130"><template #default="{ row }">{{ row.rule_status === 'withdrawn' ? '公告已撤销' : row.rule_status === 'retired' ? '来源已退役' : row.evaluation === 'source_held' ? '来源依据暂停采用' : row.evaluation === 'declared' ? '含可评估声明' : '仅元数据或旧依据缺失' }}</template></el-table-column>
         <el-table-column label="实际导入来源" min-width="130"><template #default="{ row }">{{ row.rule_source_id || '历史来源未知' }}</template></el-table-column>
         <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" @click="openRule(row)">查看依据</el-button></template></el-table-column>
       </el-table>
       <el-pagination v-model:current-page="rulesPage" :page-size="20" :total="rulesTotal" layout="prev, pager, next" @current-change="loadRules" />
     </div>
     <el-dialog :model-value="!!ruleDetail" :title="ruleDetail?.cve_id" :width="compact ? 'calc(100% - 24px)' : '650px'" @close="closeRule">
-      <el-alert v-if="ruleDetail?.rule_status && ruleDetail.rule_status !== 'active'" title="当前声明已撤销或来源已退役，不参与比对和自动修复。历史结果保留，不代表漏洞已修复。" type="warning" :closable="false" />
+      <el-alert v-if="ruleDetail?.rule_status && ruleDetail.rule_status !== 'active' || ruleDetail?.evaluation === 'source_held'" title="当前来源依据暂停采用、已撤销或已退役，不参与比对和自动修复。请在来源信任与冲突中复核。历史结果保留，不代表漏洞已修复。" type="warning" :closable="false" />
       <VulnerabilityEvidence v-if="ruleDetail" :snapshot="{ import: ruleDetail.provenance, rules: ruleDetail.affected }" :source-id="ruleDetail.rule_source_id" :digest="ruleDetail.rule_digest" :status="ruleDetail.rule_digest ? 'declared' : 'legacy'" />
       <h4>各来源公告</h4>
-      <p class="hint">按整条 CVE 选择人工来源优先、其他来源按标识排序。优先公告撤销后不自动采用较低优先声明；整源退役后才重新选择其他来源。</p>
+      <p class="hint">按整条 CVE 选择来源，不拼接不同来源的字段。同等级、同优先级的适用声明不一致时暂停采用，须在“来源信任与冲突”中复核。选中的撤销公告继续阻止较低来源回填。</p>
       <el-alert v-if="declarationsError" :title="declarationsError" type="error" :closable="false" />
       <div v-loading="declarationsLoading" v-for="item in declarations" :key="item.source_id" class="declaration">
         <div><strong>{{ item.source_id }}</strong> · {{ declarationState(item) }}</div>
@@ -65,6 +65,7 @@
         <details><summary>完整公告声明</summary><pre class="original-document">{{ JSON.stringify(declarationDetail.document, null, 2) }}</pre></details>
       </template>
     </el-dialog>
+    <SourceTrust :sources="state.governanceSources || []" :delivery="state.selectionDelivery" :is-admin="isAdmin" :compact="compact" @changed="load" />
     <div class="panel" style="margin-top:16px">
       <h4>来源治理</h4>
       <p class="hint">暂停同步保留有效数据。退役来源会撤销其当前效力、保留原始数据和历史，并阻止该标识再次同步。已离线 Agent 在收到新库前仍可能使用旧特征。</p>
@@ -143,7 +144,7 @@
         <el-alert v-if="Number(indicators.state.delivery_deferred)" title="库已提交，Agent 下发待重试；连接和正常更新仍会继续分发。" type="warning" :closable="false" />
         <el-descriptions :column="compact ? 1 : 2" border class="indicator-state">
           <el-descriptions-item label="完整快照">{{ indicators.state.visible_count }} 个可见指标 · {{ indicators.state.page_count }} 页</el-descriptions-item>
-          <el-descriptions-item label="本来源有效哈希">{{ indicators.state.effective_hashes }} 条</el-descriptions-item>
+          <el-descriptions-item label="通过来源筛选的哈希">{{ indicators.state.candidate_hashes }} 条</el-descriptions-item>
           <el-descriptions-item label="审核标签">{{ indicators.state.policy?.tag }}</el-descriptions-item>
           <el-descriptions-item label="纳入要求">置信度 ≥ {{ indicators.state.policy?.minimumConfidence }} · 本地严重程度 {{ indicators.state.policy?.severity }}</el-descriptions-item>
           <el-descriptions-item label="上游版本">{{ indicators.state.server_version }}</el-descriptions-item>
@@ -151,6 +152,7 @@
           <el-descriptions-item label="最近有效期检查">{{ date(indicators.state.evaluated_at) }}</el-descriptions-item>
           <el-descriptions-item label="快照 SHA-256"><span class="digest">{{ indicators.state.snapshot_sha256 }}</span></el-descriptions-item>
         </el-descriptions>
+        <p class="hint">通过来源筛选的数量是候选数量；最终采用还取决于全局信任策略和条目决定。下表逐条显示是否由本来源提供当前采用的声明。</p>
         <p class="hint indicator-decisions"><span v-for="(count, reason) in indicators.state.statistics" :key="reason">{{ indicatorReasons[reason] || reason }} {{ count }}　</span></p>
       </template>
       <el-empty v-if="!indicators.loading && !indicators.error && !indicators.state.identityBound" description="尚无成功的完整快照，已有检测库按当前来源继续使用" />
@@ -167,7 +169,7 @@
     <el-dialog :model-value="!!indicatorDetail" title="OpenCTI 指标依据" :width="compact ? 'calc(100% - 24px)' : '700px'" @close="closeIndicator">
       <div v-if="indicatorDetail" class="native-detail">
         <p>{{ indicatorDetail.document?.name }}</p>
-        <p>{{ indicatorDetail.state?.retired ? '来源已退役' : indicatorReasons[indicatorDetail.reason] || indicatorDetail.reason }} · {{ indicatorDetail.effective ? '已纳入当前发布贡献' : '不贡献当前检测特征' }}</p>
+        <p>{{ indicatorDetail.state?.retired ? '来源已退役' : indicatorReasons[indicatorDetail.reason] || indicatorDetail.reason }} · {{ indicatorDetail.effective ? '当前全局选择已采用此来源' : '不贡献当前检测特征' }}</p>
         <p class="hint">这里保留本次查询返回的指标字段和筛选判定。摘要用于核对保留字段，未验证情报内容真实性或上游签名。</p>
         <p class="digest">指标 {{ indicatorDetail.indicator_id }}</p>
         <p>保留字段 SHA-256</p><p class="digest">{{ indicatorDetail.document_sha256 }}</p>
@@ -244,6 +246,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchLibraries, fetchLibraryCves, fetchLibraryDeclarations, decideLibraryCve, retireLibrarySource, fetchLibraryGovernance, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, fetchVendorAdvisories, fetchVendorAdvisory, downloadVendorAdvisory, fetchOpenCtiIndicators, fetchOpenCtiIndicator, importCveLibrary, importVirusDb, getUser } from '../api'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
+import SourceTrust from '../components/SourceTrust.vue'
 
 const state = ref({ sources: [], signature: {} })
 const indicators = ref({ visible: false, id: '', rows: [], total: 0, page: 1, state: {}, loading: false, error: '' })
