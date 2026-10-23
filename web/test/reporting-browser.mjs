@@ -19,6 +19,7 @@ const server=createServer((req,res)=>{
 })
 await new Promise(done=>server.listen(0,'127.0.0.1',done))
 const base='http://127.0.0.1:'+server.address().port
+let pdfPages=0
 let browser,role='admin',failPreview=false,failHistory=false,badDigest=false,failSchedule=false,updatedSchedule=false,holdPreview=false,releasePreview,previewStarted=false
 const errors=[],unexpected=[],writes=[],checks=[],screenshots=[],downloads=[]
 try{
@@ -76,6 +77,8 @@ try{
   await page.emulateMedia({media:'print'});assert.equal(await panel.locator('.report-history').evaluate(el=>getComputedStyle(el).display),'none');assert.equal(await panel.locator('.report-controls').evaluate(el=>getComputedStyle(el).display),'none')
   await page.pdf({path:resolve(root,'report-production.pdf'),format:'A4',landscape:true,printBackground:true})
   const pdf=readFileSync(resolve(root,'report-production.pdf'));assert.equal(pdf.subarray(0,5).toString(),'%PDF-')
+  const info=execFileSync('pdfinfo',[resolve(root,'report-production.pdf')],{encoding:'utf8'});writeFileSync(resolve(root,'report-production-info.txt'),info);pdfPages=Number(info.match(/^Pages:\s+(\d+)/m)?.[1]);assert.ok(pdfPages>0&&pdfPages<100)
+  for(const [name,number] of [['report-pdf-first',1],['report-pdf-last',pdfPages]])execFileSync('pdftoppm',['-f',String(number),'-l',String(number),'-singlefile','-scale-to','1600','-png',resolve(root,'report-production.pdf'),resolve(root,name)])
   execFileSync('pdftotext',['-layout',resolve(root,'report-production.pdf'),resolve(root,'report-production.txt')]);const printed=readFileSync(resolve(root,'report-production.txt'),'utf8')
   assert.ok(printed.includes(fixture.snapshot.title));assert.ok(printed.includes('待回报'));assert.ok(printed.includes('不代表等保认证结论'));assert.ok(!printed.includes('新增报表计划'));assert.ok(!printed.includes('刷新历史'));await page.emulateMedia({media:'screen'});checks.push('actual_production_pdf_contains_report_and_excludes_controls')
   const plan=panel.locator('.report-plans');await plan.getByRole('button',{name:'编辑',exact:true}).click();const dialog=page.getByRole('dialog',{name:'定时报表计划',exact:true})
@@ -102,7 +105,7 @@ try{
   failPreview=false;holdPreview=true;await panel.getByRole('button',{name:'生成预览',exact:true}).click();await expect.poll(()=>previewStarted).toBe(true);await page.goto(base+'/login');releasePreview();await page.waitForTimeout(150);await expect(page.locator('.report-document')).toHaveCount(0);checks.push('unmounted_late_preview_cannot_restore_report')
   assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
 }finally{
-  writeFileSync(resolve(root,'result.json'),JSON.stringify({passed:checks.length===9&&errors.length===0&&unexpected.length===0,checks,errors,unexpected,writes,screenshots,downloads},null,2)+'\n')
+  writeFileSync(resolve(root,'result.json'),JSON.stringify({passed:checks.length===9&&errors.length===0&&unexpected.length===0,checks,errors,unexpected,writes,screenshots,downloads,pdfPages},null,2)+'\n')
   if(browser)await browser.close();await new Promise(done=>server.close(done))
 }
 console.log('Production reporting browser: nine scenario groups passed')

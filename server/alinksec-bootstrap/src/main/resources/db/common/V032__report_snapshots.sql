@@ -37,6 +37,5 @@ CREATE TABLE t_report_schedule (
 CREATE INDEX idx_report_due ON t_report_schedule(enabled,next_run,retry_at);
 
 CREATE INDEX idx_report_baseline_period ON t_baseline_task(created_at,id);
-CREATE INDEX idx_report_summary_period ON t_baseline_summary(checked_at,agent_id);
 CREATE INDEX idx_report_vuln_period ON t_vuln_finding(created_at,agent_id);
 CREATE INDEX idx_report_alert_period ON t_alert(first_time,agent_id);

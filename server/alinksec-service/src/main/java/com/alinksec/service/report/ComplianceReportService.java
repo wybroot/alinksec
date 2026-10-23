@@ -66,7 +66,7 @@ public class ComplianceReportService {
                   UNION ALL
                   SELECT s.agent_id,s.task_id,s.total,1,t.created_at FROM t_baseline_summary s
                   JOIN scoped a ON a.agent_id=s.agent_id JOIN t_baseline_task t ON t.id=s.task_id
-                  WHERE s.checked_at>=? AND s.checked_at<? AND NOT EXISTS
+                  WHERE t.created_at>=? AND t.created_at<? AND NOT EXISTS
                     (SELECT 1 FROM t_baseline_task_expected e WHERE e.task_id=s.task_id AND e.agent_id=s.agent_id)
                 ),ranked AS (SELECT choices.*,ROW_NUMBER() OVER(PARTITION BY agent_id ORDER BY created_at DESC,task_id DESC) AS rn FROM choices),
                 outcomes AS (SELECT r.agent_id,r.task_id,
