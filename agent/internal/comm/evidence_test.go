@@ -12,8 +12,60 @@ import (
 
 	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestEvidenceExpiryRemovesStoredBytesWhileRetainingAndReplayingLiveFile(t *testing.T) {
+	c := evidenceClient(t)
+	path, _, err := c.evidenceJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := &pb.CmdEvidenceCollect{RequestId: "11111111-1111-4111-8111-111111111111", ExecutionContract: 1, Kind: "diagnostic"}
+	report := &pb.Report{AgentId: c.state.AgentID, ReportId: command.RequestId + "-evidence", Payload: &pb.Report_Evidence{Evidence: &pb.RptEvidence{RequestId: command.RequestId, CommandId: "22222222-2222-4222-8222-222222222222", Content: []byte("expired private file bytes")}}}
+	expired, err := proto.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := proto.Clone(report).(*pb.Report)
+	live.ReportId = "33333333-3333-4333-8333-333333333333-evidence"
+	live.GetEvidence().RequestId = "33333333-3333-4333-8333-333333333333"
+	live.GetEvidence().CommandId = "44444444-4444-4444-8444-444444444444"
+	live.GetEvidence().Content = []byte("live private file bytes")
+	current, err := proto.Marshal(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	past, future := time.Now().Add(-time.Hour).UnixMilli(), time.Now().Add(time.Hour).UnixMilli()
+	journal := &evidenceJournal{Schema: 1, Records: []evidenceRecord{
+		{CommandDigest: evidenceCommandDigest(command), ExpiresAt: past, Report: expired},
+		{CommandDigest: evidenceCommandDigest(command), ExpiresAt: future, Report: current},
+	}, Completed: []evidenceCompletion{
+		{CommandID: "55555555-5555-4555-8555-555555555555", CommandDigest: evidenceCommandDigest(command), ExpiresAt: past},
+		{CommandID: "66666666-6666-4666-8666-666666666666", CommandDigest: evidenceCommandDigest(command), ExpiresAt: future},
+	}}
+	if err := securestate.WriteJSONLimit(path, journal, 4<<20); err != nil {
+		t.Fatal(err)
+	}
+	stream := &upgradeStream{}
+	if err := c.sendEvidenceResults(stream, 0, map[string]time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.reports) != 1 || !proto.Equal(stream.reports[0], live) {
+		t.Fatal("expiry discarded the live file or replayed expired bytes")
+	}
+	stored := new(evidenceJournal)
+	if err := securestate.ReadJSONLimit(path, stored, 4<<20); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Records) != 1 || !bytes.Equal(stored.Records[0].Report, current) || len(stored.Completed) != 1 || stored.Completed[0].ExpiresAt != future {
+		t.Fatal("expiry left private bytes or removed a live completion on disk")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("expiry lost private journal permissions", err)
+	}
+}
 
 func TestEvidenceOutboxReplaysSameBytesAcrossRestartUntilExactAuthenticatedReceipt(t *testing.T) {
 	c := evidenceClient(t)

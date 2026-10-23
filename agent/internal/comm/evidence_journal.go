@@ -43,6 +43,7 @@ func (c *Client) evidenceJournal() (string, *evidenceJournal, error) {
 	if journal.Schema != 1 || len(journal.Records) > 2 || len(journal.Completed) > 1000 {
 		return "", nil, errors.New("invalid evidence journal")
 	}
+	originalRecords, originalCompleted := len(journal.Records), len(journal.Completed)
 	seen := map[string]bool{}
 	retained := []evidenceRecord{}
 	for _, record := range journal.Records {
@@ -68,6 +69,11 @@ func (c *Client) evidenceJournal() (string, *evidenceJournal, error) {
 		}
 	}
 	journal.Completed = completed
+	if len(journal.Records) != originalRecords || len(journal.Completed) != originalCompleted {
+		if err := securestate.WriteJSONLimit(path, journal, 4<<20); err != nil {
+			return "", nil, err
+		}
+	}
 	return path, journal, nil
 }
 
