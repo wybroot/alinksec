@@ -73,7 +73,7 @@
         <el-table-column label="状态" min-width="140"><template #default="{ row }">{{ row.retired ? '已退役' : row.id === 'manual' ? '人工来源' : row.configured ? '部署已配置' : '部署已移除，数据仍有效' }}</template></el-table-column>
         <el-table-column label="保留数据" min-width="180"><template #default="{ row }">{{ row.cves }} 公告 / {{ row.hashes }} 哈希 / {{ row.rules }} 特征规则</template></el-table-column>
         <el-table-column prop="retirement_note" label="退役原因" min-width="160" />
-        <el-table-column label="操作" min-width="180"><template #default="{ row }"><el-button link @click="showGovernance(row.id)">治理记录</el-button><el-button v-if="isAdmin && row.id !== 'manual' && !row.retired" link type="danger" :disabled="state.running || governanceBusy" @click="retire(row)">退役来源</el-button></template></el-table-column>
+        <el-table-column label="操作" min-width="180"><template #default="{ row }"><el-button link @click="showGovernance(row.id)">治理记录</el-button><el-button v-if="row.nativeOpenCti" link @click="showIndicators(row.id)">保留的指标依据</el-button><el-button v-if="isAdmin && row.id !== 'manual' && !row.retired" link type="danger" :disabled="state.running || governanceBusy" @click="retire(row)">退役来源</el-button></template></el-table-column>
       </el-table>
     </div>
     <el-dialog v-model="governance.visible" :title="`${governance.id} · 治理记录`" :width="compact ? 'calc(100% - 24px)' : '800px'">
@@ -95,6 +95,7 @@
         <p class="document-description">{{ governanceEvent.snapshot?.document?.description }}</p>
         <VulnerabilityEvidence v-if="governanceEvent.cve_id" :snapshot="{ import: governanceEvent.snapshot?.provenance, rules: governanceEvent.snapshot?.document?.affected }" :source-id="governanceEvent.source_id" :digest="governanceEvent.document_sha256" status="declared" />
         <details v-if="governanceEvent.cve_id"><summary>完整公告声明</summary><pre class="original-document">{{ JSON.stringify(governanceEvent.snapshot?.document, null, 2) }}</pre></details>
+        <pre v-else-if="governanceEvent.operation?.startsWith('opencti_')" class="original-document">{{ JSON.stringify(governanceEvent.snapshot?.document, null, 2) }}</pre>
         <p v-else>退役时保留 {{ governanceEvent.snapshot?.provenance?.cves || 0 }} 公告 / {{ governanceEvent.snapshot?.provenance?.hashes || 0 }} 哈希 / {{ governanceEvent.snapshot?.provenance?.rules || 0 }} 特征规则</p>
       </template>
     </el-dialog>
@@ -124,11 +125,56 @@
             <el-button v-if="isAdmin" link type="primary" :disabled="!row.enabled || !!row.configurationIssue || state.running || syncing" @click="synchronize(row.id)">立即同步</el-button>
             <el-button v-if="isAdmin && !row.retired" link type="primary" @click="editSchedule(row)">同步计划</el-button>
             <el-button v-if="row.nativeAdvisories" link type="primary" @click="showAdvisories(row.id)">厂商公告</el-button>
+            <el-button v-if="row.nativeOpenCti" link type="primary" @click="showIndicators(row.id)">OpenCTI 指标</el-button>
             <el-button link type="primary" @click="showHistory(row.id)">执行记录</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
+    <el-dialog v-model="indicators.visible" :title="`${indicators.id} · OpenCTI 指标`" :width="compact ? 'calc(100% - 24px)' : '1020px'" @close="closeIndicators">
+      <p class="hint">仅纳入带审核标签、允许检测、未撤销、达到置信度且当前有效的单一文件 SHA-256 等式。复杂模式保留筛选依据。完整快照成功后替换本来源，空集合会撤销旧贡献。</p>
+      <p class="hint">已知过期指标会在服务端按分钟检查撤出，包括暂停或移除配置的来源；离线 Agent 在正常连接并收到新库前仍可能使用旧特征。</p>
+      <el-button :loading="indicators.loading" @click="loadIndicators">刷新指标</el-button>
+      <el-alert v-if="indicators.error" :title="indicators.error" type="error" :closable="false" />
+      <template v-if="!indicators.error && indicators.state.identityBound">
+        <el-alert v-if="indicators.state.retired" title="来源已退役，下列指标仅保留依据，不再贡献检测特征。" type="warning" :closable="false" />
+        <el-alert v-if="indicators.state.expiry_error" :title="indicators.state.expiry_error" type="error" :closable="false" />
+        <el-alert v-else-if="indicators.state.expiry_pending" title="已知指标已到期，正在等待撤出发布；当前已发布库仍可能包含旧贡献。" type="warning" :closable="false" />
+        <el-alert v-if="Number(indicators.state.delivery_deferred)" title="库已提交，Agent 下发待重试；连接和正常更新仍会继续分发。" type="warning" :closable="false" />
+        <el-descriptions :column="compact ? 1 : 2" border class="indicator-state">
+          <el-descriptions-item label="完整快照">{{ indicators.state.visible_count }} 个可见指标 · {{ indicators.state.page_count }} 页</el-descriptions-item>
+          <el-descriptions-item label="本来源有效哈希">{{ indicators.state.effective_hashes }} 条</el-descriptions-item>
+          <el-descriptions-item label="审核标签">{{ indicators.state.policy?.tag }}</el-descriptions-item>
+          <el-descriptions-item label="纳入要求">置信度 ≥ {{ indicators.state.policy?.minimumConfidence }} · 本地严重程度 {{ indicators.state.policy?.severity }}</el-descriptions-item>
+          <el-descriptions-item label="上游版本">{{ indicators.state.server_version }}</el-descriptions-item>
+          <el-descriptions-item label="完整拉取时间">{{ date(indicators.state.snapshot_at) }}</el-descriptions-item>
+          <el-descriptions-item label="最近有效期检查">{{ date(indicators.state.evaluated_at) }}</el-descriptions-item>
+          <el-descriptions-item label="快照 SHA-256"><span class="digest">{{ indicators.state.snapshot_sha256 }}</span></el-descriptions-item>
+        </el-descriptions>
+        <p class="hint indicator-decisions"><span v-for="(count, reason) in indicators.state.statistics" :key="reason">{{ indicatorReasons[reason] || reason }} {{ count }}　</span></p>
+      </template>
+      <el-empty v-if="!indicators.loading && !indicators.error && !indicators.state.identityBound" description="尚无成功的完整快照，已有检测库按当前来源继续使用" />
+      <el-table v-if="!indicators.error && indicators.state.identityBound" :data="indicators.rows" v-loading="indicators.loading" empty-text="完整快照为空，本来源没有有效指标贡献">
+        <el-table-column prop="name" label="指标名称" min-width="180" />
+        <el-table-column label="当前判定" min-width="150"><template #default="{ row }">{{ indicators.state.retired ? '来源已退役' : indicatorReasons[row.reason] || row.reason }}<div v-if="row.reason === 'included' && !row.effective" class="hint">当前无有效贡献</div></template></el-table-column>
+        <el-table-column prop="confidence" label="置信度" width="90" />
+        <el-table-column label="有效至" min-width="175"><template #default="{ row }">{{ row.valid_until ? date(row.valid_until) : '未设置结束时间' }}</template></el-table-column>
+        <el-table-column label="SHA-256" min-width="220"><template #default="{ row }"><span class="digest">{{ row.sha256 || '不支持的模式' }}</span></template></el-table-column>
+        <el-table-column label="操作" width="110"><template #default="{ row }"><el-button link @click="openIndicator(row)">查看指标依据</el-button></template></el-table-column>
+      </el-table>
+      <el-pagination v-if="!indicators.error && indicators.total > 20" v-model:current-page="indicators.page" :total="indicators.total" :page-size="20" layout="prev, pager, next" @current-change="loadIndicators" />
+    </el-dialog>
+    <el-dialog :model-value="!!indicatorDetail" title="OpenCTI 指标依据" :width="compact ? 'calc(100% - 24px)' : '700px'" @close="closeIndicator">
+      <div v-if="indicatorDetail" class="native-detail">
+        <p>{{ indicatorDetail.document?.name }}</p>
+        <p>{{ indicatorDetail.state?.retired ? '来源已退役' : indicatorReasons[indicatorDetail.reason] || indicatorDetail.reason }} · {{ indicatorDetail.effective ? '已纳入当前发布贡献' : '不贡献当前检测特征' }}</p>
+        <p class="hint">这里保留本次查询返回的指标字段和筛选判定。摘要用于核对保留字段，未验证情报内容真实性或上游签名。</p>
+        <p class="digest">指标 {{ indicatorDetail.indicator_id }}</p>
+        <p>保留字段 SHA-256</p><p class="digest">{{ indicatorDetail.document_sha256 }}</p>
+        <p class="digest">{{ indicatorDetail.document?.pattern }}</p>
+        <details><summary>查询返回的指标字段</summary><pre class="original-document">{{ JSON.stringify(indicatorDetail.document, null, 2) }}</pre></details>
+      </div>
+    </el-dialog>
     <el-dialog v-model="advisories.visible" :title="`${advisories.id} · 厂商公告原件`" :width="compact ? 'calc(100% - 24px)' : '1000px'">
       <p class="hint">近期范围内发现公告，并复查已导入文档；首次发现数量受部署范围限制。每轮分批抓取，待检查文档会继续处理。公告中的修复包、源码包状态和 KB 信息按原文保留。</p>
       <el-button :loading="advisories.loading" @click="loadAdvisories">刷新公告</el-button>
@@ -196,10 +242,33 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchLibraries, fetchLibraryCves, fetchLibraryDeclarations, decideLibraryCve, retireLibrarySource, fetchLibraryGovernance, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, fetchVendorAdvisories, fetchVendorAdvisory, downloadVendorAdvisory, importCveLibrary, importVirusDb, getUser } from '../api'
+import { fetchLibraries, fetchLibraryCves, fetchLibraryDeclarations, decideLibraryCve, retireLibrarySource, fetchLibraryGovernance, synchronizeLibrary, updateLibrarySchedule, resetLibrarySchedule, fetchLibraryRuns, fetchVendorAdvisories, fetchVendorAdvisory, downloadVendorAdvisory, fetchOpenCtiIndicators, fetchOpenCtiIndicator, importCveLibrary, importVirusDb, getUser } from '../api'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 
 const state = ref({ sources: [], signature: {} })
+const indicators = ref({ visible: false, id: '', rows: [], total: 0, page: 1, state: {}, loading: false, error: '' })
+const indicatorDetail = ref(null)
+let indicatorListRequest = 0, indicatorDetailRequest = 0
+const indicatorReasons = { included: '已纳入', revoked: '上游已撤销', not_approved: '缺少审核标签', detection_disabled: '未启用检测', confidence: '置信度不足', unsupported_version: '不支持的模式版本', unsupported_pattern: '不支持的模式', missing_validity: '缺少生效时间', future: '尚未生效', expired: '已过期' }
+function closeIndicator() { indicatorDetailRequest++; indicatorDetail.value = null }
+function closeIndicators() { indicatorListRequest++; closeIndicator(); indicators.value.loading = false }
+async function showIndicators(id) {
+  closeIndicators()
+  indicators.value = { visible: true, id, rows: [], total: 0, page: 1, state: {}, loading: false, error: '' }
+  await loadIndicators()
+}
+async function loadIndicators() {
+  const id = indicators.value.id, request = ++indicatorListRequest
+  closeIndicator(); indicators.value.loading = true; indicators.value.error = ''
+  try { const data = await fetchOpenCtiIndicators(id, indicators.value.page); if (request === indicatorListRequest && indicators.value.visible) Object.assign(indicators.value, { rows: data.items, total: data.total, state: data.state }) }
+  catch (e) { if (request === indicatorListRequest) indicators.value.error = e.message }
+  finally { if (request === indicatorListRequest) indicators.value.loading = false }
+}
+async function openIndicator(row) {
+  const id = indicators.value.id, request = ++indicatorDetailRequest
+  try { const data = await fetchOpenCtiIndicator(id, row.indicator_id); if (request === indicatorDetailRequest && indicators.value.visible && indicators.value.id === id) indicatorDetail.value = data }
+  catch (e) { if (request === indicatorDetailRequest && indicators.value.visible) indicators.value.error = e.message }
+}
 const advisories = ref({ visible: false, id: '', rows: [], total: 0, page: 1, state: {}, loading: false, error: '' })
 const advisoryDetail = ref(null), advisoryDownloadError = ref(''), advisoryDownloading = ref(false)
 let advisoryRequest = 0
@@ -233,7 +302,7 @@ const showRules = ref(false), ruleRows = ref([]), rulesKeyword = ref(''), rulesP
 const declarations = ref([]), declarationsError = ref(''), declarationsLoading = ref(false), declarationDetail = ref(null)
 const governanceBusy = ref(false), governanceEvent = ref(null)
 const governance = ref({ visible: false, id: '', rows: [], page: 1, total: 0, error: '', loading: false })
-const governanceOperations = { import: '导入声明', withdraw: '本地撤销', reinstate: '本地恢复', retire: '来源退役' }
+const governanceOperations = { import: '导入声明', withdraw: '本地撤销', reinstate: '本地恢复', retire: '来源退役', opencti_snapshot: '指标完整快照', opencti_expiry: '已知指标到期撤出' }
 const declarationState = item => item.retired ? '来源已退役' : item.locally_withdrawn ? '本地已撤销' : item.document?.status === 'withdrawn' ? '上游已撤销' : '有效声明'
 let declarationRequest = 0
 function closeRule() { declarationRequest++; ruleDetail.value = null }
@@ -294,7 +363,7 @@ const user = getUser()
 const role = user?.role ?? user?.roleName
 const isAdmin = role === 'admin'
 const canImport = isAdmin || role === 'operator'
-const types = { 'ubuntu-usn': 'Ubuntu USN', 'debian-tracker': 'Debian Security Tracker', 'redhat-csaf': 'Red Hat CSAF 2.0', 'msrc-cvrf': 'Microsoft CVRF 3.0', hashes: '恶意文件哈希', 'signature-zip': '病毒特征包', malwarebazaar: 'MalwareBazaar', misp: 'MISP 文件情报', 'cve-json': '漏洞比对规则', nvd: 'NVD 漏洞信息' }
+const types = { opencti: 'OpenCTI 文件指标', 'ubuntu-usn': 'Ubuntu USN', 'debian-tracker': 'Debian Security Tracker', 'redhat-csaf': 'Red Hat CSAF 2.0', 'msrc-cvrf': 'Microsoft CVRF 3.0', hashes: '恶意文件哈希', 'signature-zip': '病毒特征包', malwarebazaar: 'MalwareBazaar', misp: 'MISP 文件情报', 'cve-json': '漏洞比对规则', nvd: 'NVD 漏洞信息' }
 const runStatus = { success: '成功', failed: '失败', running: '执行中', interrupted: '重启中断' }
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 const packageSize = value => Number.isFinite(Number(value)) && Number(value) > 0 ? `${(Number(value) / 1024).toFixed(1)} KiB` : '—'
@@ -356,11 +425,13 @@ async function importFile(event, kind) {
   finally { uploading.value = false; event.target.value = '' }
 }
 onMounted(() => { load(); timer = setInterval(load, 5000); viewport.addEventListener('change', updateViewport) })
-onUnmounted(() => { clearInterval(timer); viewport.removeEventListener('change', updateViewport) })
+onUnmounted(() => { closeIndicators(); clearInterval(timer); viewport.removeEventListener('change', updateViewport) })
 </script>
 
 <style scoped>
 .native-detail p { margin: 10px 0; line-height: 1.6; }
+.indicator-state { margin-top: 12px; }
+.indicator-decisions { line-height: 1.8; }
 .declaration { border-top: 1px solid #e2e8f0; padding: 12px 0; }
 .digest { overflow-wrap: anywhere; }
 .document-description { white-space: pre-wrap; overflow-wrap: anywhere; }

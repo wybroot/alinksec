@@ -32,13 +32,22 @@ public class FeedDownload {
             .version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
     /** Absolute deadline includes DNS, headers and body; the subscriber cancels before buffering excess bytes. */
     public Result fetchBounded(String address,Map<String,String> headers,long limit,int timeoutMs)throws IOException {
+        return requestBounded(address,headers,null,limit,timeoutMs);
+    }
+    public Result postJsonBounded(String address,Map<String,String> headers,String json,long limit,int timeoutMs)throws IOException {
+        if(json==null || json.getBytes(StandardCharsets.UTF_8).length>16*1024)throw new IllegalArgumentException("请求大小超过边界");
+        return requestBounded(address,headers,json,limit,timeoutMs);
+    }
+    private Result requestBounded(String address,Map<String,String> headers,String json,long limit,int timeoutMs)throws IOException {
         if(limit<1||timeoutMs<100||timeoutMs>30_000)throw new IllegalArgumentException("下载边界无效");
         long cap=Math.min(limit,props.getMaxDownloadBytes());if(cap<1)throw new IllegalArgumentException("下载上限无效");
         var request=HttpRequest.newBuilder(validateAddress(address)).timeout(Duration.ofMillis(timeoutMs)).header("User-Agent","ALinkSec-BaselineUpstream/1");
         headers.forEach(request::header);
+        if(json==null)request.GET();
+        else request.header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(json,StandardCharsets.UTF_8));
         Path tmp=files.temporary(".download");CompletableFuture<HttpResponse<byte[]>> pending=null;
         try {
-            pending=BOUNDED_CLIENT.sendAsync(request.GET().build(),info->{
+            pending=BOUNDED_CLIENT.sendAsync(request.build(),info->{
                 if(info.statusCode()!=200&&info.statusCode()!=304)throw new IllegalArgumentException("远端状态无效");
                 long size=info.statusCode()==304?0:info.headers().firstValueAsLong("Content-Length").orElse(-1);
                 return new LimitedBody(cap,size);

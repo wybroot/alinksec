@@ -30,6 +30,13 @@ public class LibraryCatalog {
         transaction = new TransactionTemplate(manager);
     }
     public synchronized Map<String, Object> signatures(String source, SignaturePackage pkg, boolean replace, Long actor) throws IOException {
+        return storeSignatures(source,pkg,replace,actor,false);
+    }
+    /** Only the native complete-collection/known-expiry path may publish an empty effective snapshot. */
+    synchronized Map<String,Object> nativeSignatures(String source,SignaturePackage pkg)throws IOException {
+        return storeSignatures(source,pkg,true,null,true);
+    }
+    private Map<String,Object> storeSignatures(String source,SignaturePackage pkg,boolean replace,Long actor,boolean allowEmpty)throws IOException {
         try {
             return transaction.execute(status -> {
                 try {
@@ -52,7 +59,7 @@ public class LibraryCatalog {
                             """, source, rule.path("name").asText(), JsonUtils.write(rule));
                     int count = jdbc.queryForObject("SELECT count(DISTINCT sha256) FROM t_security_hash WHERE source_id NOT IN (SELECT source_id FROM t_security_source_lifecycle WHERE retired=1)", Integer.class);
                     if (count > props.getMaxHashes()) throw new IllegalArgumentException("合并哈希库超过容量上限，已有库保留");
-                    return publishSignatures(actor, "manual".equals(source) ? pkg.version() : "", false);
+                    return publishSignatures(actor, "manual".equals(source) ? pkg.version() : "", allowEmpty);
                 } catch (IOException e) { throw new UncheckedIOException(e); }
             });
         } catch (UncheckedIOException e) { throw e.getCause(); }
@@ -192,6 +199,17 @@ public class LibraryCatalog {
     }
     synchronized <T> T nativeTransaction(String source, java.util.function.Supplier<T> action) {
         return transaction.execute(status -> { lockActiveSource(source); return action.get(); });
+    }
+    void nativeIndicatorEvent(String source,String operation,Map<String,Object> snapshot) {
+        if(!Set.of("opencti_snapshot","opencti_expiry").contains(operation))throw new IllegalArgumentException("原生指标审计类型非法");
+        String document=JsonUtils.write(snapshot);
+        if(document.getBytes(StandardCharsets.UTF_8).length>64*1024)throw new IllegalArgumentException("原生指标审计超过边界");
+        event(source,"",operation,null,"",document,snapshot);
+        jdbc.update("""
+                DELETE FROM t_security_governance_event WHERE source_id=? AND operation IN ('opencti_snapshot','opencti_expiry')
+                AND id NOT IN (SELECT id FROM t_security_governance_event WHERE source_id=?
+                    AND operation IN ('opencti_snapshot','opencti_expiry') ORDER BY recorded_at DESC,id DESC LIMIT 50)
+                """,source,source);
     }
     private int storeCves(String source, List<JsonNode> documents, Long actor, Map<String,Object> nativeProvenance) {
         if (source == null || !source.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException("规则导入来源非法");

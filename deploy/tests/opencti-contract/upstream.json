@@ -1,0 +1,27 @@
+{
+  "tag": "7.261021.1",
+  "commit": "8588d03505b09f10ef8dfa3032f29697317b940f",
+  "files": [
+    {
+      "path": "opencti-platform/opencti-graphql/src/modules/indicator/indicator.graphql",
+      "blob": "35964d3015159a0e6abb1d0981dae1e3231375ac",
+      "sha256": "01d57b822c9260b54260d8d4d971cb23edce21fcc818e93baf37a6a0c4c48ada",
+      "bytes": 8520,
+      "url": "https://raw.githubusercontent.com/OpenCTI-Platform/opencti/8588d03505b09f10ef8dfa3032f29697317b940f/opencti-platform/opencti-graphql/src/modules/indicator/indicator.graphql"
+    },
+    {
+      "path": "opencti-platform/opencti-graphql/config/schema/opencti.graphql",
+      "blob": "694b9df02e1e3f8ca04dcff78b1cee63056047ab",
+      "sha256": "c3260e62c58b105708bdf82e44d7f401c02fabe88176b27a168203f4a1c40150",
+      "bytes": 427083,
+      "url": "https://raw.githubusercontent.com/OpenCTI-Platform/opencti/8588d03505b09f10ef8dfa3032f29697317b940f/opencti-platform/opencti-graphql/config/schema/opencti.graphql"
+    },
+    {
+      "path": "opencti-platform/opencti-graphql/src/modules/user/user.graphql",
+      "blob": "a680d2d403dc83a43915c0765eb3d71d53ef7aec",
+      "sha256": "f55982f5a3534d5f1042b97333f948a36c599dd64456c5f484c1ca3a1dde154b",
+      "bytes": 7994,
+      "url": "https://raw.githubusercontent.com/OpenCTI-Platform/opencti/8588d03505b09f10ef8dfa3032f29697317b940f/opencti-platform/opencti-graphql/src/modules/user/user.graphql"
+    }
+  ]
+}

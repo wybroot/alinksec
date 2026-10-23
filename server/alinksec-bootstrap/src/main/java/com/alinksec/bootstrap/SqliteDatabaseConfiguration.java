@@ -68,7 +68,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V026__baseline_compliance_review.sql",
                 "db/common/V027__scap_interpreter.sql",
                 "db/common/V028__baseline_upstream.sql",
-                "db/common/V029__native_vendor_advisories.sql"
+                "db/common/V029__native_vendor_advisories.sql",
+                "db/common/V030__native_opencti.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();
