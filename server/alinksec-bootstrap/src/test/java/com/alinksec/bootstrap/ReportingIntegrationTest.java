@@ -105,6 +105,11 @@ class ReportingIntegrationTest {
         f.jdbc.update("INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,checked_at) VALUES (?,?,5,5,0,100,?)",id,linux,time("2026-02-01T00:00:00Z"));
         var b=section(reports.preview(q()),"baseline");assertEquals(5,number(b,"legacy"));assertEquals(0,number(b,"passed"));
     }
+    @Test void lateLegacySummaryDoesNotMoveAnOutOfPeriodTaskIntoSelection() {
+        linux=host("Old task",1,1);long id=task(linux,"2026-01-30T00:00:00Z",0);
+        f.jdbc.update("INSERT INTO t_baseline_summary(task_id,agent_id,total,passed_count,failed_count,score,checked_at) VALUES (?,?,5,5,0,100,?)",id,linux,time("2026-02-01T00:00:00Z"));
+        var baseline=section(reports.preview(q()),"baseline");assertEquals(0,number(baseline,"assigned_hosts"));assertEquals(1,number(baseline,"unassessed_hosts"));assertEquals(0,number(baseline,"legacy"));
+    }
     @Test void coverageDistinguishesNeverScannedStaleInventoryAndPendingSelection() {
         linux=host("Coverage",1,1);f.jdbc.update("UPDATE t_agent SET software_collection_status='complete',software_revision=2 WHERE agent_id=?",linux);
         assertEquals("not_scanned",rows(reports.preview(q()),"coverage").get(0).get("status"));
