@@ -37,6 +37,7 @@ type fileState struct {
 	Start      int64  `json:"start"`
 	Prefix     []byte `json:"prefix,omitempty"`
 	Total      int64  `json:"total"`
+	EndsCR     bool   `json:"ends_cr,omitempty"`
 	Observed   int64  `json:"observed"`
 	Issue      string `json:"issue"`
 	NoticeSeq  uint64 `json:"notice_seq"`
@@ -144,6 +145,7 @@ func (c *Collector) tailFile(path, source string) {
 			s.Start = 0
 			s.Prefix = nil
 			s.Total = 0
+			s.EndsCR = false
 			s.Observed = 0
 		}
 		s.Identity = identity
@@ -172,6 +174,7 @@ func (c *Collector) tailFile(path, source string) {
 			if s.Total == 0 {
 				s.Start = s.Offset
 				s.Observed = time.Now().UnixMilli()
+				s.EndsCR = false
 			}
 			s.Offset += int64(len(part))
 			readBytes += len(part)
@@ -184,11 +187,13 @@ func (c *Collector) tailFile(path, source string) {
 				s.Prefix = append(s.Prefix, body[:min(remaining, len(body))]...)
 			}
 			s.Total += int64(len(body))
+			if len(body) > 0 {
+				s.EndsCR = body[len(body)-1] == '\r'
+			}
 			if complete {
 				original := s.Total
 				ending := "lf"
-				lastCR := len(body) > 0 && body[len(body)-1] == '\r'
-				if lastCR {
+				if s.EndsCR {
 					ending = "crlf"
 					original--
 					if s.Total <= maxLineBytes {
@@ -216,6 +221,7 @@ func (c *Collector) tailFile(path, source string) {
 				batchBytes += len(content)
 				s.Prefix = nil
 				s.Total = 0
+				s.EndsCR = false
 				s.Observed = 0
 				s.Start = s.Offset
 			}
@@ -244,6 +250,13 @@ func (c *Collector) loadState() {
 			if len(path) > 4096 || s.Offset < 0 || s.Start < 0 || s.Start > s.Offset || s.Total != s.Offset-s.Start || len(s.Prefix) > maxLineBytes || int64(len(s.Prefix)) > s.Total || len(s.Generation) > 32 || len(s.Identity) > 128 {
 				c.stateInvalid = true
 				return
+			}
+			// Older bounded cursors without ends_cr still retain the complete
+			// fragment when it fits in Prefix. A truncated fragment records its
+			// actual last byte separately from its retained prefix.
+			if s.Total == int64(len(s.Prefix)) {
+				s.EndsCR = len(s.Prefix) > 0 && s.Prefix[len(s.Prefix)-1] == '\r'
+				saved.Files[path] = s
 			}
 		}
 		if saved.Files != nil {

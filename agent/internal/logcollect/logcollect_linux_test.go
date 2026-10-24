@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,55 @@ func TestRawLogPartialLineSurvivesRestartWithoutChangingWhitespace(t *testing.T)
 	rows = rawOnly(got)
 	if len(rows) != 3 || rows[2].Content != "partial finished" || rows[2].Fields["timestamp_kind"] != "observed" {
 		t.Fatalf("restart or EOF duplicated/dropped: %+v", rows)
+	}
+}
+func TestRawLogCRLFSplitAcrossReadAndRestartBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		size    int
+		restart bool
+	}{
+		{"reader-boundary", 4095, false},
+		{"restart-boundary", 7, true},
+		{"truncated-poll-and-restart", maxPollBytes - 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "auth.log")
+			body := strings.Repeat("x", tc.size)
+			data := body + "\r"
+			if !tc.restart {
+				data += "\n"
+			}
+			put(t, path, []byte(data))
+			var got []*pb.LogLine
+			c := testCollector(t, dir, &got)
+			c.tailFile(path, "auth.log")
+			if tc.restart {
+				if len(rawOnly(got)) != 0 {
+					t.Fatal("partial line emitted")
+				}
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = f.WriteString("\n")
+				closeErr := f.Close()
+				if err != nil || closeErr != nil {
+					t.Fatal(err, closeErr)
+				}
+				c = testCollector(t, dir, &got)
+				c.tailFile(path, "auth.log")
+			}
+			rows := rawOnly(got)
+			if len(rows) != 1 {
+				t.Fatalf("raw row count: %d", len(rows))
+			}
+			row := rows[0]
+			if row.Content != body[:min(len(body), maxLineBytes)] || row.Fields["line_ending"] != "crlf" || row.Fields["original_bytes"] != strconv.Itoa(tc.size) || row.Fields["truncated"] != strconv.FormatBool(tc.size > maxLineBytes) {
+				t.Fatalf("split CRLF changed text or metadata: content bytes=%d fields=%v", len(row.Content), row.Fields)
+			}
+		})
 	}
 }
 func TestRawLogOversizeFragmentsStayBoundedAndLabelConversions(t *testing.T) {
