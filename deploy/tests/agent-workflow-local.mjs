@@ -374,18 +374,6 @@ try {
   await stopAgent(first)
   const oldCA = new X509Certificate(readFileSync(join(root, 'data/certs/ca.crt'))).fingerprint256
   await stopServer()
-  if (!passed || cleanupFailed) {
-    const output = join(repo, '.tmp/agent-workflow-diagnostics', root.split('/').at(-1))
-    mkdirSync(output, {recursive:true, mode:0o700})
-    const secrets = [password, token, 'ENROLL-agent-workflow', 'agent-workflow-jwt-secret']
-    for (const name of ['server.log', ...containers.map(id => `${id.slice(0, 12)}.log`)]) {
-      if (existsSync(join(root, name))) writeFileSync(join(output, name), diagnosticTail(join(root, name), secrets), {mode:0o600})
-    }
-    writeFileSync(join(output, 'processes.json'), JSON.stringify({passed, cleanupFailed,
-      serverProcesses:serverProcesses.map(({child, code, signal, spawnError}) => ({pid:child.pid, code, signal, spawnError})),
-      scope:'Bounded redacted process logs; private fixture files excluded'}, null, 2), {mode:0o600})
-    console.error(`Sanitized diagnostics: ${output}`)
-  }
   accessHost = 'ci-repaired.alinksec.test'
   await startServer(accessHost, true)
   rmSync(join(root, 'data/certs'), { recursive: true })
@@ -433,6 +421,18 @@ try {
         '--entrypoint=/bin/rm', image, '-rf', ...agentWorkDirs])
       rmSync(root, { recursive: true, force: true })
     } catch (error) { cleanupFailed = true; console.error(error.message) }
+  }
+  if (!passed || cleanupFailed) {
+    const output = join(repo, '.tmp/agent-workflow-diagnostics', root.split('/').at(-1))
+    mkdirSync(output, {recursive:true, mode:0o700})
+    const secrets = [password, token, 'ENROLL-agent-workflow', 'agent-workflow-jwt-secret']
+    for (const name of ['server.log', ...containers.map(id => `${id.slice(0, 12)}.log`)]) {
+      if (existsSync(join(root, name))) writeFileSync(join(output, name), diagnosticTail(join(root, name), secrets), {mode:0o600})
+    }
+    writeFileSync(join(output, 'processes.json'), JSON.stringify({passed, cleanupFailed,
+      serverProcesses:serverProcesses.map(({child, code, signal, spawnError}) => ({pid:child.pid, code, signal, spawnError})),
+      scope:'Bounded redacted process logs; private fixture files excluded'}, null, 2), {mode:0o600})
+    console.error(`Sanitized diagnostics: ${output}`)
   }
   if (!passed || cleanupFailed) console.error(`Validation artifacts: ${root}`)
   if (cleanupFailed) throw new Error('Could not remove Agent validation containers')

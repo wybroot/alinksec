@@ -79,7 +79,8 @@ func assertIsolationNativeRules(t *testing.T, l *isolation.Lease) {
 }
 func crashIsolationNativeOwner(t *testing.T) {
 	t.Helper()
-	nativeIsolationCommand(t, "systemctl", "kill", "--signal=SIGKILL", "--kill-whom=main", "alinksec-agent-isolation-watchdog.service")
+	// The original spelling is supported by both Ubuntu 22 and newer systemd.
+	nativeIsolationCommand(t, "systemctl", "kill", "--signal=SIGKILL", "--kill-who=main", "alinksec-agent-isolation-watchdog.service")
 }
 func waitIsolationNativeRemoved(t *testing.T) {
 	t.Helper()

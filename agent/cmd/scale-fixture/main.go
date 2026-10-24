@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 type settings struct {
@@ -41,6 +42,18 @@ type settings struct {
 	LogSeconds       int      `json:"logSeconds"`
 	stopProducers    <-chan struct{}
 	producersStopped chan<- struct{}
+}
+
+// Only fixed local labels and gRPC status enums may enter public evidence.
+type fixtureFailure string
+
+func (f fixtureFailure) Error() string { return string(f) }
+func safeFailure(err error) string {
+	var fixed fixtureFailure
+	if errors.As(err, &fixed) {
+		return string(fixed)
+	}
+	return "stream_" + status.Code(err).String()
 }
 
 var outputMu sync.Mutex
@@ -87,7 +100,7 @@ func enroll(ctx context.Context, s settings, index int, pool *x509.CertPool) (*c
 	}
 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: pool, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12})))
 	if err != nil {
-		return nil, err
+		return nil, fixtureFailure("enrollment_connection_" + status.Code(err).String())
 	}
 	defer conn.Close()
 	rpcCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -96,7 +109,7 @@ func enroll(ctx context.Context, s settings, index int, pool *x509.CertPool) (*c
 	response, err := pb.NewEnrollServiceClient(conn).Enroll(rpcCtx, &pb.EnrollRequest{EnrollToken: s.Token, Nonce: uuid(), Host: &pb.HostInfo{
 		Hostname: "synthetic-" + id, MachineId: "synthetic-" + id, OsType: pb.OsType_OS_LINUX, OsVersion: "synthetic protocol fixture", Kernel: "not-a-real-host", Arch: runtime.GOARCH, AgentVersion: "synthetic-fixture"}})
 	if err != nil {
-		return nil, err
+		return nil, fixtureFailure("enrollment_rpc_" + status.Code(err).String())
 	}
 	cert, err := tls.X509KeyPair(response.ClientCert, response.ClientKey)
 	if err != nil {
@@ -207,10 +220,10 @@ func (c *client) run(ctx context.Context, s settings, index int, ready chan<- st
 			}
 		case cmd := <-c.commands:
 			if cmd.CmdId == "" {
-				return errors.New("unexpected ephemeral command")
+				return fixtureFailure("unexpected_ephemeral_command")
 			}
 			if cmd.GetCollectNow() == nil && cmd.GetPolicySync() == nil {
-				return errors.New("unexpected actionable command")
+				return fixtureFailure("unexpected_actionable_command")
 			}
 			if policy := cmd.GetPolicySync(); policy != nil {
 				policyVersion = policy.PolicyVersion
@@ -311,11 +324,11 @@ func run() error {
 		select {
 		case id := <-ready:
 			ids = append(ids, id)
-		case <-errorsCh:
+		case failure := <-errorsCh:
 			cancel()
 			workers.Wait()
 			clients.Wait()
-			return errors.New("synthetic enrollment or stream startup failed")
+			return errors.New("synthetic startup failed: " + safeFailure(failure))
 		case <-deadline.C:
 			cancel()
 			workers.Wait()

@@ -105,6 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cluster-evidence-${{ matrix.arch }}
+          include-hidden-files: true
           path: |
             .tmp/cluster-native
             .tmp/cluster-fixtures
@@ -975,6 +976,10 @@ jobs:
         with:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Prepare native platform tools without starting listeners
         run: |
           sudo apt-get update -qq
@@ -1031,6 +1036,11 @@ jobs:
         run: |
           (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
           bash deploy/tests/dnf-native.sh
+      - name: Compile same-commit independent package version oracle
+        run: |
+          mkdir -p server/alinksec-service/target/classes server/alinksec-service/target/test-classes
+          javac -J-Xmx64m -d server/alinksec-service/target/classes server/alinksec-service/src/main/java/com/alinksec/service/scan/PackageVersions.java
+          javac -J-Xmx64m -cp server/alinksec-service/target/classes -d server/alinksec-service/target/test-classes server/alinksec-service/src/test/java/com/alinksec/service/scan/PackageVersionOracle.java
       - name: Compare full package versions with native RPM and DPKG ordering
         run: python3 -B deploy/tests/package-version-native.py
       - name: Check native DPKG and RPM inventory identities
@@ -1109,6 +1119,8 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Install native resolver required by restored SQLite API checks
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
       - name: Build same-commit SQLite application fixture
         run: mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
         env:
@@ -1162,6 +1174,8 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Install native resolver required by deployment maintenance API checks
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
       - name: Build same-commit Java fixture and install production browser dependencies
         run: |
           mvn -B -ntp -T1 -f server/pom.xml -DskipTests package

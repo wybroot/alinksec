@@ -265,7 +265,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	if int(r.Process.PID) != aliasWriter.Process.Pid || !alive(aliasWriter) || !alive(newer) {
 		t.Fatalf("short-path writer identity: %+v", r)
 	}
-	add("short_alias_unicode_rename_matches_long_policy_root", map[string]any{"attribution": r, "aliasRoot": aliasRoot, "longRoot": root})
+	add("short_alias_unicode_rename_matches_long_policy_root", map[string]any{"attribution": r, "writerPID": aliasWriter.Process.Pid, "aliasRoot": aliasRoot, "longRoot": root})
 
 	path = filepath.Join(root, "multi.dat")
 	since = time.Now()

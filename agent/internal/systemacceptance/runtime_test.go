@@ -37,10 +37,22 @@ func TestActualSystemInterfaces(t *testing.T) {
 	if inv.GetStatus() != pb.SoftwareInventory_COMPLETE || len(snapshot.Software) == 0 {
 		t.Fatalf("actual installed software inventory: %+v packages=%d", inv, len(snapshot.Software))
 	}
+	missingVersions := 0
 	for _, item := range snapshot.Software {
-		if item.Name == "" || item.Version == "" || item.Source == "" {
+		if item.Name == "" || item.Source == "" {
 			t.Fatal("incomplete package identity")
 		}
+		if item.Version == "" {
+			// Windows uninstall registry entries can legitimately omit
+			// DisplayVersion. Preserve absence instead of inventing a version.
+			if runtime.GOOS != "windows" || item.Source != "registry" {
+				t.Fatal("native package manager omitted a version")
+			}
+			missingVersions++
+		}
+	}
+	if missingVersions == len(snapshot.Software) {
+		t.Fatal("no actual software versions observed")
 	}
 	root := filepath.Join(t.TempDir(), "系统适配 with spaces")
 	if err := os.Mkdir(root, 0700); err != nil {
@@ -105,8 +117,8 @@ func TestActualSystemInterfaces(t *testing.T) {
 	})
 	result := map[string]any{"passed": true, "head": os.Getenv("GITHUB_SHA"), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH,
 		"osVersion": host.OsVersion, "kernel": host.Kernel, "scope": os.Getenv("ALINKSEC_SYSTEM_SCOPE"), "image": os.Getenv("ALINKSEC_SYSTEM_IMAGE"),
-		"packageCount": len(snapshot.Software), "inventory": inv, "watcher": m.Status(), "elapsedMillis": time.Since(started).Milliseconds(),
-		"checks": []string{"actual_os_identity", "actual_installed_software_complete", "package_name_version_source", "private_unicode_journal", "actual_native_file_event", "actual_native_rename", "bounded_watcher_shutdown"}}
+		"packageCount": len(snapshot.Software), "missingVersionCount": missingVersions, "inventory": inv, "watcher": m.Status(), "elapsedMillis": time.Since(started).Milliseconds(),
+		"checks": []string{"actual_os_identity", "actual_installed_software_complete", "package_identity_and_version_availability", "private_unicode_journal", "actual_native_file_event", "actual_native_rename", "bounded_watcher_shutdown"}}
 	cancel()
 	select {
 	case <-done:
