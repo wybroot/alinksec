@@ -42,12 +42,12 @@ import { fetchClusterStatus, retryClusterReport } from '../api'
 const data = ref(null), loading = ref(false), busy = ref(false), error = ref(''), stale = ref(false), dialog = ref(false), selected = ref(null), note = ref('')
 let alive = true, sequence = 0
 const kinds = { ASSET: '资产报告', BASELINE_RESULT: '基线结果', LOG_BATCH: '日志批次' }
-const reportIssues = { report_rejected: '内容校验失败，无法重试', agent_revoked: '主机已停用或删除', processing_failed: '业务处理失败，请先恢复服务' }
+const reportIssues = { report_rejected: '内容校验失败，无法重试', asset_superseded: '已有更新的资产报告，请重新采集主机资产', agent_revoked: '主机已停用或删除', processing_failed: '业务处理失败，请先恢复服务' }
 const issues = { redis_unavailable: '会话协调服务暂不可用', rabbit_unavailable: '报告队列服务暂不可用', postgres_unavailable: '数据库暂不可用', cluster_shared_storage_mismatch: '节点无法读取一致的共享存储', cluster_material_changed: '共享证书或配置材料已变化', cluster_node_replaced: '节点身份已被其他进程接管', cluster_readiness_expired: '节点状态长时间未更新', cluster_redis_configuration_mismatch: '会话协调配置不一致' }
 const issue = code => issues[code] || '节点协调状态异常，请检查部署与依赖服务'
 const bytes = value => Number(value) < 1048576 ? `${Number(value).toLocaleString('zh-CN')} B` : `${(Number(value) / 1048576).toFixed(1)} MiB`
 const timestamp = value => Number(value) > 0 ? new Date(Number(value)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
-const canRetry = row => !loading.value && !busy.value && !stale.value && !!data.value?.ready && Number(row.replay_count) < 3 && row.error_code !== 'report_rejected'
+const canRetry = row => !loading.value && !busy.value && !stale.value && !!data.value?.ready && Number(row.replay_count) < 3 && !['report_rejected', 'asset_superseded'].includes(row.error_code)
 async function refresh() {
   const current = ++sequence; loading.value = true; error.value = ''
   try { const result = await fetchClusterStatus(); if (alive && current === sequence) { data.value = result; stale.value = false } }

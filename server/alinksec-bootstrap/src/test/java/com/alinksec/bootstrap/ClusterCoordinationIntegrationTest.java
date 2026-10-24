@@ -134,6 +134,14 @@ class ClusterCoordinationIntegrationTest {
         }
         second.processHint(hint("ordered-1"));assertEquals(3,jdbc.queryForObject("SELECT COUNT(*) FROM t_cluster_ingress WHERE state='applied'",Integer.class));
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM t_cluster_ingress WHERE state='applied' AND content_b64<>''",Integer.class));
+        admit(first,ports("superseded",2000));jdbc.update("UPDATE t_cluster_ingress SET state='dead',error_code='processing_failed',attempts=5 WHERE id=?",hint("superseded"));
+        admit(first,ports("latest",2001));second.processHint(hint("latest"));assertEquals(2001,jdbc.queryForObject("SELECT port FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
+        jdbc.update("DELETE FROM t_cluster_ingress WHERE state='applied'"); // The asset watermark must outlive inbox retention.
+        var console=new ClusterConsoleService(a.properties,a.runtime,a.rabbit,jdbc,manager);
+        assertThrows(IllegalArgumentException.class,()->console.retry(hint("superseded"),new ClusterConsoleService.Retry(row("superseded").get("content_sha256").toString(),"stale snapshot"),actor));
+        jdbc.update("UPDATE t_cluster_ingress SET state='retry',attempts=0 WHERE id=?",hint("superseded"));
+        second.processHint(hint("superseded"));assertEquals("asset_superseded",row("superseded").get("error_code"));assertEquals("dead",row("superseded").get("state"));
+        assertEquals(2001,jdbc.queryForObject("SELECT port FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
     }
     @Test void actualBrokerRedeliveryAfterCommitBeforeAckDoesNotApplyLogTwice()throws Exception {
         var receiver=ingress(b);admit(ingress(a),logs("ack-loss","one durable log"));String id=hint("ack-loss");a.rabbit.publish(id);

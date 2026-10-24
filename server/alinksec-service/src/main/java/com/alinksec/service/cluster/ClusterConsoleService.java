@@ -65,10 +65,13 @@ public class ClusterConsoleService {
             if(rows.size()!=1) throw new IllegalArgumentException("失败报告已被清理，请刷新");
             var row=rows.get(0);
             if(!row.get("state").equals("dead") || !row.get("content_sha256").equals(change.sha256())
-                    || ((Number)row.get("replay_count")).intValue()>=3 || row.get("error_code").equals("report_rejected"))
+                    || ((Number)row.get("replay_count")).intValue()>=3 || Set.of("report_rejected","asset_superseded").contains(row.get("error_code")))
                 throw new IllegalArgumentException("报告状态已变化、内容无效或已达到三次人工重试上限");
             var states=jdbc.queryForList("SELECT status FROM t_agent WHERE agent_id=?",Integer.class,row.get("agent_id"));
             if(states.size()!=1 || states.get(0)<0 || states.get(0)>2) throw new IllegalArgumentException("主机已停用或删除，不能重试");
+            if(row.get("payload_type").equals("ASSET") && jdbc.queryForObject("SELECT cluster_asset_sequence FROM t_agent WHERE agent_id=?",
+                    Long.class,row.get("agent_id"))>((Number)row.get("sequence_id")).longValue())
+                throw new IllegalArgumentException("已有更新的资产报告，请重新采集主机资产");
             long pending=jdbc.queryForObject("SELECT COUNT(*) FROM t_cluster_ingress WHERE state IN ('pending','retry')",Long.class);
             if(pending>=properties.getMaxPendingReports())throw new IllegalArgumentException("待处理报告已达到容量上限");
             jdbc.update("""

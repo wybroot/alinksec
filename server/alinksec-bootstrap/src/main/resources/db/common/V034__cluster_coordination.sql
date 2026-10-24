@@ -65,3 +65,4 @@ CREATE TABLE t_cluster_job_slot (
 ALTER TABLE t_alert_notify_delivery ADD COLUMN claim_token VARCHAR(36) NOT NULL DEFAULT '';
 ALTER TABLE t_alert_notify_delivery ADD COLUMN lease_until BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE t_alert_notify_delivery ADD COLUMN next_attempt_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE t_agent ADD COLUMN cluster_asset_sequence BIGINT NOT NULL DEFAULT 0;

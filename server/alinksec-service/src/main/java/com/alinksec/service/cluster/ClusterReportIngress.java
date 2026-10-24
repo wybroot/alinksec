@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Authenticated admission is durable before publication; hints cannot authorize or replace report bytes. */
 @Service
 public class ClusterReportIngress {
+    private static final class SupersededAsset extends IllegalStateException {}
     private static final Set<Report.PayloadCase> ASYNC=Set.of(Report.PayloadCase.ASSET,
             Report.PayloadCase.BASELINE_RESULT,Report.PayloadCase.LOG_BATCH);
     private final ClusterProperties properties;
@@ -121,7 +122,11 @@ public class ClusterReportIngress {
                 failed.set(row);
                 requireAgent(agent,true);
                 Report report=decode(row);
+                // A manually replayed failed snapshot must not replace facts from a newer snapshot.
+                if(report.hasAsset() && jdbc.queryForObject("SELECT cluster_asset_sequence FROM t_agent WHERE agent_id=?",
+                        Long.class,agent)>number(row,"sequence_id"))throw new SupersededAsset();
                 dispatcher.dispatchQueued(agent,report);
+                if(report.hasAsset())jdbc.update("UPDATE t_agent SET cluster_asset_sequence=? WHERE agent_id=?",row.get("sequence_id"),agent);
                 jdbc.update("""
                         UPDATE t_cluster_ingress SET state='applied',content_b64='',finished_at=?,error_code=''
                         WHERE id=? AND state IN ('pending','retry')
@@ -142,8 +147,8 @@ public class ClusterReportIngress {
             var fresh=jdbc.queryForList("SELECT attempts,state FROM t_cluster_ingress WHERE id=?",row.get("id"));
             if(fresh.isEmpty() || !Set.of("pending","retry").contains(fresh.get(0).get("state"))) return;
             int attempts=((Number)fresh.get(0).get("attempts")).intValue()+1;
-            boolean dead=attempts>=5 || failure instanceof SecurityException;
-            String code=failure instanceof IllegalArgumentException ? "report_rejected" : failure instanceof SecurityException ? "agent_revoked" : "processing_failed";
+            boolean dead=attempts>=5 || failure instanceof SecurityException || failure instanceof SupersededAsset;
+            String code=failure instanceof SupersededAsset ? "asset_superseded" : failure instanceof IllegalArgumentException ? "report_rejected" : failure instanceof SecurityException ? "agent_revoked" : "processing_failed";
             long now=now();
             jdbc.update("""
                     UPDATE t_cluster_ingress SET state=?,attempts=?,next_attempt_at=?,published_at=0,error_code=?,finished_at=?

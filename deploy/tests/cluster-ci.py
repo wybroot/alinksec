@@ -69,6 +69,16 @@ def free_port():
         server.bind(('127.0.0.1', 0))
         return server.getsockname()[1]
 
+class FixtureExited(Exception):
+    pass
+
+def broker_listening(ident, port):
+    state = json.loads(command(['docker', 'inspect', '--format', '{{json .State}}', ident]))
+    if not state['Running']:
+        raise FixtureExited('RabbitMQ exited: ' + json.dumps(state))
+    with socket.create_connection(('127.0.0.1', port), timeout=1):
+        return True
+
 def container(name, image, arguments=(), *, environment=None, mounts=(), memory='256m', host=False, ports=(), command_args=()):
     arguments = ['docker', 'run', '-d', '--name', prefix + '-' + name, '--label', 'alinksec.cluster-validation=' + prefix, '--memory=' + memory,
                  '--memory-swap=' + memory, '--cpus=1', '--pids-limit=256',
@@ -155,11 +165,12 @@ try:
                       mounts=[(redis_config, '/usr/local/etc/redis/redis.conf', True)], memory='96m', ports=[6379],
                       command_args=['redis-server', '/usr/local/etc/redis/redis.conf'])
     rabbit = container('rabbit', 'rabbitmq:4.3.7-alpine', environment={'RABBITMQ_DEFAULT_USER': 'cluster_test', 'RABBITMQ_DEFAULT_PASS': rabbit_password,
-                       'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS': '+S 2:2 +A 4'}, memory='768m', ports=[5672])
+                       'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS': '+S 2:2 +A 4', 'RABBITMQ_CTL_ERL_ARGS': '+S 1:1 +A 2'}, memory='1024m', ports=[5672])
     redis_uri = f'redis://default:{redis_password}@127.0.0.1:{mapped(redis,6379)}/0'
     rabbit_uri = f'amqp://cluster_test:{rabbit_password}@127.0.0.1:{mapped(rabbit,5672)}/%2F'
     until(lambda: command(['docker', 'exec', '-e', 'REDISCLI_AUTH=' + redis_password, redis, 'redis-cli', 'PING']) == 'PONG', 'Redis authenticated')
-    until(lambda: command(['docker', 'exec', rabbit, 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']) is not None, 'RabbitMQ authenticated endpoint', 120)
+    # Avoid starting a second Erlang VM on every probe. Actual client authentication follows in JUnit.
+    until(lambda: broker_listening(rabbit, mapped(rabbit,5672)), 'RabbitMQ listening endpoint', 120)
     integration_environment = {'ALINKSEC_CLUSTER_TEST_REQUIRED': 'true', 'ALINKSEC_INTEGRATION_PG_URL': f'jdbc:postgresql://127.0.0.1:{pg_port}/alinksec?stringtype=unspecified',
             'ALINKSEC_INTEGRATION_PG_USER': 'alinksec_app', 'ALINKSEC_INTEGRATION_PG_PASSWORD': app_password,
             'ALINKSEC_CLUSTER_TEST_REDIS_URI': redis_uri, 'ALINKSEC_CLUSTER_TEST_RABBIT_URI': rabbit_uri,
@@ -284,11 +295,14 @@ try:
     passed = True
 finally:
     with contextlib.suppress(Exception):
-        owned = command(['docker', 'ps', '-aq', '--filter', 'label=alinksec.cluster-validation=' + prefix]).splitlines()
+        owned = command(['docker', 'ps', '-aq', '--no-trunc', '--filter', 'label=alinksec.cluster-validation=' + prefix]).splitlines()
         for ident in owned:
             if ident not in containers:
                 containers.append(ident)
     for ident in reversed(containers):
+        with contextlib.suppress(Exception):
+            state = json.loads(command(['docker', 'inspect', '--format', '{{json .State}}', ident]))
+            (OUTPUT / ('container-' + ident[:12] + '-state.json')).write_text(json.dumps(state, indent=2) + '\n')
         with contextlib.suppress(Exception):
             run = subprocess.run(['docker', 'logs', ident], capture_output=True, text=True, timeout=10)
             (OUTPUT / ('container-' + ident[:12] + '.log')).write_text(redact(run.stdout + run.stderr))
