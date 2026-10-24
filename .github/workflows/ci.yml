@@ -1566,13 +1566,21 @@ jobs:
           cache-dependency-path: server/**/pom.xml
       - name: Capture bounded original public publisher documents
         run: python3 deploy/tests/vendor-native-samples.py .tmp/vendor-native-samples
+      - name: Pull the production VictoriaMetrics version for disposable external acceptance
+        run: docker pull quay.io/victoriametrics/victoria-metrics:v1.102.0
       - name: Check strict native formats against original publisher bytes
         working-directory: server
-        run: mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=VendorAdvisoryAdapterTest,VendorAdvisoryIndexTest,VendorAdvisoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: >-
+          python3 ../deploy/tests/external-services.py --output ../.tmp/external-services --
+          mvn -B -T1 -pl alinksec-bootstrap -am
+          -Dtest=MetricsForwarderTest,VendorAdvisoryAdapterTest,VendorAdvisoryIndexTest,VendorAdvisoryIntegrationTest,VendorAdvisoryLiveIntegrationTest,ExternalMetricsIntegrationTest
+          -Dsurefire.failIfNoSpecifiedTests=false -DargLine=-Xmx256m test
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_VENDOR_NATIVE_SAMPLES: ${{ github.workspace }}/.tmp/vendor-native-samples
           ALINKSEC_VENDOR_ADVISORY_FIXTURES: ${{ github.workspace }}/.tmp/vendor-advisory-fixtures
+      - name: Verify real external evidence and require every live test without skips
+        run: python3 deploy/tests/external-services-verdict.py .tmp/external-services server/alinksec-bootstrap/target/surefire-reports "$GITHUB_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -1594,7 +1602,9 @@ jobs:
             .tmp/vendor-native-samples
             .tmp/vendor-advisory-fixtures
             .tmp/vendor-advisory-browser
+            .tmp/external-services
             server/**/target/surefire-reports/*VendorAdvisory*
+            server/**/target/surefire-reports/*ExternalMetrics*
           include-hidden-files: true
           if-no-files-found: error
 
