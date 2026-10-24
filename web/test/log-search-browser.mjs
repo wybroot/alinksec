@@ -59,7 +59,7 @@ try {
   const panel = page.locator('.log-search'), tableRows = panel.locator('.el-table__body tr')
   const search = () => panel.getByRole('button', { name: '检索', exact: true }).click()
   const keyword = panel.getByRole('textbox', { name: '原文字面关键词', exact: true })
-  const shot = async name => { await page.screenshot({ path: resolve(output, name), animations: 'disabled', fullPage: true }); screenshots.push(name) }
+  const shot = async name => { await expect(panel.locator('.el-loading-mask')).toHaveCount(0); await page.screenshot({ path: resolve(output, name), animations: 'disabled', fullPage: true }); screenshots.push(name) }
   await page.goto(base + '/logs'); await expect(panel).toContainText('尚未检索'); assert.equal(requests.length, 0)
   await search(); await expect(tableRows).toHaveCount(4); await expect(panel).toContainText('原文已截断'); await expect(panel).toContainText('采集状态')
   await expect(panel).toContainText('<img src=x onerror=window.logXss=true>'); assert.equal(await page.evaluate(() => !!window.logXss), false)
@@ -79,7 +79,7 @@ try {
   await panel.getByRole('button', { name: '导出本页 NDJSON', exact: true }).click(); await expect(panel).toContainText('日志导出摘要不匹配'); assert.equal(invalidSaved, false); page.off('download', onDownload); badDigest = false
   checks.push('invalid_export_digest_blocks_save')
   await search(); await expect(tableRows).toHaveCount(4); await rawRow.getByRole('button', { name: '查看原文', exact: true }).click(); await expect.poll(() => panel.locator('.log-raw').textContent()).toBe(fixture.detail.content)
-  await page.setViewportSize({ width: 390, height: 844 }); await shot('logs-detail-mobile.png')
+  await page.setViewportSize({ width: 390, height: 844 }); await panel.locator('.log-detail').scrollIntoViewIfNeeded(); await shot('logs-detail-mobile.png')
   const bounds = await panel.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391)
   const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth })); assert.ok(width.scroll <= width.client + 1)
   await panel.getByRole('button', { name: '关闭原文', exact: true }).click()
@@ -91,9 +91,9 @@ try {
   await search(); await expect(tableRows).toHaveCount(50); await panel.getByRole('button', { name: '继续扫描', exact: true }).click(); await expect(tableRows).toHaveCount(10); await expect(panel).toContainText('本次扫描已完成')
   checks.push('filter_changes_disable_stale_actions_and_real_cursor_continuation')
   await keyword.fill('%_'); await search(); await expect(tableRows).toHaveCount(1); await expect(tableRows).toContainText('auth%_')
-  await keyword.fill('absent-keyword'); await search(); await expect(tableRows).toHaveCount(0); await expect(panel).toContainText('本次检索范围内没有匹配日志'); await shot('logs-empty-mobile.png')
+  await keyword.fill('absent-keyword'); await search(); await expect(tableRows).toHaveCount(0); await expect(panel).toContainText('本次检索范围内没有匹配日志'); await panel.locator('.log-empty').scrollIntoViewIfNeeded(); await shot('logs-empty-mobile.png')
   checks.push('literal_keyword_and_true_empty_results')
-  await keyword.fill(''); await search(); await expect(tableRows).toHaveCount(4); failList = true; await search(); await expect(panel).toContainText('日志检索暂不可用'); await expect(panel).toContainText('当前结果已过期'); await expect(panel.getByRole('button', { name: '导出本页 CSV', exact: true })).toBeDisabled(); await shot('logs-error-mobile.png')
+  await keyword.fill(''); await search(); await expect(tableRows).toHaveCount(4); failList = true; await search(); await expect(panel).toContainText('日志检索暂不可用'); await expect(panel).toContainText('当前结果已过期'); await expect(panel.getByRole('button', { name: '导出本页 CSV', exact: true })).toBeDisabled(); await panel.locator('.log-notice').first().scrollIntoViewIfNeeded(); await shot('logs-error-mobile.png')
   failList = false; await search(); await expect(panel.getByRole('button', { name: '导出本页 CSV', exact: true })).toBeEnabled(); checks.push('failed_refresh_marks_stale_and_retry_restores_actions')
   const previous = requests.length; await page.evaluate(() => sessionStorage.setItem('logrole', 'viewer')); await page.reload(); await expect(panel).toContainText('需要当前有效管理员账号'); await expect(panel.getByRole('button', { name: '检索', exact: true })).toHaveCount(0); assert.equal(requests.length, previous)
   checks.push('viewer_page_makes_no_sensitive_requests')
