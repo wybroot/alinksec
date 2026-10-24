@@ -399,10 +399,10 @@ func (s *winTrace) dosPath(path string) string {
 	path = cleanPath(path)
 	for device, drive := range s.devices {
 		if strings.HasPrefix(path, device+`\`) {
-			return drive + strings.TrimPrefix(path, device)
+			return matchPath(drive + strings.TrimPrefix(path, device))
 		}
 	}
-	return path
+	return matchPath(path)
 }
 
 func (s *winTrace) onEvent(r *eventRecord) {

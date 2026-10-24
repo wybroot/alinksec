@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,17 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		t.Skip("requires native Windows validation")
 	}
 	root := t.TempDir()
+	// Exercise the long policy root even when TEMP itself uses RUNNER~1.
+	rootUTF, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nameBuf := make([]uint16, 32768)
+	n, err := windows.GetLongPathName(rootUTF, &nameBuf[0], uint32(len(nameBuf)))
+	if err != nil || n == 0 || n >= uint32(len(nameBuf)) {
+		t.Fatal("long fixture path", err)
+	}
+	root = windows.UTF16ToString(nameBuf[:n])
 	work := t.TempDir()
 	enabled := true
 	cfg := &config.DecoyConfig{Enabled: &enabled, Dirs: []string{root}, WatchTrees: []string{root}, Response: "kill", CountPerDir: 1}
@@ -231,6 +243,29 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		t.Fatalf("reader misattributed: %s", event.Detail)
 	}
 	add("reader_and_unrelated_process_not_terminated", map[string]any{"event": event})
+
+	rootUTF, err = windows.UTF16PtrFromString(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err = windows.GetShortPathName(rootUTF, &nameBuf[0], uint32(len(nameBuf)))
+	if err != nil || n == 0 || n >= uint32(len(nameBuf)) {
+		t.Fatal("short fixture path", err)
+	}
+	aliasRoot := windows.UTF16ToString(nameBuf[:n])
+	if !strings.Contains(aliasRoot, "~") {
+		t.Fatal("native ETW short-path fixture requires an actual DOS alias")
+	}
+	path = filepath.Join(root, "短路径归因 with spaces.txt")
+	writeSyncedRansomFixture(t, path, "short-name fixture")
+	time.Sleep(1200 * time.Millisecond)
+	since = time.Now()
+	aliasWriter := child("rename", filepath.Join(aliasRoot, filepath.Base(path)))
+	r = lookup(path, since, "attributed")
+	if int(r.Process.PID) != aliasWriter.Process.Pid || !alive(aliasWriter) || !alive(newer) {
+		t.Fatalf("short-path writer identity: %+v", r)
+	}
+	add("short_alias_unicode_rename_matches_long_policy_root", map[string]any{"attribution": r, "aliasRoot": aliasRoot, "longRoot": root})
 
 	path = filepath.Join(root, "multi.dat")
 	since = time.Now()

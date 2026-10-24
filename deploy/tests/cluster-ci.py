@@ -2,6 +2,7 @@
 """Run the actual cluster only on an isolated GitHub-hosted runner, then stop every owned process."""
 import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -260,6 +261,13 @@ try:
     until(lambda: done(cross_command), 'REST A command is delivered by the actual stream owner B')
     until(lambda: int(sql(f"SELECT COUNT(*) FROM t_cluster_ingress WHERE agent_id='{agent}' AND payload_type='ASSET' AND state='applied'")) > 0, 'Native asset report commits through the real queue')
     checks.append('actual_native_mtls_agent_on_b_accepts_rest_a_command_and_queued_asset_fact')
+    scale_spec = importlib.util.spec_from_file_location('scale_acceptance', REPO / 'deploy/tests/scale-acceptance.py')
+    scale_module = importlib.util.module_from_spec(scale_spec)
+    scale_spec.loader.exec_module(scale_module)
+    scale_result = scale_module.run_scale(repo=REPO, private=PRIVATE, sql=sql, api=api, port=a_http, admin=admin,
+            address=f'127.0.0.1:{proxy_grpc}', addresses=[f'127.0.0.1:{a_grpc}', f'127.0.0.1:{b_grpc}'], ca=SHARED / 'certs/ca.crt', native_agent=agent,
+            java_processes=[node_a, node_b], container_ids=[pg, redis, rabbit, proxy, native_agent], redact=redact)
+    assert scale_result['passed'] and scale_result['longSoakAccepted'] is False
     command(['docker', 'pause', native_agent])
     stop_java(node_b, abrupt=True)
     pending_command = collect()

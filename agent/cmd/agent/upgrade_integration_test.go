@@ -18,6 +18,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/identity"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 	"github.com/alinksec/alinksec-agent/internal/upgrade"
 	"gopkg.in/yaml.v3"
 )
@@ -127,27 +128,60 @@ func TestNativeUpgradeLifecycle(t *testing.T) {
 		Phase     string    `json:"phase"`
 		Deadline  time.Time `json:"deadline"`
 	}
+	var observation struct {
+		JournalError string `json:"journalError,omitempty"`
+		BinaryError  string `json:"binaryError,omitempty"`
+		SHA256       string `json:"sha256"`
+		Phase        string `json:"phase"`
+		CommandID    string `json:"commandId"`
+	}
+	t.Cleanup(func() {
+		if t.Failed() && os.Getenv("ALINKSEC_UPGRADE_EVIDENCE_FILE") != "" {
+			data, _ := json.MarshalIndent(observation, "", "  ")
+			dir := filepath.Dir(os.Getenv("ALINKSEC_UPGRADE_EVIDENCE_FILE"))
+			_ = os.MkdirAll(dir, 0700)
+			_ = os.WriteFile(filepath.Join(dir, "observer.json"), data, 0600)
+		}
+	})
 	for {
-		data, _ := os.ReadFile(filepath.Join(work, "upgrade", "state.json"))
-		json.Unmarshal(data, &journal)
-		current, _ := os.ReadFile(binary)
-		if journal.CommandID == "upgrade-crashing" && journal.Phase == "pending" && sha256.Sum256(current) == badHash {
+		var raw json.RawMessage
+		journalErr := securestate.ReadJSONLimit(filepath.Join(work, "upgrade", "state.json"), &raw, 2<<20)
+		if journalErr == nil {
+			journalErr = json.Unmarshal(raw, &journal)
+		}
+		current, binaryErr := upgradeSnapshotDigest(binary)
+		observation.JournalError, observation.BinaryError = "", ""
+		if journalErr != nil {
+			observation.JournalError = journalErr.Error()
+		}
+		if binaryErr != nil {
+			observation.BinaryError = binaryErr.Error()
+		}
+		observation.SHA256 = hex.EncodeToString(current[:])
+		observation.Phase, observation.CommandID = journal.Phase, journal.CommandID
+		if journalErr != nil && !os.IsNotExist(journalErr) {
+			t.Fatalf("invalid upgrade journal snapshot: %v", journalErr)
+		}
+		if binaryErr != nil && !os.IsNotExist(binaryErr) {
+			t.Fatalf("candidate snapshot: %v", binaryErr)
+		}
+		if journalErr == nil && binaryErr == nil && journal.CommandID == "upgrade-crashing" && journal.Phase == "pending" && current == badHash {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("broken candidate was not installed: %+v", journal)
+			t.Fatalf("broken candidate was not installed: journal=%+v observer=%+v", journal, observation)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	service.restartWatchdog(t) // Resume the durable deadline rather than reset it.
-	data, err := os.ReadFile(filepath.Join(work, "upgrade", "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var resumed struct {
 		Deadline time.Time `json:"deadline"`
 	}
-	if err := json.Unmarshal(data, &resumed); err != nil || !resumed.Deadline.Equal(journal.Deadline) {
+	var raw json.RawMessage
+	if err := securestate.ReadJSONLimit(filepath.Join(work, "upgrade", "state.json"), &raw, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &resumed); err != nil || !resumed.Deadline.Equal(journal.Deadline) {
 		t.Fatal("watchdog restart changed startup deadline")
 	}
 	connection = fixture.nextConnection(t)

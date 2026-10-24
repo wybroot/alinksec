@@ -95,7 +95,7 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 	unique := map[string]bool{}
 	issue := ""
 	for _, p := range roots {
-		p = cleanPath(p)
+		p = matchPath(p)
 		if p != "" && (len(p) < 3 || p[1] != ':' || p[2] != '\\') {
 			issue = "unsupported_path"
 		}
@@ -223,7 +223,7 @@ func cleanPath(p string) string {
 }
 
 func (m *Monitor) watched(path string) bool {
-	path = cleanPath(path)
+	path = matchPath(path)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, root := range m.roots {
@@ -235,12 +235,12 @@ func (m *Monitor) watched(path string) bool {
 }
 
 func (m *Monitor) observe(w Write) {
+	w.Path = matchPath(w.Path)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.status != "ready" {
 		return
 	}
-	w.Path = cleanPath(w.Path)
 	cutoff := time.Now().Add(-retention)
 	kept := m.writes[:0]
 	for _, old := range m.writes {
@@ -265,6 +265,15 @@ func (m *Monitor) Lookup(paths []string, since time.Time) Result {
 	if err := m.native.check(); err != nil {
 		m.fail("capture_health_failed: " + err.Error())
 	}
+	// Resolve once per requested path, outside the evidence lock. Windows may
+	// report an existing parent's 8.3 alias even after the leaf was renamed.
+	var normalized []string
+	if len(paths) <= maxObjects {
+		normalized = make([]string, len(paths))
+		for i, path := range paths {
+			normalized[i] = matchPath(path)
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r := Result{Source: "windows_kernel_file_etw", Status: m.status, Reason: m.reason}
@@ -281,10 +290,10 @@ func (m *Monitor) Lookup(paths []string, since time.Time) Result {
 		return r
 	}
 	var identity *Identity
-	for _, path := range paths {
+	for _, path := range normalized {
 		found := false
 		for _, w := range m.writes {
-			if w.Path != cleanPath(path) || w.At.Before(since) {
+			if w.Path != path || w.At.Before(since) {
 				continue
 			}
 			found = true

@@ -34,7 +34,8 @@
   ordered within one runner.
 
 - The user authorized grouping adjacent, related backlog items on 2026-10-24.
-  Develop modules 20/21 together, then modules 22/23 together, with one branch,
+  Develop modules 20/21 together, then modules 22/23 together, and modules 25/26
+  together after module 24, with one branch,
   review and complete CI validation per group. Preserve the remaining backlog.
 - Create each group branch from the latest merged `main`. When its tree already
   matches the fully validated feature tree, development may proceed while the
