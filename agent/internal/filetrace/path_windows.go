@@ -18,6 +18,19 @@ func matchPath(path string) string {
 	if !strings.Contains(path, "~") || len(path) < 3 || path[1:3] != `:\` || len(path) > 32767 {
 		return path
 	}
+	return expandNativePath(path, windows.GetLongPathName)
+}
+
+// shortPath is used only by Configure to cache aliases of watched roots.
+func shortPath(path string) string {
+	path = cleanPath(path)
+	if len(path) < 3 || path[1:3] != `:\` || len(path) > 32767 {
+		return path
+	}
+	return expandNativePath(path, windows.GetShortPathName)
+}
+
+func expandNativePath(path string, query func(*uint16, *uint16, uint32) (uint32, error)) string {
 	parent, suffix := path, ""
 	buf := make([]uint16, 32768)
 	for depth := 0; depth < 32; depth++ {
@@ -26,7 +39,7 @@ func matchPath(path string) string {
 			return path
 		}
 		// A fixed maximum avoids trusting a required-size result from the OS.
-		n, err := windows.GetLongPathName(p, &buf[0], uint32(len(buf)))
+		n, err := query(p, &buf[0], uint32(len(buf)))
 		if err == nil && n > 0 && n < uint32(len(buf)) {
 			return cleanPath(windows.UTF16ToString(buf[:n]) + suffix)
 		}

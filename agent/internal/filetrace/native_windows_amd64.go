@@ -399,10 +399,10 @@ func (s *winTrace) dosPath(path string) string {
 	path = cleanPath(path)
 	for device, drive := range s.devices {
 		if strings.HasPrefix(path, device+`\`) {
-			return matchPath(drive + strings.TrimPrefix(path, device))
+			return drive + strings.TrimPrefix(path, device)
 		}
 	}
-	return matchPath(path)
+	return path
 }
 
 func (s *winTrace) onEvent(r *eventRecord) {
@@ -433,8 +433,8 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if !property(r, "FileName", b[:]) {
 			return
 		}
-		path := s.dosPath(utf16At(b[:], 0))
-		if !s.m.watched(path) {
+		path := s.m.eventPath(s.dosPath(utf16At(b[:], 0)))
+		if path == "" {
 			return
 		}
 		if len(s.objects) >= maxObjects {

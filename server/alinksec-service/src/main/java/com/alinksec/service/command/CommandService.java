@@ -176,7 +176,12 @@ public class CommandService {
         }
     }
 
-    /** Called after a newly authenticated Agent stream is registered. */
+    /** Bounded lookup for the gateway's current local stream batch. */
+    public List<String> pendingAgents(List<String> localAgents) {
+        return repository.findPendingAgents(localAgents);
+    }
+
+    /** Called after stream registration or by the durable pending-command poll. */
     public void deliverPending(String agentId) {
         var pending=sender.deferredDelivery() ? repository.findPendingByAgent(agentId,100) : repository.findPendingByAgent(agentId);
         for (Map<String, Object> row : pending) {
