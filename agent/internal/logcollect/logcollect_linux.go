@@ -2,13 +2,27 @@
 
 package logcollect
 
-import "time"
+import (
+	"fmt"
+	"golang.org/x/sys/unix"
+	"os"
+	"syscall"
+	"time"
+)
 
-// pollInterval Linux：secure 日志轮询周期
 func pollInterval() time.Duration { return 5 * time.Second }
-
-// pollOnce Linux：tail 登录日志（RHEL 系 secure，Debian 系 auth.log，都存在则双采）
 func (c *Collector) pollOnce() {
 	c.tailFile("/var/log/secure", "secure")
-	c.tailFile("/var/log/auth.log", "secure")
+	c.tailFile("/var/log/auth.log", "auth.log")
+}
+func openLog(path string) (*os.File, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), path), nil
+}
+func fileIdentity(st os.FileInfo) string {
+	v := st.Sys().(*syscall.Stat_t)
+	return fmt.Sprintf("%d:%d", v.Dev, v.Ino)
 }

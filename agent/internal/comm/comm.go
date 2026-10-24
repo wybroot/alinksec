@@ -146,6 +146,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	c.grd.UpdateProtection(cfg.FileRules, cfg.LoginRules)
 	c.windowsLogin = windowslogin.New(workDir, cfg.ServerAddr, log)
 	if c.windowsLogin != nil {
+		c.windowsLogin.SetRawSink(func(lines []*pb.LogLine) bool { return c.queueLogBatch("windows-security", lines) })
 		c.windowsLogin.Update(cfg.LoginRules)
 	}
 	// 常驻 L1 引擎：原生文件事件触发，丢失/溢出由有界恢复遍历补查。
@@ -1356,16 +1357,29 @@ func (c *Client) pushMetrics(samples []*pb.MetricSample) {
 // logLoop 登录/安全日志采集（docs/04 §2）：Agent 侧批量攒行 → RptLogBatch。
 // 日志含入侵检测线索，经 pushReport 走离线队列保全路径。
 func (c *Client) logLoop(ctx context.Context) {
-	lc := logcollect.New(c.workDir, c.log, func(source string, lines []*pb.LogLine) {
+	lc := logcollect.New(c.workDir, c.log, func(source string, lines []*pb.LogLine) bool {
+		if !c.queueLogBatch(source, lines) {
+			return false
+		}
+		// Both fixed Linux authentication sources retain the existing guard input.
+		if source == "auth.log" {
+			source = "secure"
+		}
 		c.grd.ObserveLoginLogs(source, lines)
-		c.pushReport(&pb.Report{
-			AgentId:  c.state.AgentID,
-			ReportId: newUUID(),
-			Ts:       time.Now().UnixMilli(),
-			Payload:  &pb.Report_LogBatch{LogBatch: &pb.RptLogBatch{Source: source, Lines: lines}},
-		})
+		return true
 	})
 	lc.Run(ctx)
+}
+
+// Log cursors advance only after successful local spool admission. Reports are
+// removed after stream Send, so this does not imply server durable receipt.
+func (c *Client) queueLogBatch(source string, lines []*pb.LogLine) bool {
+	if err := c.queue.Push(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(),
+		Payload: &pb.Report_LogBatch{LogBatch: &pb.RptLogBatch{Source: source, Lines: lines}}}); err != nil {
+		c.log.Error("raw log spool admission failed")
+		return false
+	}
+	return true
 }
 
 /* ==================== TLS ==================== */

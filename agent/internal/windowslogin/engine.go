@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/config"
+	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"github.com/alinksec/alinksec-agent/internal/securestate"
 )
 
@@ -104,6 +105,7 @@ type Engine struct {
 	write        func(string, any, int) error
 	loadErr      error
 	applied      map[string]int64
+	rawSink      func([]*pb.LogLine) bool
 }
 
 func newEngine(dir, server string, log *slog.Logger, r Reader, f Firewall) *Engine {
@@ -225,7 +227,7 @@ func (e *Engine) syncPolicy(hash string) error {
 	next.PolicyHash = hash
 	next.PolicySince = e.now().UnixMilli()
 	next.Buckets = map[string]*bucket{}
-	if len(e.rules) == 0 {
+	if len(e.rules) == 0 && e.rawSink == nil {
 		next.Initialized = false
 		next.Cursor = 0
 		next.Anchor = ""
@@ -273,7 +275,7 @@ func (e *Engine) Poll() {
 	if err := e.reconcile(); err != nil {
 		return
 	}
-	if len(e.rules) == 0 {
+	if len(e.rules) == 0 && e.rawSink == nil {
 		e.status.State = "disabled"
 		return
 	}
@@ -331,6 +333,7 @@ func (e *Engine) Poll() {
 		return
 	}
 	bufferFull := false
+	var rawLines []*pb.LogLine
 	for _, r := range records {
 		if r.ID <= next.Cursor || r.ID > latest.ID {
 			e.fail("event_order_invalid")
@@ -350,6 +353,9 @@ func (e *Engine) Poll() {
 		next.Cursor = r.ID
 		next.Anchor = r.Fingerprint
 		e.status.LastEvent = r.Time.UnixMilli()
+		if e.rawSink != nil && r.RawXML != "" {
+			rawLines = append(rawLines, rawLine(r, next.Generation))
+		}
 	}
 	// Other Security event types may be skipped by the login XPath. Only advance
 	// to latest when the batch was exhausted, retaining a native record anchor.
@@ -357,6 +363,12 @@ func (e *Engine) Poll() {
 	if !behind {
 		next.Cursor = latest.ID
 		next.Anchor = latest.Fingerprint
+	}
+	// Admission precedes cursor commit. The existing transport spool has no
+	// server durable ACK; immutable event keys suppress retries after a crash.
+	if len(rawLines) > 0 && !e.admitRaw(rawLines) {
+		e.fail("raw_log_queue_failed")
+		return
 	}
 	if err := e.commit(next); err != nil {
 		e.fail("persist_failed")
@@ -391,6 +403,42 @@ func (e *Engine) coverage(success, failure, behind bool) {
 		e.status.State = "degraded"
 		e.status.Issue = "log_gap"
 	}
+	if len(e.rules) == 0 && e.status.State == "polling" {
+		e.status.State = "disabled"
+	}
+}
+
+// SetRawSink shares the native reader and cursor even with protection disabled.
+func (e *Engine) SetRawSink(sink func([]*pb.LogLine) bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rawSink = sink
+}
+
+func rawLine(r Record, generation string) *pb.LogLine {
+	h := sha256.Sum256([]byte(generation + "\x00" + r.Fingerprint))
+	return &pb.LogLine{Ts: r.Time.UnixMilli(), Content: r.RawXML, Fields: map[string]string{
+		"record_kind": "raw_log", "timestamp_kind": "event", "format": "windows_event_xml",
+		"provider": provider, "channel": "Security", "event_id": r.EventID,
+		"record_id": fmt.Sprint(r.ID), "source_event_id": hex.EncodeToString(h[:]), "truncated": "false",
+	}}
+}
+
+func (e *Engine) admitRaw(lines []*pb.LogLine) bool {
+	// The reader batch is 128 records; transport batches stay below 512 KiB / 100
+	// lines even when each native XML record reaches the 64 KiB parser cap.
+	for len(lines) > 0 {
+		n, size := 0, 0
+		for n < len(lines) && n < 100 && size+len(lines[n].Content) < 512<<10 {
+			size += len(lines[n].Content)
+			n++
+		}
+		if n == 0 || !e.rawSink(lines[:n]) {
+			return false
+		}
+		lines = lines[n:]
+	}
+	return true
 }
 func trusted(ip netip.Addr, values []string) bool {
 	for _, v := range values {
