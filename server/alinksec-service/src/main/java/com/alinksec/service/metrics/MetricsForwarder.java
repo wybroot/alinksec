@@ -114,7 +114,7 @@ public class MetricsForwarder {
         }
     }
 
-    /** 单行：name{agent_id="..",hostname="..",mount=".."} value tsSeconds */
+    /** Prometheus 文本格式的时间戳为整数毫秒，直接保留 Agent 的 UnixMilli。 */
     private void formatLine(StringBuilder sb, MetricSample s, String agentId, String hostname) {
         sb.append(s.getName()).append("{agent_id=\"").append(escape(agentId))
                 .append("\",hostname=\"").append(escape(hostname)).append('"');
@@ -122,7 +122,7 @@ public class MetricsForwarder {
             sb.append(',').append(e.getKey()).append("=\"").append(escape(e.getValue())).append('"');
         }
         sb.append("} ").append(s.getValue())
-                .append(' ').append(String.format("%.3f", s.getTs() / 1000.0));
+                .append(' ').append(s.getTs());
     }
 
     private static String escape(String v) {
