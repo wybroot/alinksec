@@ -35,6 +35,10 @@ public class RabbitTransport {
         try {
             var factory=new ConnectionFactory();
             factory.setUri(properties.getRabbitUri());
+            if(factory.isSSL()) {
+                factory.useSslProtocol(javax.net.ssl.SSLContext.getDefault());
+                factory.enableHostnameVerification();
+            }
             factory.setConnectionTimeout(2000);factory.setHandshakeTimeout(3000);
             factory.setRequestedHeartbeat(10);factory.setAutomaticRecoveryEnabled(false);
             factory.setShutdownTimeout(2000);

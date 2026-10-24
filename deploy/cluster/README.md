@@ -14,7 +14,7 @@
 - 所有应用副本挂载**同一份 POSIX 共享存储**，在容器内使用相同绝对路径 `/app/data`，支持原子重命名和私有文件权限。PKI、JWT、签名库、补丁、升级包、安全库工作目录以及节点探针全部共享。定期恢复演练须包含数据库和这份目录。
 - 冗余入口、跨机编排与相同版本的应用镜像。示例的单 HAProxy、单 web 容器也需要在生产拓扑中消除单点。
 
-Redis/RabbitMQ URI 密码至少 16 字符，推荐独立随机凭据；跨主机网络使用 `rediss://`、`amqps://` 及受信任的服务证书。不要公开 PostgreSQL、Redis、AMQP 或内部 REST 端口。共享目录包含 CA 私钥，应限制给应用运行身份；web 只挂载叶证书目录。
+Redis/RabbitMQ URI 密码至少 16 字符，推荐独立随机凭据；跨主机网络使用 `rediss://`、`amqps://` 及受信任的服务证书。AMQPS 显式校验证书链和主机名，使用 JVM 默认信任库；内部 CA 需预先加入两个副本共同使用的 JVM 信任库（可通过独立 Compose 覆盖文件挂载并配置 Java trustStore）。PostgreSQL 跨机连接也应通过部署覆盖项设置带 `sslmode=verify-full` 的 `SPRING_DATASOURCE_URL` 与受信任根证书。不要公开 PostgreSQL、Redis、AMQP 或内部 REST 端口。共享目录包含 CA 私钥，应限制给应用运行身份；web 只挂载叶证书目录。
 
 ## 首次初始化与启动
 

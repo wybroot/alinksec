@@ -213,7 +213,7 @@ try:
         token = ok(a_http, '/api/auth/login', body={'username': username, 'password': password})['token']
         assert api(b_http, '/api/cluster', token=token, expected=403)['code'] != 0
     sql("UPDATE t_user SET role_id=3 WHERE username='admin'")
-    assert api(a_http, '/api/cluster', token=admin)['code'] != 0
+    assert api(a_http, '/api/cluster', token=admin, expected=400)['code'] != 0
     sql("UPDATE t_user SET role_id=1 WHERE username='admin'")
     checks.append('actual_rest_denies_operator_viewer_and_stale_administrator_claims')
     live_probe = (SHARED / '.cluster-probes/node-a').read_bytes()
