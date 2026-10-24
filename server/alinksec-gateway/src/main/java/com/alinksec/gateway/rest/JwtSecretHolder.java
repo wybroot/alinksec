@@ -24,22 +24,29 @@ public class JwtSecretHolder {
     private String dataDir;
 
     private String secret;
+    @Value("${alinksec.cluster.enabled:false}")
+    private boolean clusterEnabled;
 
     @PostConstruct
     void init() throws IOException {
         if (fromEnv != null && !fromEnv.isBlank()) {
+            if (clusterEnabled && fromEnv.length() < 32) throw new IllegalStateException("cluster_jwt_secret_too_short");
             secret = fromEnv;
             return;
         }
         Path keyFile = Path.of(dataDir).getParent().resolve("jwt.secret");
         if (Files.exists(keyFile)) {
             secret = Files.readString(keyFile).trim();
+            if (clusterEnabled && secret.length() < 32) throw new IllegalStateException("cluster_jwt_secret_too_short");
             return;
         }
+        if (clusterEnabled) throw new IllegalStateException("cluster_requires_initialized_shared_jwt");
         byte[] key = new byte[32];
         new SecureRandom().nextBytes(key);
         secret = Base64.getEncoder().encodeToString(key);
         Files.createDirectories(keyFile.getParent());
+        try {Files.createFile(keyFile,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));}
+        catch(UnsupportedOperationException ignored) {Files.createFile(keyFile);}
         Files.writeString(keyFile, secret);
     }
 

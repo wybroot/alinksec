@@ -57,7 +57,8 @@ public class HeartbeatService {
     }
 
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
-        agentRepository.heartbeat(agentId, hb.getAgentVersion(), hb.getPolicyVersion());
+        if(agentRepository.heartbeat(agentId, hb.getAgentVersion(), hb.getPolicyVersion())!=1)
+            throw new SecurityException("agent_disabled_or_deleted");
         agentRepository.virusContract(agentId,hb.getVirusExecutionContract(),hb.getDbVersion());
         agentRepository.signatureUpdateContract(agentId,hb.getSignatureUpdateContract());
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
@@ -87,8 +88,8 @@ public class HeartbeatService {
     public void markOfflineAgents() {
         List<AgentEntity> stale = agentRepository.findStaleOnline(OFFLINE_SECONDS);
         for (AgentEntity agent : stale) {
-            agentRepository.updateStatus(agent.agentId(), AgentEntity.STATUS_OFFLINE);
-            log.warn("主机离线: agent={} hostname={} last_heartbeat={}",
+            if(agentRepository.markOfflineIfStale(agent.agentId(),OFFLINE_SECONDS)==1)
+                log.warn("主机离线: agent={} hostname={} last_heartbeat={}",
                     agent.agentId(), agent.hostname(), agent.lastHeartbeat());
         }
     }

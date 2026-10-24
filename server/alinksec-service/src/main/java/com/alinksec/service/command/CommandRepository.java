@@ -131,6 +131,13 @@ public class CommandRepository {
                 """, agentId, ST_PENDING);
     }
 
+    public List<Map<String,Object>> findPendingByAgent(String agentId,int limit) {
+        if(limit<1 || limit>1000) throw new IllegalArgumentException("invalid_command_poll_limit");
+        return jdbc.queryForList("""
+                SELECT * FROM t_command WHERE agent_id=? AND status=? ORDER BY created_at,id LIMIT ?
+                """,agentId,ST_PENDING,limit);
+    }
+
     /** Counts pending rows created before complete protobuf command persistence existed. */
     public int countLegacyPending() {
         String commandPayload = database.jsonTextValue("payload", "command_b64");

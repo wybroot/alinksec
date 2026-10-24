@@ -1,0 +1,90 @@
+name: alinksec-cluster
+
+x-server: &server
+  image: ${ALINKSEC_CLUSTER_SERVER_IMAGE:?set a reviewed image built from the cluster implementation}
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile.server
+  environment: &environment
+    SPRING_PROFILES_ACTIVE: postgres
+    PG_HOST: ${ALINKSEC_PG_HOST:?set the PostgreSQL HA endpoint}
+    PG_PORT: ${ALINKSEC_PG_PORT:-5432}
+    PG_USER: ${ALINKSEC_PG_USER:-alinksec_app}
+    PG_PASSWORD: ${ALINKSEC_PG_PASSWORD:?set the restricted application password}
+    ALINKSEC_METRICS_ENABLED: "false"
+    ALINKSEC_CLUSTER_ENABLED: "true"
+    ALINKSEC_CLUSTER_DEPLOYMENT_ID: ${ALINKSEC_CLUSTER_DEPLOYMENT_ID:?set the initialized deployment UUID}
+    ALINKSEC_CLUSTER_SHARED_DIR: /app/data
+    ALINKSEC_CLUSTER_REDIS_URI: ${ALINKSEC_CLUSTER_REDIS_URI:?set an authenticated Redis HA endpoint}
+    ALINKSEC_CLUSTER_RABBIT_URI: ${ALINKSEC_CLUSTER_RABBIT_URI:?set an authenticated RabbitMQ endpoint}
+    ALINKSEC_CERT_DIR: /app/data/certs
+    ALINKSEC_WEB_TLS_DIR: /app/data/web-tls
+    ALINKSEC_LIBRARY_WORK_DIR: /app/data/libraries
+    ALINKSEC_SIG_DIR: /app/data/signature
+    ALINKSEC_PATCH_DIR: /app/data/patch
+    ALINKSEC_UPGRADE_DIR: /app/data/upgrade
+    ALINKSEC_JWT_SECRET: ${ALINKSEC_JWT_SECRET:-}
+    ALINKSEC_PUBLIC_HOST: ${HOST_IP:?set the Agent-reachable ingress IPv4 or DNS name}
+    ALINKSEC_SERVER_TLS_SANS: localhost,127.0.0.1,::1,${HOST_IP:?set HOST_IP}
+    ALINKSEC_SIG_BASE: ${HOST_IP:?set HOST_IP}:8443
+    JAVA_TOOL_OPTIONS: -Xmx512m -XX:ActiveProcessorCount=2
+    TZ: Asia/Shanghai
+  volumes:
+    - ${ALINKSEC_CLUSTER_SHARED_PATH:?set the shared POSIX storage mount}:/app/data
+  restart: unless-stopped
+
+services:
+  # Run once, finish bootstrap, then stop before preparing the deployment marker.
+  init:
+    <<: *server
+    profiles: [initialize]
+    environment:
+      <<: *environment
+      ALINKSEC_CLUSTER_ENABLED: "false"
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:-}
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:-}
+    restart: "no"
+
+  server-a:
+    <<: *server
+    environment:
+      <<: *environment
+      ALINKSEC_CLUSTER_NODE_ID: ${ALINKSEC_NODE_A_ID:-node-a}
+
+  server-b:
+    <<: *server
+    environment:
+      <<: *environment
+      ALINKSEC_CLUSTER_NODE_ID: ${ALINKSEC_NODE_B_ID:-node-b}
+
+  entry:
+    image: haproxy:3.4.7-alpine
+    environment:
+      ALINKSEC_PROXY_AGENT_BIND: ":9443"
+      ALINKSEC_PROXY_API_BIND: ":8080"
+      ALINKSEC_NODE_A_GRPC: server-a:9443
+      ALINKSEC_NODE_B_GRPC: server-b:9443
+      ALINKSEC_NODE_A_HTTP: server-a:8080
+      ALINKSEC_NODE_B_HTTP: server-b:8080
+      ALINKSEC_NODE_A_CHECK_PORT: "8080"
+      ALINKSEC_NODE_B_CHECK_PORT: "8080"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - ${ALINKSEC_BIND_ADDRESS:?set a specific local IPv4}:9443:9443
+    depends_on: [server-a, server-b]
+    restart: unless-stopped
+
+  web:
+    image: ${ALINKSEC_CLUSTER_WEB_IMAGE:?set a reviewed web image built from the cluster implementation}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+    environment:
+      ALINKSEC_BACKEND_HOST: entry
+    volumes:
+      - ${ALINKSEC_CLUSTER_SHARED_PATH:?set the shared storage mount}/web-tls:/etc/nginx/tls:ro
+    ports:
+      - ${ALINKSEC_BIND_ADDRESS:?set a specific local IPv4}:8443:443
+    depends_on: [entry]
+    restart: unless-stopped

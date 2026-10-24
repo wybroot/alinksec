@@ -31,6 +31,9 @@ import java.util.Map;
  */
 @Service
 public class VirusDbService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterSlots clusterSlots;
+
 
     private static final Logger log = LoggerFactory.getLogger(VirusDbService.class);
 
@@ -106,6 +109,13 @@ public class VirusDbService {
     @Scheduled(fixedDelayString = "${alinksec.signature.push-interval-ms:3600000}",
             initialDelayString = "${alinksec.signature.push-interval-ms:3600000}")
     public void scheduledPush() {
+        if(clusterSlots==null)scheduledPushOwned();else {
+            clusterSlots.once("signature-push",clusterSlots.intervalSlot(pushInterval),this::scheduledPushOwned);
+        }
+    }
+    @org.springframework.beans.factory.annotation.Value("${alinksec.signature.push-interval-ms:3600000}")
+    private long pushInterval=3_600_000;
+    private void scheduledPushOwned() {
         Map<String, Object> latest = latestDb();
         if (latest != null) {
             pushToAllAgents();

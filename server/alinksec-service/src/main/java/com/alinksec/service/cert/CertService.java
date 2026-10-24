@@ -59,6 +59,12 @@ public class CertService {
     }
 
     private final AlinkSecProperties props;
+    @org.springframework.beans.factory.annotation.Value("${alinksec.cluster.enabled:false}")
+    private boolean clusterEnabled;
+    @org.springframework.beans.factory.annotation.Value("${alinksec.cluster.shared-dir:}")
+    private String clusterSharedDir;
+    @org.springframework.beans.factory.annotation.Value("${alinksec.cluster.deployment-id:}")
+    private String clusterDeploymentId;
     private X509Certificate caCert;
     private java.security.PrivateKey caPrivateKey;
     private X509Certificate serverCert;
@@ -77,6 +83,15 @@ public class CertService {
             }
         }
         Path dir = Paths.get(props.getServer().getCertDir());
+        if (clusterEnabled) {
+            Path root=com.alinksec.service.cluster.ClusterFiles.root(clusterSharedDir,clusterDeploymentId);
+            com.alinksec.service.cluster.ClusterFiles.directory(root,dir.toString());
+            com.alinksec.service.cluster.ClusterFiles.directory(root,props.getServer().getWebTlsDir());
+            for (String name : java.util.List.of("ca.crt", "ca.key", "server.crt", "server.key")) {
+                if (!Files.isRegularFile(dir.resolve(name), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    throw new IllegalStateException("cluster_requires_initialized_shared_pki");
+            }
+        }
         Files.createDirectories(dir);
         if (Files.exists(dir.resolve("ca.crt"))) {
             loadCa(dir);
@@ -92,7 +107,14 @@ public class CertService {
             throw new IllegalStateException("existing server certificate SAN does not include public host: "
                     + publicHost + "; restore the certificate with the documented TLS recovery procedure");
         }
-        publishWebTls(dir);
+        if(clusterEnabled) {
+            Path web=Paths.get(props.getServer().getWebTlsDir());
+            for(String name:java.util.List.of("server.crt","server.key")) {
+                if(!Files.isRegularFile(web.resolve(name),java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        || Files.mismatch(dir.resolve(name),web.resolve(name))!=-1)
+                    throw new IllegalStateException("cluster_requires_initialized_shared_web_tls");
+            }
+        } else publishWebTls(dir);
     }
 
     static void validatePublicHost(String host) {
@@ -238,14 +260,18 @@ public class CertService {
     }
 
     private static void copyAtomically(Path source, Path destination) throws IOException {
-        Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
-        Files.copy(source, temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Path temporary = Files.createTempFile(destination.getParent(),".tls-",".tmp");
         try {
-            Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-        } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
-            Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        }
+            Files.copy(source, temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if(Files.getFileStore(temporary).supportsFileAttributeView("posix"))
+                Files.setPosixFilePermissions(temporary,java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            try {
+                Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally { Files.deleteIfExists(temporary); }
     }
 
     private org.bouncycastle.asn1.x509.GeneralNames buildSans() {
@@ -285,6 +311,10 @@ public class CertService {
     }
 
     private static void writePem(Path path, Object obj) throws IOException {
+        if(obj instanceof PrivateKey) {
+            try {Files.createFile(path,java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));}
+            catch(UnsupportedOperationException ignored) {Files.createFile(path);}
+        }
         try (JcaPEMWriter pem = new JcaPEMWriter(new FileWriter(path.toFile()))) {
             if (obj instanceof PrivateKey key) {
                 pem.writeObject(new PemObject("PRIVATE KEY", key.getEncoded()));

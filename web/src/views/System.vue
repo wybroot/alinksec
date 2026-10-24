@@ -53,6 +53,7 @@
       <!-- ============ 合规报表 ============ -->
       <el-tab-pane label="合规报表" name="report" lazy><ReportPanel /></el-tab-pane>
       <el-tab-pane v-if="isAdmin" label="集中取证" name="evidence" lazy><EvidencePanel /></el-tab-pane>
+      <el-tab-pane v-if="isAdmin" label="服务集群" name="cluster" lazy><ClusterPanel /></el-tab-pane>
 
       <el-tab-pane v-if="isAdmin" label="告警通道" name="notify">
         <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
@@ -114,6 +115,7 @@
 import { onMounted, ref } from 'vue'
 import ReportPanel from '../components/ReportPanel.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
+import ClusterPanel from '../components/ClusterPanel.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
 

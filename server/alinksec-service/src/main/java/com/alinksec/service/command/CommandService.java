@@ -71,6 +71,7 @@ public class CommandService {
      */
     @Transactional
     public String dispatch(String agentId, Command.Builder command, Long issuedBy) {
+        if(sender.deferredDelivery()) return dispatchAfterCommit(agentId,command,issuedBy);
         Command cmd = persist(agentId, command, issuedBy);
         send(agentId, cmd);
         return cmd.getCmdId();
@@ -87,15 +88,28 @@ public class CommandService {
                     // IMMEDIATE mode even the committed connection holds the next write
                     // transaction until cleanup. A separate worker lets cleanup finish,
                     // and also supports deployments with a single pooled connection.
-                    try { deliveryWorker.execute(() -> {
-                        try { deliveryTransaction.executeWithoutResult(status -> send(agentId, cmd)); }
-                        catch (RuntimeException e) { log.warn("已提交指令保留待重推: cmd_id={} agent={}", cmd.getCmdId(), agentId); }
-                    }); }
-                    catch (RuntimeException e) { log.warn("已提交指令保留待重推: cmd_id={} agent={}", cmd.getCmdId(), agentId); }
+                    enqueueDelivery(agentId,cmd);
                 }
             });
-        } else { send(agentId, cmd); }
+        } else if(sender.deferredDelivery()) { enqueueDelivery(agentId,cmd); }
+        else { send(agentId, cmd); }
         return cmd.getCmdId();
+    }
+
+    private void enqueueDelivery(String agentId,Command command) {
+        try { deliveryWorker.execute(()-> {
+            try {
+                deliverInIdentity(agentId,()->deliveryTransaction.execute(status->send(agentId,command)));
+            } catch(RuntimeException failure) {
+                log.warn("已提交指令保留待重推: cmd_id={} agent={}",command.getCmdId(),agentId);
+            }
+        }); } catch(RuntimeException failure) {
+            log.warn("已提交指令保留待重推: cmd_id={} agent={}",command.getCmdId(),agentId);
+        }
+    }
+
+    private Boolean deliverInIdentity(String agentId,java.util.function.Supplier<Boolean> action) {
+        return sender.deferredDelivery() ? sender.withIdentity(agentId,action,false) : action.get();
     }
 
     @PreDestroy public void close() { deliveryWorker.shutdownNow(); }
@@ -164,7 +178,8 @@ public class CommandService {
 
     /** Called after a newly authenticated Agent stream is registered. */
     public void deliverPending(String agentId) {
-        for (Map<String, Object> row : repository.findPendingByAgent(agentId)) {
+        var pending=sender.deferredDelivery() ? repository.findPendingByAgent(agentId,100) : repository.findPendingByAgent(agentId);
+        for (Map<String, Object> row : pending) {
             Command command;
             try {
                 command = refreshDownloadCredentials(agentId, rebuild(row));
@@ -175,7 +190,7 @@ public class CommandService {
                 continue;
             }
             Command ready=command;
-            if (!Boolean.TRUE.equals(deliveryTransaction.execute(status -> send(agentId,ready)))) {
+            if (!Boolean.TRUE.equals(deliverInIdentity(agentId,()->deliveryTransaction.execute(status -> send(agentId,ready))))) {
                 return;
             }
         }
@@ -207,7 +222,7 @@ public class CommandService {
                     return;
                 }
                 Command ready=command;
-                deliveryTransaction.executeWithoutResult(status -> send(agentId,ready,retry));
+                deliverInIdentity(agentId,()->deliveryTransaction.execute(status -> send(agentId,ready,retry)));
             });
         }
     }

@@ -13,4 +13,11 @@ public interface CommandSender {
      * @return false = Agent 不在线或写入失败
      */
     boolean send(String agentId, Command command);
+
+    /** Cluster delivery takes its session fence before opening any command-row transaction. */
+    default <T> T withIdentity(String agentId, java.util.function.Supplier<T> action, T absent) {
+        return action.get();
+    }
+
+    default boolean deferredDelivery() { return false; }
 }

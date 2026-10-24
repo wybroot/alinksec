@@ -120,6 +120,7 @@ class BaselineScheduleIntegrationTest {
                     var scheduler = new ThreadPoolTaskScheduler(); scheduler.setPoolSize(1); scheduler.setDaemon(true); return scheduler;
                 });
                 context.registerBean(ScheduledAnnotationBeanPostProcessor.class);
+                context.registerBean(com.alinksec.service.cluster.ClusterSlots.class,()->mock(com.alinksec.service.cluster.ClusterSlots.class));
                 context.registerBean(VirusTaskService.class,() -> service);
                 context.refresh();
                 var tasks = context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks().stream()

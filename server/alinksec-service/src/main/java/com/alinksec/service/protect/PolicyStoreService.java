@@ -24,10 +24,15 @@ import java.util.Map;
  */
 @Service
 public class PolicyStoreService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterRuntime clusterRuntime;
+
 
     private static final Logger log = LoggerFactory.getLogger(PolicyStoreService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
 
@@ -42,7 +47,7 @@ public class PolicyStoreService {
         ensureProtectionRules();
         Integer rows = jdbc.queryForObject("SELECT count(*) FROM t_policy_state WHERE id = 1", Integer.class);
         if (rows == null || rows == 0) {
-            jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}')");
+            jdbc.update("INSERT INTO t_policy_state (id, version, content) VALUES (1, 1, '{}') ON CONFLICT(id) DO NOTHING");
         }
         String stored = contentJson();
         if (stored == null || stored.isBlank()
@@ -91,6 +96,11 @@ public class PolicyStoreService {
      * @return 新版本号
      */
     public synchronized String rebuild() {
+        if(transactionManager==null)return rebuildLocked();
+        return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status->rebuildLocked());
+    }
+    private String rebuildLocked() {
+        jdbc.update("UPDATE t_policy_state SET version=version WHERE id=1");
         String content = buildFromRules();
         Long version = jdbc.queryForObject(
                 "UPDATE t_policy_state SET version = version + 1, content = ?, updated_at = CURRENT_TIMESTAMP " +
@@ -197,8 +207,9 @@ public class PolicyStoreService {
 
     /** 即时推送在线 Agent（status=1 在线；PENDING 兜底：上线心跳版本落后自动触发） */
     private void pushToOnlineAgents() {
-        String version = currentVersion();
-        String content = contentJson();
+        var snapshot=jdbc.queryForMap("SELECT version,CAST(content AS TEXT) AS content FROM t_policy_state WHERE id=1");
+        String version="v"+snapshot.get("version");
+        String content=snapshot.get("content").toString();
         List<String> online = jdbc.queryForList(
                 "SELECT agent_id FROM t_agent WHERE status = 1", String.class);
         for (String agentId : online) {

@@ -78,13 +78,20 @@ public class AgentRepository {
         return jdbc.update("""
                 UPDATE t_agent
                 SET status = 1, last_heartbeat = CURRENT_TIMESTAMP, agent_version = ?, policy_version = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE agent_id = ?
+                WHERE agent_id = ? AND status IN (0,1,2)
                 """, agentVersion, policyVersion, agentId);
     }
 
     public int updateStatus(String agentId, short status) {
         return jdbc.update("UPDATE t_agent SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE agent_id = ?",
                 status, agentId);
+    }
+
+    public int markOfflineIfStale(String agentId,int staleSeconds) {
+        return jdbc.update("""
+                UPDATE t_agent SET status=2,updated_at=CURRENT_TIMESTAMP
+                WHERE agent_id=? AND status=1 AND last_heartbeat<?
+                """,agentId,database.timestampBefore(Duration.ofSeconds(staleSeconds)));
     }
 
     public void virusContract(String agentId,int contract,String version) {

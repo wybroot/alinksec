@@ -19,6 +19,8 @@ public class LoginAttemptLimiter {
 
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
     private final Clock clock;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterLoginLimiter clustered;
 
     public LoginAttemptLimiter() {
         this(Clock.systemUTC());
@@ -29,6 +31,7 @@ public class LoginAttemptLimiter {
     }
 
     public boolean isAllowed(String clientIp) {
+        if(clustered!=null && clustered.enabled())return clustered.apply(clientIp,"check");
         Attempt attempt = attempts.get(key(clientIp));
         if (attempt == null) {
             return true;
@@ -49,6 +52,7 @@ public class LoginAttemptLimiter {
     }
 
     public void recordFailure(String clientIp) {
+        if(clustered!=null && clustered.enabled()) {clustered.apply(clientIp,"failure");return;}
         Instant now = clock.instant();
         String key = key(clientIp);
         Attempt attempt = attempts.get(key);
@@ -73,6 +77,7 @@ public class LoginAttemptLimiter {
     }
 
     public void recordSuccess(String clientIp) {
+        if(clustered!=null && clustered.enabled()) {clustered.apply(clientIp,"success");return;}
         attempts.remove(key(clientIp));
     }
 

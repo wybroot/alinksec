@@ -28,6 +28,8 @@ public class DevSeedRunner implements CommandLineRunner {
 
     @Value("${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:}")
     private String bootstrapEnrollToken;
+    @Value("${alinksec.cluster.enabled:false}")
+    private boolean clusterEnabled;
 
     public DevSeedRunner(EnrollTokenService enrollTokenService, JdbcTemplate jdbc, DatabaseDialect database) {
         this.enrollTokenService = enrollTokenService;
@@ -37,6 +39,11 @@ public class DevSeedRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        if(clusterEnabled) {
+            if(jdbc.queryForObject("SELECT count(*) FROM t_user WHERE status=1 AND role_id=1",Long.class)==0)
+                throw new IllegalStateException("cluster_requires_initialized_administrator");
+            return;
+        }
         seedAdmin();
         seedEnrollToken();
     }

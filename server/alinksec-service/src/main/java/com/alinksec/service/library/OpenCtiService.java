@@ -61,7 +61,7 @@ public final class OpenCtiService {
             }
             var policy=Map.of("tag",snapshot.config().tag(),"minimumConfidence",snapshot.config().minimumConfidence(),"severity",snapshot.config().severity());
             long revision=current.isEmpty()?1:((Number)current.get("revision")).longValue()+1;
-            jdbc.update("""
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"""
                     INSERT INTO t_opencti_source(source_id,configuration_sha256,principal_id,revision,server_version,snapshot_sha256,
                         snapshot_at,evaluated_at,visible_count,hash_count,page_count,policy,statistics)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_id) DO UPDATE SET revision=EXCLUDED.revision,
@@ -70,7 +70,7 @@ public final class OpenCtiService {
                         page_count=EXCLUDED.page_count,policy=EXCLUDED.policy,statistics=EXCLUDED.statistics,expiry_error=''
                     """,id,snapshot.config().fingerprint(),snapshot.principal(),revision,snapshot.serverVersion(),snapshot.digest(),
                     now.toString(),now.toString(),snapshot.indicators().size(),hashes.size(),snapshot.pages(),JsonUtils.write(policy),JsonUtils.write(reasons));
-            jdbc.update("DELETE FROM t_opencti_indicator WHERE source_id=?",id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"DELETE FROM t_opencti_indicator WHERE source_id=?",id);
             jdbc.batchUpdate("""
                     INSERT INTO t_opencti_indicator(source_id,indicator_id,document,document_sha256,document_bytes,sha256,included,reason,expires_at)
                     VALUES (?,?,?,?,?,?,?,?,?)
@@ -112,7 +112,7 @@ public final class OpenCtiService {
         if(ids.isEmpty())return Map.of();String id=ids.get(0);
         try{return catalog.nativeTransaction(id,()->{
             var old=stored(id);Instant now=clock.instant();
-            int changed=jdbc.update("UPDATE t_opencti_indicator SET included=0,reason='expired' WHERE source_id=? AND included=1 AND expires_at>=0 AND expires_at<=?",id,now.toEpochMilli());
+            int changed=com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_opencti_indicator SET included=0,reason='expired' WHERE source_id=? AND included=1 AND expires_at>=0 AND expires_at<=?",id,now.toEpochMilli());
             if(changed==0)return Map.<String,Object>of();
             int severity=JsonUtils.read(old.get("policy").toString()).path("severity").intValue();
             Map<String,SignaturePackage.Hash> hashes=new TreeMap<>();
@@ -121,8 +121,8 @@ public final class OpenCtiService {
             Map<String,Integer> reasons=new TreeMap<>();
             for(var row:jdbc.queryForList("SELECT reason,count(*) AS total FROM t_opencti_indicator WHERE source_id=? GROUP BY reason",id))
                 reasons.put(row.get("reason").toString(),((Number)row.get("total")).intValue());
-            jdbc.update("UPDATE t_opencti_source SET revision=revision+1,evaluated_at=?,hash_count=?,statistics=?,expiry_error='' WHERE source_id=?",now.toString(),hashes.size(),JsonUtils.write(reasons),id);
-            jdbc.update("UPDATE t_security_feed_state SET entry_count=? WHERE source_id=?",hashes.size(),id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_opencti_source SET revision=revision+1,evaluated_at=?,hash_count=?,statistics=?,expiry_error='' WHERE source_id=?",now.toString(),hashes.size(),JsonUtils.write(reasons),id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET entry_count=? WHERE source_id=?",hashes.size(),id);
             try{
                 var release=catalog.nativeSignatures(id,new SignaturePackage("",hashes,List.of()));
                 catalog.nativeIndicatorEvent(id,"opencti_expiry",Map.of("source_id",id,"snapshot_sha256",old.get("snapshot_sha256"),
@@ -130,11 +130,11 @@ public final class OpenCtiService {
                 return result(id,hashes.size(),release);
             }catch(IOException e){throw new UncheckedIOException(e);}
         });}catch(RuntimeException e){
-            jdbc.update("UPDATE t_opencti_source SET expiry_error='已知指标到期撤出未能发布，将继续重试；请检查发布存储' WHERE source_id=?",id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_opencti_source SET expiry_error='已知指标到期撤出未能发布，将继续重试；请检查发布存储' WHERE source_id=?",id);
             if(e instanceof UncheckedIOException io)throw io.getCause();throw e;
         }
     }
-    public void deliveryDeferred(String id,boolean deferred){jdbc.update("UPDATE t_opencti_source SET delivery_deferred=? WHERE source_id=?",deferred?1:0,id);}
+    public void deliveryDeferred(String id,boolean deferred){com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_opencti_source SET delivery_deferred=? WHERE source_id=?",deferred?1:0,id);}
     public Map<String,Object> state(String id){
         var rows=jdbc.queryForList("""
                 SELECT server_version,snapshot_sha256,snapshot_at,evaluated_at,visible_count,hash_count,page_count,policy,

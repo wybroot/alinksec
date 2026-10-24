@@ -20,7 +20,7 @@ import java.time.Duration;
 
 /**
  * 上行 Report 统一分发（通信协议 §4）。
- * report_id 幂等：PG 临时去重表（M2 换 Redis SETNX + 10min TTL）。
+ * 同步报告使用 SQL 去重；集群异步报告由持久收件箱按 Agent 与 report_id 去重。
  */
 @Service
 public class ReportDispatcher {
@@ -75,13 +75,26 @@ public class ReportDispatcher {
         } else dispatchAccepted(agentId,report);
     }
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
+        dispatchAccepted(agentId,report,false);
+    }
+
+    /** The durable inbox owns deduplication and commits this business work in its SQL transaction. */
+    public void dispatchQueued(String agentId,com.alinksec.proto.Report report) {
+        if(!java.util.Set.of(com.alinksec.proto.Report.PayloadCase.ASSET,com.alinksec.proto.Report.PayloadCase.BASELINE_RESULT,
+                com.alinksec.proto.Report.PayloadCase.LOG_BATCH).contains(report.getPayloadCase())
+                || !org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("invalid_queued_dispatch_scope");
+        dispatchAccepted(agentId,report,true);
+    }
+
+    private void dispatchAccepted(String agentId,com.alinksec.proto.Report report,boolean queued) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
         String key=report.getReportId();
         if((report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
             catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
         }
-        if (!key.isBlank() && !tryAcquire(key, Duration.ofMinutes(10))) {
+        if (!queued && !key.isBlank() && !tryAcquire(key, Duration.ofMinutes(10))) {
             log.debug("重复上报丢弃: report_id={}", report.getReportId());
             return;
         }
