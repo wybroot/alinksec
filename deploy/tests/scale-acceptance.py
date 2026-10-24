@@ -46,6 +46,7 @@ def run_scale(*,repo,private,sql,api,port,admin,address,addresses,ca,native_agen
     def observe(value,kind,at,now):
         if start<=at<end:
             latencies[kind].append((now-at)/1e6)
+            raw_latency.write(json.dumps({'kind':kind,'identity':value,'sentMonotonicNs':at,'observedMonotonicNs':now,'latencyMillis':(now-at)/1e6})+'\n')
             assert len(latencies[kind])<=100000
     def collect_events():
         nonlocal ready,produced,finished
@@ -138,7 +139,7 @@ def run_scale(*,repo,private,sql,api,port,admin,address,addresses,ca,native_agen
         result['startedMonotonicNs']=start;result['finishedMonotonicNs']=end
         container_pids={ident:int(subprocess.check_output(['docker','inspect','--format','{{.State.Pid}}',ident],text=True)) for ident in container_ids}
         next_sample=time.monotonic_ns();next_command=start;next_native=start;maximum_deadline=end+profile['drainSeconds']*1_000_000_000
-        with (out/'seconds.jsonl').open('w') as raw_samples,(out/'command-observations.jsonl').open('w') as raw_commands:
+        with (out/'seconds.jsonl').open('w') as raw_samples,(out/'command-observations.jsonl').open('w') as raw_commands,(out/'latency-observations.jsonl').open('w') as raw_latency:
             while True:
                 collect_events();now=time.monotonic_ns()
                 assert now<maximum_deadline,('reports or commands failed to drain',{'logs':len(pending_logs),'heartbeats':len(pending_hearts),'commands':len(pending_commands),'samples':samples})
@@ -149,7 +150,7 @@ def run_scale(*,repo,private,sql,api,port,admin,address,addresses,ca,native_agen
                     if now>=next_native:
                         dispatch(native_agent,'nativeCollect');next_native+=profile['nativeCommandEverySeconds']*1_000_000_000
                 poll_commands()
-                raw_commands.flush()
+                raw_commands.flush();raw_latency.flush()
                 now=time.monotonic_ns()
                 if now>=next_sample:
                     snapshot=db_sample();now=time.monotonic_ns();inside=start<=now<end
@@ -161,7 +162,7 @@ def run_scale(*,repo,private,sql,api,port,admin,address,addresses,ca,native_agen
                     assert max_resources['javaRssBytes']<=profile['maxJavaRssMiBPerReplica']*1048576
                     assert max_resources['driverRssBytes']<=profile['maxDriverRssMiB']*1048576
                     api_started=time.monotonic_ns();dashboard=api(port,'/api/dashboard/summary',token=admin)['data'];api_done=time.monotonic_ns()
-                    if inside:latencies['api'].append((api_done-api_started)/1e6)
+                    observe(None,'api',api_started,api_done)
                     if first_dashboard is None and dashboard['hosts']['online']>=201:first_dashboard=api_done
                     sample={'monotonicNs':now,'steadyWindow':inside,'elapsedSeconds':(now-start)/1e9,'database':snapshot,'java':process_samples,'driver':driver_usage,
                             'containers':{ident:container_usage(pid) for ident,pid in container_pids.items()},'dashboardOnline':dashboard['hosts']['online'],

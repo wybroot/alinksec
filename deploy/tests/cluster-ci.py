@@ -179,8 +179,8 @@ try:
     command(['mvn', '-B', '-ntp', '-T1', '-pl', 'alinksec-bootstrap', '-am', '-Dtest=ClusterCoordinationIntegrationTest',
              '-Dsurefire.failIfNoSpecifiedTests=false', '-DforkCount=0', 'test'], env=integration_environment, timeout=600, log='coordination-tests.log', cwd=REPO / 'server')
     junit = ET.parse(REPO / 'server/alinksec-bootstrap/target/surefire-reports/TEST-com.alinksec.bootstrap.ClusterCoordinationIntegrationTest.xml').getroot()
-    assert int(junit.attrib['tests']) == 13 and all(int(junit.attrib[key]) == 0 for key in ['failures', 'errors', 'skipped'])
-    checks.append('thirteen_real_postgres_redis_rabbit_fencing_order_ack_loss_worker_slot_notification_cases')
+    assert int(junit.attrib['tests']) == 14 and all(int(junit.attrib[key]) == 0 for key in ['failures', 'errors', 'skipped'])
+    checks.append('fourteen_real_postgres_redis_rabbit_fencing_pool_isolation_order_ack_loss_worker_slot_notification_cases')
 
     app_environment = {'SPRING_PROFILES_ACTIVE': 'postgres', 'PG_HOST': '127.0.0.1', 'PG_PORT': str(pg_port), 'PG_USER': 'alinksec_app', 'PG_PASSWORD': app_password,
             'ALINKSEC_METRICS_ENABLED': 'false', 'ALINKSEC_CLUSTER_DEPLOYMENT_ID': deployment, 'ALINKSEC_CLUSTER_SHARED_DIR': str(SHARED),
@@ -333,4 +333,4 @@ finally:
                     '-c', 'find /cleanup -depth -mindepth 1 -delete'], capture_output=True, timeout=30)
     PRIVATE.rmdir()
 assert passed and result['remainingOwnedContainers'] == 0 and result['remainingJavaProcesses'] == 0
-print(json.dumps({'passed': True, 'checks': len(checks), 'junitTests': 13, 'cleanup': True}))
+print(json.dumps({'passed': True, 'checks': len(checks), 'junitTests': 14, 'cleanup': True}))
