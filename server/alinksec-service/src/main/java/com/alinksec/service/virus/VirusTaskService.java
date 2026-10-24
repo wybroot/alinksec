@@ -14,6 +14,9 @@ import java.util.*;
 
 @Service
 public class VirusTaskService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterSlots clusterSlots;
+
     public static final int MODE_QUICK=1,MODE_FULL=2,MODE_CUSTOM=3;
     private final JdbcTemplate jdbc; private final CommandService commands; private final DatabaseDialect database;
     public VirusTaskService(JdbcTemplate jdbc,CommandService commands,DatabaseDialect database) { this.jdbc=jdbc; this.commands=commands; this.database=database; }
@@ -70,8 +73,12 @@ public class VirusTaskService {
         jdbc.update("UPDATE t_virus_task_agent SET state='timeout' WHERE state='pending' AND task_id IN (SELECT id FROM t_virus_scan_task WHERE status=1 AND created_at<?)",database.timestampBefore(Duration.ofHours(2).plusMinutes(5)));
         jdbc.update("UPDATE t_virus_scan_task SET status=3,progress=100,finished_at=CURRENT_TIMESTAMP WHERE status=1 AND created_at<?",database.timestampBefore(Duration.ofHours(2).plusMinutes(5)));
     }
-    @Scheduled(cron="${alinksec.virus.weekly-scan-cron:0 30 2 * * MON}") @Transactional
+    @Scheduled(cron="${alinksec.virus.weekly-scan-cron:0 30 2 * * MON}",zone="Asia/Shanghai") @Transactional
     public void weeklyQuickScan() {
+        String slot=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).with(java.time.DayOfWeek.MONDAY).toString();
+        if(clusterSlots==null)weeklyOwned();else clusterSlots.once("weekly-virus-scan",clusterSlots.weeklySlot(),this::weeklyOwned);
+    }
+    private void weeklyOwned() {
         var releases=jdbc.queryForList("SELECT hash_count,rule_count FROM t_virus_db ORDER BY id DESC LIMIT 1");
         if(releases.isEmpty() || ((Number)releases.get(0).get("hash_count")).longValue()+((Number)releases.get(0).get("rule_count")).longValue()==0) return;
         String after="";

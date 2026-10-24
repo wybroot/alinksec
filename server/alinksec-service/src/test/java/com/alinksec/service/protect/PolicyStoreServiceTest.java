@@ -20,8 +20,7 @@ class PolicyStoreServiceTest {
                 Map.of("rule_id","PR-0002","name","file","type","file_integrity","match","{\"paths\":[\"/etc/passwd\"]}","actions","[\"alert\"]","severity",3,"enabled",false),
                 Map.of("rule_id","PR-0003","name","SSH","type","login","match","{\"ssh_ports\":[22]}","actions","[\"alert\"]","severity",3,"enabled",true)));
         when(jdbc.queryForObject(startsWith("UPDATE t_policy_state"), eq(Long.class), anyString())).thenReturn(2L);
-        when(jdbc.queryForObject(startsWith("SELECT version"),eq(Long.class))).thenReturn(2L);
-        when(jdbc.queryForObject(startsWith("SELECT CAST"),eq(String.class))).thenReturn("{}");
+        when(jdbc.queryForMap(startsWith("SELECT version"))).thenReturn(Map.of("version",2L,"content","{}"));
         new PolicyStoreService(jdbc,mock(CommandService.class)).rebuild();
         var snapshot = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(jdbc).queryForObject(startsWith("UPDATE t_policy_state"),eq(Long.class),snapshot.capture());

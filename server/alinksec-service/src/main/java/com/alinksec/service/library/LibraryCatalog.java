@@ -282,6 +282,7 @@ public class LibraryCatalog {
     private void lockAuthority() {
         if(jdbc.update("UPDATE t_vuln_rule_state SET revision=revision WHERE id=1")!=1)
             throw new IllegalStateException("来源治理状态缺失");
+        com.alinksec.service.cluster.ClusterWork.assertLibraryOwner(jdbc);
     }
     private void lockSignatureRelease() {
         jdbc.update("""
@@ -601,6 +602,12 @@ public class LibraryCatalog {
 
     /** Retain current/recent releases and every artifact referenced by pending delivery or valid tokens. */
     public synchronized int pruneSignatures() throws IOException {
+        try { return transaction.execute(status->{
+            lockAuthority();
+            try { return pruneSignaturesLocked(); } catch(IOException failure) {throw new UncheckedIOException(failure);}
+        }); } catch(UncheckedIOException failure) {throw failure.getCause();}
+    }
+    private int pruneSignaturesLocked() throws IOException {
         if (props.getRetainVersions() < 2 || props.getRetainDays() < 1) throw new IllegalArgumentException("至少保留两个版本和一天历史");
         // A queued command can still contain an old package URL. Conservatively defer cleanup.
         if (jdbc.queryForObject("SELECT count(*) FROM t_command WHERE type='signature_update' AND status IN (0,1,2,3)", Integer.class) > 0) return 0;

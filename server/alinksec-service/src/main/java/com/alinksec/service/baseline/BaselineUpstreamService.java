@@ -17,6 +17,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** A single bounded worker per process, plus a database lease across replicas. */
 @Service
 public class BaselineUpstreamService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterRuntime clusterRuntime;
+
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final BaselineUpstreamProperties props;

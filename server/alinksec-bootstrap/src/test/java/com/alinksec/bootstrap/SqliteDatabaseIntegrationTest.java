@@ -207,11 +207,11 @@ class SqliteDatabaseIntegrationTest {
 
     @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
-        assertEquals(95, jdbc.queryForObject("""
+        assertEquals(101, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(33, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(34, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));
@@ -226,6 +226,22 @@ class SqliteDatabaseIntegrationTest {
                 new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor()
                         .postProcessAfterInitialization(dataSource, "dataSource"));
         assertTrue(hasMessage(error, "Checksum mismatch"));
+    }
+
+    @Test
+    void staleOfflineDecisionCannotOverwriteFreshHeartbeatOrReactivateRevokedHost() {
+        var agents=new AgentRepository(jdbc,database);
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,status,last_heartbeat) VALUES ('heartbeat-race','race',1,1,?)",
+                database.timestampBefore(java.time.Duration.ofSeconds(120)));
+        assertEquals(1,agents.findStaleOnline(60).size());
+        assertEquals(1,agents.heartbeat("heartbeat-race","fixture","v1"));
+        assertEquals(0,agents.markOfflineIfStale("heartbeat-race",60));
+        assertEquals(AgentEntity.STATUS_ONLINE,agents.findByAgentId("heartbeat-race").orElseThrow().status());
+        for(short revoked:List.of(AgentEntity.STATUS_DISABLED,AgentEntity.STATUS_DELETED)) {
+            agents.updateStatus("heartbeat-race",revoked);
+            assertEquals(0,agents.heartbeat("heartbeat-race","stale-stream","v0"));
+            assertEquals(revoked,agents.findByAgentId("heartbeat-race").orElseThrow().status());
+        }
     }
 
     @Test

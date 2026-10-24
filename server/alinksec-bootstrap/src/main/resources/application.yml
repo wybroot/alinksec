@@ -17,6 +17,13 @@ server:
   port: 8080   # M2 REST API 占位
 
 alinksec:
+  cluster:
+    enabled: ${ALINKSEC_CLUSTER_ENABLED:false}
+    deployment-id: ${ALINKSEC_CLUSTER_DEPLOYMENT_ID:}
+    node-id: ${ALINKSEC_CLUSTER_NODE_ID:}
+    shared-dir: ${ALINKSEC_CLUSTER_SHARED_DIR:}
+    redis-uri: ${ALINKSEC_CLUSTER_REDIS_URI:}
+    rabbit-uri: ${ALINKSEC_CLUSTER_RABBIT_URI:}
   baseline-upstream:
     max-artifact-bytes: 67108864
     sources: []

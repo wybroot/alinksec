@@ -38,6 +38,78 @@ on:
         default: false
 
 jobs:
+  cluster:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.reporting_only && !inputs.source_trust_only && !inputs.opencti_only && !inputs.vendor_only && !inputs.upstream_only && !inputs.scap_only
+    name: cluster (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      GOARCH: ${{ matrix.arch }}
+      ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Build Java and the actual native Agent serially
+        run: |
+          python3 -B deploy/tests/cluster-prepare.test.py
+          mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
+          mkdir -p .tmp
+          (cd agent && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../.tmp/alinksec-agent ./cmd/agent)
+          test "$(.tmp/alinksec-agent version)" = "alinksec-agent $(cat VERSION)"
+          docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-cluster-agent-validation .
+        env:
+          MAVEN_OPTS: -Xmx384m -XX:ActiveProcessorCount=2
+      - name: Install PostgreSQL CLI
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Validate actual dependency fencing, two Java replicas, native Agent and HAProxy failover
+        run: python3 -B deploy/tests/cluster-ci.py
+      - uses: actions/setup-node@v4
+        if: matrix.arch == 'amd64'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build production console after all cluster fixture processes stop
+        if: matrix.arch == 'amd64'
+        working-directory: web
+        run: npm ci && npm test && npm run build
+      - name: Install isolated console browser
+        if: matrix.arch == 'amd64'
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Validate production cluster console with actual database and live REST captures
+        if: matrix.arch == 'amd64'
+        working-directory: web
+        run: node test/cluster-browser.mjs
+      - name: Retain actual cluster and boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-evidence-${{ matrix.arch }}
+          path: |
+            .tmp/cluster-native
+            .tmp/cluster-fixtures
+            .tmp/cluster-browser
+            server/**/target/surefire-reports/*ClusterCoordination*
+          if-no-files-found: error
+          retention-days: 14
   scap-resolver:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
     runs-on: ubuntu-24.04
@@ -1066,8 +1138,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "33"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "95"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "34"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "101"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

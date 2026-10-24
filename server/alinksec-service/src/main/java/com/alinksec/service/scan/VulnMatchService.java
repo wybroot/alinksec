@@ -43,6 +43,7 @@ public class VulnMatchService {
     }
 
     private void matchSnapshot(String agentId, long taskId) {
+        com.alinksec.service.cluster.ClusterWork.write(jdbc,()->null);
         // Serialize scans/results with inventory replacement for this host. This
         // also makes a fixed finding's inventory revision a durable boundary.
         jdbc.update("UPDATE t_agent SET software_revision=software_revision WHERE agent_id=? AND deleted=false", agentId);

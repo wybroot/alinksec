@@ -44,6 +44,9 @@ async function request(path, options = {}) {
 const get = (path) => request(path)
 const post = (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) })
 
+export const fetchClusterStatus = () => get('/api/cluster')
+export const retryClusterReport = (id, body) => post(`/api/cluster/reports/${encodeURIComponent(id)}/retry`, body)
+
 export const fetchEvidence = () => get('/api/evidence')
 export const fetchEvidenceTargets = () => get('/api/evidence/targets')
 export const fetchEvidenceSamples = agent => get(`/api/evidence/targets/${encodeURIComponent(agent)}/samples`)

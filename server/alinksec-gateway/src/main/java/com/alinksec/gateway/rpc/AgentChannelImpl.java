@@ -29,6 +29,8 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
     private final com.alinksec.gateway.channel.ConnectionRegistry registry;
     private final CommandService commandService;
     private final IsolationLeaseService isolationLeases;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.alinksec.service.cluster.ClusterReportIngress reportIngress;
 
     public AgentChannelImpl(ReportDispatcher dispatcher, AgentRepository agentRepository,
                              com.alinksec.gateway.channel.ConnectionRegistry registry,
@@ -63,6 +65,10 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                         return;
                     }
                     registry.withCurrent(authenticatedAgentId,responseObserver,()-> {
+                        var current=agentRepository.findByAgentId(authenticatedAgentId);
+                        if(current.isEmpty() || current.get().status()==AgentEntity.STATUS_DISABLED
+                                || current.get().status()==AgentEntity.STATUS_DELETED)
+                            throw new SecurityException("agent_disabled_or_deleted");
                         if (report.hasHeartbeat()) {
                             registry.weakPasswordContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getWeakPasswordContract());
                             registry.upgradeContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getUpgradeContract());
@@ -76,7 +82,9 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                                         .setLeaseId(pulse.getLeaseId()).setNonce(pulse.getNonce())).build());
                             }
                         } else {
-                            dispatcher.dispatch(authenticatedAgentId, report);
+                            if(reportIngress==null || !reportIngress.admit(authenticatedAgentId,report))
+                                dispatcher.dispatch(authenticatedAgentId, report);
+                            if(report.hasHeartbeat()) registry.heartbeatReady(authenticatedAgentId,responseObserver);
                             if(report.hasEvidence()) dispatcher.evidenceReceipt(authenticatedAgentId,report).ifPresent(receipt->
                                     registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setEvidenceReceipt(receipt).build()));
                             if(report.hasFixResult()) {
@@ -92,6 +100,11 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                             }
                         }
                     });
+                } catch (SecurityException | com.alinksec.service.cluster.ClusterUnavailable failure) {
+                    closed=true;
+                    if(authenticatedAgentId!=null) registry.unregister(authenticatedAgentId,responseObserver);
+                    var status=failure instanceof SecurityException ? Status.PERMISSION_DENIED : Status.UNAVAILABLE;
+                    responseObserver.onError(status.withDescription("agent session is unavailable").asRuntimeException());
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);
                     // 单条处理失败不拆流（Agent 无需重发：非关键路径靠下轮心跳/快照补偿）
@@ -123,10 +136,12 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                     log.warn("agent 已禁用，拒绝接入: {}", report.getAgentId());
                     return false;
                 }
+                registry.register(report.getAgentId(), responseObserver);
                 authenticatedAgentId = report.getAgentId();
                 authenticated = true;
                 // Capability belongs to this authenticated connection. A
                 // previous, newer Agent may have been downgraded while offline.
+                registry.withCurrent(authenticatedAgentId,responseObserver,()-> {
                 agentRepository.weakPasswordContract(authenticatedAgentId, report.hasHeartbeat()?report.getHeartbeat().getWeakPasswordContract():0);
                 agentRepository.windowsUpdateContract(authenticatedAgentId,report.hasHeartbeat()?report.getHeartbeat().getWindowsUpdateContract():0);
                 agentRepository.evidenceContract(authenticatedAgentId,report.hasHeartbeat()?report.getHeartbeat().getEvidenceContract():0);
@@ -134,13 +149,13 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                         report.hasHeartbeat() ? report.getHeartbeat().getUpgradeContract() : 0);
                 agentRepository.isolationContract(authenticatedAgentId,
                         report.hasHeartbeat() ? report.getHeartbeat().getIsolationContract() : 0);
-                registry.register(authenticatedAgentId, responseObserver);
                 if (report.hasHeartbeat()) registry.upgradeContract(authenticatedAgentId,responseObserver,
                         report.getHeartbeat().getUpgradeContract());
                 if (report.hasHeartbeat()) registry.isolationContract(authenticatedAgentId,responseObserver,
                         report.getHeartbeat().getIsolationContract());
                 if (report.hasHeartbeat()) registry.weakPasswordContract(authenticatedAgentId,responseObserver,report.getHeartbeat().getWeakPasswordContract());
-                commandService.deliverPending(authenticatedAgentId);
+                });
+                if(!registry.deferredDelivery()) commandService.deliverPending(authenticatedAgentId);
                 return true;
             }
 

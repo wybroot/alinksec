@@ -35,6 +35,11 @@ public class LibrarySyncService {
     private final LibrarySchedule schedules;
     private final VendorAdvisoryService vendors;
     private final OpenCtiService opencti;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.ClusterWork clusterWork;
+    private void clustered(Runnable action) {
+        if(clusterWork==null) action.run();else clusterWork.library(action);
+    }
     private final AtomicBoolean busy = new AtomicBoolean();
     private final AtomicBoolean selectionQueued = new AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "library-sync"); t.setDaemon(true); return t; });
@@ -53,7 +58,7 @@ public class LibrarySyncService {
         this.vendors = new VendorAdvisoryService(catalog,download,jdbc,nativeLimits);
         this.opencti = new OpenCtiService(catalog,download,jdbc,openctiLimits);
     }
-    public void recheckAssets() { worker.execute(() -> matcher.matchAll(0)); }
+    public void recheckAssets() { worker.execute(() -> clustered(() -> matcher.matchAll(0))); }
     public void selectionChanged() {
         // The catalog already committed a durable pending marker; executor shutdown cannot lose that work.
         if(!selectionQueued.compareAndSet(false,true))return;
@@ -64,6 +69,9 @@ public class LibrarySyncService {
         retrySelectionDelivery(true);
     }
     private void retrySelectionDelivery(boolean signaturesAllowed) {
+        clustered(()->retrySelectionDeliveryOwned(signaturesAllowed));
+    }
+    private void retrySelectionDeliveryOwned(boolean signaturesAllowed) {
         var pending=catalog.selectionDelivery();
         long release=((Number)pending.get("signature_release_id")).longValue(),revision=((Number)pending.get("rule_revision")).longValue();
         if(signaturesAllowed && ((Number)pending.get("signature_pending")).intValue()==1) {
@@ -78,7 +86,7 @@ public class LibrarySyncService {
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 86_400_000)
     public void cleanupVersions() {
         if (busy.get()) return;
-        try { catalog.pruneSignatures(); }
+        try { clustered(()->{try {catalog.pruneSignatures();} catch(IOException failure) {throw new UncheckedIOException(failure);}}); }
         catch (Exception e) { log.warn("Library history cleanup deferred: {}", e.getClass().getSimpleName()); }
     }
     @PostConstruct public void validate() {
@@ -98,10 +106,11 @@ public class LibrarySyncService {
         }
         recoverInterruptedRuns();
     }
-    public void recoverInterruptedRuns() {
+    public void recoverInterruptedRuns() { clustered(this::recoverOwned); }
+    private void recoverOwned() {
         String message = "服务重启中断了上次同步，将按计划重试";
-        jdbc.update("UPDATE t_security_feed_run SET status='interrupted',finished_at=?,error=? WHERE status='running'", Instant.now().toString(), message);
-        jdbc.update("UPDATE t_security_feed_state SET status='failed',failure_count=failure_count+1,error=? WHERE status='running'", message);
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_run SET status='interrupted',finished_at=?,error=? WHERE status='running'", Instant.now().toString(), message);
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET status='failed',failure_count=failure_count+1,error=? WHERE status='running'", message);
     }
     public boolean trigger(String id) { return trigger(id, "manual"); }
     private boolean trigger(String id, String triggerType) {
@@ -109,17 +118,25 @@ public class LibrarySyncService {
         if (!schedules.effective(source).enabled()) throw new IllegalArgumentException("该远端数据源未启用");
         if (!busy.compareAndSet(false, true)) return false;
         try {
-            worker.execute(() -> { try { sync(source, triggerType); } finally { busy.set(false); } });
+            Runnable task=()->{try {sync(source,triggerType);} finally {busy.set(false);}};
+            if(clusterWork!=null && clusterWork.enabled()) {
+                if(!clusterWork.enqueueLibrary(worker,task)) {busy.set(false);return false;}
+            } else worker.execute(task);
             return true;
         } catch (RuntimeException e) { busy.set(false); throw e; }
     }
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
     public void scheduled() {
         if (busy.get()) return;
+        // A surviving replica may already be running when another worker dies.
+        // Claiming the library lease first prevents recovery from interrupting a live owner.
+        if(clusterWork!=null && clusterWork.enabled()
+                && jdbc.queryForObject("SELECT COUNT(*) FROM t_security_feed_state WHERE status='running'",Integer.class)>0)
+            recoverInterruptedRuns();
         if(opencti.hasExpired()) {
             if(!busy.compareAndSet(false,true))return;
             try{worker.execute(()->{
-                try{var result=opencti.expireNext();if(!result.isEmpty())deliverOpenCti(result);}
+                try{clustered(()->{try {var result=opencti.expireNext();if(!result.isEmpty())deliverOpenCti(result);} catch(IOException failure) {throw new UncheckedIOException(failure);}});}
                 catch(Exception e){log.warn("OpenCTI expiry publication deferred: type={}",e.getClass().getSimpleName());}
                 finally{busy.set(false);}
             });}catch(RuntimeException e){busy.set(false);throw e;}
@@ -151,17 +168,35 @@ public class LibrarySyncService {
     }
     public void sync(LibraryProperties.Source source) { sync(source, "manual"); }
     private void sync(LibraryProperties.Source source, String triggerType) {
+        clustered(()->{
+            if(clusterWork!=null && clusterWork.enabled()) {
+                if(!schedules.effective(source).enabled())return;
+                if(triggerType.equals("scheduled") && !due(source))return;
+                recoverOwned();
+            }
+            syncOwned(source,triggerType);
+        });
+    }
+    private boolean due(LibraryProperties.Source source) {
+        var rows=jdbc.queryForList("SELECT checked_at,failure_count,status FROM t_security_feed_state WHERE source_id=?",source.getId());
+        if(rows.isEmpty())return true;
+        if(VendorAdvisoryAdapter.TYPES.contains(source.getType()) && rows.get(0).get("status").equals("success")
+                && ((Number)vendors.state(source.getId()).getOrDefault("pending_count",0)).intValue()>0)
+            return Instant.parse(rows.get(0).get("checked_at").toString()).plusSeconds(60).isBefore(Instant.now());
+        return LibrarySchedule.nextCheck(schedules.effective(source),rows.get(0)).isBefore(Instant.now());
+    }
+    private void syncOwned(LibraryProperties.Source source,String triggerType) {
         String id = source.getId();
         boolean signatureAttempted=false;
         if (catalog.isRetired(id)) throw new IllegalArgumentException("来源已退役");
         long nativeBefore=VendorAdvisoryAdapter.TYPES.contains(source.getType())
                 ? jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class) : -1;
-        jdbc.update("""
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"""
                 INSERT INTO t_security_feed_state(source_id,kind,checked_at,status) VALUES (?,?,?,'running')
                 ON CONFLICT(source_id) DO UPDATE SET kind=EXCLUDED.kind,checked_at=EXCLUDED.checked_at,status='running',error=''
                 """, id, source.getType(), Instant.now().toString());
         String runId = UUID.randomUUID().toString();
-        jdbc.update("INSERT INTO t_security_feed_run(id,source_id,trigger_type,started_at,status) VALUES (?,?,?,?,'running')",
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"INSERT INTO t_security_feed_run(id,source_id,trigger_type,started_at,status) VALUES (?,?,?,?,'running')",
                 runId, id, triggerType, Instant.now().toString());
         try {
             if (!vendors.configurationIssue(source).isBlank()) throw new IllegalArgumentException("厂商来源配置与已固定身份不符");
@@ -227,10 +262,10 @@ public class LibrarySyncService {
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             if (VendorAdvisoryAdapter.TYPES.contains(source.getType()))
-                jdbc.update("UPDATE t_security_feed_state SET entry_count=(SELECT count(*) FROM t_security_cve WHERE source_id=?) WHERE source_id=?",id,id);
+                com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET entry_count=(SELECT count(*) FROM t_security_cve WHERE source_id=?) WHERE source_id=?",id,id);
             // Messages from parsers/HTTP libraries may contain a URL, API key or response body.
             String message = e instanceof OpenCtiAdapter.Failure ? e.getMessage() : e instanceof NvdProgressException ? e.getMessage() : e instanceof IllegalArgumentException ? "数据格式、认证或容量校验失败，已有库保留" : "远端访问或发布失败，已有库保留";
-            jdbc.update("UPDATE t_security_feed_state SET status='failed',failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END,error=? WHERE source_id=?", message, id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET status='failed',failure_count=CASE WHEN failure_count<1000 THEN failure_count+1 ELSE 1000 END,error=? WHERE source_id=?", message, id);
             log.warn("Library sync failed: source={} type={}", id, e.getClass().getSimpleName());
         } finally {
             // A later document can fail after an earlier document committed. Recheck those changes too.
@@ -238,14 +273,14 @@ public class LibrarySyncService {
                     || jdbc.queryForObject("SELECT revision FROM t_vuln_rule_state WHERE id=1",Long.class)!=nativeBefore)) {
                 try { matcher.matchAll(0); }
                 catch (Exception e) {
-                    jdbc.update("UPDATE t_security_feed_state SET status='failed',error='公告已入库，资产重新比对失败，请重新扫描',failure_count=failure_count+1 WHERE source_id=?",id);
+                    com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET status='failed',error='公告已入库，资产重新比对失败，请重新扫描',failure_count=failure_count+1 WHERE source_id=?",id);
                     log.warn("Native advisory asset recheck failed: source={} type={}",id,e.getClass().getSimpleName());
                 }
             }
             var state = jdbc.queryForMap("SELECT status,entry_count,error FROM t_security_feed_state WHERE source_id=?", id);
-            jdbc.update("UPDATE t_security_feed_run SET finished_at=?,status=?,entry_count=?,error=? WHERE id=?",
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_run SET finished_at=?,status=?,entry_count=?,error=? WHERE id=?",
                     Instant.now().toString(), state.get("status"), state.get("entry_count"), state.get("error"), runId);
-            jdbc.update("DELETE FROM t_security_feed_run WHERE source_id=? AND id NOT IN (SELECT id FROM t_security_feed_run WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 50)", id, id);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"DELETE FROM t_security_feed_run WHERE source_id=? AND id NOT IN (SELECT id FROM t_security_feed_run WHERE source_id=? ORDER BY started_at DESC,id DESC LIMIT 50)", id, id);
             retrySelectionDelivery(!signatureAttempted);
         }
     }
@@ -313,7 +348,7 @@ public class LibrarySyncService {
                 List<JsonNode> documents=fetchNvdWindow(source,start,end,budget);
                 catalog.cveWindow(source.getId(),documents,end);
                 long next=Math.min(Duration.ofDays(119).toSeconds(),Math.max(121,Duration.between(start,end).toSeconds()*2));
-                jdbc.update("UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",next,source.getId());
+                com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",next,source.getId());
                 int count=jdbc.queryForObject("SELECT count(*) FROM t_security_cve WHERE source_id=?",Integer.class,source.getId());
                 success(source.getId(),count,end.toString(),"","");
                 // Matching may be retried independently; a committed complete window remains committed.
@@ -325,7 +360,7 @@ public class LibrarySyncService {
                 if (currentSeconds<=121) throw new NvdProgressException("NVD 最小推进窗口仍超过容量，请人工缩小导入范围");
                 long seconds=Math.max(121,currentSeconds/2);
                 end=start.plusSeconds(seconds);
-                jdbc.update("UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",seconds,source.getId());
+                com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_security_feed_state SET nvd_window_seconds=? WHERE source_id=?",seconds,source.getId());
                 if (budget.bytes>=props.getMaxDownloadBytes() || budget.requests>=64) throw new NvdProgressException("NVD 本次访问预算已用尽，下次继续较小窗口");
             }
         }
@@ -382,7 +417,7 @@ public class LibrarySyncService {
     }
     private static String encode(String text) { return URLEncoder.encode(text, StandardCharsets.UTF_8); }
     private void success(String id, int count, String cursor, String etag, String modified) {
-        jdbc.update("""
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"""
                 UPDATE t_security_feed_state SET status='success',failure_count=0,error='',success_at=?,entry_count=?,
                 cursor=?,etag=?,last_modified=? WHERE source_id=?
                 """, Instant.now().toString(), count, cursor, etag, modified, id);

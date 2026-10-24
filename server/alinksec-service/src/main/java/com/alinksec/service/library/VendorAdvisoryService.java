@@ -54,7 +54,7 @@ public final class VendorAdvisoryService {
     private void pin(LibraryProperties.Source source) {
         String fingerprint=VendorAdvisoryIndex.fingerprint(source);
         catalog.nativeTransaction(source.getId(),()-> {
-            jdbc.update("INSERT INTO t_vendor_sync_state(source_id,configuration_sha256,updated_at) VALUES (?,?,?) ON CONFLICT(source_id) DO NOTHING",
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"INSERT INTO t_vendor_sync_state(source_id,configuration_sha256,updated_at) VALUES (?,?,?) ON CONFLICT(source_id) DO NOTHING",
                     source.getId(),fingerprint,Instant.now().toString());
             String pinned=jdbc.queryForObject("SELECT configuration_sha256 FROM t_vendor_sync_state WHERE source_id=?",String.class,source.getId());
             if (!fingerprint.equals(pinned)) throw new IllegalArgumentException("厂商来源身份或范围已变更，请退役旧来源并使用新来源标识");
@@ -95,7 +95,7 @@ public final class VendorAdvisoryService {
             if (response.status()==304) {
                 if (old.isEmpty()) throw VendorAdvisoryIndex.invalid();
                 catalog.nativeTransaction(source.getId(),()-> {
-                    jdbc.update("UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=? WHERE source_id=? AND document_id=? AND current_version=1",Instant.now().toString(),item.updated().toString(),source.getId(),item.id());
+                    com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=? WHERE source_id=? AND document_id=? AND current_version=1",Instant.now().toString(),item.updated().toString(),source.getId(),item.id());
                     return null;
                 });
             } else {
@@ -113,7 +113,7 @@ public final class VendorAdvisoryService {
                 || Instant.parse(old.get("checked_at").toString()).isBefore(Instant.now().minusSeconds(86_400));
     }
     private void progress(String source,int discovered,int pending,int checked) {
-        jdbc.update("UPDATE t_vendor_sync_state SET discovered_count=?,pending_count=?,checked_count=?,updated_at=? WHERE source_id=?",
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_sync_state SET discovered_count=?,pending_count=?,checked_count=?,updated_at=? WHERE source_id=?",
                 discovered,pending,checked,Instant.now().toString(),source);
     }
     private List<VendorAdvisoryIndex.Candidate> discover(LibraryProperties.Source source,Budget budget) throws IOException {
@@ -157,7 +157,7 @@ public final class VendorAdvisoryService {
         for (var item:candidates) rows.addObject().put("id",item.id()).put("address",item.address()).put("updated",item.updated().toString());
         byte[] bytes=JsonUtils.write(Map.of("candidates",rows)).getBytes(StandardCharsets.UTF_8);
         if (bytes.length>(4<<20)) throw VendorAdvisoryIndex.invalid();
-        jdbc.update("UPDATE t_vendor_sync_state SET index_base64=?,index_sha256=?,etag=?,last_modified=? WHERE source_id=?",
+        com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_sync_state SET index_base64=?,index_sha256=?,etag=?,last_modified=? WHERE source_id=?",
                 Base64.getEncoder().encodeToString(bytes),sha(bytes),etag,modified,source.getId());
         return candidates;
     }
@@ -175,34 +175,34 @@ public final class VendorAdvisoryService {
         catalog.nativeTransaction(sourceId,()-> {
             var old=jdbc.queryForList("SELECT id,sha256,vendor_updated_at FROM t_vendor_document WHERE source_id=? AND document_id=? AND current_version=1",sourceId,document.id());
             if (!old.isEmpty() && digest.equals(old.get(0).get("sha256"))) {
-                jdbc.update("UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=?,etag=?,last_modified=? WHERE id=?",Instant.now().toString(),discoveredUpdate.toString(),response.etag(),response.modified(),old.get(0).get("id"));
+                com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET checked_at=?,discovery_updated_at=?,etag=?,last_modified=? WHERE id=?",Instant.now().toString(),discoveredUpdate.toString(),response.etag(),response.modified(),old.get(0).get("id"));
                 return null;
             }
             if (!old.isEmpty() && !document.updated().equals(Instant.EPOCH)
                     && document.updated().isBefore(Instant.parse(old.get(0).get("vendor_updated_at").toString()))) throw VendorAdvisoryIndex.invalid();
             var affected=new TreeSet<>(jdbc.queryForList("SELECT cve_id FROM t_vendor_contribution WHERE source_id=? AND document_id=?",String.class,sourceId,document.id()));
             for (var cve:document.cves()) affected.add(cve.path("cve_id").asText());
-            jdbc.update("UPDATE t_vendor_document SET current_version=0 WHERE source_id=? AND document_id=? AND current_version=1",sourceId,document.id());
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET current_version=0 WHERE source_id=? AND document_id=? AND current_version=1",sourceId,document.id());
             var known=jdbc.queryForList("SELECT id FROM t_vendor_document WHERE source_id=? AND document_id=? AND configuration_sha256=? AND sha256=?",sourceId,document.id(),fingerprint,digest);
             String archive=known.isEmpty()?UUID.randomUUID().toString():known.get(0).get("id").toString();
             String now=Instant.now().toString();
             int ruleCount=document.cves().stream().mapToInt(c->c.path("affected").size()).sum();
             if (known.isEmpty()) {
                 if (jdbc.queryForObject("SELECT count(*) FROM t_vendor_document",Integer.class)>=50_000) throw VendorAdvisoryIndex.invalid();
-                jdbc.update("""
+                com.alinksec.service.cluster.ClusterWork.update(jdbc,"""
                         INSERT INTO t_vendor_document(id,source_id,document_id,format,publisher,title,vendor_version,vendor_updated_at,configuration_sha256,
                         origin,origin_kind,sha256,size_bytes,raw_base64,current_version,cve_count,rule_count,imported_at,checked_at,etag,last_modified)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)
                         """,archive,sourceId,document.id(),source.getType(),document.publisher(),document.title(),document.version(),document.updated().toString(),fingerprint,
                         origin,originKind(source,origin),digest,response.raw().length,Base64.getEncoder().encodeToString(response.raw()),document.cves().size(),ruleCount,now,now,response.etag(),response.modified());
-            } else jdbc.update("UPDATE t_vendor_document SET current_version=1,raw_base64=?,checked_at=?,etag=?,last_modified=? WHERE id=?",
+            } else com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET current_version=1,raw_base64=?,checked_at=?,etag=?,last_modified=? WHERE id=?",
                     Base64.getEncoder().encodeToString(response.raw()),now,response.etag(),response.modified(),archive);
-            jdbc.update("UPDATE t_vendor_document SET discovery_updated_at=? WHERE id=?",discoveredUpdate.toString(),archive);
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET discovery_updated_at=? WHERE id=?",discoveredUpdate.toString(),archive);
             pruneRaw(sourceId,document.id());
             Long bytes=jdbc.queryForObject("SELECT COALESCE(sum(size_bytes),0) FROM t_vendor_document WHERE raw_base64 IS NOT NULL",Long.class);
             if (bytes>limits.getMaxArchiveBytes()) throw new IllegalArgumentException("厂商公告原件容量已满，已有文档保留");
-            jdbc.update("DELETE FROM t_vendor_contribution WHERE source_id=? AND document_id=?",sourceId,document.id());
-            for (var cve:document.cves()) jdbc.update("INSERT INTO t_vendor_contribution(source_id,document_id,cve_id,raw_document_id,document) VALUES (?,?,?,?,?)",
+            com.alinksec.service.cluster.ClusterWork.update(jdbc,"DELETE FROM t_vendor_contribution WHERE source_id=? AND document_id=?",sourceId,document.id());
+            for (var cve:document.cves()) com.alinksec.service.cluster.ClusterWork.update(jdbc,"INSERT INTO t_vendor_contribution(source_id,document_id,cve_id,raw_document_id,document) VALUES (?,?,?,?,?)",
                     sourceId,document.id(),cve.path("cve_id").asText(),archive,VulnerabilityEvidence.canonicalJson(cve));
             if (jdbc.queryForObject("SELECT count(*) FROM t_vendor_contribution WHERE source_id=?",Integer.class,sourceId)>100_000) throw VendorAdvisoryIndex.invalid();
             for (String cve:affected) aggregate(sourceId,cve,source.getType(),document.publisher(),archive);
@@ -211,7 +211,7 @@ public final class VendorAdvisoryService {
     }
     private void pruneRaw(String source,String document) {
         var versions=jdbc.queryForList("SELECT id FROM t_vendor_document WHERE source_id=? AND document_id=? AND raw_base64 IS NOT NULL ORDER BY current_version DESC,imported_at DESC,id DESC",String.class,source,document);
-        for (int i=limits.getRetainRawVersions();i<versions.size();i++) jdbc.update("UPDATE t_vendor_document SET raw_base64=NULL WHERE id=?",versions.get(i));
+        for (int i=limits.getRetainRawVersions();i<versions.size();i++) com.alinksec.service.cluster.ClusterWork.update(jdbc,"UPDATE t_vendor_document SET raw_base64=NULL WHERE id=?",versions.get(i));
     }
     private void aggregate(String source,String cve,String format,String publisher,String changedArchive) {
         var rows=jdbc.queryForList("""

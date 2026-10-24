@@ -9,6 +9,10 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.alinksec.service.cluster.ClusterSessions;
+import com.alinksec.service.cluster.ClusterUnavailable;
+import java.util.function.Supplier;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Agent 在线连接注册表：agent_id → 下行 stream。
@@ -25,6 +29,9 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
         final AtomicInteger upgradeContract=new AtomicInteger(),isolationContract=new AtomicInteger(),weakPasswordContract=new AtomicInteger();
         final java.util.concurrent.locks.ReentrantReadWriteLock identity=new java.util.concurrent.locks.ReentrantReadWriteLock();
         final Object output=new Object();
+        final ReentrantLock management=new ReentrantLock();
+        String token="";
+        volatile boolean ready;
         volatile boolean closed;
         Connection(StreamObserver<Command> stream) { this.stream=stream; }
         StreamObserver<Command> stream() { return stream; }
@@ -32,16 +39,32 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
         AtomicInteger isolationContract() { return isolationContract; }
     }
     private final Map<String, Connection> streams = new ConcurrentHashMap<>();
+    private final ClusterSessions sessions;
+    private final java.util.concurrent.atomic.AtomicBoolean coordinationFailed=new java.util.concurrent.atomic.AtomicBoolean();
+    private final Object[] registrationLocks=java.util.stream.IntStream.range(0,64).mapToObj(i->new Object()).toArray();
+
+    public ConnectionRegistry() { this.sessions=null; }
+    @org.springframework.beans.factory.annotation.Autowired
+    public ConnectionRegistry(ClusterSessions sessions) { this.sessions=sessions; }
+    @Override public boolean deferredDelivery() { return sessions!=null && sessions.enabled(); }
 
     public void register(String agentId, StreamObserver<Command> stream) {
+        synchronized(registrationLocks[Math.floorMod(agentId.hashCode(),registrationLocks.length)]) {
         Connection replacement=new Connection(stream);
         Connection old;
         for(;;) {
             old=streams.get(agentId);
-            if(old==null) { if(streams.putIfAbsent(agentId,replacement)==null) break; }
+            if(old==null) {
+                if(deferredDelivery()) replacement.token=sessions.claim(agentId);
+                if(streams.putIfAbsent(agentId,replacement)==null) break;
+            }
             else {
                 old.identity.writeLock().lock();
-                try { synchronized(old.output) { if(streams.replace(agentId,old,replacement)) { old.closed=true; break; } } }
+                try {
+                    if(streams.get(agentId)!=old) continue;
+                    if(deferredDelivery()) replacement.token=sessions.claim(agentId);
+                    synchronized(old.output) { if(streams.replace(agentId,old,replacement)) { old.closed=true; break; } }
+                }
                 finally { old.identity.writeLock().unlock(); }
             }
         }
@@ -53,16 +76,19 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
             }
         }
         log.info("Agent 上线: agent={} online={}", agentId, streams.size());
+        }
     }
 
     public void unregister(String agentId, StreamObserver<Command> stream) {
         // 只在仍是本人注册时移除（避免新连接被旧连接的 onCompleted 回调误删）
         Connection current=streams.get(agentId);
+        boolean removed=false;
         if(current!=null) {
             current.identity.writeLock().lock();
-            try { synchronized(current.output) { if(current.stream()==stream) { current.closed=true; streams.remove(agentId,current); } } }
+            try { synchronized(current.output) { if(current.stream()==stream) { current.closed=true; removed=streams.remove(agentId,current); } } }
             finally { current.identity.writeLock().unlock(); }
         }
+        if(removed) release(agentId,current);
         log.info("Agent 下线: agent={} online={}", agentId, streams.size());
     }
 
@@ -80,7 +106,7 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
         if (connection == null) {
             return false;
         }
-        synchronized(connection.output) {
+        return inIdentity(agentId,connection,expected,()-> { synchronized(connection.output) {
         if(streams.get(agentId)!=connection || connection.closed || expected!=null && connection.stream()!=expected) return false;
         if (command.hasVulnScan() && command.getVulnScan().getIncludeWeakPassword()
                 && (command.getVulnScan().getExecutionContract()!=1 || connection.weakPasswordContract.get()!=1)) return false;
@@ -101,7 +127,83 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
             connection.closed=true;
             return false;
         }
+        } },false);
+    }
+
+    @Override public <T> T withIdentity(String agentId,Supplier<T> action,T absent) {
+        if(!deferredDelivery()) return action.get();
+        Connection connection=streams.get(agentId);
+        return connection==null || !connection.ready ? absent : inIdentity(agentId,connection,null,action,absent);
+    }
+
+    private <T> T inIdentity(String agentId,Connection connection,StreamObserver<Command> expected,Supplier<T> action,T absent) {
+        connection.identity.readLock().lock();
+        try {
+            if(streams.get(agentId)!=connection || connection.closed || expected!=null && connection.stream()!=expected) return absent;
+            if(!deferredDelivery()) return action.get();
+            connection.management.lock();
+            try { return sessions.current(agentId,connection.token,action); }
+            catch(ClusterUnavailable failure) {
+                connection.closed=true;
+                if(!java.util.Set.of("agent_session_replaced_or_expired","agent_session_expired","agent_fence_busy").contains(failure.getMessage()))
+                    coordinationFailed.set(true);
+                return absent;
+            }
+            finally { connection.management.unlock(); }
+        } finally {
+            connection.identity.readLock().unlock();
+            // A nested receipt send still holds its outer report's identity read lock.
+            if(connection.closed && connection.identity.getReadHoldCount()==0) retire(agentId,connection);
         }
+    }
+
+    private void release(String agentId,Connection connection) {
+        if(deferredDelivery() && !coordinationFailed.get() && sessions.ready()) try { sessions.release(agentId,connection.token); }
+        catch(RuntimeException ignored) { /* Token comparison and TTL protect replacement ownership. */ }
+    }
+
+    private void retire(String agentId,Connection connection) {
+        boolean removed;
+        connection.identity.writeLock().lock();
+        try { removed=streams.remove(agentId,connection);connection.closed=true; }
+        finally { connection.identity.writeLock().unlock(); }
+        if(removed) {
+            release(agentId,connection);
+            try { synchronized(connection.output) {
+                connection.stream().onError(io.grpc.Status.UNAVAILABLE.withDescription("agent session is no longer owned by this node").asRuntimeException());
+            } } catch(RuntimeException ignored) { }
+        }
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay=5000,initialDelay=5000,scheduler="clusterScheduler")
+    public void renewOwnership() {
+        if(!deferredDelivery()) return;
+        if(!sessions.healthy()) { coordinationFailed.set(true);closeOwnedStreams();return; }
+        coordinationFailed.set(false);
+        for(var entry:streams.entrySet()) {
+            String agent=entry.getKey();Connection connection=entry.getValue();
+            inIdentity(agent,connection,null,()-> {
+                if(!sessions.renew(agent,connection.token)) throw new ClusterUnavailable("agent_session_expired");
+                return true;
+            },false);
+            if(coordinationFailed.get()) { closeOwnedStreams();break; }
+        }
+    }
+
+    @jakarta.annotation.PreDestroy
+    public void closeOwnedStreams() {
+        coordinationFailed.set(true);
+        streams.forEach(this::retire);
+    }
+
+    public java.util.List<String> localAgentIds() {
+        return streams.entrySet().stream().filter(e->!e.getValue().closed && (!deferredDelivery() || e.getValue().ready))
+                .map(Map.Entry::getKey).sorted().toList();
+    }
+
+    public void heartbeatReady(String agent,StreamObserver<Command> expected) {
+        Connection current=streams.get(agent);
+        if(current!=null && current.stream()==expected && !current.closed) current.ready=true;
     }
 
     public void upgradeContract(String agentId,StreamObserver<Command> stream,int contract) {
@@ -136,9 +238,7 @@ public class ConnectionRegistry implements com.alinksec.service.command.CommandS
     public void withCurrent(String agentId,StreamObserver<Command> stream,Runnable action) {
         Connection current=streams.get(agentId);
         if(current!=null) {
-            current.identity.readLock().lock();
-            try { if(streams.get(agentId)==current && !current.closed && current.stream()==stream) action.run(); }
-            finally { current.identity.readLock().unlock(); }
+            inIdentity(agentId,current,stream,()-> { action.run();return null; },null);
         }
     }
 
