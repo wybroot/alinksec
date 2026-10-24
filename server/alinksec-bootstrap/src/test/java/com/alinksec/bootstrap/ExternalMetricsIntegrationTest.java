@@ -35,7 +35,10 @@ class ExternalMetricsIntegrationTest {
         try(var pool=new HikariDataSource(config)) {
             var jdbc=new JdbcTemplate(pool);jdbc.execute("CREATE TABLE t_agent(agent_id TEXT PRIMARY KEY,hostname TEXT)");
             jdbc.update("INSERT INTO t_agent VALUES (?,?)",agent,host);
-            long first=(Instant.now().minusSeconds(10).toEpochMilli()/1000)*1000+123,second=first+1111;
+            // The deployed VM defaults to a 30s query latency offset. This checks historical sample
+            // fidelity outside that window, without changing the production service/query settings.
+            long first=(Instant.now().minusSeconds(60).toEpochMilli()/1000)*1000+123,second=first+1111;
+            Path evidence=Path.of(System.getenv("ALINKSEC_EXTERNAL_EVIDENCE")).resolve("metrics");Files.createDirectories(evidence);
             String metric="alinksec_external_probe",label="C:\\监测\\\"\n目录";
             var batch=RptMetricsBatch.newBuilder()
                     .addSamples(MetricSample.newBuilder().setName(metric).setTs(first).setValue(12.5).putLabels("mount",label))
@@ -55,6 +58,7 @@ class ExternalMetricsIntegrationTest {
                     Thread.sleep(100);
                 }
                 assertFalse(exported.isBlank(),"Actual samples must be visible at their current millisecond timestamps");
+                Files.writeString(evidence.resolve("export.ndjson"),exported);
                 var samples=new TreeMap<Long,Double>();
                 for(String line:exported.lines().toList()) {
                     JsonNode row=JsonUtils.read(line);assertEquals(agent,row.path("metric").path("agent_id").asText());
@@ -66,18 +70,17 @@ class ExternalMetricsIntegrationTest {
                 var mvc=MockMvcBuilders.standaloneSetup(new MetricsController(new VmQueryClient(props),props)).build();
                 String query="last_over_time("+selector+"[1h])",time=Long.toString(Instant.now().getEpochSecond());
                 var instant=mvc.perform(get("/api/metrics/query").param("query",query).param("time",time)).andReturn().getResponse();
+                Files.write(evidence.resolve("query.json"),instant.getContentAsByteArray());
                 assertEquals(200,instant.getStatus());JsonNode result=JsonUtils.read(instant.getContentAsString()).path("data");
                 assertEquals("success",result.path("status").asText());assertEquals(1,result.path("data").path("result").size());
                 assertEquals("25.75",result.path("data").path("result").get(0).path("value").get(1).asText());
                 var range=mvc.perform(get("/api/metrics/query_range").param("query",query).param("start",Long.toString(first/1000))
                         .param("end",time).param("step","1s")).andReturn().getResponse();
+                Files.write(evidence.resolve("query-range.json"),range.getContentAsByteArray());
                 assertEquals(200,range.getStatus());assertFalse(JsonUtils.read(range.getContentAsString()).path("data").path("data").path("result").isEmpty());
-                Path evidence=Path.of(System.getenv("ALINKSEC_EXTERNAL_EVIDENCE")).resolve("metrics");Files.createDirectories(evidence);
-                Files.writeString(evidence.resolve("export.ndjson"),exported);
-                Files.write(evidence.resolve("query.json"),instant.getContentAsByteArray());Files.write(evidence.resolve("query-range.json"),range.getContentAsByteArray());
-                Files.writeString(evidence.resolve("result.json"),JsonUtils.write(Map.of("accepted",true,"sampleCount",2,"timestamps",List.of(first,second),
-                        "millisecondPrecisionVerified",true,"escapedLabelsVerified",true,"productionForwarder",true,"productionQueryClient",true,
-                        "nativeAgentTransportVerified",false,"realHostLongSoakVerified",false))+"\n");
+                Files.writeString(evidence.resolve("result.json"),JsonUtils.write(Map.ofEntries(Map.entry("accepted",true),Map.entry("sampleCount",2),Map.entry("timestamps",List.of(first,second)),
+                        Map.entry("millisecondPrecisionVerified",true),Map.entry("escapedLabelsVerified",true),Map.entry("productionForwarder",true),Map.entry("productionQueryClient",true),
+                        Map.entry("nativeAgentTransportVerified",false),Map.entry("realHostLongSoakVerified",false),Map.entry("latencyAcceptance",false),Map.entry("sampleAgeSeconds",60)))+"\n");
             } finally {Locale.setDefault(previous);forwarder.stop();}
         }
     }

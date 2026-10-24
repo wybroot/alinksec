@@ -50,6 +50,7 @@ def verify(root, reports, head):
     assert metrics["accepted"] and metrics["sampleCount"] == 2 and metrics["millisecondPrecisionVerified"] and metrics["escapedLabelsVerified"]
     assert metrics["productionForwarder"] and metrics["productionQueryClient"]
     assert metrics["nativeAgentTransportVerified"] is False and metrics["realHostLongSoakVerified"] is False
+    assert metrics["latencyAcceptance"] is False and metrics["sampleAgeSeconds"] == 60
     samples = {}
     for line in (root / "metrics/export.ndjson").read_text().splitlines():
         row = json.loads(line)
