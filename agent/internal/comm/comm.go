@@ -411,12 +411,7 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 	}()
 
 	sendCh := make(chan *pb.Report, 256)
-	sendErr := make(chan error, 1)
-	go func() {
-		defer close(sendCh)
-		// 发送协程：唯一写 stream 的地方
-		sendErr <- c.sendLoop(sctx, stream, sendCh, generation)
-	}()
+	sendErr := c.startReportSender(sctx, stream, sendCh, generation)
 
 	c.log.Info("主通道已建立", "agent_id", c.state.AgentID)
 
@@ -480,6 +475,17 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 		<-sendErr
 		return ctx.Err()
 	}
+}
+
+func (c *Client) startReportSender(ctx context.Context, stream pb.AgentChannel_ChannelClient, reports <-chan *pb.Report, generation uint64) <-chan error {
+	finished := make(chan error, 1)
+	go func() {
+		defer close(finished)
+		// Command handlers may still be finishing when transport or SCM stops.
+		// This consumer does not own their channel and must never close it.
+		finished <- c.sendLoop(ctx, stream, reports, generation)
+	}()
+	return finished
 }
 
 // sendLoop 发送协程：心跳定时、离线队列补传、sendCh 消费

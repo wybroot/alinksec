@@ -18,6 +18,7 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/config"
 	"github.com/alinksec/alinksec-agent/internal/configguard"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,17 +71,20 @@ func waitConfigCondition(t *testing.T, description string, check func() bool) {
 
 func readConfigEvents(t *testing.T, work string) []configguard.Event {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(work, "config-integrity", "record.json"))
-	if err != nil {
+	// Observe an atomic snapshot without taking a Windows handle that prevents
+	// the running Agent from replacing its journal. Keep malformed records fatal.
+	var record map[string]json.RawMessage
+	if err := securestate.ReadJSONLimit(filepath.Join(work, "config-integrity", "record.json"), &record, 2<<20); err != nil {
 		t.Fatal(err)
 	}
-	var r struct {
-		Events []configguard.Event `json:"events"`
+	if len(record["events"]) == 0 {
+		return nil
 	}
-	if err := json.Unmarshal(b, &r); err != nil {
+	var events []configguard.Event
+	if err := json.Unmarshal(record["events"], &events); err != nil {
 		t.Fatal(err)
 	}
-	return r.Events
+	return events
 }
 
 func TestConfigIntegrityLifecycle(t *testing.T) {

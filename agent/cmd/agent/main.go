@@ -110,7 +110,7 @@ func cmdRun(args []string) error {
 	if *cfgPath == "" {
 		*cfgPath = *workDir + string(os.PathSeparator) + "agent.yml"
 	}
-	return runManaged(func(ctx context.Context) error {
+	return runManaged(*workDir, func(ctx context.Context) error {
 		store, cfg, err := configguard.Open(*workDir, *cfgPath)
 		if err != nil {
 			return err

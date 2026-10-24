@@ -430,10 +430,11 @@ jobs:
           ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
           ALINKSEC_CONFIG_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/config-native/result.json
       - name: Retain native Windows configuration evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: config-validation-windows-amd64
-          path: .tmp/config-native/result.json
+          path: .tmp/config-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
