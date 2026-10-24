@@ -58,6 +58,15 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 		_ = f.Close()
 		return fmt.Errorf("report exceeds 4MiB queue limit")
 	}
+	// A blocked stream can hold a peek while raw collection continues. Retain
+	// the source cursor instead of growing the spool while compaction is fenced.
+	if r.GetLogBatch() != nil && q.peeked != nil {
+		st, statErr := f.Stat()
+		if statErr != nil || st.Size()+int64(len(line)+1) > maxQueueBytes {
+			_ = f.Close()
+			return fmt.Errorf("raw log spool capacity unavailable")
+		}
+	}
 	w := bufio.NewWriter(f)
 	if _, err := w.Write(append(line, '\n')); err != nil {
 		_ = f.Close()

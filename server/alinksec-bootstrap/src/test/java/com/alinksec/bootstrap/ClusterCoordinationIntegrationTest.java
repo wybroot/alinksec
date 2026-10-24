@@ -75,7 +75,7 @@ class ClusterCoordinationIntegrationTest {
     @AfterEach void close() throws Exception {
         for(var node:nodes){node.runtime.close();node.rabbit.close();node.redis.close();}
         if(a!=null){var factory=new ConnectionFactory();factory.setUri(a.properties.getRabbitUri());try(var connection=factory.newConnection();var channel=connection.createChannel()){channel.queueDelete(a.rabbit.queueName());}}
-        if(jdbc!=null && agent!=null){jdbc.update("DELETE FROM t_agent_log WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_asset_port WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_alert_notify_delivery WHERE alert_no LIKE 'cluster-%'");jdbc.update("DELETE FROM t_alert WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_notify_channel WHERE name LIKE 'cluster-%'");jdbc.update("DELETE FROM t_agent WHERE agent_id=?",agent);if(actor!=null)jdbc.update("DELETE FROM t_user WHERE id=?",actor);}
+        if(jdbc!=null && agent!=null){new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(t->{LogBatchService.gate(jdbc);var usage=jdbc.queryForMap("SELECT COUNT(*) AS rows,COALESCE(SUM(stored_bytes),0) AS bytes FROM t_agent_log WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_agent_log WHERE agent_id=?",agent);jdbc.update("UPDATE t_agent_log_state SET retained_rows=retained_rows-?,retained_bytes=retained_bytes-? WHERE id=1",usage.get("rows"),usage.get("bytes"));});jdbc.update("DELETE FROM t_asset_port WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_alert_notify_delivery WHERE alert_no LIKE 'cluster-%'");jdbc.update("DELETE FROM t_alert WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_notify_channel WHERE name LIKE 'cluster-%'");jdbc.update("DELETE FROM t_agent WHERE agent_id=?",agent);if(actor!=null)jdbc.update("DELETE FROM t_user WHERE id=?",actor);}
         if(pool!=null)pool.close();
     }
     Report logs(String id,String text){return Report.newBuilder().setAgentId(agent).setReportId(id).setLogBatch(RptLogBatch.newBuilder().setSource("cluster").addLines(LogLine.newBuilder().setContent(text).setTs(System.currentTimeMillis()))).build();}
@@ -157,7 +157,7 @@ class ClusterCoordinationIntegrationTest {
     }
     @Test void businessRollbackRetryAndPoisonQuarantineDoNotLoseOrPartiallyApplyFacts() {
         AtomicBoolean fail=new AtomicBoolean(true);
-        var service=new LogBatchService(jdbc,dialect){@Override public void onBatch(String id,RptLogBatch batch){super.onBatch(id,batch);if(fail.getAndSet(false))throw new IllegalStateException("controlled failure after insert");}};
+        var service=new LogBatchService(jdbc,dialect){@Override public void onBatch(String id,String reportId,RptLogBatch batch){super.onBatch(id,reportId,batch);if(fail.getAndSet(false))throw new IllegalStateException("controlled failure after insert");}};
         var receiver=ingress(b,service);admit(ingress(a),logs("rollback","rollback then commit"));receiver.processHint(hint("rollback"));
         assertEquals(0,logCount());assertEquals("retry",row("rollback").get("state"));
         jdbc.update("UPDATE t_cluster_ingress SET next_attempt_at=0 WHERE id=?",hint("rollback"));receiver.processHint(hint("rollback"));assertEquals(1,logCount());

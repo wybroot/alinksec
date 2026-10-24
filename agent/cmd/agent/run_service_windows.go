@@ -7,11 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime/debug"
+	"sort"
+	"strings"
+
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 
 	"golang.org/x/sys/windows/svc"
 )
 
-func runManaged(run func(context.Context) error) error {
+func runManaged(work string, run func(context.Context) error) error {
 	isService, err := svc.IsWindowsService()
 	if err != nil {
 		return fmt.Errorf("detect Windows service environment: %w", err)
@@ -19,7 +25,46 @@ func runManaged(run func(context.Context) error) error {
 	if !isService {
 		return runForeground(run)
 	}
+	if err := retainServiceCrashOutput(work); err != nil {
+		return fmt.Errorf("prepare private service crash output: %w", err)
+	}
 	return svc.Run("alinksec-agent", &agentService{run: run})
+}
+
+// SCM does not supply a usable stderr. Keep runtime panics in a private folder
+// so an unexpected 1067 stop retains its cause. Keep only three process records;
+// normal application reports and configuration contents are not written here.
+func retainServiceCrashOutput(work string) error {
+	dir := filepath.Join(work, "service-crashes")
+	if err := securestate.PrivateDir(dir); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var old []os.DirEntry
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "crash-") && entry.Type().IsRegular() {
+			old = append(old, entry)
+		}
+	}
+	sort.Slice(old, func(i, j int) bool {
+		a, ae := old[i].Info()
+		b, be := old[j].Info()
+		return ae == nil && (be != nil || a.ModTime().After(b.ModTime()))
+	})
+	for _, entry := range old[min(2, len(old)):] {
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	f, err := os.CreateTemp(dir, "crash-*.log")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return debug.SetCrashOutput(f, debug.CrashOptions{})
 }
 
 type agentService struct {

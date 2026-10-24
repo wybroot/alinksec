@@ -430,25 +430,37 @@ jobs:
           ALINKSEC_SMOKE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
           ALINKSEC_CONFIG_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/config-native/result.json
       - name: Retain native Windows configuration evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: config-validation-windows-amd64
-          path: .tmp/config-native/result.json
+          path: .tmp/config-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
       - name: Check native Windows login reader and WFP lifetime
-        run: go test -v -count=1 -timeout=2m -run '^TestNativeWindowsLoginProtection$' ./internal/windowslogin
+        run: go test -v -count=1 -timeout=2m -run '^TestNativeWindows(LoginProtection|RawLogs)$' ./internal/windowslogin
         working-directory: agent
         env:
           ALINKSEC_WINDOWS_LOGIN_NATIVE_REQUIRED: 'true'
           ALINKSEC_WINDOWS_LOGIN_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/windows-login-native/result.json
+          ALINKSEC_RAW_LOG_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/raw-log-native/result.json
       - name: Retain native Windows login evidence
         uses: actions/upload-artifact@v4
         with:
           name: windows-login-validation-windows-amd64
           path: .tmp/windows-login-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain native Windows raw Security log evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-log-native-windows-amd64
+          path: .tmp/raw-log-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -624,6 +636,22 @@ jobs:
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
           ALINKSEC_PACKAGE_REPAIR_NATIVE_REQUIRED: 'true'
+      - name: Check bounded Linux raw log collection and spool admission
+        run: |
+          mkdir -p ../.tmp/raw-log-native
+          go test -json -count=1 ./internal/logcollect ./internal/windowslogin ./internal/comm > ../.tmp/raw-log-native/go-test.jsonl
+        working-directory: agent
+        env:
+          ALINKSEC_RAW_LOG_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/raw-log-native/result.json
+      - name: Retain native Linux raw log evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-log-native-linux-${{ matrix.arch }}
+          path: .tmp/raw-log-native
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check native Linux resource feedback and recovery
         run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
         working-directory: agent
@@ -1138,8 +1166,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "34"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "101"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "35"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "102"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1438,18 +1466,21 @@ jobs:
       - name: Check SQLite statistics, authority, snapshot integrity and schedule recovery
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest,EvidenceIntegrationTest,EvidenceControllerTest -Dsurefire.failIfNoSpecifiedTests=false test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest,EvidenceIntegrationTest,EvidenceControllerTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
           mkdir -p ../.tmp/report-fixtures/junit-sqlite
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*ReportControllerTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*JwtAuthInterceptorTest.xml ../.tmp/report-fixtures/junit-sqlite/
           mkdir -p ../.tmp/evidence-fixtures/junit-sqlite
           cp alinksec-bootstrap/target/surefire-reports/TEST-*EvidenceIntegrationTest.xml ../.tmp/evidence-fixtures/junit-sqlite/
+          mkdir -p ../.tmp/log-search-fixtures/junit-sqlite
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*LogSearchIntegrationTest.xml ../.tmp/log-search-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*EvidenceControllerTest.xml ../.tmp/evidence-fixtures/junit-sqlite/
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
+          ALINKSEC_LOG_SEARCH_FIXTURES: ${{ github.workspace }}/.tmp/log-search-fixtures
       - name: Prepare actual PostgreSQL schema and report reader role
         run: |
           sudo apt-get update -qq
@@ -1468,11 +1499,13 @@ jobs:
       - name: Check identical PostgreSQL transactions with the restricted application role
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,EvidenceIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,EvidenceIntegrationTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
           mkdir -p ../.tmp/report-fixtures/junit-postgres
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-postgres/
           mkdir -p ../.tmp/evidence-fixtures/junit-postgres
           cp alinksec-bootstrap/target/surefire-reports/TEST-*EvidenceIntegrationTest.xml ../.tmp/evidence-fixtures/junit-postgres/
+          mkdir -p ../.tmp/log-search-fixtures/junit-postgres
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*LogSearchIntegrationTest.xml ../.tmp/log-search-fixtures/junit-postgres/
         env:
           MAVEN_OPTS: -Xmx256m
           ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/reporting?stringtype=unspecified
@@ -1480,6 +1513,7 @@ jobs:
           ALINKSEC_INTEGRATION_PG_PASSWORD: report-app-fixture
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
+          ALINKSEC_LOG_SEARCH_FIXTURES: ${{ github.workspace }}/.tmp/log-search-fixtures
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -1491,12 +1525,27 @@ jobs:
         working-directory: web
       - name: Independently read actual Excel, CSV, HTML and JSON documents
         run: /usr/bin/python3 deploy/tests/report-documents.py .tmp/report-fixtures
+      - name: Independently parse exact raw log CSV and NDJSON documents
+        run: python3 deploy/tests/log-documents.py .tmp/log-search-fixtures
       - name: Check actual production report pages and PDF against database captures
         working-directory: web
         run: node test/reporting-browser.mjs
       - name: Check central evidence console and exact file downloads
         working-directory: web
         run: node test/evidence-browser.mjs
+      - name: Check raw log search, original text and bounded downloads in production pages
+        working-directory: web
+        run: node test/log-search-browser.mjs
+      - name: Retain raw log database, export and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-search-console
+          path: |
+            .tmp/log-search-fixtures
+            .tmp/log-search-browser
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Retain central evidence database and browser observations
         if: always()
         uses: actions/upload-artifact@v4

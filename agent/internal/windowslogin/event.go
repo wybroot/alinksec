@@ -24,6 +24,8 @@ type Record struct {
 	Fingerprint string
 	Time        time.Time
 	Attempt     *Attempt
+	RawXML      string
+	EventID     string
 }
 type Attempt struct {
 	IP        netip.Addr
@@ -101,6 +103,8 @@ func Parse(data []byte) (Record, error) {
 	if s.Provider[0].Name != provider || !strings.EqualFold(s.Provider[0].GUID, providerGUID) || (s.IDs[0] != "4624" && s.IDs[0] != "4625") {
 		return r, nil
 	}
+	r.RawXML = string(data)
+	r.EventID = s.IDs[0]
 	if len(e.Data) != 1 || len(e.Data[0].Values) > 64 {
 		return r, fmt.Errorf("event_fields")
 	}

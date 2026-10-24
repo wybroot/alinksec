@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -26,11 +27,49 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func retainFailedServiceCrashEvidence(t *testing.T, work string) {
+	t.Helper()
+	if !t.Failed() {
+		return
+	}
+	files, err := filepath.Glob(filepath.Join(work, "service-crashes", "crash-*.log"))
+	if err != nil {
+		t.Logf("enumerate service crash output: %v", err)
+		return
+	}
+	for _, path := range files {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Logf("open service crash output: %v", err)
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(f, 256<<10))
+		f.Close()
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		text := string(data)
+		for _, secret := range []string{"ENROLL-windows-scm-fixture", "do-not-leak-this-content", "must-not-be-echoed"} {
+			text = strings.ReplaceAll(text, secret, "[fixture-secret-redacted]")
+		}
+		t.Logf("retained service crash %s:\n%s", filepath.Base(path), text)
+		if output := os.Getenv("ALINKSEC_CONFIG_EVIDENCE_FILE"); output != "" {
+			dir := filepath.Join(filepath.Dir(output), "diagnostics")
+			if err := os.MkdirAll(dir, 0700); err == nil {
+				if err := os.WriteFile(filepath.Join(dir, filepath.Base(path)), []byte(text), 0600); err != nil {
+					t.Logf("retain service crash artifact: %v", err)
+				}
+			}
+		}
+	}
+}
 
 func applyNativeConfig(t *testing.T, binary, work string, contents []byte) {
 	t.Helper()

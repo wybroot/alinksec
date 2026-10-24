@@ -40,6 +40,7 @@ func newUpgradeTestService(t *testing.T, binary, work string) upgradeTestService
 		t.Fatal(err)
 	}
 	s := &scmUpgradeService{manager: manager, service: service}
+	t.Cleanup(func() { retainFailedServiceCrashEvidence(t, work) })
 	t.Cleanup(func() {
 		if helper, err := manager.OpenService("alinksec-agent-upgrade-watchdog"); err == nil {
 			cfg, err := helper.Config()

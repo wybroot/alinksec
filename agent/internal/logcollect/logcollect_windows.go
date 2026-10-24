@@ -2,10 +2,14 @@
 
 package logcollect
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
-func pollInterval()time.Duration{return 30*time.Second}
+func pollInterval() time.Duration { return 30 * time.Second }
 
-// Security logons are read by windowslogin's native XML reader and committed
-// with its cursor. Do not run a second overlapping reader or localized CLI parser.
-func (c *Collector) pollOnce(){}
+// Security 4624/4625 XML is collected by windowslogin's single native reader.
+func (c *Collector) pollOnce()              {}
+func openLog(path string) (*os.File, error) { return os.Open(path) }
+func fileIdentity(st os.FileInfo) string    { return st.Name() }

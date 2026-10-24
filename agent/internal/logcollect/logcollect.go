@@ -1,145 +1,287 @@
-// Package logcollect 登录/安全日志采集（docs/04 §2）：
-// Linux tail /var/log/secure（Debian 系 /var/log/auth.log）；Windows 走 Security 事件日志。
-// 产物 RptLogBatch 批量上报，服务端落 t_agent_log；轮询 offset 持久化防重启重采。
+// Package logcollect tails fixed Linux authentication log files. Windows shares
+// windowslogin's native Security reader. Collection notices are marked metadata.
 package logcollect
 
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 )
 
 const (
-	maxLineBytes  = 4000 // 单行截断上限（服务端列宽对齐）
-	maxBatchLines = 100  // 单批次行数上限
+	maxLineBytes  = 16 << 10
+	maxBatchLines = 100
+	maxPollBytes  = 256 << 10
 	stateFile     = "logtail.state.json"
 )
 
-// Collector 日志采集器：线程安全（offset 持久化互斥）
+type fileState struct {
+	Identity   string `json:"identity"`
+	Generation string `json:"generation"`
+	Offset     int64  `json:"offset"`
+	Start      int64  `json:"start"`
+	Prefix     []byte `json:"prefix,omitempty"`
+	Total      int64  `json:"total"`
+	EndsCR     bool   `json:"ends_cr,omitempty"`
+	Observed   int64  `json:"observed"`
+	Issue      string `json:"issue"`
+	NoticeSeq  uint64 `json:"notice_seq"`
+}
+type stateJSON struct {
+	Version int                  `json:"version"`
+	Files   map[string]fileState `json:"files"`
+}
 type Collector struct {
-	log       *slog.Logger
-	statePath string
-	mu        sync.Mutex
-	offsets   map[string]int64
-	send      func(source string, lines []*pb.LogLine)
+	log          *slog.Logger
+	statePath    string
+	mu           sync.Mutex
+	files        map[string]fileState
+	stateInvalid bool
+	send         func(string, []*pb.LogLine) bool
 }
 
-func New(workDir string, log *slog.Logger, send func(source string, lines []*pb.LogLine)) *Collector {
-	c := &Collector{
-		log:       log,
-		statePath: filepath.Join(workDir, stateFile),
-		offsets:   map[string]int64{},
-		send:      send,
-	}
+func New(workDir string, log *slog.Logger, send func(string, []*pb.LogLine) bool) *Collector {
+	c := &Collector{log: log, statePath: filepath.Join(workDir, stateFile), files: map[string]fileState{}, send: send}
 	c.loadState()
 	return c
 }
-
-// Run 阻塞采集主循环（平台分支见 _linux/_windows）
 func (c *Collector) Run(ctx context.Context) {
 	tk := time.NewTicker(pollInterval())
 	defer tk.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			c.saveState()
 			return
 		case <-tk.C:
 			c.pollOnce()
 		}
 	}
 }
+func digest(v string) string { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }
+func newGeneration() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b[:])
+}
+func (c *Collector) notice(path, source, issue string, s *fileState) bool {
+	if s.Issue == issue {
+		return true
+	}
+	at := time.Now().UnixMilli()
+	seq := s.NoticeSeq + 1
+	line := &pb.LogLine{Ts: at, Content: "Log collection status: " + issue, Fields: map[string]string{
+		"record_kind": "collection_status", "timestamp_kind": "observed", "status": issue, "path": path,
+		"source_event_id": digest(fmt.Sprintf("notice\x00%s\x00%s\x00%d\x00%d\x00%s", path, s.Generation, seq, s.Offset, issue)),
+	}}
+	if !c.send(source, []*pb.LogLine{line}) {
+		return false
+	}
+	s.Issue = issue
+	s.NoticeSeq = seq
+	return true
+}
 
-// tailFile 从上次 offset 增量读取一个文件；文件截断/轮转（offset>size）时重头采。
-// offset 仅按完整行（含换行符）推进，半行留待下轮，防截断行丢失。
+// A bounded fragment is persisted even without a newline. Failed queue admission
+// keeps the previous cursor so the same immutable source event is retried.
 func (c *Collector) tailFile(path, source string) {
 	c.mu.Lock()
-	off := c.offsets[path]
-	c.mu.Unlock()
-
-	st, err := os.Stat(path)
-	if err != nil {
-		return // 文件不存在（未装 sshd / 权限不足）：静默跳过，下轮再试
+	defer c.mu.Unlock()
+	current := c.files[path]
+	s := current
+	s.Prefix = append([]byte(nil), s.Prefix...)
+	if c.stateInvalid {
+		if c.notice(path, source, "cursor_invalid", &s) {
+			c.files[path] = s
+		}
+		return
 	}
-	if st.Size() < off {
-		off = 0 // 轮转/截断：重头
-	}
-	f, err := os.Open(path)
+	f, err := openLog(path)
 	if err != nil {
+		issue := "unreadable"
+		if os.IsNotExist(err) {
+			issue = "missing"
+		}
+		if c.notice(path, source, issue, &s) {
+			c.files[path] = s
+			c.saveState()
+		}
 		return
 	}
 	defer f.Close()
-	if _, err := f.Seek(off, 0); err != nil {
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		if c.notice(path, source, "not_regular", &s) {
+			c.files[path] = s
+			c.saveState()
+		}
 		return
 	}
-
-	br := bufio.NewReaderSize(f, 64*1024)
+	identity := fileIdentity(st)
+	replaced := s.Identity != "" && identity != s.Identity
+	truncated := st.Size() < s.Offset
+	if s.Generation == "" || replaced || truncated {
+		if replaced || truncated {
+			if !c.notice(path, source, "rotation_gap_possible", &s) {
+				return
+			}
+			s.Offset = 0
+			s.Start = 0
+			s.Prefix = nil
+			s.Total = 0
+			s.EndsCR = false
+			s.Observed = 0
+		}
+		s.Identity = identity
+		s.Generation = newGeneration()
+		c.files[path] = s
+		if !c.saveState() {
+			c.files[path] = current
+			return
+		}
+	}
+	if s.Issue != "reading" {
+		if !c.notice(path, source, "reading", &s) {
+			return
+		}
+	}
+	if _, err = f.Seek(s.Offset, io.SeekStart); err != nil {
+		return
+	}
+	reader := bufio.NewReaderSize(f, 4096)
 	var batch []*pb.LogLine
-	pos := off
-	now := time.Now().UnixMilli()
-	for len(batch) < maxBatchLines {
-		line, rerr := br.ReadBytes('\n')
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			pos += int64(len(line))
-			content := strings.TrimSpace(string(line))
-			if content == "" {
-				if rerr != nil {
-					break
+	readBytes := 0
+	batchBytes := 0
+	for readBytes < maxPollBytes && len(batch) < maxBatchLines && batchBytes < 256<<10 {
+		part, readErr := reader.ReadSlice('\n')
+		if len(part) > 0 {
+			if s.Total == 0 {
+				s.Start = s.Offset
+				s.Observed = time.Now().UnixMilli()
+				s.EndsCR = false
+			}
+			s.Offset += int64(len(part))
+			readBytes += len(part)
+			complete := part[len(part)-1] == '\n'
+			body := part
+			if complete {
+				body = body[:len(body)-1]
+			}
+			if remaining := maxLineBytes - len(s.Prefix); remaining > 0 {
+				s.Prefix = append(s.Prefix, body[:min(remaining, len(body))]...)
+			}
+			s.Total += int64(len(body))
+			if len(body) > 0 {
+				s.EndsCR = body[len(body)-1] == '\r'
+			}
+			if complete {
+				original := s.Total
+				ending := "lf"
+				if s.EndsCR {
+					ending = "crlf"
+					original--
+					if s.Total <= maxLineBytes {
+						s.Prefix = s.Prefix[:max(0, len(s.Prefix)-1)]
+					}
 				}
-				continue
+				valid := utf8.Valid(s.Prefix)
+				content := strings.ToValidUTF8(string(s.Prefix), "\ufffd")
+				// PostgreSQL TEXT cannot store NUL. Preserve its location visibly and label the conversion.
+				nul := strings.ContainsRune(content, 0)
+				content = strings.ReplaceAll(content, "\x00", "\\u0000")
+				fields := map[string]string{"record_kind": "raw_log", "timestamp_kind": "observed", "path": path, "line_ending": ending,
+					"original_bytes": strconv.FormatInt(original, 10), "truncated": strconv.FormatBool(original > maxLineBytes),
+					"utf8_replaced": strconv.FormatBool(!valid), "nul_escaped": strconv.FormatBool(nul),
+					"source_event_id": digest(fmt.Sprintf("%s\x00%s\x00%s\x00%d", source, identity, s.Generation, s.Start))}
+				// Escaped NULs can expand a line. Keep a UTF-8 boundary and declare that truncation too.
+				if len(content) > 65536 {
+					content = content[:65536]
+					for !utf8.ValidString(content) {
+						content = content[:len(content)-1]
+					}
+					fields["truncated"] = "true"
+				}
+				batch = append(batch, &pb.LogLine{Ts: s.Observed, Content: content, Fields: fields})
+				batchBytes += len(content)
+				s.Prefix = nil
+				s.Total = 0
+				s.EndsCR = false
+				s.Observed = 0
+				s.Start = s.Offset
 			}
-			if len(content) > maxLineBytes {
-				content = content[:maxLineBytes]
+		}
+		if readErr != nil && readErr != bufio.ErrBufferFull {
+			if readErr != io.EOF {
+				c.log.Warn("log file read failed", "source", source)
 			}
-			batch = append(batch, &pb.LogLine{Ts: now, Content: content})
-		}
-		if rerr != nil {
-			break // EOF 或读取异常：本轮结束（offset 未推进的部分下轮重读）
+			break
 		}
 	}
-	if len(batch) > 0 {
-		c.send(source, batch)
+	if len(batch) > 0 && !c.send(source, batch) {
+		return
 	}
-	if pos > off {
-		c.mu.Lock()
-		c.offsets[path] = pos
-		c.mu.Unlock()
-		c.saveState()
-	}
+	c.files[path] = s
+	c.saveState()
 }
-
-/* ---------- offset 持久化 ---------- */
-
-type stateJSON map[string]int64
-
 func (c *Collector) loadState() {
-	data, err := os.ReadFile(c.statePath)
-	if err != nil {
+	var saved stateJSON
+	err := securestate.ReadJSONLimit(c.statePath, &saved, 128<<10)
+	if os.IsNotExist(err) {
 		return
 	}
-	var s stateJSON
-	if json.Unmarshal(data, &s) == nil {
-		c.offsets = s
+	if err == nil && saved.Version == 2 && len(saved.Files) <= 4 {
+		for path, s := range saved.Files {
+			if len(path) > 4096 || s.Offset < 0 || s.Start < 0 || s.Start > s.Offset || s.Total != s.Offset-s.Start || len(s.Prefix) > maxLineBytes || int64(len(s.Prefix)) > s.Total || len(s.Generation) > 32 || len(s.Identity) > 128 {
+				c.stateInvalid = true
+				return
+			}
+			// Older bounded cursors without ends_cr still retain the complete
+			// fragment when it fits in Prefix. A truncated fragment records its
+			// actual last byte separately from its retained prefix.
+			if s.Total == int64(len(s.Prefix)) {
+				s.EndsCR = len(s.Prefix) > 0 && s.Prefix[len(s.Prefix)-1] == '\r'
+				saved.Files[path] = s
+			}
+		}
+		if saved.Files != nil {
+			c.files = saved.Files
+		}
+		return
 	}
+	// Preserve old offsets once, then bind them to the actual opened file identity.
+	var legacy map[string]int64
+	if securestate.ReadJSONLimit(c.statePath, &legacy, 128<<10) == nil && legacy != nil && len(legacy) <= 4 {
+		for path, off := range legacy {
+			if off < 0 || len(path) > 4096 {
+				c.stateInvalid = true
+				return
+			}
+			c.files[path] = fileState{Offset: off, Start: off}
+		}
+		return
+	}
+	c.stateInvalid = true
 }
-
-func (c *Collector) saveState() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	data, err := json.Marshal(c.offsets)
-	if err != nil {
-		return
+func (c *Collector) saveState() bool {
+	if err := securestate.WriteJSONLimit(c.statePath, stateJSON{Version: 2, Files: c.files}, 128<<10); err != nil {
+		c.log.Warn("log cursor persistence failed")
+		return false
 	}
-	tmp := c.statePath + ".tmp"
-	if os.WriteFile(tmp, data, 0o600) == nil {
-		_ = os.Rename(tmp, c.statePath)
-	}
+	return true
 }

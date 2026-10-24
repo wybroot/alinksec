@@ -138,7 +138,7 @@ public class ReportDispatcher {
             case VIRUS_RESULT -> virusResultService.onResult(agentId, report.getVirusResult());
             case FIX_RESULT -> fixResultService.onResult(agentId, report.getFixResult());
             case WINDOWS_UPDATE -> windowsUpdates.onSnapshot(agentId,report.getWindowsUpdate());
-            case LOG_BATCH -> logBatchService.onBatch(agentId, report.getLogBatch());
+            case LOG_BATCH -> logBatchService.onBatch(agentId, report.getReportId(), report.getLogBatch());
             default -> log.warn("未知上报类型: {}", report.getPayloadCase());
         }
     }

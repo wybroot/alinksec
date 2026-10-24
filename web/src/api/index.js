@@ -44,6 +44,21 @@ async function request(path, options = {}) {
 const get = (path) => request(path)
 const post = (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) })
 
+export const fetchRawLogs = query => get(`/api/logs?${new URLSearchParams(query)}`)
+export const fetchRawLog = id => get(`/api/logs/${encodeURIComponent(id)}`)
+export async function downloadRawLogs(ids, format) {
+  const response = await fetch('/api/logs/export', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ ids, format }) })
+  if (response.status === 401) { clearSession(); location.href = '/login'; throw new Error('登录已过期') }
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).msg || '日志导出失败')
+  const reader = response.body.getReader(), chunks = []; let size = 0
+  try { for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > 8388608) { await reader.cancel(); throw new Error('日志导出超过 8 MiB') }; chunks.push(value) } } finally { reader.releaseLock() }
+  const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('')
+  if (digest !== response.headers.get('X-Content-SHA256')) throw new Error('日志导出摘要不匹配')
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
+  const link = document.createElement('a'); link.href = url; link.download = `alinksec-logs.${format === 'csv' ? 'csv' : 'ndjson'}`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export const fetchClusterStatus = () => get('/api/cluster')
 export const retryClusterReport = (id, body) => post(`/api/cluster/reports/${encodeURIComponent(id)}/retry`, body)
 
