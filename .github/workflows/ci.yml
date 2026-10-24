@@ -69,8 +69,10 @@ jobs:
       - name: Build Java and the actual native Agent serially
         run: |
           python3 -B deploy/tests/cluster-prepare.test.py
+          python3 -B -W error::ResourceWarning deploy/tests/scale-acceptance.test.py
           mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
           mkdir -p .tmp
+          (cd agent && go build -trimpath -o ../.tmp/scale-fixture ./cmd/scale-fixture)
           (cd agent && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../.tmp/alinksec-agent ./cmd/agent)
           test "$(.tmp/alinksec-agent version)" = "alinksec-agent $(cat VERSION)"
           docker build -f deploy/tests/fixtures/Dockerfile.agent -t alinksec-cluster-agent-validation .
@@ -103,11 +105,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cluster-evidence-${{ matrix.arch }}
+          include-hidden-files: true
           path: |
             .tmp/cluster-native
             .tmp/cluster-fixtures
             .tmp/cluster-browser
             server/**/target/surefire-reports/*ClusterCoordination*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain raw scale samples, driver events and fixed-profile verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-acceptance-${{ matrix.arch }}
+          path: .tmp/scale-native
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
   scap-resolver:
@@ -217,7 +229,16 @@ jobs:
           retention-days: 14
   windows-agent:
     if: github.event_name != 'workflow_dispatch' || !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
-    runs-on: windows-latest
+    name: windows-agent (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            platform: windows-amd64
+          - runner: windows-2022
+            platform: windows-2022-amd64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -225,10 +246,19 @@ jobs:
         with:
           go-version: '1.24.x'
           cache-dependency-path: agent/go.sum
+      - name: Capture actual Windows host applicability
+        run: python deploy/tests/system-identity.py .tmp/system-identity/result.json --scope native-host
       - name: Check Windows Agent and service lifecycle
         # These packages share native firewall/service state and PowerShell.
-        run: go test -p 1 -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/windowsupdate ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer
+        run: go test -p 1 -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/windowsupdate ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer ./internal/systemacceptance
         working-directory: agent
+      - name: Validate actual Windows system interfaces and Unicode paths
+        working-directory: agent
+        run: go test -count=1 -v ./internal/systemacceptance
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_SYSTEM_SCOPE: native-host
+          ALINKSEC_SYSTEM_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/system-identity/interfaces.json
       - name: Extract pinned native ClamAV test engine
         run: python deploy/tests/clamav-install.py .tmp/clamav-native
       - name: Capture native Windows compliance pack observations
@@ -240,7 +270,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: baseline-compliance-native-windows-amd64
+          name: baseline-compliance-native-${{ matrix.platform }}
           path: .tmp/compliance-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -256,7 +286,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clamav-validation-windows-amd64
+          name: clamav-validation-${{ matrix.platform }}
           path: |
             .tmp/clamav-native/install.json
             .tmp/clamav-native/scan.json
@@ -284,7 +314,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: file-watch-validation-windows-amd64
+          name: file-watch-validation-${{ matrix.platform }}
           path: .tmp/file-watch-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -292,7 +322,7 @@ jobs:
       - name: Retain native Windows resource evidence
         uses: actions/upload-artifact@v4
         with:
-          name: resource-validation-windows-amd64
+          name: resource-validation-${{ matrix.platform }}
           path: .tmp/resource-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -313,7 +343,7 @@ jobs:
       - name: Retain native Windows evidence transfer
         uses: actions/upload-artifact@v4
         with:
-          name: central-evidence-windows-amd64
+          name: central-evidence-${{ matrix.platform }}
           path: |
             .tmp/evidence-native/result.json
             .tmp/evidence-native/diagnostic.zip
@@ -331,7 +361,7 @@ jobs:
       - name: Retain native Windows signature update evidence
         uses: actions/upload-artifact@v4
         with:
-          name: signature-validation-windows-amd64
+          name: signature-validation-${{ matrix.platform }}
           path: |
             .tmp/signature-native
             .tmp/signature-fixtures
@@ -361,7 +391,7 @@ jobs:
       - name: Retain native Windows ransomware attribution evidence
         uses: actions/upload-artifact@v4
         with:
-          name: windows-ransom-validation-windows-amd64
+          name: windows-ransom-validation-${{ matrix.platform }}
           path: .tmp/windows-ransom-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -376,7 +406,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-update-validation-windows-amd64
+          name: windows-update-validation-${{ matrix.platform }}
           path: .tmp/windows-update-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -384,7 +414,7 @@ jobs:
       - name: Retain validated native Windows Agent
         uses: actions/upload-artifact@v4
         with:
-          name: agent-windows-amd64
+          name: agent-${{ matrix.platform }}
           path: agent/alinksec-agent-windows-amd64.exe
           if-no-files-found: error
           retention-days: 14
@@ -401,8 +431,8 @@ jobs:
       - name: Retain native Windows upgrade evidence
         uses: actions/upload-artifact@v4
         with:
-          name: upgrade-validation-windows-amd64
-          path: .tmp/upgrade-native/result.json
+          name: upgrade-validation-${{ matrix.platform }}
+          path: .tmp/upgrade-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -416,7 +446,7 @@ jobs:
       - name: Retain native Windows isolation evidence
         uses: actions/upload-artifact@v4
         with:
-          name: isolation-validation-windows-amd64
+          name: isolation-validation-${{ matrix.platform }}
           path: .tmp/isolation-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -433,7 +463,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: config-validation-windows-amd64
+          name: config-validation-${{ matrix.platform }}
           path: .tmp/config-native
           include-hidden-files: true
           if-no-files-found: error
@@ -449,7 +479,7 @@ jobs:
       - name: Retain native Windows login evidence
         uses: actions/upload-artifact@v4
         with:
-          name: windows-login-validation-windows-amd64
+          name: windows-login-validation-${{ matrix.platform }}
           path: .tmp/windows-login-native/result.json
           include-hidden-files: true
           if-no-files-found: error
@@ -459,9 +489,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raw-log-native-windows-amd64
+          name: raw-log-native-${{ matrix.platform }}
           path: .tmp/raw-log-native
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain actual Windows host identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-identity-${{ matrix.platform }}
+          path: .tmp/system-identity
           if-no-files-found: error
           retention-days: 14
 
@@ -528,7 +566,7 @@ jobs:
           node --test deploy/tests/baseline-package.test.mjs
           python3 deploy/baseline/build-compliance-pack.py --check
       - name: Check deployment configuration and least-privilege boundaries
-        run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs
+        run: node --test --test-concurrency=1 deploy/tests/deployment-config.test.mjs deploy/tests/fixture-diagnostics.test.mjs
       - run: npm ci && npm test && npm audit --omit=dev --registry=https://registry.npmjs.org && npm run build
         working-directory: web
       - name: Retain validated web bundle
@@ -613,13 +651,6 @@ jobs:
       - name: Check standard SCAP lifecycle, nine outcomes and immutable evidence in production pages
         working-directory: web
         run: node test/scap-browser.mjs
-      - name: Check real SQLite maintenance and restored application
-        timeout-minutes: 10
-        run: |
-          docker build --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org -f deploy/docker/Dockerfile.sqlite-maintenance -t alinksec-sqlite-maintenance:latest .
-          bash deploy/tests/sqlite-maintenance-local.sh
-        env:
-          ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
       - name: Ensure native OpenSSH configuration checks are available
         run: |
           if ! test -x /usr/sbin/sshd; then
@@ -679,94 +710,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - name: Check native protected local identity files and redacted evidence
-        working-directory: agent
-        run: |
-          mkdir -p ../.tmp
-          go test -c -o ../.tmp/baseline-native.test ./internal/baseline
-          cd internal/baseline
-          sudo env ALINKSEC_IDENTITY_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLocalIdentity$'
-      - name: Check native fixed log metadata and ACL boundaries
-        working-directory: agent/internal/baseline
-        run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
-      - name: Capture native Linux compliance pack observations
-        working-directory: agent/internal/baseline
-        run: |
-          sudo env ALINKSEC_COMPLIANCE_NATIVE_OUTPUT="$GITHUB_WORKSPACE/.tmp/compliance-native/result.json" ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeCompliancePack$'
-          sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.tmp/compliance-native" "$GITHUB_WORKSPACE/.tmp/compliance-native/result.json"
-      - name: Retain native Linux compliance evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-compliance-native-linux-${{ matrix.arch }}
-          path: .tmp/compliance-native/result.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
-      - name: Check native OpenSSH name resolution and banner declarations with mandatory input boundaries
-        working-directory: agent/internal/baseline
-        run: sudo env ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeSSHNotice$'
-      - name: Check native systemd service and Ctrl-Alt-Del observations with isolated runner fixtures
-        run: bash deploy/tests/systemd-native.sh
-      - name: Check native AppArmor root modes and isolated unattached profile transitions
-        run: bash deploy/tests/apparmor-native.sh
-      - name: Check native kernel audit and isolated private watch rules
-        run: bash deploy/tests/audit-native.sh
-      - name: Check isolated auditd native configuration parsing and declared log metadata
-        run: bash deploy/tests/auditd-native.sh
-      - name: Check isolated Debian cron native file selection and metadata boundaries
-        run: bash deploy/tests/cron-native.sh
-      - name: Check isolated rsyslog native cron routing across all eight severities
-        run: bash deploy/tests/rsyslog-cron-native.sh
-      - name: Check isolated sudoers native declarations and mandatory input boundaries
-        run: bash deploy/tests/sudoers-native.sh
-      - name: Check isolated APT native installation/source declarations and mandatory input boundaries
-        run: bash deploy/tests/apt-native.sh
-      - name: Check isolated Ubuntu24 PAM password, login lockout and resource limits
-        run: |
-          cp .tmp/baseline-native.test .tmp/pam-native.test
-          bash deploy/tests/pam-password-native.sh
-      - name: Check isolated Rocky9 DNF signature declarations against native configuration
-        run: |
-          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
-          bash deploy/tests/dnf-native.sh
-      - name: Compare full package versions with native RPM and DPKG ordering
-        run: python3 -B deploy/tests/package-version-native.py
-      - name: Check native DPKG and RPM inventory identities
-        run: |
-          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/software-native.test ./internal/collector)
-          ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true .tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
-          docker run --rm --read-only --network=none --memory=128m --memory-swap=128m --cpus=1 --pids-limit=64 \
-            --cap-drop=ALL --security-opt=no-new-privileges:true \
-            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
-            --env ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true --env GOMEMLIMIT=64MiB \
-            alinksec-dnf-native-validation:latest \
-            /workspace/.tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
-      - name: Check bounded native RPM headers without executing package scripts
-        run: |
-          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/package-repair-native.test ./internal/fixer)
-          docker build -f deploy/tests/fixtures/Dockerfile.package-repair -t alinksec-package-repair-validation:latest .
-          docker run --rm --network=none --memory=192m --memory-swap=256m --cpus=1 --pids-limit=64 \
-            --cap-drop=ALL --security-opt=no-new-privileges:true \
-            --mount "type=bind,src=$PWD,dst=/workspace,readonly" --env GOMEMLIMIT=96MiB \
-            --env ALINKSEC_RPM_REPAIR_NATIVE_REQUIRED=true alinksec-package-repair-validation:latest \
-            /workspace/.tmp/package-repair-native.test -test.v -test.run '^TestNativeRPMPackageMetadataIsReadWithoutRunningPackageScripts$'
-      - name: Retain native package version comparisons
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-version-native-${{ matrix.arch }}
-          path: .tmp/package-version-native.tsv
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
-      - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
-        run: bash deploy/tests/shadow-defaults-native.sh
-      - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
-        run: bash deploy/tests/bash-policy-native.sh
-      - name: Check isolated linker metadata and reviewed privileged file inventory
-        run: bash deploy/tests/program-files-native.sh
-      - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
-        run: bash deploy/tests/ipv4-host-native.sh
       - name: Check concurrent guard policy updates and Agent baseline runtime observations
         run: go test -race ./internal/yara ./internal/clamav ./internal/windowsupdate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/resources ./internal/guard ./internal/configguard ./internal/isolation ./internal/baseline ./internal/comm ./internal/scan ./internal/virusscan
         working-directory: agent
@@ -894,34 +837,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - run: docker compose config -q
-        working-directory: deploy/docker
-      - run: docker compose build
-        working-directory: deploy/docker
-      - name: Check standalone server image and restart persistence
-        run: bash deploy/tests/server-image-smoke.sh
-        env:
-          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server:latest
-      - name: Check actual archive paths, UID/GID and mode with one bounded helper
-        run: python3 -B deploy/tests/operations-volume-local.py
-        env:
-          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
-          ALINKSEC_OPERATIONS_TEST_IMAGE: alinksec-server:latest
-          ALINKSEC_OPERATIONS_WEB_IMAGE: alinksec-web:latest
-      - name: Check second clean server build with a changed version
-        run: |
-          mkdir -p .tmp/changed-version
-          node deploy/tests/snapshot-source.mjs .tmp/changed-version
-          java -Xmx128m deploy/tests/ChangeSnapshotVersion.java .tmp/changed-version 0.1.1-VALIDATION
-          docker build --no-cache -f deploy/docker/Dockerfile.server -t alinksec-server-changed-version .tmp/changed-version
-          bash deploy/tests/server-image-smoke.sh
-        env:
-          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server-changed-version
-      - name: Check standalone web image and HTTPS API proxy
-        run: bash deploy/tests/web-image-smoke.sh
-        env:
-          ALINKSEC_SMOKE_WEB_IMAGE: alinksec-web:latest
-          ALINKSEC_SMOKE_BROWSER: 'true'
       - name: Retain browser validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -963,6 +878,338 @@ jobs:
             .tmp/baseline-browser-fixtures-sqlite.json
           include-hidden-files: true
           if-no-files-found: ignore
+      - name: Retain sanitized failed Agent fixture diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-workflow-diagnostics-${{ matrix.arch }}
+          path: .tmp/agent-workflow-diagnostics
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  system-acceptance:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
+    name: system-acceptance (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      GOARCH: ${{ matrix.arch }}
+      ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+      ALINKSEC_SYSTEM_SCOPE: native-host
+      ALINKSEC_SYSTEM_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/system-acceptance/native-host.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Record native Ubuntu 22 host identity
+        run: python3 deploy/tests/system-identity.py .tmp/system-acceptance/identity.json --scope native-host
+      - name: Build same-commit static Agent and native OS fixture
+        working-directory: agent
+        run: |
+          mkdir -p ../.tmp
+          CGO_ENABLED=0 go build -trimpath -o ../.tmp/alinksec-agent ./cmd/agent
+          CGO_ENABLED=0 go test -c -o ../.tmp/system-acceptance.test ./internal/systemacceptance
+          go test -race -count=1 ./internal/systemacceptance ./internal/securestate ./internal/filewatch ./internal/isolation
+      - name: Check actual Ubuntu 22 systemd upgrade and independent rollback
+        run: bash deploy/tests/agent-upgrade-native.sh
+      - name: Check actual Ubuntu 22 native isolation owner failure and expiry
+        run: bash deploy/tests/agent-isolation-native.sh
+      - name: Check actual Ubuntu 22 native configuration recovery and replay
+        run: bash deploy/tests/agent-config-native.sh
+      - name: Check real legacy and current distribution userlands serially
+        run: python3 -B deploy/tests/system-userlands.py
+      - name: Retain native host and all distribution userland evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-acceptance-linux-${{ matrix.arch }}
+          path: |
+            .tmp/system-acceptance
+            .tmp/upgrade-native
+            .tmp/isolation-native
+            .tmp/config-native
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-native:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
+    name: linux-native (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      GOARCH: ${{ matrix.arch }}
+      COMPOSE_PARALLEL_LIMIT: '1'
+      HOST_IP: ci.alinksec.test
+      ALINKSEC_BIND_ADDRESS: 127.0.0.1
+      ALINKSEC_POSTGRES_PASSWORD: ci-postgres-password
+      ALINKSEC_POSTGRES_APP_PASSWORD: ci-postgres-app-password
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ENROLL-ci-smoke-test
+      # Full maintenance must preserve the generated secret in server-data too.
+      ALINKSEC_JWT_SECRET: ''
+      ALINKSEC_SERVER_IMAGE: alinksec-server:latest
+      ALINKSEC_WEB_IMAGE: alinksec-web:latest
+      ALINKSEC_SQLITE_MAINTENANCE_IMAGE: alinksec-sqlite-maintenance:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare native platform tools without starting listeners
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openssh-server rpm dpkg util-linux openscap-scanner
+          sudo install -d -o root -g root -m 0755 /run/sshd
+      - name: Check native protected local identity files and redacted evidence
+        working-directory: agent
+        run: |
+          mkdir -p ../.tmp
+          go test -c -o ../.tmp/baseline-native.test ./internal/baseline
+          cd internal/baseline
+          sudo env ALINKSEC_IDENTITY_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLocalIdentity$'
+      - name: Check native fixed log metadata and ACL boundaries
+        working-directory: agent/internal/baseline
+        run: sudo env ALINKSEC_LOG_METADATA_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeLogMetadata$'
+      - name: Capture native Linux compliance pack observations
+        working-directory: agent/internal/baseline
+        run: |
+          sudo env ALINKSEC_COMPLIANCE_NATIVE_OUTPUT="$GITHUB_WORKSPACE/.tmp/compliance-native/result.json" ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeCompliancePack$'
+          sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.tmp/compliance-native" "$GITHUB_WORKSPACE/.tmp/compliance-native/result.json"
+      - name: Retain native Linux compliance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-compliance-native-linux-${{ matrix.arch }}
+          path: .tmp/compliance-native/result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check native OpenSSH name resolution and banner declarations with mandatory input boundaries
+        working-directory: agent/internal/baseline
+        run: sudo env ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true ../../../.tmp/baseline-native.test -test.v -test.run '^TestNativeSSHNotice$'
+      - name: Check native systemd service and Ctrl-Alt-Del observations with isolated runner fixtures
+        run: bash deploy/tests/systemd-native.sh
+      - name: Check native AppArmor root modes and isolated unattached profile transitions
+        run: bash deploy/tests/apparmor-native.sh
+      - name: Check native kernel audit and isolated private watch rules
+        run: bash deploy/tests/audit-native.sh
+      - name: Check isolated auditd native configuration parsing and declared log metadata
+        run: bash deploy/tests/auditd-native.sh
+      - name: Check isolated Debian cron native file selection and metadata boundaries
+        run: bash deploy/tests/cron-native.sh
+      - name: Check isolated rsyslog native cron routing across all eight severities
+        run: bash deploy/tests/rsyslog-cron-native.sh
+      - name: Check isolated sudoers native declarations and mandatory input boundaries
+        run: bash deploy/tests/sudoers-native.sh
+      - name: Check isolated APT native installation/source declarations and mandatory input boundaries
+        run: bash deploy/tests/apt-native.sh
+      - name: Check isolated Ubuntu24 PAM password, login lockout and resource limits
+        run: |
+          cp .tmp/baseline-native.test .tmp/pam-native.test
+          bash deploy/tests/pam-password-native.sh
+      - name: Check isolated Rocky9 DNF signature declarations against native configuration
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/dnf-native.test ./internal/baseline)
+          bash deploy/tests/dnf-native.sh
+      - name: Compile same-commit independent package version oracle
+        run: |
+          mkdir -p server/alinksec-service/target/classes server/alinksec-service/target/test-classes
+          javac -J-Xmx64m -d server/alinksec-service/target/classes server/alinksec-service/src/main/java/com/alinksec/service/scan/PackageVersions.java
+          javac -J-Xmx64m -cp server/alinksec-service/target/classes -d server/alinksec-service/target/test-classes server/alinksec-service/src/test/java/com/alinksec/service/scan/PackageVersionOracle.java
+      - name: Compare full package versions with native RPM and DPKG ordering
+        run: python3 -B deploy/tests/package-version-native.py
+      - name: Check native DPKG and RPM inventory identities
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/software-native.test ./internal/collector)
+          ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true .tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+          docker run --rm --read-only --network=none --memory=128m --memory-swap=128m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+            --env ALINKSEC_SOFTWARE_NATIVE_REQUIRED=true --env GOMEMLIMIT=64MiB \
+            alinksec-dnf-native-validation:latest \
+            /workspace/.tmp/software-native.test -test.v -test.run '^TestNativeSoftwareInventory$'
+      - name: Check bounded native RPM headers without executing package scripts
+        run: |
+          (cd agent && CGO_ENABLED=0 go test -c -o ../.tmp/package-repair-native.test ./internal/fixer)
+          docker build -f deploy/tests/fixtures/Dockerfile.package-repair -t alinksec-package-repair-validation:latest .
+          docker run --rm --network=none --memory=192m --memory-swap=256m --cpus=1 --pids-limit=64 \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" --env GOMEMLIMIT=96MiB \
+            --env ALINKSEC_RPM_REPAIR_NATIVE_REQUIRED=true alinksec-package-repair-validation:latest \
+            /workspace/.tmp/package-repair-native.test -test.v -test.run '^TestNativeRPMPackageMetadataIsReadWithoutRunningPackageScripts$'
+      - name: Retain native package version comparisons
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-version-native-${{ matrix.arch }}
+          path: .tmp/package-version-native.tsv
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check isolated Ubuntu24 Shadow account aging defaults and mandatory input boundaries
+        run: bash deploy/tests/shadow-defaults-native.sh
+      - name: Check isolated Ubuntu24 Bash global startup declarations and mandatory input boundaries
+        run: bash deploy/tests/bash-policy-native.sh
+      - name: Check isolated linker metadata and reviewed privileged file inventory
+        run: bash deploy/tests/program-files-native.sh
+      - name: Check isolated IPv4 host role, complete interfaces and kernel parameter references
+        run: bash deploy/tests/ipv4-host-native.sh
+
+  sqlite-maintenance:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
+    name: sqlite-maintenance (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      GOARCH: ${{ matrix.arch }}
+      COMPOSE_PARALLEL_LIMIT: '1'
+      HOST_IP: ci.alinksec.test
+      ALINKSEC_BIND_ADDRESS: 127.0.0.1
+      ALINKSEC_POSTGRES_PASSWORD: ci-postgres-password
+      ALINKSEC_POSTGRES_APP_PASSWORD: ci-postgres-app-password
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ENROLL-ci-smoke-test
+      # Full maintenance must preserve the generated secret in server-data too.
+      ALINKSEC_JWT_SECRET: ''
+      ALINKSEC_SERVER_IMAGE: alinksec-server:latest
+      ALINKSEC_WEB_IMAGE: alinksec-web:latest
+      ALINKSEC_SQLITE_MAINTENANCE_IMAGE: alinksec-sqlite-maintenance:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install native resolver required by restored SQLite API checks
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
+      - name: Build same-commit SQLite application fixture
+        run: mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
+        env:
+          MAVEN_OPTS: -Xmx384m -XX:ActiveProcessorCount=2
+      - name: Check real SQLite maintenance and restored application
+        timeout-minutes: 10
+        run: |
+          docker build --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org -f deploy/docker/Dockerfile.sqlite-maintenance -t alinksec-sqlite-maintenance:latest .
+          bash deploy/tests/sqlite-maintenance-local.sh
+        env:
+          ALINKSEC_MAINTENANCE_TEST_ALLOW_FIXTURES: 'true'
+
+  deployment:
+    if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only
+    name: deployment (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      GOARCH: ${{ matrix.arch }}
+      COMPOSE_PARALLEL_LIMIT: '1'
+      HOST_IP: ci.alinksec.test
+      ALINKSEC_BIND_ADDRESS: 127.0.0.1
+      ALINKSEC_POSTGRES_PASSWORD: ci-postgres-password
+      ALINKSEC_POSTGRES_APP_PASSWORD: ci-postgres-app-password
+      ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
+      ALINKSEC_BOOTSTRAP_ENROLL_TOKEN: ENROLL-ci-smoke-test
+      # Full maintenance must preserve the generated secret in server-data too.
+      ALINKSEC_JWT_SECRET: ''
+      ALINKSEC_SERVER_IMAGE: alinksec-server:latest
+      ALINKSEC_WEB_IMAGE: alinksec-web:latest
+      ALINKSEC_SQLITE_MAINTENANCE_IMAGE: alinksec-sqlite-maintenance:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/**/pom.xml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install native resolver required by deployment maintenance API checks
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends openscap-scanner
+      - name: Build same-commit Java fixture and install production browser dependencies
+        run: |
+          mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
+          (cd web && npm ci && npx playwright install --with-deps --only-shell chromium)
+        env:
+          MAVEN_OPTS: -Xmx384m -XX:ActiveProcessorCount=2
+      - run: docker compose config -q
+        working-directory: deploy/docker
+      - run: docker compose build
+        working-directory: deploy/docker
+      - name: Check standalone server image and restart persistence
+        run: bash deploy/tests/server-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server:latest
+      - name: Check actual archive paths, UID/GID and mode with one bounded helper
+        run: python3 -B deploy/tests/operations-volume-local.py
+        env:
+          ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
+          ALINKSEC_OPERATIONS_TEST_IMAGE: alinksec-server:latest
+          ALINKSEC_OPERATIONS_WEB_IMAGE: alinksec-web:latest
+      - name: Check second clean server build with a changed version
+        run: |
+          mkdir -p .tmp/changed-version
+          node deploy/tests/snapshot-source.mjs .tmp/changed-version
+          java -Xmx128m deploy/tests/ChangeSnapshotVersion.java .tmp/changed-version 0.1.1-VALIDATION
+          docker build --no-cache -f deploy/docker/Dockerfile.server -t alinksec-server-changed-version .tmp/changed-version
+          bash deploy/tests/server-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_SERVER_IMAGE: alinksec-server-changed-version
+      - name: Check standalone web image and HTTPS API proxy
+        run: bash deploy/tests/web-image-smoke.sh
+        env:
+          ALINKSEC_SMOKE_WEB_IMAGE: alinksec-web:latest
+          ALINKSEC_SMOKE_BROWSER: 'true'
       - run: docker compose up -d --wait
         working-directory: deploy/docker
       - name: Check HTTPS health with the platform CA
@@ -1059,6 +1306,16 @@ jobs:
         run: |
           docker compose -f deploy/docker/docker-compose.yml down -v --remove-orphans || true
           docker compose -f deploy/docker/docker-compose.lite.yml down -v --remove-orphans || true
+
+      - name: Retain standalone HTTPS browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-browser-${{ matrix.arch }}
+          path: .tmp/browser-artifacts-*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   native-yara:
     if: github.event_name != 'workflow_dispatch' || !inputs.windows_only && !inputs.scap_only && !inputs.upstream_only && !inputs.vendor_only && !inputs.opencti_only && !inputs.source_trust_only && !inputs.reporting_only

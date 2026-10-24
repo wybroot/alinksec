@@ -17,7 +17,25 @@ func openDirectory(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.Open(canonical)
+	p, err := windows.UTF16PtrFromString(canonical)
+	if err != nil {
+		return nil, err
+	}
+	// A pinned reader must survive an atomic signature-directory switch. Keep
+	// its identity while allowing the old directory to be renamed for retirement.
+	h, err := windows.CreateFile(p, windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: canonical, Err: err}
+	}
+	f := os.NewFile(uintptr(h), canonical)
+	st, err := f.Stat()
+	if err != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+		f.Close()
+		return nil, fmt.Errorf("not a regular directory: %s", canonical)
+	}
+	return f, nil
 }
 func openRegular(path string, mutation bool) (*os.File, *os.File, error) {
 	parent, err := openDirectory(filepath.Dir(path))

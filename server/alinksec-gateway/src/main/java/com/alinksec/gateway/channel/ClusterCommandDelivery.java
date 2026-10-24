@@ -13,14 +13,19 @@ public class ClusterCommandDelivery {
     public ClusterCommandDelivery(ConnectionRegistry registry,CommandService commands) {
         this.registry=registry;this.commands=commands;
     }
-    @Scheduled(fixedDelay=1000,initialDelay=5000,scheduler="clusterScheduler")
+    @Scheduled(fixedDelay=250,initialDelay=5000,scheduler="clusterScheduler")
     public void deliver() {
         if(!registry.deferredDelivery()) return;
         var agents=registry.localAgentIds();
         if(agents.isEmpty()) return;
         int count=Math.min(256,agents.size());
+        var batch=new java.util.ArrayList<String>(count);
         for(int i=0;i<count;i++) {
-            String agent=agents.get(Math.floorMod(cursor++,agents.size()));
+            batch.add(agents.get(Math.floorMod(cursor++,agents.size())));
+        }
+        // Empty streams require one batch query rather than one query per Agent.
+        // deliverPending still checks the current identity and command row state.
+        for(String agent:commands.pendingAgents(batch)) {
             try { commands.deliverPending(agent); }
             catch(RuntimeException failure) { /* Pending facts remain durable for the next bounded pass. */ }
         }

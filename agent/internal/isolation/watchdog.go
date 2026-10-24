@@ -11,6 +11,10 @@ import (
 )
 
 func watch(ctx context.Context, work, id string, m serviceManager, f firewall) (result error) {
+	return watchWithClock(ctx, work, id, m, f, time.Now)
+}
+
+func watchWithClock(ctx context.Context, work, id string, m serviceManager, f firewall, clock func() time.Time) (result error) {
 	unlock, err := securestate.Lock(directory(work))
 	if err != nil {
 		return err
@@ -36,24 +40,24 @@ func watch(ctx context.Context, work, id string, m serviceManager, f firewall) (
 			result = errors.Join(result, f.clear(l))
 		}
 	}()
-	now := time.Now()
+	now := clock()
 	if l.Phase == "prepared" && now.Before(l.Deadline) && !now.Before(l.Created) {
 		l.Phase = "applying"
 		l.Message = "applying owned firewall rules"
 		if err = save(work, l, now); err == nil {
 			err = f.apply(l)
 		}
-		if err == nil && time.Now().Before(l.Deadline) {
+		if err == nil && clock().Before(l.Deadline) {
 			l.Phase = "active"
 			l.Message = "waiting for authenticated post-isolation confirmation"
-			err = save(work, l, time.Now())
+			err = save(work, l, clock())
 		}
 		if err != nil {
 			l.Phase = "restoring"
 			l.Automatic = true
 			l.Cause = "apply_failed"
 			l.Message = "isolation apply failed: " + err.Error()
-			err = save(work, l, time.Now())
+			err = save(work, l, clock())
 		}
 	} else if l.Phase != "finished" {
 		// A restarted owner cannot prove its previous rules/session survived.
@@ -85,14 +89,14 @@ func watch(ctx context.Context, work, id string, m serviceManager, f firewall) (
 			l.Automatic = true
 			l.Cause = "journal_unreadable"
 			l.Message = "isolation journal unreadable; withdrawing owned firewall rules"
-			if e = save(work, l, time.Now()); e != nil {
+			if e = save(work, l, clock()); e != nil {
 				unlock()
 				return e
 			}
 			current = l
 		}
 		l = current
-		now = time.Now()
+		now = clock()
 		if l.Revision != revision {
 			remaining := l.Deadline.Sub(now)
 			if remaining > LeaseDuration {

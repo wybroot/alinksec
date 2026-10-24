@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { protectionWorkflow } from './protection-workflow.mjs'
 import { detectionWorkflow } from './detection-workflow.mjs'
+import { diagnosticTail } from './fixture-diagnostics.mjs'
 
 assert.equal(process.env.ALINKSEC_SMOKE_ALLOW_FIXTURES, 'true')
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -25,6 +26,7 @@ const password = 'agent-workflow-admin-password'
 const detectionOnly=process.env.ALINKSEC_SMOKE_DETECTION_ONLY==='true'
 const agentStateRoot=detectionOnly?'/tmp/alinksec-native/work':'/work'
 let server, proxy, token, passed = false
+const serverProcesses = []
 let accessHost = 'ci.alinksec.test'
 const controller = new AbortController()
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
@@ -93,7 +95,11 @@ async function startServer(host = accessHost, expectFailure = false) {
   })
   closeSync(log)
   const current = { child }
-  current.closed = new Promise(ok => child.once('close', code => { current.code = code; ok(code) }))
+  current.closed = new Promise(ok => {
+    child.once('error', error => { current.spawnError = error.code || 'spawn_failed' })
+    child.once('close', (code, signal) => { current.code = code; current.signal = signal; ok(code) })
+  })
+  serverProcesses.push(current)
   server = current
   if (expectFailure) {
     const code = await Promise.race([current.closed, delay(30_000).then(() => { throw new Error('Stale certificate did not prevent startup') })])
@@ -104,6 +110,7 @@ async function startServer(host = accessHost, expectFailure = false) {
   }
   let startupError
   try { await until(async () => {
+    if (current.code !== undefined || current.spawnError) throw new Error(`Server exited during startup: code=${current.code}, signal=${current.signal}, spawn=${current.spawnError}`)
     try { token = (await api('/api/auth/login', { username: 'admin', password })).token; return !!token }
     catch (error) { startupError=error; return false }
   }, 'Server did not start', 45_000) }
@@ -400,7 +407,7 @@ try {
       const diagnostic = await exec('docker', ['logs', id], {encoding:'utf8',timeout:30_000,maxBuffer:1024*1024})
       const output = diagnostic.stdout + diagnostic.stderr
       writeFileSync(join(root, `${id.slice(0, 12)}.log`), output)
-      if (!passed) console.error(`Agent ${id.slice(0, 12)} output:\n${output.split('\n').slice(-40).join('\n')}`)
+      if (!passed) console.error(`Agent ${id.slice(0, 12)} output:\n${diagnosticTail(join(root, `${id.slice(0, 12)}.log`), [password, token, 'ENROLL-agent-workflow', 'agent-workflow-jwt-secret']).split('\n').slice(-40).join('\n')}`)
     } catch {}
     try { await exec('docker', ['rm', '-f', id], { timeout: 30_000 }) } catch { cleanupFailed = true }
   }
@@ -414,6 +421,18 @@ try {
         '--entrypoint=/bin/rm', image, '-rf', ...agentWorkDirs])
       rmSync(root, { recursive: true, force: true })
     } catch (error) { cleanupFailed = true; console.error(error.message) }
+  }
+  if (!passed || cleanupFailed) {
+    const output = join(repo, '.tmp/agent-workflow-diagnostics', root.split('/').at(-1))
+    mkdirSync(output, {recursive:true, mode:0o700})
+    const secrets = [password, token, 'ENROLL-agent-workflow', 'agent-workflow-jwt-secret']
+    for (const name of ['server.log', ...containers.map(id => `${id.slice(0, 12)}.log`)]) {
+      if (existsSync(join(root, name))) writeFileSync(join(output, name), diagnosticTail(join(root, name), secrets), {mode:0o600})
+    }
+    writeFileSync(join(output, 'processes.json'), JSON.stringify({passed, cleanupFailed,
+      serverProcesses:serverProcesses.map(({child, code, signal, spawnError}) => ({pid:child.pid, code, signal, spawnError})),
+      scope:'Bounded redacted process logs; private fixture files excluded'}, null, 2), {mode:0o600})
+    console.error(`Sanitized diagnostics: ${output}`)
   }
   if (!passed || cleanupFailed) console.error(`Validation artifacts: ${root}`)
   if (cleanupFailed) throw new Error('Could not remove Agent validation containers')

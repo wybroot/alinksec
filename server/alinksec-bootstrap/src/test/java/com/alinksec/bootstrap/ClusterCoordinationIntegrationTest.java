@@ -41,7 +41,7 @@ class ClusterCoordinationIntegrationTest {
     DatabaseDialect dialect;String deployment,agent,token;Long actor;
     Node a,b;final List<Node> nodes=new ArrayList<>();
     record Node(ClusterProperties properties,RedisLeases redis,RabbitTransport rabbit,ClusterRuntime runtime,
-                ClusterSessions sessions,ClusterWork work,ClusterSlots slots){}
+                ClusterSessions sessions,ClusterWork work,ClusterSlots slots,AgentFence fence){}
     @BeforeEach void setup() throws Exception {
         var config=new HikariConfig();config.setJdbcUrl(required("ALINKSEC_INTEGRATION_PG_URL"));
         config.setUsername(required("ALINKSEC_INTEGRATION_PG_USER"));config.setPassword(required("ALINKSEC_INTEGRATION_PG_PASSWORD"));
@@ -68,12 +68,13 @@ class ClusterCoordinationIntegrationTest {
         properties.setRedisUri(required("ALINKSEC_CLUSTER_TEST_REDIS_URI"));properties.setRabbitUri(required("ALINKSEC_CLUSTER_TEST_RABBIT_URI"));properties.validate();
         var redis=new RedisLeases(properties);var rabbit=new RabbitTransport(properties);
         var runtime=new ClusterRuntime(properties,jdbc,manager,pool,certificates,app,libraries,new BaselineUpstreamProperties(),environment,redis,rabbit);
-        var sessions=new ClusterSessions(properties,new AgentFence(properties,pool),redis,runtime);
-        var result=new Node(properties,redis,rabbit,runtime,sessions,new ClusterWork(properties,runtime,jdbc,manager),new ClusterSlots(properties,runtime,jdbc,manager));
+        var fence=new AgentFence(properties,pool);
+        var sessions=new ClusterSessions(properties,fence,redis,runtime);
+        var result=new Node(properties,redis,rabbit,runtime,sessions,new ClusterWork(properties,runtime,jdbc,manager),new ClusterSlots(properties,runtime,jdbc,manager),fence);
         nodes.add(result);runtime.initialize();return result;
     }
     @AfterEach void close() throws Exception {
-        for(var node:nodes){node.runtime.close();node.rabbit.close();node.redis.close();}
+        for(var node:nodes){node.runtime.close();node.rabbit.close();node.redis.close();node.fence.close();}
         if(a!=null){var factory=new ConnectionFactory();factory.setUri(a.properties.getRabbitUri());try(var connection=factory.newConnection();var channel=connection.createChannel()){channel.queueDelete(a.rabbit.queueName());}}
         if(jdbc!=null && agent!=null){new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(t->{LogBatchService.gate(jdbc);var usage=jdbc.queryForMap("SELECT COUNT(*) AS rows,COALESCE(SUM(stored_bytes),0) AS bytes FROM t_agent_log WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_agent_log WHERE agent_id=?",agent);jdbc.update("UPDATE t_agent_log_state SET retained_rows=retained_rows-?,retained_bytes=retained_bytes-? WHERE id=1",usage.get("rows"),usage.get("bytes"));});jdbc.update("DELETE FROM t_asset_port WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_alert_notify_delivery WHERE alert_no LIKE 'cluster-%'");jdbc.update("DELETE FROM t_alert WHERE agent_id=?",agent);jdbc.update("DELETE FROM t_notify_channel WHERE name LIKE 'cluster-%'");jdbc.update("DELETE FROM t_agent WHERE agent_id=?",agent);if(actor!=null)jdbc.update("DELETE FROM t_user WHERE id=?",actor);}
         if(pool!=null)pool.close();
@@ -109,6 +110,28 @@ class ClusterCoordinationIntegrationTest {
         assertThrows(ClusterUnavailable.class,()->a.sessions.current(agent,token,()->{return applied.incrementAndGet();}));
         a.sessions.release(agent,token);assertTrue(b.redis.current(agent,replacement));
         assertEquals(1,b.sessions.current(agent,replacement,()->{return applied.incrementAndGet();}));assertEquals(1,applied.get());
+    }
+    @Test void simultaneousFencesLeaveBusinessConnectionsAvailable() throws Exception {
+        var entered=new CountDownLatch(4);var finish=new CountDownLatch(1);
+        var executor=Executors.newFixedThreadPool(8);
+        try {
+            var futures=new ArrayList<java.util.concurrent.Future<Boolean>>();
+            for(int i=0;i<8;i++) {
+                String id="pool-acceptance-"+i;
+                futures.add(executor.submit(()->a.fence.with(id,()->{
+                    try(var connection=pool.getConnection()) {
+                        entered.countDown();await(finish);
+                        try(var statement=connection.createStatement();var result=statement.executeQuery("SELECT 1")) {
+                            return result.next() && result.getInt(1)==1;
+                        }
+                    }catch(java.sql.SQLException failure){throw new IllegalStateException(failure);}
+                })));
+            }
+            await(entered);
+            assertEquals(1,jdbc.queryForObject("SELECT 1",Integer.class));
+            finish.countDown();
+            for(var future:futures)assertTrue(future.get(5,TimeUnit.SECONDS));
+        }finally{finish.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(5,TimeUnit.SECONDS));}
     }
     @Test void inFlightCommitBoundaryRejectsReplacementUntilTheOwnerFinishes()throws Exception {
         var entered=new CountDownLatch(1);var finish=new CountDownLatch(1);var executor=Executors.newSingleThreadExecutor();

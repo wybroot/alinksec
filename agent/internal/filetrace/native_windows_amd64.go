@@ -433,8 +433,8 @@ func (s *winTrace) onEvent(r *eventRecord) {
 		if !property(r, "FileName", b[:]) {
 			return
 		}
-		path := s.dosPath(utf16At(b[:], 0))
-		if !s.m.watched(path) {
+		path := s.m.eventPath(s.dosPath(utf16At(b[:], 0)))
+		if path == "" {
 			return
 		}
 		if len(s.objects) >= maxObjects {

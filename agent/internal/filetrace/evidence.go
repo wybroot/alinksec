@@ -47,6 +47,7 @@ type native interface {
 type Monitor struct {
 	mu          sync.Mutex
 	roots       []string
+	rootAliases []string
 	writes      []Write
 	status      string
 	reason      string
@@ -95,7 +96,7 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 	unique := map[string]bool{}
 	issue := ""
 	for _, p := range roots {
-		p = cleanPath(p)
+		p = matchPath(p)
 		if p != "" && (len(p) < 3 || p[1] != ':' || p[2] != '\\') {
 			issue = "unsupported_path"
 		}
@@ -105,6 +106,11 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 		}
 	}
 	sort.Strings(normalized)
+	aliases := make([]string, len(normalized))
+	for i, root := range normalized {
+		// Filesystem name queries belong to policy setup, never the ETW callback.
+		aliases[i] = shortPath(root)
+	}
 	if len(normalized) > 64 {
 		issue = "root_capacity_exceeded"
 	}
@@ -112,7 +118,8 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 		issue = "window_exceeds_retention"
 	}
 	m.mu.Lock()
-	if strings.Join(m.roots, "\x00") == strings.Join(normalized, "\x00") && m.window == window {
+	if strings.Join(m.roots, "\x00") == strings.Join(normalized, "\x00") &&
+		strings.Join(m.rootAliases, "\x00") == strings.Join(aliases, "\x00") && m.window == window {
 		m.mu.Unlock()
 		return
 	}
@@ -120,6 +127,7 @@ func (m *Monitor) Configure(roots []string, window time.Duration) {
 	m.generation++
 	m.policyIssue = issue
 	m.roots = normalized
+	m.rootAliases = aliases
 	m.writes = nil
 	m.since = time.Now()
 	m.status = "starting"
@@ -223,24 +231,72 @@ func cleanPath(p string) string {
 }
 
 func (m *Monitor) watched(path string) bool {
+	return m.eventPath(path) != ""
+}
+
+// eventPath uses only cached root names. Querying the filesystem from the ETW
+// consumer can itself emit file events and prevent that consumer from keeping up.
+// Each root component accepts its configured long or short name independently;
+// Windows can emit a mixture of both. Unknown names below the root stay lexical.
+func (m *Monitor) eventPath(path string) string {
 	path = cleanPath(path)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, root := range m.roots {
-		if path == root || strings.HasPrefix(path, root+`\`) {
-			return true
+	best, matched := "", ""
+	for i, root := range m.roots {
+		if len(root) <= len(best) {
+			continue
+		}
+		alias := root
+		if i < len(m.rootAliases) {
+			alias = m.rootAliases[i]
+		}
+		if suffix, ok := rootSuffix(path, root, alias); ok {
+			best, matched = root, root+suffix
 		}
 	}
-	return false
+	return matched
+}
+
+func rootSuffix(path, root, alias string) (string, bool) {
+	if path == root || strings.HasPrefix(path, root+`\`) {
+		return path[len(root):], true
+	}
+	// No allocations or filesystem calls are needed for the common long path.
+	if alias == root {
+		return "", false
+	}
+	rest, longRest, shortRest := path, root, alias
+	for {
+		part, tail, more := strings.Cut(rest, `\`)
+		longPart, longTail, longMore := strings.Cut(longRest, `\`)
+		shortPart, shortTail, shortMore := strings.Cut(shortRest, `\`)
+		if longMore != shortMore || (part != longPart && part != shortPart) {
+			return "", false
+		}
+		if !longMore {
+			if more {
+				return `\` + tail, true
+			}
+			return "", true
+		}
+		if !more {
+			return "", false
+		}
+		rest, longRest, shortRest = tail, longTail, shortTail
+	}
 }
 
 func (m *Monitor) observe(w Write) {
+	w.Path = m.eventPath(w.Path)
+	if w.Path == "" {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.status != "ready" {
 		return
 	}
-	w.Path = cleanPath(w.Path)
 	cutoff := time.Now().Add(-retention)
 	kept := m.writes[:0]
 	for _, old := range m.writes {
@@ -265,6 +321,15 @@ func (m *Monitor) Lookup(paths []string, since time.Time) Result {
 	if err := m.native.check(); err != nil {
 		m.fail("capture_health_failed: " + err.Error())
 	}
+	// Resolve once per requested path, outside the evidence lock. Windows may
+	// report an existing parent's 8.3 alias even after the leaf was renamed.
+	var normalized []string
+	if len(paths) <= maxObjects {
+		normalized = make([]string, len(paths))
+		for i, path := range paths {
+			normalized[i] = matchPath(path)
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r := Result{Source: "windows_kernel_file_etw", Status: m.status, Reason: m.reason}
@@ -281,10 +346,10 @@ func (m *Monitor) Lookup(paths []string, since time.Time) Result {
 		return r
 	}
 	var identity *Identity
-	for _, path := range paths {
+	for _, path := range normalized {
 		found := false
 		for _, w := range m.writes {
-			if w.Path != cleanPath(path) || w.At.Before(since) {
+			if w.Path != path || w.At.Before(since) {
 				continue
 			}
 			found = true

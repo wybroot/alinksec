@@ -11,6 +11,22 @@ fi
 source /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 ]]
 [[ -x .tmp/baseline-native.test ]]
+# This independent job can reach the manager while the runner is still booting.
+# Wait for readiness before creating fixtures; never retry failed assertions.
+manager_deadline=$((SECONDS + 120))
+while true; do
+  manager_state="$(timeout 5s /usr/bin/systemctl --system is-system-running 2>/dev/null || true)"
+  case "$manager_state" in
+    running|degraded) break ;;
+  esac
+  if (( SECONDS >= manager_deadline )); then
+    echo "Native systemd fixture manager never became ready: $manager_state" >&2
+    /usr/bin/systemctl --system list-jobs --no-pager >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
+echo "Native systemd fixture manager ready: $manager_state"
 gcc -Wall -Wextra -Werror -O2 deploy/tests/systemd-clock-readonly.c -o .tmp/systemd-clock-readonly
 sudo env ALINKSEC_SYSTEMD_NATIVE_REQUIRED=true ALINKSEC_SYSTEMD_FIXTURES_ALLOWED=true \
   GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \

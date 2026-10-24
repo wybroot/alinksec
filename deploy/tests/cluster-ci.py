@@ -2,6 +2,7 @@
 """Run the actual cluster only on an isolated GitHub-hosted runner, then stop every owned process."""
 import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -178,8 +179,8 @@ try:
     command(['mvn', '-B', '-ntp', '-T1', '-pl', 'alinksec-bootstrap', '-am', '-Dtest=ClusterCoordinationIntegrationTest',
              '-Dsurefire.failIfNoSpecifiedTests=false', '-DforkCount=0', 'test'], env=integration_environment, timeout=600, log='coordination-tests.log', cwd=REPO / 'server')
     junit = ET.parse(REPO / 'server/alinksec-bootstrap/target/surefire-reports/TEST-com.alinksec.bootstrap.ClusterCoordinationIntegrationTest.xml').getroot()
-    assert int(junit.attrib['tests']) == 13 and all(int(junit.attrib[key]) == 0 for key in ['failures', 'errors', 'skipped'])
-    checks.append('thirteen_real_postgres_redis_rabbit_fencing_order_ack_loss_worker_slot_notification_cases')
+    assert int(junit.attrib['tests']) == 14 and all(int(junit.attrib[key]) == 0 for key in ['failures', 'errors', 'skipped'])
+    checks.append('fourteen_real_postgres_redis_rabbit_fencing_pool_isolation_order_ack_loss_worker_slot_notification_cases')
 
     app_environment = {'SPRING_PROFILES_ACTIVE': 'postgres', 'PG_HOST': '127.0.0.1', 'PG_PORT': str(pg_port), 'PG_USER': 'alinksec_app', 'PG_PASSWORD': app_password,
             'ALINKSEC_METRICS_ENABLED': 'false', 'ALINKSEC_CLUSTER_DEPLOYMENT_ID': deployment, 'ALINKSEC_CLUSTER_SHARED_DIR': str(SHARED),
@@ -260,6 +261,13 @@ try:
     until(lambda: done(cross_command), 'REST A command is delivered by the actual stream owner B')
     until(lambda: int(sql(f"SELECT COUNT(*) FROM t_cluster_ingress WHERE agent_id='{agent}' AND payload_type='ASSET' AND state='applied'")) > 0, 'Native asset report commits through the real queue')
     checks.append('actual_native_mtls_agent_on_b_accepts_rest_a_command_and_queued_asset_fact')
+    scale_spec = importlib.util.spec_from_file_location('scale_acceptance', REPO / 'deploy/tests/scale-acceptance.py')
+    scale_module = importlib.util.module_from_spec(scale_spec)
+    scale_spec.loader.exec_module(scale_module)
+    scale_result = scale_module.run_scale(repo=REPO, private=PRIVATE, sql=sql, api=api, port=a_http, admin=admin,
+            address=f'127.0.0.1:{proxy_grpc}', addresses=[f'127.0.0.1:{a_grpc}', f'127.0.0.1:{b_grpc}'], ca=SHARED / 'certs/ca.crt', native_agent=agent,
+            java_processes=[node_a, node_b], container_ids=[pg, redis, rabbit, proxy, native_agent], redact=redact)
+    assert scale_result['passed'] and scale_result['longSoakAccepted'] is False
     command(['docker', 'pause', native_agent])
     stop_java(node_b, abrupt=True)
     pending_command = collect()
@@ -325,4 +333,4 @@ finally:
                     '-c', 'find /cleanup -depth -mindepth 1 -delete'], capture_output=True, timeout=30)
     PRIVATE.rmdir()
 assert passed and result['remainingOwnedContainers'] == 0 and result['remainingJavaProcesses'] == 0
-print(json.dumps({'passed': True, 'checks': len(checks), 'junitTests': 13, 'cleanup': True}))
+print(json.dumps({'passed': True, 'checks': len(checks), 'junitTests': 14, 'cleanup': True}))

@@ -138,6 +138,17 @@ public class CommandRepository {
                 """,agentId,ST_PENDING,limit);
     }
 
+    /** One indexed lookup for a bounded batch of locally owned streams. */
+    public List<String> findPendingAgents(List<String> agents) {
+        if(agents.size()>256) throw new IllegalArgumentException("invalid_command_agent_batch");
+        if(agents.isEmpty()) return List.of();
+        var args=new java.util.ArrayList<Object>(agents);
+        args.add(ST_PENDING);
+        return jdbc.queryForList("SELECT DISTINCT agent_id FROM t_command WHERE agent_id IN ("+
+                String.join(",",java.util.Collections.nCopies(agents.size(),"?"))+
+                ") AND status=? ORDER BY agent_id",String.class,args.toArray());
+    }
+
     /** Counts pending rows created before complete protobuf command persistence existed. */
     public int countLegacyPending() {
         String commandPayload = database.jsonTextValue("payload", "command_b64");

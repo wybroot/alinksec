@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -128,7 +129,18 @@ func TestAuthenticatedConfirmationAndOperatorWithdrawal(t *testing.T) {
 func TestUnconfirmedLeaseExpiresWithoutAgent(t *testing.T) {
 	work, l := fixtureLease(t, "prepared", 350*time.Millisecond)
 	f := &fakeFirewall{}
-	done := startWatch(t, work, l, f)
+	// ACL/JSON setup may outlive 350ms on Windows. Advance only after observing
+	// actual application, so this tests expiry rather than fixture startup speed.
+	var clock atomic.Int64
+	clock.Store(l.Updated.UnixNano())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- watchWithClock(ctx, work, l.ID, fakeManager{}, f, func() time.Time { return time.Unix(0, clock.Load()) })
+	}()
+	waitPhase(t, work, "active")
+	clock.Store(l.Deadline.UnixNano())
 	awaitWatch(t, done)
 	final := waitPhase(t, work, "finished")
 	if !final.Automatic || !final.Confirmed.IsZero() || final.Restored.IsZero() {
@@ -136,6 +148,21 @@ func TestUnconfirmedLeaseExpiresWithoutAgent(t *testing.T) {
 	}
 	if f.applies != 1 || f.clears < 1 {
 		t.Fatalf("wrong firewall lifecycle: %+v", f)
+	}
+	if !final.Deadline.Equal(l.Deadline) || !final.Restored.Equal(l.Deadline) {
+		t.Fatal("unconfirmed lease deadline was extended")
+	}
+}
+
+func TestAlreadyExpiredPreparedLeaseNeverApplies(t *testing.T) {
+	work, l := fixtureLease(t, "prepared", 350*time.Millisecond)
+	f := &fakeFirewall{}
+	if err := watchWithClock(context.Background(), work, l.ID, fakeManager{}, f, func() time.Time { return l.Deadline }); err != nil {
+		t.Fatal(err)
+	}
+	final := waitPhase(t, work, "finished")
+	if f.applies != 0 || f.clears < 1 || !final.Automatic || !final.Confirmed.IsZero() || final.Restored.IsZero() || !final.Deadline.Equal(l.Deadline) {
+		t.Fatalf("expired startup did not fail open: firewall=%+v lease=%+v", f, final)
 	}
 }
 func TestRestartNeverReappliesActiveOrPartialIsolation(t *testing.T) {

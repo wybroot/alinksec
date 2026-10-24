@@ -3,6 +3,9 @@ package com.alinksec.service.cluster;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.stereotype.Component;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import jakarta.annotation.PreDestroy;
 
 import javax.sql.DataSource;
 import java.nio.ByteBuffer;
@@ -13,7 +16,8 @@ import java.util.function.Supplier;
 
 /**
  * One PostgreSQL lock orders stream replacement, dispatch and the committed current-stream receipt.
- * Its connection is separate from business transactions so receipts follow their commits.
+ * Its bounded connection pool is separate from business transactions so receipts
+ * follow their commits and simultaneous fences cannot exhaust business connections.
  */
 @Component
 public class AgentFence {
@@ -21,10 +25,30 @@ public class AgentFence {
     private final ThreadLocal<Held> held = new ThreadLocal<>();
     private final ClusterProperties properties;
     private final DataSource dataSource;
+    private HikariDataSource fencePool;
 
     public AgentFence(ClusterProperties properties, DataSource dataSource) {
         this.properties = properties;
         this.dataSource = dataSource;
+    }
+
+    private synchronized HikariDataSource connections() {
+        if (fencePool == null) {
+            if (!(dataSource instanceof HikariDataSource source))
+                throw new ClusterUnavailable("agent_fence_requires_hikari_pool");
+            var config = new HikariConfig();
+            source.copyStateTo(config);
+            config.setPoolName(source.getPoolName() + "-agent-fence");
+            config.setMaximumPoolSize(Math.min(4, source.getMaximumPoolSize()));
+            config.setMinimumIdle(0);
+            fencePool = new HikariDataSource(config);
+        }
+        return fencePool;
+    }
+
+    @PreDestroy
+    public synchronized void close() {
+        if (fencePool != null) fencePool.close();
     }
 
     public <T> T with(String agent, Supplier<T> action) {
@@ -37,7 +61,7 @@ public class AgentFence {
             assertAlive();
             return action.get();
         }
-        try (Connection connection = dataSource.getConnection()) {
+        try (Connection connection = connections().getConnection()) {
             connection.setNetworkTimeout(Runnable::run, 3000);
             connection.setAutoCommit(false);
             boolean committed = false;
