@@ -65,7 +65,7 @@ try {
   await expect(panel).toContainText('<img src=x onerror=window.logXss=true>'); assert.equal(await page.evaluate(() => !!window.logXss), false)
   assert.equal(await panel.locator('img').count(), 0); await shot('logs-desktop.png'); checks.push('captured_database_raw_sources_truncation_metadata_and_safe_text')
   const rawRow = tableRows.filter({ hasText: 'onerror=window.logXss' }); await rawRow.getByRole('button', { name: '查看原文', exact: true }).click()
-  await expect(panel.locator('.log-raw')).toHaveText(fixture.detail.content); await expect(panel.locator('.log-detail')).toContainText(fixture.detail.content_sha256)
+  await expect.poll(() => panel.locator('.log-raw').textContent()).toBe(fixture.detail.content); await expect(panel.locator('.log-detail')).toContainText(fixture.detail.content_sha256)
   assert.equal(await panel.locator('.log-detail script,.log-detail img').count(), 0); checks.push('original_whitespace_newlines_digest_time_semantics_and_no_markup_execution')
   for (const format of ['ndjson', 'csv']) {
     const pending = page.waitForEvent('download'); await panel.getByRole('button', { name: `导出本页 ${format.toUpperCase()}`, exact: true }).click()
@@ -78,7 +78,7 @@ try {
   badDigest = true; let invalidSaved = false; const onDownload = () => { invalidSaved = true }; page.on('download', onDownload)
   await panel.getByRole('button', { name: '导出本页 NDJSON', exact: true }).click(); await expect(panel).toContainText('日志导出摘要不匹配'); assert.equal(invalidSaved, false); page.off('download', onDownload); badDigest = false
   checks.push('invalid_export_digest_blocks_save')
-  await search(); await expect(tableRows).toHaveCount(4); await rawRow.getByRole('button', { name: '查看原文', exact: true }).click(); await expect(panel.locator('.log-raw')).toHaveText(fixture.detail.content)
+  await search(); await expect(tableRows).toHaveCount(4); await rawRow.getByRole('button', { name: '查看原文', exact: true }).click(); await expect.poll(() => panel.locator('.log-raw').textContent()).toBe(fixture.detail.content)
   await page.setViewportSize({ width: 390, height: 844 }); await shot('logs-detail-mobile.png')
   const bounds = await panel.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391)
   const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth })); assert.ok(width.scroll <= width.client + 1)
