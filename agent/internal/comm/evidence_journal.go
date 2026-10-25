@@ -175,7 +175,7 @@ func (c *Client) sendEvidenceResults(stream pb.AgentChannel_ChannelClient, gener
 	_, journal, err := c.evidenceJournal()
 	c.evidenceMu.Unlock()
 	if err != nil {
-		c.log.Error("evidence journal unavailable")
+		c.log.Error("evidence journal unavailable", "err", err)
 		return nil
 	}
 	retained := map[string]bool{}
