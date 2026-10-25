@@ -104,6 +104,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install native resolver required by release API smoke checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openscap-scanner
+          oscap --version
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
@@ -143,6 +148,18 @@ jobs:
           name: release-images-${{ matrix.arch }}
           path: release/images-${{ matrix.arch }}.json
           if-no-files-found: error
+      - name: Retain failed release smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke-failure-${{ matrix.arch }}
+          path: |
+            .tmp/server-image-smoke.*/server.log
+            .tmp/web-image-smoke.*/server.log
+            .tmp/web-image-smoke.*/web.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
 
   publish:
     needs: [verify, build-images]
