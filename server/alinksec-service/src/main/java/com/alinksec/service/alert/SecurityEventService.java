@@ -42,9 +42,10 @@ public class SecurityEventService {
                     detail = ?, action_taken = ?
                 WHERE agent_id = ? AND rule_id = ?
                   AND (%s) = ?
+                  AND severity_source = 'agent_proto_v1' AND severity = ?
                   AND status IN (0, 1)
                 """.formatted(database.jsonTextValue("detail", "fingerprint"));
-        int merged = jdbc.update(mergeSql, withFingerprint(detailJson, fingerprint), event.getActionTaken(), agentId, event.getRuleId(), fingerprint);
+        int merged = jdbc.update(mergeSql, withFingerprint(detailJson, fingerprint), event.getActionTaken(), agentId, event.getRuleId(), fingerprint, event.getSeverityValue());
         if (merged > 0) {
             log.debug("告警聚合: agent={} rule={} type={}", agentId, event.getRuleId(), event.getType());
             return;
@@ -52,18 +53,17 @@ public class SecurityEventService {
 
         String alertNo = "ALT-" + java.util.UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO t_alert (alert_no, agent_id, rule_id, event_type, severity, title, detail, action_taken)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO t_alert (alert_no, agent_id, rule_id, event_type, severity, severity_source, title, detail, action_taken)
+                VALUES (?, ?, ?, ?, ?, 'agent_proto_v1', ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 """,
                 alertNo, agentId, event.getRuleId(), event.getType(),
-                event.getSeverity().getNumber(),
+                event.getSeverityValue(),
                 buildTitle(event), withFingerprint(detailJson, fingerprint),
                 event.getActionTaken());
         log.info("新告警: agent={} type={} severity={} rule={}",
                 agentId, event.getType(), event.getSeverity(), event.getRuleId());
-        notifyService.onAlert(alertNo, agentId, event.getType(),
-                event.getSeverity().getNumber(), buildTitle(event), event.getActionTaken());
+        notifyService.onAlert(alertNo);
     }
 
     private String buildTitle(RptSecurityEvent e) {

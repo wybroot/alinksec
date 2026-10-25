@@ -54,7 +54,9 @@ var (
 		b := unsafe.Slice((*byte)(unsafe.Pointer(p)), 448)
 		if binary.LittleEndian.Uint32(b[416:]) != 0 {
 			if s, ok := sessions.Load(uintptr(binary.LittleEndian.Uint64(b[440:]))); ok {
-				s.(*winTrace).m.fail("etw_events_lost")
+				trace := s.(*winTrace)
+				trace.health[8].Store(uint64(binary.LittleEndian.Uint32(b[416:])))
+				trace.m.fail("etw_events_lost")
 			}
 		}
 		return 1
@@ -126,6 +128,7 @@ type winTrace struct {
 	completed atomic.Uint64
 	rejected  [4]atomic.Uint64 // Count and last rejected emitter/thread/open-owner PIDs.
 	lastSweep time.Time
+	health    [9]atomic.Uint64 // Native session query and callback loss statistics.
 }
 
 func newNative(m *Monitor, workDir string) native { return &winTrace{m: m, workDir: workDir} }
@@ -212,20 +215,12 @@ func (s *winTrace) start() (err error) {
 		s.handle = 0
 		return err
 	}
-	keywords, e := fileKeywords()
-	if e != nil {
-		return e
-	}
-	// A zero timeout returns before provider configuration completes. Do not
-	// publish a ready evidence epoch while the initial file opens can still be
-	// missed. Bound the wait; a timeout follows the normal unavailable/retry path.
-	r, _, _ = enableTrace.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&fileProvider)), 1, 4, uintptr(keywords), 0, 5000, 0)
-	if err = apiError("EnableTraceEx2", r); err != nil {
-		return err
-	}
 	s.objects = make(map[uint64]openedFile)
 	s.pending = make(map[uint64]pendingWrite)
 	s.devices = devicePaths()
+	for i := range s.health {
+		s.health[i].Store(0)
+	}
 	s.key = uintptr(nextSession.Add(1))
 	sessions.Store(s.key, s)
 	// Keep the complete SDK structure, including its output-only headers.
@@ -249,7 +244,19 @@ func (s *winTrace) start() (err error) {
 		r, _, _ := processTrace.Call(uintptr(unsafe.Pointer(&consumer)), 1, 0, 0)
 		done <- apiError("ProcessTrace", r)
 	}()
-	return nil
+	// Attach the real-time consumer before enabling a system-wide provider.
+	// Otherwise provider enablement and device enumeration accumulate traffic
+	// while no consumer drains the bounded session buffers.
+	keywords, e := fileKeywords()
+	if e != nil {
+		return e
+	}
+	// Wait for provider configuration; initial file opens must not precede it.
+	r, _, _ = enableTrace.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&fileProvider)), 1, 4, uintptr(keywords), 0, 5000, 0)
+	if err = apiError("EnableTraceEx2", r); err != nil {
+		return err
+	}
+	return s.checkLocked()
 }
 
 func stopNamed(name string) error {
@@ -264,6 +271,9 @@ func stopNamed(name string) error {
 func (s *winTrace) check() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.checkLocked()
+}
+func (s *winTrace) checkLocked() error {
 	if s.handle == 0 {
 		return fmt.Errorf("session inactive")
 	}
@@ -279,6 +289,9 @@ func (s *winTrace) check() error {
 		return e
 	}
 	p := (*traceProperties)(unsafe.Pointer(&b[0]))
+	for i, value := range []uint32{p.EventsLost, p.RealTimeBuffersLost, p.LogBuffersLost, p.BufferSize, p.NumberOfBuffers, p.FreeBuffers, p.MinimumBuffers, p.MaximumBuffers} {
+		s.health[i].Store(uint64(value))
+	}
 	if p.EventsLost != 0 || p.RealTimeBuffersLost != 0 || p.LogBuffersLost != 0 {
 		return fmt.Errorf("etw_events_lost")
 	}
@@ -549,6 +562,9 @@ func (s *winTrace) onEvent(r *eventRecord) {
 
 func (s *winTrace) counters() map[string]uint64 {
 	out := map[string]uint64{"matched_file_opens": s.mapped.Load(), "completed_modifications": s.completed.Load()}
+	for i, name := range []string{"etw_events_lost", "etw_real_time_buffers_lost", "etw_log_buffers_lost", "etw_buffer_size_kib", "etw_buffers", "etw_free_buffers", "etw_min_buffers", "etw_max_buffers", "etw_callback_events_lost"} {
+		out[name] = s.health[i].Load()
+	}
 	for i, name := range []string{"unverified_operations", "last_unverified_emitter", "last_unverified_thread", "last_unverified_open_owner"} {
 		out[name] = s.rejected[i].Load()
 	}

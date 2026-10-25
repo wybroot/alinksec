@@ -516,6 +516,7 @@ validation reference is in English.
 | [12 · Native Agent Evidence](docs/12-原生Agent本机验收记录.md) | Linux resource sampling and actual Windows SCM checks |
 | [76 · System and Scale Acceptance](docs/76-系统适配与规模验收.md) | Native OS and distribution userland matrix, fixed load profile, raw samples and pending field acceptance |
 | [77 · External Service Acceptance](docs/77-真实外部服务联调.md) | Real public publisher imports, disposable VictoriaMetrics and pending private service acceptance |
+| [78 · Alert and Capture Corrections](docs/78-告警等级与采集查询修正.md) | Source-aware alert levels, ETW startup health and recent metric visibility |
 | [13 · Releases](docs/13-版本发布流程.md) | CI gates, images, assets and credentials |
 | [14 · ARM64](docs/14-ARM64支持.md) | Source builds, installation and multi-platform validation |
 | [15 · Security Libraries](docs/15-安全库同步与存储.md) | Manual imports, remote feeds, retained versions and S3 configuration |

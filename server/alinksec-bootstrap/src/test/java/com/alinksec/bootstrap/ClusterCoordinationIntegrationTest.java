@@ -262,10 +262,10 @@ class ClusterCoordinationIntegrationTest {
             var first=new NotifyService(jdbc);var second=new NotifyService(jdbc);
             ReflectionTestUtils.setField(first,"clusterProperties",a.properties);ReflectionTestUtils.setField(second,"clusterProperties",b.properties);
             var start=new CountDownLatch(1);List<Future<?>> futures=new ArrayList<>();
-            for(var service:List.of(first,second))futures.add(executor.submit(()->{await(start);service.onAlert(alert,agent,"fixture",4,"Harmless alert","");}));
+            for(var service:List.of(first,second))futures.add(executor.submit(()->{await(start);service.onAlert(alert);}));
             start.countDown();for(var future:futures)future.get(10,TimeUnit.SECONDS);assertEquals(1,requests.get());
             jdbc.update("UPDATE t_alert_notify_delivery SET next_attempt_at=0 WHERE alert_no=?",alert);response.set(204);
-            first.onAlert(alert,agent,"fixture",4,"Harmless alert","");second.onAlert(alert,agent,"fixture",4,"Harmless alert","");
+            first.onAlert(alert);second.onAlert(alert);
             assertEquals(2,requests.get());assertEquals(1,new HashSet<>(keys).size());assertNotNull(keys.getFirst());
             assertEquals(2,jdbc.queryForObject("SELECT attempts FROM t_alert_notify_delivery WHERE alert_no=?",Integer.class,alert));
             assertNotNull(jdbc.queryForObject("SELECT delivered_at FROM t_alert_notify_delivery WHERE alert_no=?",Object.class,alert));

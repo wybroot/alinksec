@@ -199,6 +199,15 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 		t.Fatalf("lookup want %s for %s since %s: %+v, counters=%v recent=%+v", want, path, since.Format(time.RFC3339Nano), r, g.fileTrace.Counters(), g.fileTrace.RecentWrites())
 		return r
 	}
+	stats := g.fileTrace.Counters()
+	for _, key := range []string{"etw_events_lost", "etw_real_time_buffers_lost", "etw_log_buffers_lost", "etw_callback_events_lost"} {
+		if stats[key] != 0 {
+			t.Fatalf("native capture loss at startup: %v", stats)
+		}
+	}
+	if stats["etw_buffer_size_kib"] != 64 || stats["etw_buffers"] == 0 || stats["etw_max_buffers"] > 16 {
+		t.Fatalf("native capture buffer bounds: %v", stats)
+	}
 	g.healthLoop() // Establish the first completed detector window after capture starts.
 	path := newDecoyManager(cfg, work).knownDecoys()[0]
 	since := time.Now()
@@ -214,7 +223,7 @@ func TestNativeWindowsRansomAttribution(t *testing.T) {
 	if err := filetrace.Terminate(wrong); err == nil || !alive(writer) {
 		t.Fatal("identity mismatch was not refused")
 	}
-	add("identity_mismatch_preserves_process", nil)
+	add("identity_mismatch_preserves_process", map[string]any{"startupCounters": stats})
 	g.healthLoop()
 	if len(events) == 0 {
 		t.Fatal("decoy health loop did not report tampering")

@@ -176,6 +176,14 @@ func (m *Monitor) Run(ctx context.Context) {
 			}
 		}
 		if enabled && !running && time.Now().After(retry) {
+			m.mu.Lock()
+			if generation != m.generation || len(m.roots) == 0 || m.policyIssue != "" {
+				m.mu.Unlock()
+				continue
+			}
+			m.status = "starting"
+			m.reason = ""
+			m.mu.Unlock()
 			if err := m.native.start(); err != nil {
 				m.fail("capture_start_failed: " + err.Error())
 				retry = time.Now().Add(30 * time.Second)
@@ -185,10 +193,15 @@ func (m *Monitor) Run(ctx context.Context) {
 				}
 			} else {
 				m.mu.Lock()
-				if generation != m.generation {
+				if generation != m.generation || m.status == "unavailable" {
+					failed := m.status == "unavailable"
 					m.mu.Unlock()
 					if err := m.native.close(); err != nil {
 						m.fail("session_cleanup_failed")
+						running = true
+					}
+					if failed {
+						retry = time.Now().Add(30 * time.Second)
 					}
 					continue
 				}

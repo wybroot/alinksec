@@ -59,7 +59,7 @@ const d = reactive({ stats: {}, events: [], sevDist: [], trend: [], res: { hrs: 
 const loading = ref(false)
 const hostCoverage = computed(() => d.stats.hostsTotal ? Math.round((d.stats.hosts || 0) / d.stats.hostsTotal * 100) : 0)
 const severityRows = computed(() => {
-  const colors = ['#d94f45', '#d88b1d', '#2d7797', '#71818a']
+  const colors = ['#d94f45', '#d88b1d', '#2d7797', '#71818a', '#547b81', '#8e8195']
   return d.sevDist.map((row, i) => ({ ...row, color: colors[i] }))
 })
 const latestPercent = values => values?.length ? `${values[values.length - 1]}%` : '—'

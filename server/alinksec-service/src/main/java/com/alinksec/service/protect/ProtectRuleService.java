@@ -91,9 +91,9 @@ public class ProtectRuleService {
     /** 拦截记录：诱饵/加密行为与 EDR 进程事件（t_alert，含处置动作） */
     public List<Map<String, Object>> listBlocks(int limit) {
         return jdbc.queryForList("""
-                SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.rule_id, t.event_type, t.severity,
+                SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.rule_id, t.event_type, t.severity, t.severity_source, t.severity_level,
                        t.title, t.detail, t.action_taken, t.first_time, t.last_time, t.count
-                FROM t_alert t LEFT JOIN t_agent a ON a.agent_id = t.agent_id
+                FROM v_alert_severity t LEFT JOIN t_agent a ON a.agent_id = t.agent_id
                 WHERE t.event_type IN ('decoy_tamper', 'ransom_behavior', 'process', 'file_tamper', 'login_crack', 'login_anomaly')
                 ORDER BY t.last_time DESC LIMIT ?
                 """, limit);

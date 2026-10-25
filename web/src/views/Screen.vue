@@ -189,7 +189,7 @@ const pieEl = ref(null)
 const pie = useChart(pieEl, () => {
   const nonzero = sevPie.value.filter(d => d.value > 0)
   const data = nonzero.length ? nonzero : [{ value: 0, name: '暂无告警' }]
-  const colors = { 严重: C.red, 高危: C.amber, 中危: C.cyan, 低危: '#3f6aa6' }
+  const colors = { 严重: C.red, 高危: C.amber, 中危: C.cyan, 低危: '#3f6aa6', 信息: '#547b81', 未知: '#8e8195' }
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c}（{d}%）', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
     legend: { bottom: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 12, itemHeight: 8, icon: 'roundRect' },

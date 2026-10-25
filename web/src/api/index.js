@@ -196,7 +196,8 @@ export async function logout() {
 /* ---------------- 适配工具 ---------------- */
 
 const SEV = { 5: 'critical', 4: 'critical', 3: 'high', 2: 'medium', 1: 'low' }
-const sev = (n) => SEV[Number(n)] || 'low'
+const sev = (n) => SEV[Number(n)] || 'unknown'
+const alertSev = a => a.severity_level == null ? sev(a.severity) : ({ '-1': 'unknown', 0: 'info', 1: 'low', 2: 'medium', 3: 'high', 4: 'critical' }[Number(a.severity_level)] || 'unknown')
 const OS = { 1: (v) => v || 'Linux', 2: (v) => v || 'Windows' }
 
 function fmtTime(iso) {
@@ -254,12 +255,14 @@ export async function fetchDashboard() {
       riskHosts: (topHosts || []).length,
       topRisk: top ? `${top.hostname}（${top.alert_count}）` : '—',
     },
-    // Include Agent SEV_CRITICAL=5 alongside the existing console severity 4.
+    // The backend groups source-aware display levels; old APIs may also return5.
     sevDist: [
       { value: critical, name: '严重' },
       { value: sevMap[3] ?? 0, name: '高危' },
       { value: sevMap[2] ?? 0, name: '中危' },
       { value: sevMap[1] ?? 0, name: '低危' },
+      { value: sevMap[0] ?? 0, name: '信息' },
+      { value: sevMap[-1] ?? 0, name: '未知' },
     ].filter((x) => x.value > 0),
     trend: (trend || []).map((t) => ({
       date: t.date,
@@ -269,7 +272,8 @@ export async function fetchDashboard() {
     events: (events?.list || []).map((a) => ({
       id: a.id,
       time: fmtTime(a.last_time),
-      sev: sev(a.severity),
+      sev: alertSev(a),
+      legacySeverity: a.severity_source === 'legacy_unclassified',
       text: a.title,
       host: a.hostname || a.agent_id,
       action: a.action_taken || 'alert_only',
@@ -338,6 +342,8 @@ export async function fetchScreen() {
     { name: '高危', value: sevMap[3] ?? 0 },
     { name: '中危', value: sevMap[2] ?? 0 },
     { name: '低危', value: sevMap[1] ?? 0 },
+    { name: '信息', value: sevMap[0] ?? 0 },
+    { name: '未知', value: sevMap[-1] ?? 0 },
   ]
 
   // 基线维度雷达（pass_rate 0~100）
@@ -354,7 +360,8 @@ export async function fetchScreen() {
   // 实时事件流
   const events = (alerts?.list || []).map((a) => ({
     id: a.id,
-    sev: sev(a.severity),
+    sev: alertSev(a),
+    legacySeverity: a.severity_source === 'legacy_unclassified',
     type: a.event_type,
     text: alertText(a),
     host: a.hostname || a.agent_id || '—',
@@ -897,7 +904,7 @@ export async function fetchProtect() {
     title: keyMap[e.key] || e.name,
     desc: e.desc || descMap[e.key] || '',
   }))
-  return { cards, blocks: (blocks || []).map((b) => ({ ...b, severity: sev(b.severity), time: fmtTime(b.last_time) })) }
+  return { cards, blocks: (blocks || []).map((b) => ({ ...b, severity: alertSev(b), legacySeverity: b.severity_source === 'legacy_unclassified', time: fmtTime(b.last_time) })) }
 }
 
 /** 防护规则清单（PR-0010 诱饵 / PR-0011 加密行为） */
@@ -926,7 +933,8 @@ export async function fetchAlerts() {
   const data = await get('/api/alerts?page=1&size=100')
   return (data?.list || []).map((a) => ({
     id: a.id,
-    sev: sev(a.severity),
+    sev: alertSev(a),
+    legacySeverity: a.severity_source === 'legacy_unclassified',
     type: a.event_type,
     text: a.title,
     host: a.hostname || a.agent_id || '—',

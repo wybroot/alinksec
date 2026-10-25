@@ -30,7 +30,7 @@ public class VmQueryClient {
 
     public Object query(String query, String time) {
         StringBuilder url = new StringBuilder(props.getMetrics().getVmBaseUrl())
-                .append("/api/v1/query?query=").append(enc(query));
+                .append("/api/v1/query?latency_offset=1ms&query=").append(enc(query));
         if (time != null && !time.isBlank()) {
             url.append("&time=").append(enc(time));
         }
@@ -39,7 +39,7 @@ public class VmQueryClient {
 
     public Object queryRange(String query, String start, String end, String step) {
         String url = props.getMetrics().getVmBaseUrl() + "/api/v1/query_range"
-                + "?query=" + enc(query)
+                + "?latency_offset=1ms&query=" + enc(query)
                 + "&start=" + enc(start)
                 + "&end=" + enc(end)
                 + "&step=" + enc(step);
