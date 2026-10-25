@@ -434,7 +434,7 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 			}
 			if receipt := cmd.GetEvidenceReceipt(); receipt != nil {
 				if err := c.evidenceReceipt(receipt); err != nil {
-					c.log.Error("evidence receipt persistence failed")
+					c.log.Error("evidence receipt persistence failed", "err", err)
 				}
 				continue
 			}

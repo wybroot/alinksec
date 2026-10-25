@@ -9,15 +9,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 	"github.com/alinksec/alinksec-agent/internal/virusscan"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -32,6 +35,8 @@ func TestNativeEvidenceAgent(t *testing.T) {
 		t.Fatal("absolute Agent binary required")
 	}
 	root := t.TempDir()
+	observations := []evidenceReceiptObservation{}
+	t.Cleanup(func() { retainEvidenceObservations(t, root, observations) })
 	fixture, address, ca := newSCMFixture(t, root)
 	work := filepath.Join(root, "Evidence Agent Work With Spaces")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -108,22 +113,52 @@ func TestNativeEvidenceAgent(t *testing.T) {
 		return report.GetAck().GetCmdId() == command.CmdId && report.GetAck().GetStage() == pb.RptAck_DONE
 	})
 	connection.commands <- &pb.Command{Payload: &pb.Command_EvidenceReceipt{EvidenceReceipt: &pb.CmdEvidenceReceipt{RequestId: request.RequestId, CommandId: command.CmdId, ContentSha256: result.Sha256}}}
-	awaitReceipt := func() {
+	awaitReceipt := func(command *pb.Command) {
+		t.Helper()
+		started := time.Now()
 		deadline := time.Now().Add(10 * time.Second)
+		observation := evidenceReceiptObservation{CommandID: command.CmdId}
+		defer func() {
+			observation.ElapsedMillis = time.Since(started).Milliseconds()
+			observations = append(observations, observation)
+		}()
+		encoded, err := proto.Marshal(command.GetEvidenceCollect())
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(encoded)
+		expectedDigest := hex.EncodeToString(digest[:])
 		for time.Now().Before(deadline) {
-			content, err := os.ReadFile(filepath.Join(work, "evidence-state", "pending.json"))
+			observation.Polls++
 			var state struct {
-				Schema  int
-				Records []json.RawMessage
+				Schema    int
+				Records   []json.RawMessage
+				Completed []struct {
+					CommandID, CommandDigest string
+					Failed                   bool
+					ExpiresAt                int64
+				}
 			}
-			if err == nil && json.Unmarshal(content, &state) == nil && state.Schema == 1 && len(state.Records) == 0 {
-				return
+			// Ordinary os.ReadFile opens without FILE_SHARE_DELETE on Windows.
+			// The observer must permit the Agent to atomically replace this path.
+			err := securestate.ReadJSONLimit(filepath.Join(work, "evidence-state", "pending.json"), &state, 4<<20)
+			if err != nil {
+				observation.ReadErrors++
+				observation.LastReadError = err.Error()
+			} else {
+				observation.PendingRecords = len(state.Records)
+				for _, completed := range state.Completed {
+					if state.Schema == 1 && len(state.Records) == 0 && completed.CommandID == command.CmdId && completed.CommandDigest == expectedDigest && !completed.Failed && completed.ExpiresAt > time.Now().UnixMilli() {
+						observation.Committed = true
+						return
+					}
+				}
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		t.Fatal("native Agent did not persist the committed evidence receipt")
+		t.Fatalf("native Agent did not persist the committed evidence receipt: polls=%d read_errors=%d pending=%d last_read_error=%q", observation.Polls, observation.ReadErrors, observation.PendingRecords, observation.LastReadError)
 	}
-	awaitReceipt()
+	awaitReceipt(command)
 	sampleRequest := &pb.CmdEvidenceCollect{RequestId: "33333333-3333-4333-8333-333333333333", ExecutionContract: 1, Kind: "quarantine_sample", Deadline: time.Now().Add(time.Minute).UnixMilli(), QuarantineId: capture, OriginalPath: original, ExpectedSha256: hash}
 	sampleCommand := &pb.Command{CmdId: "44444444-4444-4444-8444-444444444444", IssuedAt: time.Now().UnixMilli(), Payload: &pb.Command_EvidenceCollect{EvidenceCollect: sampleRequest}}
 	connection.commands <- sampleCommand
@@ -145,7 +180,7 @@ func TestNativeEvidenceAgent(t *testing.T) {
 		t.Fatal("sample export restored original path")
 	}
 	connection.commands <- &pb.Command{Payload: &pb.Command_EvidenceReceipt{EvidenceReceipt: &pb.CmdEvidenceReceipt{RequestId: sampleRequest.RequestId, CommandId: sampleCommand.CmdId, ContentSha256: hash}}}
-	awaitReceipt()
+	awaitReceipt(sampleCommand)
 	if output := os.Getenv("ALINKSEC_EVIDENCE_NATIVE_OUTPUT"); output != "" {
 		if err := os.MkdirAll(output, 0700); err != nil {
 			t.Fatal(err)
@@ -157,6 +192,63 @@ func TestNativeEvidenceAgent(t *testing.T) {
 		proof, _ := json.MarshalIndent(map[string]any{"passed": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "checks": checks, "diagnosticBytes": len(result.Content), "diagnosticSha256": result.Sha256, "sampleBytes": len(sample), "sampleSha256": hash}, "", "  ")
 		if err := os.WriteFile(filepath.Join(output, "result.json"), proof, 0600); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+type evidenceReceiptObservation struct {
+	CommandID      string `json:"commandId"`
+	Committed      bool   `json:"committed"`
+	ElapsedMillis  int64  `json:"elapsedMillis"`
+	Polls          int    `json:"polls"`
+	ReadErrors     int    `json:"readErrors"`
+	PendingRecords int    `json:"pendingRecords"`
+	LastReadError  string `json:"lastReadError,omitempty"`
+}
+
+func retainEvidenceObservations(t *testing.T, root string, observations []evidenceReceiptObservation) {
+	t.Helper()
+	output := os.Getenv("ALINKSEC_EVIDENCE_NATIVE_OUTPUT")
+	if output != "" {
+		if err := os.MkdirAll(output, 0700); err != nil {
+			t.Errorf("create evidence observations directory: %v", err)
+			return
+		}
+		data, err := json.MarshalIndent(map[string]any{"passed": !t.Failed(), "receiptDeadlineMillis": 10000, "receipts": observations}, "", "  ")
+		if err == nil {
+			err = os.WriteFile(filepath.Join(output, "observations.json"), data, 0600)
+		}
+		if err != nil {
+			t.Errorf("retain evidence observations: %v", err)
+		}
+	}
+	if !t.Failed() {
+		return
+	}
+	// Retain only the bounded output of this disposable fixture process. Never
+	// copy agent.yml, credentials, raw journals or captured quarantine contents.
+	f, err := os.Open(filepath.Join(root, "agent-process.log"))
+	if err != nil {
+		t.Logf("open failed evidence process log: %v", err)
+		return
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size() > 64<<10 {
+		if _, err := f.Seek(-(64 << 10), io.SeekEnd); err != nil {
+			t.Logf("seek failed evidence process log: %v", err)
+			return
+		}
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 64<<10))
+	if err != nil {
+		t.Logf("read failed evidence process log: %v", err)
+		return
+	}
+	text := strings.ReplaceAll(string(data), "ENROLL-windows-scm-fixture", "[fixture-secret-redacted]")
+	t.Logf("failed evidence process log:\n%s", text)
+	if output != "" {
+		if err := os.WriteFile(filepath.Join(output, "failed-agent-process.log"), []byte(text), 0600); err != nil {
+			t.Errorf("retain failed evidence process log: %v", err)
 		}
 	}
 }

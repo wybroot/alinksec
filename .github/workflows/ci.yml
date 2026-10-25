@@ -335,18 +335,29 @@ jobs:
           GOARCH: amd64
       - name: Prepare independent harmless Windows signature release fixtures
         run: python deploy/tests/signature-fixtures.py .tmp/signature-fixtures
+      - name: Check Windows evidence observer sharing against actual receipt commits
+        working-directory: agent
+        run: |
+          New-Item -ItemType Directory -Force ../.tmp/evidence-native | Out-Null
+          go test -p 1 -count=1 -json -run '^TestEvidenceReceiptObserverSharing$' ./internal/comm | Tee-Object -FilePath ../.tmp/evidence-native/observer-sharing.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check actual Windows evidence, mTLS restart replay and quarantine export
         run: python deploy/tests/evidence-agent-native.py
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_EVIDENCE_AGENT_BIN: ${{ github.workspace }}/agent/alinksec-agent-windows-amd64.exe
       - name: Retain native Windows evidence transfer
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: central-evidence-${{ matrix.platform }}
           path: |
             .tmp/evidence-native/result.json
             .tmp/evidence-native/diagnostic.zip
+            .tmp/evidence-native/observations.json
+            .tmp/evidence-native/attempts.json
+            .tmp/evidence-native/observer-sharing.jsonl
+            .tmp/evidence-native/attempt-*/
           include-hidden-files: true
           if-no-files-found: error
       - name: Check native Windows delta reconstruction and actual Agent update commands
@@ -782,12 +793,16 @@ jobs:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_EVIDENCE_AGENT_BIN: ${{ github.workspace }}/.tmp/alinksec-agent
       - name: Retain native Linux evidence transfer
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: central-evidence-linux-${{ matrix.arch }}
           path: |
             .tmp/evidence-native/result.json
             .tmp/evidence-native/diagnostic.zip
+            .tmp/evidence-native/observations.json
+            .tmp/evidence-native/attempts.json
+            .tmp/evidence-native/attempt-*/
           include-hidden-files: true
           if-no-files-found: error
       - name: Retain native Linux signature update evidence
