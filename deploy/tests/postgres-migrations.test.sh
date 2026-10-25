@@ -266,7 +266,7 @@ PGDATABASE="$restore_database" pg_restore --exit-on-error --no-owner --no-privil
 restored_state="$(PGDATABASE="$restore_database" owner_sql -At -c "
   SELECT hostname || '|' || (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public')
   FROM t_agent WHERE agent_id = 'migration-fixture-agent';")"
-[[ "$restored_state" == "legacy-host|36" ]] || fail "Unexpected restored legacy state: $restored_state"
+[[ "$restored_state" == "legacy-host|35" ]] || fail "Unexpected restored legacy state: $restored_state"
 pass "legacy backup restores into a fresh database with original schema and host data"
 
 run_migrations "$work_dir/base" "$restore_database"

@@ -37,10 +37,10 @@ try {
     const rows=page.locator('.el-table__body-wrapper tbody tr')
     await expect(rows).toHaveCount(fixture.alerts.list.length)
     // Exact source/number matches come from actual migrated database captures.
-    for(const item of fixture.alerts.list) {
+    for(const [index,item] of fixture.alerts.list.entries()) {
       const label={0:'信息',1:'低危',2:'中危',3:'高危',4:'严重','-1':'未知'}[item.severity_level]
-      const actual=rows.filter({hasText:item.title})
-      if(item.rule_id!=='same'&&item.rule_id!=='changing')await expect(actual).toContainText(label)
+      await expect(rows.nth(index)).toContainText(item.title)
+      await expect(rows.nth(index).locator('td').first()).toContainText(label)
     }
     const legacy=rows.filter({hasText:'Historical'});await expect(legacy).toContainText('严重');await expect(legacy).toContainText('历史等级，沿用旧含义')
     await page.getByRole('tab',{name:'严重',exact:true}).click()
