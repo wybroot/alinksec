@@ -55,3 +55,15 @@
 - Do not base a group on an unmerged branch or stack its PR on an unmerged PR.
 - Version releases and production deployments require separate user instructions;
   module merge authorization does not authorize either action.
+
+# Documentation and release baseline
+
+- The current documentation/product target is v0.0.4. Review the full tracked
+  documentation corpus when updating a release: current commands and defaults
+  must agree with source, while historical dates, commits, failures and test
+  counts keep their original scope. The complete index is `docs/README.md`.
+- Field acceptance for backlog items 25/26/27 remains deferred by the user;
+  item 28 is not applicable to the current fresh-deployment scope. A software
+  release must not relabel those field checks as passed.
+- Keep earlier published tags/assets intact. A new version uses its own exact
+  main CI, tested native Agents, image manifests and checksums.

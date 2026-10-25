@@ -1,5 +1,7 @@
 # Ubuntu24 login PAM 会话资源限制参考
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [三项候选](../deploy/baseline/packages/pam-limits/linux-baseline.json) 版本1成组处理旧0039、0056、0057：core、文件句柄与用户进程的soft/hard声明。共用一个有限session链和limits配置解析器；每项独立返回pass/fail/error。一项error会阻止整包发布，另外两项的通过不能掩盖它。定义、版本差异和每项任务快照保留完整范围。
 
 产品限定Ubuntu24.04，固定查询`libpam-modules`的`1.5.3-5ubuntu5`及数字更新版本。固定入口`/etc/pam.d/login`，只读session管理组、`/etc/security/limits.conf`和`limits.d`。不会调用生产PAM会话或修改Agent/其他进程的资源限制。安装包版本是产品条件，不能证明磁盘模块与运行实例的完整性。
@@ -44,4 +46,4 @@ Ubuntu的显式root补丁要求root字面声明，默认/组声明不用于root�
 
 解释依据固定Linux-PAM1.5.3 [模块源码](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.c)、[limits手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/limits.conf.5.xml)、[模块手册源文件](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_limits/pam_limits.8.xml)和[控制流程](https://github.com/linux-pam/linux-pam/blob/v1.5.3/libpam/pam_dispatch.c)，以及[Ubuntu24 limits手册](https://manpages.ubuntu.com/manpages/noble/man5/limits.conf.5.html)。另核对官方Ubuntu [1.5.3-5ubuntu5.7源码补丁包](https://archive.ubuntu.com/ubuntu/pool/main/p/pam/pam_1.5.3-5ubuntu5.7.debian.tar.xz)中的显式root、初始化、soft默认及EPERM补丁和构建选项；该包未启用vendor配置目录。来源文件经Git blob和SHA256核对，不声称tag/软件包签名认证。
 
-旧60项现46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选，不扩大通用包覆盖。基线模块整体仍未完成，继续按[模块计划](19-模块完善计划.md)在当前分支推进，PR保持草稿。
+历史实施记录：旧60项该阶段有46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选，不扩大通用包覆盖。当时基线模块整体仍未完成，继续按[模块计划](19-模块完善计划.md)在当时分支推进，PR保持草稿。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

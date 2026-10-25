@@ -1,5 +1,7 @@
 # Deployment Validation
 
+> 版本基线：v0.0.4。已按本版核对「Deployment Validation」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](../../docs/releases/v0.0.4.md)，全部资料见[文档索引](../../docs/README.md)。
+
 `package-version-native.py` runs after the isolated DNF check on each Linux CI
 runner. It uses host DPKG and the existing offline Rocky9 image's native RPM
 library to produce every ordered pair from a fixed corpus, then checks the Java
@@ -20,16 +22,16 @@ disable behavior and transaction rollback have separate SQLite integration
 tests; excluded BL-LINUX-0054 never contributes a host baseline pass or score.
 See [closing boundaries](../../docs/44-基线模块收尾与认证-Agent-DNF核查.md).
 
-Release target: v0.0.2, adding Linux ARM64 to the earlier
-v0.0.1 amd64 release. Publication requires `windows-agent`,
-`build-and-test (amd64)`, `build-and-test (arm64)` and `schema` to pass on the
-exact tagged main commit. It reuses all three tested native Agents, builds and
-smoke-tests containers serially on each native architecture, then merges the
-tested digests into multi-platform component tags and publishes GitHub assets.
-See [release process](../../docs/13-版本发布流程.md).
+Release target: v0.0.4. All 27 job names in
+[`ci-gate.mjs`](../release/ci-gate.mjs) must complete successfully for the exact
+tagged main commit, including both Windows Server versions and both Linux
+architectures. The release reuses the three tested native Agents, builds and
+smoke-tests all three images serially on each native architecture, and publishes
+multi-platform indexes and six GitHub assets only after those checks pass.
+See the [release process](../../docs/13-版本发布流程.md).
 
 ```sh
-node deploy/release/check-version.mjs v0.0.2
+node deploy/release/check-version.mjs v0.0.4
 node --test --test-concurrency=1 deploy/tests/release-*.test.mjs
 ```
 
@@ -49,6 +51,18 @@ When testing a locally built maintenance image, set
 
 Run checks serially on low-memory machines. Build the server before starting API
 validation, and stop one scenario before starting another.
+
+## Startup and restore material
+
+`JwtSecretHolderTest` and `CertServiceTest` execute nine tests against real
+temporary files and EC keys/certificates. They cover normal restart, JWT source
+priority, cluster initialization, single-component relative certificate paths,
+empty JWT rejection and mixed CA/server restore rejection without overwriting
+existing files. Both Linux build jobs execute these tests. Run them through
+the existing Maven reactor with `-pl alinksec-gateway -am`,
+`-Dtest=CertServiceTest,JwtSecretHolderTest` and
+`-Dsurefire.failIfNoSpecifiedTests=false`; use the host resource watchdog and
+heap limits from [AGENTS.md](../../AGENTS.md).
 
 ## Complete deployment maintenance
 

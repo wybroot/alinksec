@@ -1,5 +1,7 @@
 # Ubuntu 24.04 login PAM 登录失败锁定核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立候选 `ALINKSEC-UBUNTU24-PAM-AUTH` 版本1映射旧 `BL-LINUX-0005`。范围固定为 Ubuntu24.04、Linux-PAM1.5.3及 `/etc/pam.d/login` 的已支持本地 auth 链；检查只读配置，不尝试认证、不访问账户口令、散列或失败计数记录，也不修改PAM配置。它不证明应用实际调用该服务、其他登录入口、NSS身份来源、模块运行期行为、计数文件可写或重启后锁定仍保留。系统版本匹配后仍须管理员确认实际组件与链条。
 
 ```bash
@@ -48,4 +50,4 @@ REST和生产网页使用单独标注的协议夹具，覆盖完整error/fail/pa
 
 解释依据Ubuntu24.04的 [pam_faillock手册](https://manpages.ubuntu.com/manpages/noble/man8/pam_faillock.8.html)、[faillock.conf手册](https://manpages.ubuntu.com/manpages/noble/man5/faillock.conf.5.html)，以及Linux-PAM1.5.3的[认证阶段实现](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_faillock/pam_faillock.c)、[配置读取实现](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_faillock/faillock_config.c)和[数值范围定义](https://github.com/linux-pam/linux-pam/blob/v1.5.3/modules/pam_faillock/faillock_config.h)。
 
-旧60项目前有8项通用观测和12项独立产品检查，40项尚未实现。通用包版本6仍明确列出自身未包含的52项。继续留在基线分支和草稿PR；其余模块只保留有序待办。
+历史实施记录：旧60项该阶段当时有8项通用观测和12项独立产品检查，40项尚未实现。通用包版本6仍明确列出自身未包含的52项。继续留在基线分支和草稿PR；其余模块只保留有序待办。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

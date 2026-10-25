@@ -1,11 +1,15 @@
 # ALinkSec Agent 详细设计与策略规范
 
-> 适用版本：v0.0.2；更新日期：2026-10-03。
+> 版本基线：v0.0.4。已按本版核对「ALinkSec Agent 详细设计与策略规范」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
 
-当前 Agent 源码产品版本为 `0.0.2`，可执行 `alinksec-agent version` 查询。构建目标为 Linux amd64、Linux arm64 和 Windows amd64 原生二进制；Linux 使用随包 systemd 单元，Windows `run` 自动接入 SCM。安装与服务配置见 [部署文档第 8 节](06-部署文档.md)。内置默认告警策略、实际 Linux 文件/SSH 防护配置见 [防护说明](11-登录与文件防护.md)。本文资源指标是设计目标，已测资源与平台覆盖以 [原生 Agent 验收](12-原生Agent本机验收记录.md)和 [ARM64 验收](14-ARM64支持.md)为准。
+> 适用版本：v0.0.4；更新日期：2026-10-25。
+
+当前 Agent 源码产品版本为 `0.0.4`，可执行 `alinksec-agent version` 查询。构建目标为 Linux amd64、Linux arm64 和 Windows amd64 原生二进制；Linux 使用随包 systemd 单元，Windows `run` 自动接入 SCM。安装与服务配置见 [部署文档第 8 节](06-部署文档.md)。内置默认告警策略、实际 Linux 文件/SSH 防护配置见 [防护说明](11-登录与文件防护.md)。本文资源指标是设计目标，已测资源与平台覆盖以 [原生 Agent 验收](12-原生Agent本机验收记录.md)和 [ARM64 验收](14-ARM64支持.md)为准。
 > 语言/运行时：Go 1.24+，CGO_ENABLED=0 原生成品（linux/amd64、linux/arm64、windows/amd64）。
 
 `linux/arm64` 构建与原生 CI 已合并；Agent 按自身构建架构上报 `amd64` / `arm64`，平台兼容旧版本上报的 `x86_64` / `aarch64`。升级下发核对整批目标的 OS 与架构，Agent 替换自身前再次校验包内构建平台。ARM64 从 v0.0.2 提供，v0.0.1 成品不包含 ARM64，见 [ARM64 部署](14-ARM64支持.md)。
+
+新增能力的运行契约、真实平台证据及异常边界分别见[升级](55-Agent升级看护与自动回退.md)、[隔离](56-主机隔离租约与失联撤销.md)、[配置恢复](57-Agent配置防篡改与可信恢复.md)、[资源适配](58-Agent资源自适应与有界补传.md)、[Windows 登录](60-Windows登录防护与覆盖状态.md)、[ETW](61-Windows勒索进程归因与安全响应.md)、[WUA](62-Windows更新发现与自动修复.md)、[SCAP](68-XCCDF与OVAL原生解释.md)和[取证](74-集中取证与自动恢复点.md)。目录树是结构摘要，实际新增包以 [internal](../agent/internal)为准。
 
 ## 1. 工程结构
 
@@ -30,7 +34,7 @@ agent/
     └── proto/         # 当前生成的 Go 协议类型
 ```
 
-实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys、Windows WMI 及固定版本 tailscale/wf（动态 WFP）。当前无 Agent SQLite、kardianos/service、go-yara、lumberjack 依赖；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
+实际依赖以 [go.mod](../agent/go.mod)为准：gopsutil v3/v4、gRPC、Protobuf、yaml.v3、x/sys、Windows WMI 及固定版本 tailscale/wf（动态 WFP）。默认成品不依赖 Agent SQLite、kardianos/service、go-yara 或 lumberjack；可选原生 YARA 使用项目自己的 CGO 接口和独立审核运行库；Linux 由 systemd 管理，Windows 直接接入 x/sys/windows/svc。
 
 | 平台 | 默认配置与工作目录 | 常驻日志 |
 | --- | --- | --- |

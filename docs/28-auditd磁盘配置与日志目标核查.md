@@ -1,6 +1,8 @@
 # Ubuntu24.04 auditd 磁盘配置与日志目标核查
 
-独立候选 [auditd/linux-baseline.json](../deploy/baseline/packages/auditd/linux-baseline.json) 版本1提供三项新增参考：固定磁盘配置的本地日志写入声明、keep_logs声明，以及配置所指日志文件的元数据。这些新增项不替代旧0029的sudo使用审计或0048的cron日志策略；旧60项仍有33项未实现。匹配Ubuntu24.04后仍需管理员确认auditd 3.1.2及默认配置入口，按[模板流程](18-基线模板审核与系统适配.md)审核、测试、评估证据后发布。
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
+历史实施记录：独立候选 [auditd/linux-baseline.json](../deploy/baseline/packages/auditd/linux-baseline.json) 版本1提供三项新增参考：固定磁盘配置的本地日志写入声明、keep_logs声明，以及配置所指日志文件的元数据。这些新增项不替代旧0029的sudo使用审计或0048的cron日志策略；旧60项仍有33项未实现。匹配Ubuntu24.04后仍需管理员确认auditd 3.1.2及默认配置入口，按[模板流程](18-基线模板审核与系统适配.md)审核、测试、评估证据后发布。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。
 
 | option | 参考 | 已观察不满足 |
 |---|---|---|

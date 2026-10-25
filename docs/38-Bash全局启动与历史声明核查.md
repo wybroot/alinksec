@@ -1,5 +1,7 @@
 # Bash 全局启动与历史声明核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [bash-policy/linux-baseline.json](../deploy/baseline/packages/bash-policy/linux-baseline.json) 版本1一次提供旧0010/0017/0026/0044/0045五项。限定Ubuntu24.04 amd64/arm64、完整安装的`bash 5.2.21-2ubuntu4`及`base-files 13ubuntu10`系列（含`.数字`更新）。仅解释审核过的原始系统启动前缀及其后的有限字面声明；这是本项目参考，管理员需评估实际产品适用性。
 
 | 原规则 | 全局声明范围 | 完整参考 |
@@ -46,4 +48,4 @@
 
 语义来源为[Ubuntu24 Bash手册](https://manpages.ubuntu.com/manpages/noble/man1/bash.1.html)，入口内容来自[Ubuntu官方Bash归档](https://archive.ubuntu.com/ubuntu/pool/main/b/bash/)和[base-files归档](https://archive.ubuntu.com/ubuntu/pool/main/b/base-files/)。下载包及所选前缀摘要核对不宣称发行商签名认证；实际安装产品与跨架构语义由原生CI验证。
 
-旧60项现46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续按类别成组推进。
+历史实施记录：旧60项该阶段有46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选。当时基线模块尚未完成，PR保持草稿，继续按类别成组推进。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

@@ -1,5 +1,7 @@
 # Ubuntu 24.04 passwd 口令链参考核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [PAM 候选](../deploy/baseline/packages/pam/linux-baseline.json) 版本1增加0002口令质量和0006新口令散列选择两项。范围为 Ubuntu24.04 的 Linux-PAM1.5.3/libpwquality1.4.5，入口固定 `/etc/pam.d/passwd`，只解释 password 管理组。它不证明应用确实调用该服务、现存口令符合要求、登录认证链有效、外部身份源或其他服务受相同策略约束。参考要求由本项目选择，不是完整合规标准。
 
 ```json
@@ -41,4 +43,4 @@ password required pam_permit.so
 
 解释依据 Ubuntu24.04 的 [PAM配置](https://manpages.ubuntu.com/manpages/noble/man5/pam.d.5.html)、[pam_pwquality](https://manpages.ubuntu.com/manpages/noble/man8/pam_pwquality.8.html)、[pwquality.conf](https://manpages.ubuntu.com/manpages/noble/man5/pwquality.conf.5.html) 和 [pam_unix](https://manpages.ubuntu.com/manpages/noble/man8/pam_unix.8.html) 手册，及 libpwquality1.4.5 的 [设置读取实现](https://github.com/libpwquality/libpwquality/blob/libpwquality-1.4.5/src/settings.c) 与 [PAM模块实现](https://github.com/libpwquality/libpwquality/blob/libpwquality-1.4.5/src/pam_pwquality.c)。令牌复用依据 Linux-PAM1.5.3 的 [pam_get_authtok实现](https://github.com/linux-pam/linux-pam/blob/v1.5.3/libpam/pam_get_authtok.c)。
 
-旧60项目前有8通用观测、2SSH、7身份文件、2PAM口令与1PAM登录失败锁定产品检查，40项仍未实现。通用包版本6自身仍未包含52项，并指向12项独立候选；详见[逐项审核](20-旧基线模板内容审核.md)及[模块计划](19-模块完善计划.md)。
+历史实施记录：旧60项该阶段当时有8通用观测、2SSH、7身份文件、2PAM口令与1PAM登录失败锁定产品检查，40项仍未实现。通用包版本6自身仍未包含52项，并指向12项独立候选；详见[逐项审核](20-旧基线模板内容审核.md)及[模块计划](19-模块完善计划.md)。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

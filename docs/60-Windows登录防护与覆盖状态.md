@@ -1,5 +1,7 @@
 # Windows 登录防护与覆盖状态
 
+> 版本基线：v0.0.4。已按本版核对「Windows 登录防护与覆盖状态」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 Windows 登录防护为独立规则 `PR-0004`，默认停用、仅告警。Linux SSH 规则 `PR-0003` 保持独立。Windows 规则必须明确设置 `platforms:["windows"]` 和 `windows_contract:1`；未知契约、混入 SSH 端口、非 3/10 登录类型和超限参数会被平台及 Agent 拒绝。
 
 ## 事件与适用范围

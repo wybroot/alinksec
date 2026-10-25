@@ -1,5 +1,7 @@
 # Agent 配置防篡改与可信恢复
 
+> 版本基线：v0.0.4。已按本版核对「Agent 配置防篡改与可信恢复」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 ## 保护范围与信任起点
 
 Linux 和 Windows 的 `run`、`install` 使用 `config-integrity/record.json` 留存 `agent.yml` 与最近一次经认证通道接受的 `policy.json`。运行时使用可信内容，每 2 秒比较磁盘文件的 SHA256；文件大小和 mtime 不能代替内容检查。管理地址、TLS 服务名和 CA 引用从可信配置恢复，保留已注册的证书与 Agent 身份。

@@ -1,5 +1,7 @@
 # systemd 清理调度与内核同步指示核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立[systemd-maintenance/linux-baseline.json](../deploy/baseline/packages/systemd-maintenance/linux-baseline.json)版本1成组提供旧0046/0055。限定Ubuntu24 amd64/arm64、本地已加载systemd255系统管理器及可查询的systemctl/busctl。两项分别观察systemd-tmpfiles-clean.timer/service和systemd-timesyncd.service，不把服务活动推断为实际删除或已同步到可信来源。
 
 | 原规则 | 当前完整参考 |
@@ -23,4 +25,4 @@ adjtimex始终使用全零输入的modes=0，不设置时钟、频率、偏移�
 
 语义来源：[Ubuntu24 busctl](https://manpages.ubuntu.com/manpages/noble/en/man1/busctl.1.html)、[timer](https://manpages.ubuntu.com/manpages/noble/en/man5/systemd.timer.5.html)、[adjtimex](https://manpages.ubuntu.com/manpages/noble/en/man2/adjtimex.2.html)，及systemd255[清理service](https://github.com/systemd/systemd/blob/v255/units/systemd-tmpfiles-clean.service)、[清理timer](https://github.com/systemd/systemd/blob/v255/units/systemd-tmpfiles-clean.timer)、[busctl类型JSON转换](https://github.com/systemd/systemd/blob/v255/src/busctl/busctl.c)。这是项目有限参考，不宣称完整等保、CIS或STIG合规。
 
-旧60项现50项具有限定范围实现、10项未支持；通用review版本21仍8项/52排除，其中42项指向独立产品候选。基线模块继续当前分支，PR保持草稿。
+历史实施记录：旧60项该阶段有50项具有限定范围实现、10项未支持；通用review版本21仍8项/52排除，其中42项指向独立产品候选。基线模块继续当时分支，PR保持草稿。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

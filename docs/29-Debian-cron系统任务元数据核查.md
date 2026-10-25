@@ -1,5 +1,7 @@
 # Ubuntu24 Debian cron 系统任务元数据核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立候选 [cron/linux-baseline.json](../deploy/baseline/packages/cron/linux-baseline.json) v1 实现旧 `BL-LINUX-0019` 的有限产品范围：Ubuntu24.04 已完整安装的 Debian cron `3.0pl1-184ubuntu2`，默认系统任务表 `/etc/crontab`、目录 `/etc/cron.d` 及其**全部直接条目**的当前磁盘元数据。不适用于 Cronie、bcron、BusyBox cron、其他版本或自定义路径。OS 匹配只是选模条件，Agent 还需两次确认固定 dpkg 数据库中的精确软件包状态；管理员确认可信安装和路径适用性。包登记不能证明二进制未被替换或该实例正在使用这些路径。
 
 源码与官方依据：[Ubuntu noble cron 软件包](https://packages.ubuntu.com/noble/cron)、[3.0pl1 原始源码](https://archive.ubuntu.com/ubuntu/pool/main/c/cron/cron_3.0pl1.orig.tar.gz)、[184ubuntu2 补丁](https://archive.ubuntu.com/ubuntu/pool/main/c/cron/cron_3.0pl1-184ubuntu2.debian.tar.xz) 中 `Drop-in-drop.d-directory-support.patch` 及应用全部补丁后的 `database.c`，另参考 [Debian cron(8)](https://manpages.debian.org/bookworm/cron/cron.8.en.html)。Ubuntu manpage 的同名入口可能展示 Cronie，本实现以精确 Debian cron 包源码和原生二进制验证为准。
@@ -36,4 +38,4 @@ Agent 只运行固定 `/usr/bin/dpkg-query --admindir=/var/lib/dpkg --show --sho
 
 原生验证覆盖安全文件、组可写、错误UID、root执行位、root符号链接、点号备份名、访问ACL、目录默认ACL，另做真实GID和硬链接边界。通过受控主任务标记确认实例处理已开始，再核对被测条目是否在有界窗口执行；不能把负例的窗口内未执行扩大成长期保证。原生行为与候选更窄参考分别记录，ACL检查必须执行而不能静默跳过。这些容器任务仅验证文件选择与元数据边界，不认证实际业务任务或 cron 日志。
 
-旧60项目前28项有有限范围实现，32项未实现；通用审核候选v10仍只有8项和52项自身未包含，其中20项转到独立产品候选。旧任务快照、既有包版本和V001–V007迁移不改写；本候选不自动导入或发布。基线模块整体继续完善，PR保留草稿，不合并或发版。
+历史实施记录：旧60项该阶段当时28项有有限范围实现，32项未实现；通用审核候选v10仍只有8项和52项自身未包含，其中20项转到独立产品候选。旧任务快照、既有包版本和V001–V007迁移不改写；本候选不自动导入或发布。当时基线模块整体继续完善，PR保留草稿，不合并或发版。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

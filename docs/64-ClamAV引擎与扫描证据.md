@@ -1,5 +1,7 @@
 # ClamAV 引擎与扫描证据
 
+> 版本基线：v0.0.4。已按本版核对「ClamAV 引擎与扫描证据」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 ClamAV 为可选的本机外部引擎。Linux amd64、Linux arm64 和 Windows amd64
 Agent 使用 INSTREAM 将文件内容交给管理员维护的 ClamAV 服务；内置 SHA256
 和内部规则保持独立。默认不启用、不下载特征库，也不启动或安装系统服务。

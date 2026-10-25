@@ -1,5 +1,7 @@
 # OpenSSH 名称解析与横幅磁盘声明核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [ssh-notice/linux-baseline.json](../deploy/baseline/packages/ssh-notice/linux-baseline.json) 版本1成组提供旧0020和0043。限定Ubuntu24.04及可查询的`openssh-server 1:9.6p1-3ubuntu13`系列（含`.数字`更新），固定主配置`/etc/ssh/sshd_config`。现有[SSH连接配置候选](21-OpenSSH配置核查.md)版本1保持两项原范围；新包单独审核、测试和发布，不改变历史任务或旧包。
 
 0020核对原生扩展测试输出的`UseDNS=no`，是本项目减少远端名称解析依赖的参考，**不是通用安全要求**。该选项是全局配置，不允许放入Match；原生语法错误保持error。0043先确定指定连接的有效Banner选择，再核对固定`/etc/issue.net`的审核原始字节SHA256；不是只检查任意非空路径或文件存在。
@@ -50,4 +52,4 @@ root执行的`sshd -T`还要求运行目录`/run/sshd`存在且可信。CI仅在
 
 语义来源为[Ubuntu24 sshd_config手册](https://manpages.ubuntu.com/manpages/noble/man5/sshd_config.5.html)及OpenSSH9.6源码的[配置解释](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/servconf.c)、[横幅读取与发送](https://github.com/openssh/openssh-portable/blob/V_9_6_P1/auth2.c)。原生横幅读取允许更大文本并在真实认证阶段发送；本项目16KiB及审核摘要是更窄的参考，不能把`-T`输出当成原生已读取或交付横幅。
 
-旧60项现46项具有限定范围实现、14项未支持；通用review版本19仍8项/52排除，其中38项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。
+历史实施记录：旧60项该阶段有46项具有限定范围实现、14项未支持；通用review版本19仍8项/52排除，其中38项指向独立产品候选。当时基线模块尚未完成，PR保持草稿，继续本模块成组推进。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

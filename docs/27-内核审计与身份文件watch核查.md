@@ -1,5 +1,7 @@
 # Ubuntu24.04 内核审计与身份文件 watch 核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立候选 [audit/linux-baseline.json](../deploy/baseline/packages/audit/linux-baseline.json) 版本1覆盖旧0021和0025的限定参考。0021更名为内核审计当前启用状态，0025限定四个本地身份文件当前加载的watch规则。产品范围是Ubuntu24.04 Linux audit UAPI、初始用户/PID命名空间和CAP_AUDIT_CONTROL；管理员需确认实际规则形式。系统版本匹配只决定选模，两端需升级，旧Agent遇到新类型为error。按[模板流程](18-基线模板审核与系统适配.md)审核、选主机测试并评估证据后发布。
 
 | 检查项 | 固定参考 | 明确不满足 |
