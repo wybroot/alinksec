@@ -102,7 +102,7 @@ flowchart LR
     WINDOWS -->|HTTPS downloads| WEB
 ```
 
-**Current source: v0.0.3 release preparation.** Publication status is recorded by the GitHub Release; the latest published version is [v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2). Use its [versioned deployment guide](https://github.com/wybroot/alinksec/blob/v0.0.2/docs/06-部署文档.md) when installing that release. The [handoff checklist](docs/80-发版准备与现场交付.md) tracks the field checks deferred by the project owner.
+**Latest published version: [v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3), released on 2026-10-25.** Use its [versioned deployment guide](https://github.com/wybroot/alinksec/blob/v0.0.3/docs/06-部署文档.md) and verify the six release assets against `SHA256SUMS` and `release-manifest.json`. The [handoff checklist](docs/80-发版准备与现场交付.md) records the publication evidence and the field checks deferred by the project owner.
 
 The Agent is a native single binary. Managed hosts do not need Docker, a JRE,
 Node.js or a Go toolchain. **v0.0.3** supports Linux

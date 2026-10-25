@@ -92,7 +92,7 @@ flowchart LR
     WINDOWS -->|HTTPS 下载| WEB
 ```
 
-**当前源码为 v0.0.3 发版准备。** 是否发布以 GitHub Release 为准；最近已发布版本为 [v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)，安装该版本请使用其[固定版本部署文档](https://github.com/wybroot/alinksec/blob/v0.0.2/docs/06-部署文档.md)。用户已将真机验收留待后续，交接项目见[发版与现场清单](docs/80-发版准备与现场交付.md)。
+**最新正式版本为 [v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)，于 2026-10-25 发布。** 安装请使用其[固定版本部署文档](https://github.com/wybroot/alinksec/blob/v0.0.3/docs/06-部署文档.md)，并按 `SHA256SUMS` 和 `release-manifest.json` 核对六个附件。发布证据及用户留待后续的真机验收项目见[发版与现场清单](docs/80-发版准备与现场交付.md)。
 
 Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.3** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.3 发布说明](docs/releases/v0.0.3.md)。
 
