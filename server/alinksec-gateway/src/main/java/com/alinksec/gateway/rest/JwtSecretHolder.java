@@ -34,9 +34,12 @@ public class JwtSecretHolder {
             secret = fromEnv;
             return;
         }
-        Path keyFile = Path.of(dataDir).getParent().resolve("jwt.secret");
+        Path parent = Path.of(dataDir).toAbsolutePath().getParent();
+        if (parent == null) throw new IllegalStateException("jwt_secret_directory_invalid");
+        Path keyFile = parent.resolve("jwt.secret");
         if (Files.exists(keyFile)) {
             secret = Files.readString(keyFile).trim();
+            if (secret.isEmpty()) throw new IllegalStateException("jwt_secret_empty");
             if (clusterEnabled && secret.length() < 32) throw new IllegalStateException("cluster_jwt_secret_too_short");
             return;
         }

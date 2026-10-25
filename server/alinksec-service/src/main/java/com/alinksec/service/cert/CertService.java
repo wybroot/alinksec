@@ -242,12 +242,31 @@ public class CertService {
                 throw new IllegalStateException("unsupported CA private key format");
             }
         }
+        // A mixed restore must fail before the CA signs any Agent certificate.
+        byte[] challenge = new byte[32];
+        new SecureRandom().nextBytes(challenge);
+        try {
+            var signature = java.security.Signature.getInstance("SHA256withECDSA");
+            signature.initSign(caPrivateKey);
+            signature.update(challenge);
+            byte[] signed = signature.sign();
+            signature.initVerify(caCert.getPublicKey());
+            signature.update(challenge);
+            if (!signature.verify(signed)) throw new java.security.SignatureException("CA key mismatch");
+        } catch (java.security.GeneralSecurityException failure) {
+            throw new IllegalStateException("CA certificate and private key do not match; restore matching PKI backup", failure);
+        }
     }
 
     private void loadServer(Path dir) throws Exception {
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
         try (FileInputStream in = new FileInputStream(dir.resolve("server.crt").toFile())) {
             serverCert = (X509Certificate) cf.generateCertificate(in);
+        }
+        try {
+            serverCert.verify(caCert.getPublicKey());
+        } catch (java.security.GeneralSecurityException failure) {
+            throw new IllegalStateException("Server certificate is not signed by configured CA; restore matching PKI backup", failure);
         }
     }
 

@@ -22,6 +22,7 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,6 +30,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CertServiceTest {
 
     @TempDir Path temp;
+
+    @Test
+    void rejectsMismatchedCaKeyBeforeIssuingCertificatesOrPublishingTls() throws Exception {
+        AlinkSecProperties original = initialized("original");
+        AlinkSecProperties other = initialized("other");
+        Path certs = Path.of(original.getServer().getCertDir());
+        Files.copy(Path.of(other.getServer().getCertDir(), "ca.key"), certs.resolve("ca.key"),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        var before = materialSnapshot(original);
+
+        assertThrows(IllegalStateException.class, () -> new CertService(original).init());
+        assertMaterialUnchanged(before);
+    }
+
+    @Test
+    void rejectsCaRestoreThatDoesNotMatchExistingServerCertificate() throws Exception {
+        AlinkSecProperties original = initialized("original");
+        AlinkSecProperties other = initialized("other");
+        Path certs = Path.of(original.getServer().getCertDir());
+        for (String name : List.of("ca.crt", "ca.key")) {
+            Files.copy(Path.of(other.getServer().getCertDir(), name), certs.resolve(name),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        var before = materialSnapshot(original);
+
+        assertThrows(IllegalStateException.class, () -> new CertService(original).init());
+        assertMaterialUnchanged(before);
+    }
+
+    private AlinkSecProperties initialized(String name) throws Exception {
+        AlinkSecProperties props = new AlinkSecProperties();
+        props.getServer().setCertDir(temp.resolve(name).resolve("certs").toString());
+        props.getServer().setWebTlsDir(temp.resolve(name).resolve("web-tls").toString());
+        new CertService(props).init();
+        return props;
+    }
+
+    private static java.util.Map<Path, byte[]> materialSnapshot(AlinkSecProperties props) throws Exception {
+        var result = new java.util.HashMap<Path, byte[]>();
+        try (var files = Files.walk(Path.of(props.getServer().getCertDir()).getParent())) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) result.put(file, Files.readAllBytes(file));
+        }
+        return result;
+    }
+
+    private static void assertMaterialUnchanged(java.util.Map<Path, byte[]> before) throws Exception {
+        for (var entry : before.entrySet()) assertArrayEquals(entry.getValue(), Files.readAllBytes(entry.getKey()));
+    }
 
     @Test
     void rejectsMissingPlaceholderAndMalformedDeploymentAddresses() {
