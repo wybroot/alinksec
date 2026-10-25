@@ -8,7 +8,7 @@ on:
       tag:
         description: Existing release tag (full CI must have passed on this commit)
         required: true
-        default: v0.0.2
+        default: v0.0.3
         type: string
 
 permissions:
@@ -80,7 +80,6 @@ jobs:
     name: release-images (${{ matrix.arch }})
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - arch: amd64
@@ -168,11 +167,24 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME || 'wangyanbiao' }}
           password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
-      - name: Download the three tested native Agents
+      - name: Download the tested Linux amd64 Agent
         uses: actions/download-artifact@v4
         with:
-          pattern: agent-*
-          merge-multiple: true
+          name: agent-linux-amd64
+          path: release/bin
+          run-id: ${{ needs.verify.outputs.ci-run }}
+          github-token: ${{ github.token }}
+      - name: Download the tested Linux arm64 Agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-linux-arm64
+          path: release/bin
+          run-id: ${{ needs.verify.outputs.ci-run }}
+          github-token: ${{ github.token }}
+      - name: Download the tested Windows Server 2025 Agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-windows-amd64
           path: release/bin
           run-id: ${{ needs.verify.outputs.ci-run }}
           github-token: ${{ github.token }}

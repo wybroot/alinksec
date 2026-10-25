@@ -13,6 +13,9 @@ const lock = JSON.parse(read('web/package-lock.json'))
 assert.equal(lock.version, version)
 assert.equal(lock.packages[''].version, version)
 assert.equal(read('agent/internal/identity/identity.go').match(/^const AgentVersion = "([^"]+)"$/m)?.[1], version)
+assert.equal(read('.github/workflows/release.yml').match(/^        default: (v\d+\.\d+\.\d+)$/m)?.[1], `v${version}`,
+  'Release dispatch default must match VERSION')
+assert.ok(read(`docs/releases/v${version}.md`).startsWith(`# ALinkSec v${version}\n`), 'Missing matching release notes')
 execFileSync(process.env.JAVA_BIN || 'java', ['-Xmx64m', `${root}deploy/release/CheckVersion.java`, root, version], { stdio: 'inherit' })
 for (const [file, components] of [
   ['docker-compose.yml', ['server', 'web']],
