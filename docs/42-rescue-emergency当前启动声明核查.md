@@ -1,5 +1,7 @@
 # rescue/emergency 当前启动声明核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立[systemd-rescue/linux-baseline.json](../deploy/baseline/packages/systemd-rescue/linux-baseline.json)版本1将旧0059收窄为Ubuntu24 amd64/arm64、本地已加载systemd255的联合启动参考。生产只读，不启动维护模式、不触发登录、不读取口令字段，无自动修复。通过仅表示以下完整声明匹配，实际维护模式认证仍未验证。
 
 | 输入 | 项目参考 |
@@ -25,4 +27,4 @@ systemd255的sulogin-shell先查询环境布尔声明，再查询同名内核参
 
 依据：[systemd255 rescue单元](https://github.com/systemd/systemd/blob/v255/units/rescue.service.in)、[emergency单元](https://github.com/systemd/systemd/blob/v255/units/emergency.service.in)、[sulogin-shell实现](https://github.com/systemd/systemd/blob/v255/src/sulogin-shell/sulogin-shell.c)、[D-Bus service ABI](https://github.com/systemd/systemd/blob/v255/src/core/dbus-service.c)、[内核参数解析](https://github.com/systemd/systemd/blob/v255/src/basic/proc-cmdline.c)。这些来源用于界定观察语义，阈值和有限链是项目参考。
 
-旧60项现53项具有限定范围实现、7项未支持；通用review版本23仍8项/52排除，其中45项指向独立产品候选。基线继续当前分支，PR保持草稿。
+历史实施记录：旧60项该阶段有53项具有限定范围实现、7项未支持；通用review版本23仍8项/52排除，其中45项指向独立产品候选。基线继续当时分支，PR保持草稿。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

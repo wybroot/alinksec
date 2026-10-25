@@ -1,5 +1,7 @@
 # 链接器元数据与 SUID/SGID 审核清单核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立[program-files/linux-baseline.json](../deploy/baseline/packages/program-files/linux-baseline.json)版本1成组提供旧0041/0042。限定Ubuntu24 amd64/arm64、完整安装libc-bin/libc6 `2.39-0ubuntu8`系列。默认示例必须由管理员审核，不能当成全部Linux的权限/授权结论；生产只读，无自动修复。
 
 | 原规则 | 有限当前参考 |
@@ -30,4 +32,4 @@ scope=/usr/bin,/usr/sbin
 
 来源：[Ubuntu24 ldconfig](https://manpages.ubuntu.com/manpages/noble/en/man8/ldconfig.8.html)、[glibc2.39配置解析](https://github.com/bminor/glibc/blob/glibc-2.39/elf/ldconfig.c)、[Linux execve](https://manpages.ubuntu.com/manpages/noble/en/man2/execve.2.html)。项目的权限上限与清单参考须按业务审核，不是完整等保/CIS/STIG认证。
 
-旧60项现52项具有限定范围实现、8项未支持；通用review版本22仍8项/52排除，其中44项指向独立产品候选。基线继续当前分支，PR保持草稿。
+历史实施记录：旧60项该阶段有52项具有限定范围实现、8项未支持；通用review版本22仍8项/52排除，其中44项指向独立产品候选。基线继续当时分支，PR保持草稿。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

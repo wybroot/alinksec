@@ -1,5 +1,7 @@
 # 服务集群（第 22／23 项）
 
+> 版本基线：v0.0.4。已按本版核对「服务集群（第 22／23 项）」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](../../docs/releases/v0.0.4.md)，全部资料见[文档索引](../../docs/README.md)。
+
 此配置启用 PostgreSQL 上的应用多副本、Redis 会话租约和 RabbitMQ 持久队列。SQLite 保持单实例；普通部署无需 Redis 或 RabbitMQ。
 
 ## 拓扑与前提
@@ -18,13 +20,13 @@ Redis/RabbitMQ URI 密码至少 16 字符，推荐独立随机凭据；跨主机
 
 ## 首次初始化与启动
 
-先按现有 PostgreSQL 安装步骤执行 `deploy/sql` 和全部 `deploy/migrations`，包括 V034；使用迁移脚本授予受限应用权限。不要使用数据库超级用户启动应用。迁移和材料变更都在停止全部应用的维护窗口执行。
+先按现有 PostgreSQL 安装步骤执行 `deploy/sql` 和全部 `deploy/migrations`，截至 V036；使用迁移脚本授予受限应用权限。不要使用数据库超级用户启动应用。迁移和材料变更都在停止全部应用的维护窗口执行。
 
 在权限为 0600 的独立环境文件中设置以下变量，通过 `docker compose --env-file /secure/cluster.env -f deploy/cluster/compose.yml ...` 执行下列命令：
 
 | 变量 | 含义 |
 | --- | --- |
-| `ALINKSEC_CLUSTER_SERVER_IMAGE`、`ALINKSEC_CLUSTER_WEB_IMAGE` | 从本版本构建、已验证的镜像引用 |
+| `ALINKSEC_CLUSTER_SERVER_IMAGE`、`ALINKSEC_CLUSTER_WEB_IMAGE` | v0.0.4 的已验证镜像索引／digest；全部副本使用相同版本 |
 | `ALINKSEC_PG_HOST`、`ALINKSEC_PG_PORT`、`ALINKSEC_PG_USER`、`ALINKSEC_PG_PASSWORD` | 同一数据库 HA 入口、受限角色及密码，数据库名为 `alinksec` |
 | `ALINKSEC_CLUSTER_REDIS_URI` | 同一 Redis HA URI，例如 `rediss://default:密码@地址:6379/0` |
 | `ALINKSEC_CLUSTER_RABBIT_URI` | 同一 RabbitMQ URI，例如 `amqps://用户名:密码@地址:5671/%2F` |

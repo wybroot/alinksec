@@ -1,5 +1,7 @@
 # APT 默认磁盘源认证声明核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 旧 `BL-LINUX-0053` 收窄为默认磁盘源认证与显式签名范围声明。独立候选 [apt-sources-definitions.json](../deploy/baseline/apt-sources-definitions.json) 和 [模板包](../deploy/baseline/packages/apt-sources/linux-baseline.json) 仅适用 Ubuntu 24.04 完整安装的 `apt/libapt-pkg6.0t64 2.8.3`。管理员确认包可信及默认入口适用性；包状态查询不证明二进制或库未被修改。通用观测包仍排除此项，旧模板、历史任务及 V001–V007 不改写，无自动修复。
 
 ## 参考和结果

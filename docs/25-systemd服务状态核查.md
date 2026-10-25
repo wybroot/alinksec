@@ -1,5 +1,7 @@
 # Ubuntu 24.04 systemd 服务状态核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立候选包 [systemd/linux-baseline.json](../deploy/baseline/packages/systemd/linux-baseline.json) 版本 1 对旧 `BL-LINUX-0022`、`BL-LINUX-0024` 提供明确范围的状态观察。适用范围为 Ubuntu 24.04、systemd 255 的本地系统管理器，以及可查询的 `auditd.service`、`rsyslog.service` 单元。其他日志产品、非 systemd 系统、用户管理器和远程管理器不在范围内；管理员应先确认本机产品选择，再按 [模板流程](18-基线模板审核与系统适配.md) 导入、审核、选主机测试和发布。两端需升级，旧 Agent 不支持新类型时保持执行异常。
 
 `systemd_service` 的目标只允许这两个服务，`operator` 固定 `eq`，`expected` 固定 `loaded/active/running`。定义不能带命令、配置路径、总线地址或其他产品字段。生产 Agent 使用绝对路径、固定参数和隔离的客户端环境执行：

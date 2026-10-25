@@ -1,5 +1,7 @@
 # Ctrl-Alt-Del 当前 systemd 策略核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 旧 `BL-LINUX-0060` 收窄为 Ubuntu 24.04 已加载 systemd 255 本地系统管理器的当前目标屏蔽和连续按键动作。独立 [定义](../deploy/baseline/ctrl-alt-del-definitions.json) 与 [候选包](../deploy/baseline/packages/ctrl-alt-del/linux-baseline.json) 要求管理员确认系统管理器可信和产品适用性；查询版本不证明二进制或总线未被修改。通用观测包仍排除此项，旧迁移和历史任务保留，无自动修复。
 
 ## 两条当前管理器路径

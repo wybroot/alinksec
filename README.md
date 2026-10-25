@@ -10,7 +10,7 @@ Asset inventory · Security baselines · Vulnerability remediation · Malware sc
 
 [English](README.md) · [简体中文](README-cn.md)
 
-[![Release](https://img.shields.io/badge/Release-v0.0.2-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.2) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v0.0.4-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.4) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
 
 ![Go](https://img.shields.io/badge/Agent-Go_1.24-00ADD8?style=for-the-badge&logo=go&logoColor=white) ![Java](https://img.shields.io/badge/Server-Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white) ![Vue](https://img.shields.io/badge/Console-Vue_3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white) ![Docker](https://img.shields.io/badge/Deploy-Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
@@ -38,7 +38,7 @@ security dashboard at `/screen` for an at-a-glance view of the environment.
 
 | 💻 Native Agents | 📡 Observable Commands | 🛂 Access Control |
 | :---: | :---: | :---: |
-| **Linux & Windows**<br/>Single binary · systemd / Windows SCM | **11 command types**<br/>Receipt, execution and terminal ACKs | **3 roles**<br/>Administrator · Operator · Viewer |
+| **Linux & Windows**<br/>Single binary · systemd / Windows SCM | **14 task commands**<br/>Receipt, execution and terminal ACKs | **3 roles**<br/>Administrator · Operator · Viewer |
 | **2 deployment modes**<br/>PostgreSQL or lightweight SQLite | **500 MiB offline queue**<br/>Persistent reports · 24-hour retention limit | **15-minute uninstall token**<br/>Authorized · Expiring · Single use |
 
 > **Lightweight by design:** short native Linux measurements recorded about
@@ -102,12 +102,12 @@ flowchart LR
     WINDOWS -->|HTTPS downloads| WEB
 ```
 
-**Latest published version: [v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3), released on 2026-10-25.** Use its [versioned deployment guide](https://github.com/wybroot/alinksec/blob/v0.0.3/docs/06-部署文档.md) and verify the six release assets against `SHA256SUMS` and `release-manifest.json`. The [handoff checklist](docs/80-发版准备与现场交付.md) records the publication evidence and the field checks deferred by the project owner.
+**Latest published version: [v0.0.4](https://github.com/wybroot/alinksec/releases/tag/v0.0.4), released on 2026-10-25.** Use its [versioned deployment guide](https://github.com/wybroot/alinksec/blob/v0.0.4/docs/06-部署文档.md) and verify the six release assets against `SHA256SUMS` and `release-manifest.json`. The [handoff checklist](docs/80-发版准备与现场交付.md) records the publication evidence and the field checks deferred by the project owner.
 
 The Agent is a native single binary. Managed hosts do not need Docker, a JRE,
-Node.js or a Go toolchain. **v0.0.3** supports Linux
+Node.js or a Go toolchain. **v0.0.4** supports Linux
 amd64 / **ARM64 (aarch64)** containers and Linux amd64 / arm64 / Windows amd64
-Agents. See the [v0.0.3 release notes](docs/releases/v0.0.3.md).
+Agents. See the [v0.0.4 release notes](docs/releases/v0.0.4.md).
 
 Linux amd64 and arm64 use native CI runners for validation and image builds.
 Choose the Agent matching the managed host's OS and architecture; the
@@ -149,6 +149,14 @@ alinksec/
 
 <a id="capabilities"></a>
 
+## v0.0.4 scope
+
+The release includes Agent upgrade rollback, isolation leases, trusted configuration recovery, resource adaptation, Linux password coverage, Windows login/ETW/update workflows, event-driven monitoring, ClamAV integration and optional native YARA builds. It also includes reviewed compliance packages, offline XCCDF/OVAL execution, signed upstream candidates, native vendor feeds, OpenCTI, source conflict governance, report snapshots, evidence collection, checkpoint backups, application clustering and central log search.
+
+Startup now rejects empty persisted JWT secrets and inconsistent restored CA/server certificates, and supports a single-component relative certificate directory. Restore the matching backup set when validation fails; the application preserves existing material. See the [release notes](docs/releases/v0.0.4.md), [credential checks](docs/81-发布后启动凭据核查.md) and [complete documentation index](docs/README.md).
+
+The default release Agent uses `CGO_ENABLED=0`; native YARA requires its separately approved build/runtime. ClamAV requires a local configured service. Field OS coverage, sustained Windows observation, 200 real hosts for 72 hours and the one-second metric target remain deferred.
+
 ## 🔬 Inside the Platform
 
 ### 📡 Commands You Can Follow From Start to Finish
@@ -176,7 +184,7 @@ sequenceDiagram
 ```
 
 <details>
-<summary><b>All 11 Command Types</b></summary>
+<summary><b>All 14 Task Commands</b></summary>
 
 | Command | Purpose |
 | --- | --- |
@@ -191,6 +199,11 @@ sequenceDiagram
 | `agent_upgrade` | Download, verify and replace the Agent binary |
 | `collect_now` | Trigger selected collectors immediately |
 | `agent_control` | Restart, pause/resume collection or arm uninstall |
+| `windows_update_scan` | Discover updates through native Windows Update Agent |
+| `scap_scan` | Evaluate an approved offline XCCDF/OVAL bundle |
+| `evidence_collect` | Collect bounded diagnostics and evidence |
+
+The protocol also defines four receipt/control payloads (`isolation_confirm`, `windows_login_receipt`, `windows_update_receipt`, `evidence_receipt`). They are not additional ACK-tracked tasks; the authoritative schema is [agent.proto](proto/agent.proto).
 
 </details>
 
@@ -282,13 +295,13 @@ For standard deployment, follow sections 5 and 6 of the
 
 ### 1. Download Verified Release Assets
 
-Download all six attachments from **[v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)**
+Download all six attachments from **[v0.0.4](https://github.com/wybroot/alinksec/releases/tag/v0.0.4)**
 after its release workflow succeeds. Keep source, Compose files, images and
 Agents on the same version.
 
 | Asset | Contents |
 | --- | --- |
-| `alinksec-v0.0.3.tar.gz` | Source, deployment files and documentation |
+| `alinksec-v0.0.4.tar.gz` | Source, deployment files and documentation |
 | `alinksec-agent-linux-amd64` | Native Linux x86_64 Agent |
 | `alinksec-agent-linux-arm64` | Native Linux aarch64 Agent |
 | `alinksec-agent-windows-amd64.exe` | Native Windows x64 Agent |
@@ -299,17 +312,17 @@ Verify and extract them in the download directory:
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.3.tar.gz
-cd alinksec-v0.0.3/deploy/docker
+tar -xzf alinksec-v0.0.4.tar.gz
+cd alinksec-v0.0.4/deploy/docker
 ```
 
 After publication, pull these images; Docker selects Linux amd64 or arm64 for
 the deployment host, which does not need to compile:
 
 ```text
-wangyanbiao/alinksec:server-v0.0.3
-wangyanbiao/alinksec:web-v0.0.3
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.3
+wangyanbiao/alinksec:server-v0.0.4
+wangyanbiao/alinksec:web-v0.0.4
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.4
 ```
 
 ### 2. Start the Management Platform
@@ -405,11 +418,11 @@ VERIFY items. The [full CI](https://github.com/wybroot/alinksec/actions/runs/369
 and [release workflow](https://github.com/wybroot/alinksec/actions/runs/36993494771)
 passed for the published release.
 
-**v0.0.3 brings the completed module backlog together.** All 27 required
+**v0.0.4 includes the completed modules and four startup credential fixes.** All 27 required
 CI jobs must pass on the exact release commit on `main`, including both Windows
 Server versions, both Linux architectures, database, cluster and module checks. The attached
 `release-manifest.json` identifies that commit, the validated CI run and each
-image digest; see the [release notes](docs/releases/v0.0.3.md) and
+image digest; see the [release notes](docs/releases/v0.0.4.md) and
 [ARM64 evidence](docs/14-ARM64支持.md).
 
 | Verified Area | Evidence |
@@ -497,6 +510,7 @@ For the release pipeline, see the [release process](docs/13-版本发布流程.m
 [Deployment Checklist](deploy/部署检查清单.md) ·
 [Changelog](CHANGELOG.md) · [Release Process](docs/13-版本发布流程.md)
 
+The [complete documentation index](docs/README.md) covers every guide and historical record.
 Detailed design and deployment documents are currently in Chinese; the
 validation reference is in English.
 
@@ -530,16 +544,18 @@ validation reference is in English.
 | [20 · Legacy Baseline Content Review](docs/20-旧基线模板内容审核.md) | Retirement of 60 legacy rules, reviewed observations and unsupported scope |
 | [37 · Shadow Account Defaults](docs/37-Shadow新账户口令有效期与预警默认声明核查.md) | Ubuntu24 finite new-account aging declarations, isolated native comparison and explicit existing-account limits |
 | [38 · Bash Global Startup Declarations](docs/38-Bash全局启动与历史声明核查.md) | Five finite Ubuntu24 timeout, mask and history declarations with separate login/nonlogin scope |
-| [19 · Module Completion Plan](docs/19-模块完善计划.md) | One module per branch, baseline quality gates and ordered backlog |
+| [19 · Module Completion Plan](docs/19-模块完善计划.md) | Completed software backlog, grouped validation and deferred field acceptance |
 | [Validation Reference](deploy/tests/README.md) | Local checks, fixtures and resource constraints |
 
 </details>
 
-### 🧭 What's Next
+### 🧭 Deferred Field Acceptance
 
 - Broader Linux distribution and Windows security-engine acceptance.
 - Sustained scan workloads and larger managed-host deployments.
-- More complete delivery tooling and operator workflows.
+- Real private intelligence sources, a selected Windows patch installation and reboot.
+
+These field checks remain open; the planned software development is complete.
 
 ### 🤝 License & Contributions
 

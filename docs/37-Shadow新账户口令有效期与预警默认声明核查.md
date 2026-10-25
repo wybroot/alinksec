@@ -1,5 +1,7 @@
 # Shadow 新账户口令有效期与预警默认声明核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [shadow-defaults/linux-baseline.json](../deploy/baseline/packages/shadow-defaults/linux-baseline.json) 版本1成组提供旧0003/0004。仅支持Ubuntu24.04 amd64/arm64、可查询的`passwd 1:4.13+dfsg1-4ubuntu3`系列（含`.数字`更新），固定读取`/etc/login.defs`。这是本项目的有限新普通本地账户默认声明参考，需独立审核、完整两项测试及发布；不是完整等保、CIS或STIG结论。
 
 | 项目 | 完整参考 |
@@ -37,4 +39,4 @@ login.defs参数是新建账户时的默认输入，不会自动更新已有账�
 
 语义来源为[Ubuntu24 login.defs手册](https://manpages.ubuntu.com/manpages/noble/man5/login.defs.5.html)、[useradd手册](https://manpages.ubuntu.com/manpages/noble/man8/useradd.8.html)以及Shadow4.13源码的[配置读取](https://github.com/shadow-maint/shadow/blob/4.13/lib/getdef.c)和[账户创建](https://github.com/shadow-maint/shadow/blob/4.13/src/useradd.c)。源码tag及Ubuntu Debian补丁归档用于交叉核对，摘要校验不宣称发行商签名认证；实际安装产品语义由隔离原生验证确认。手册与源码对未声明最小天数存在不同表述，本检查保留缺失状态，不凭任一默认值判定。
 
-旧60项现46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选。基线模块尚未完成，PR保持草稿，继续本模块成组推进。
+历史实施记录：旧60项该阶段有46项具有限定范围实现、14项未支持。通用review版本19仍8项/52排除，其中38项指向独立产品候选。当时基线模块尚未完成，PR保持草稿，继续本模块成组推进。 当前模块已完成并合并，最终旧规则处置见[模块收尾](44-基线模块收尾与认证-Agent-DNF核查.md)。

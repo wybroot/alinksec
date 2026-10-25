@@ -1,5 +1,7 @@
 # APT 默认磁盘安装策略核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [定义](../deploy/baseline/apt-definitions.json) 与 [候选包](../deploy/baseline/packages/apt/linux-baseline.json) v1 将旧0052明确收窄为默认磁盘未认证安装声明。仅 Ubuntu24.04 完整安装 `apt` 与 `libapt-pkg6.0t64` **2.8.3**，管理员确认可信安装、默认入口及适用性。后端和Agent都必须更新；导入、审核、指定适用主机测试后才可发布。此候选不自动启用，无自动修复，不代表完整合规。
 
 固定 `apt_install_policy`、target=`/etc/apt`、eq，完整参考为 `apt/apt-get:AllowUnauthenticated=false,Force-Yes=false`。定义不得弱化、加路径/命令/option或其他字段，包括null。Windows执行返回明确error；其他产品及包版本不在已验证范围。任务保留完整定义快照，执行异常阻止发布，新版本不能复用旧证据。

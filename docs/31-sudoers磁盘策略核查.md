@@ -1,5 +1,7 @@
 # sudoers 磁盘策略核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 独立 [Ubuntu24 sudoers 候选包](../deploy/baseline/packages/sudoers/linux-baseline.json) 将旧 BL-LINUX-0018 收窄为统一认证声明参考，将 BL-LINUX-0029 重映射为获准命令日志文件声明。它解释限定配置语法，不计算某个账户的最终有效授权，也不证明每次认证或日志交付。两端需升级；未知类型、无法完整解释配置或读取失败返回执行异常并阻止候选发布。
 
 适用范围为 Ubuntu 24.04、完整安装 `sudo 1.9.15p5-3ubuntu5.24.04.4`，管理员确认可信安装、默认 sudoers 插件和 `/etc/sudoers` 入口。Agent 固定查询 `/usr/bin/dpkg-query` 和 `/var/lib/dpkg`，使用清洁环境，读取前后确认精确软件包状态；这不验证可执行文件、插件或配置入口的真实性。产品版本依据 [Ubuntu 软件包记录](https://packages.ubuntu.com/en/noble-updates/sudo)。

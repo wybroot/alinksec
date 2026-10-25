@@ -1,5 +1,7 @@
 # XCCDF／OVAL 原生解释与离线内容审核
 
+> 版本基线：v0.0.4。已按本版核对「XCCDF／OVAL 原生解释与离线内容审核」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 模块 14 在独立的「标准核查」页面导入 SCAP 内容。服务端使用 OpenSCAP 的 `xccdf resolve --force` 完成 XCCDF 标准加载与继承解析，目标 Agent 使用固定 SCC 5.15 运行原生 OVAL／CPE 探测。Profile 选择、变量覆盖、逻辑组合、定义继承及原生得分由标准解释器处理。
 
 当前支持 Linux amd64、Linux arm64、Windows amd64。具体 OVAL 探针和目标系统的支持范围依 SCC 5.15；未支持的探针、权限不足和适用性结果保持可见。当前原生验收环境为 Ubuntu 24.04 两种架构和 GitHub Windows runner，不能据此宣称每一种发行版、Windows 版本或上游 Profile 均已验收。

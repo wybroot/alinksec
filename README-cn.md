@@ -10,7 +10,7 @@
 
 [English](README.md) · [简体中文](README-cn.md)
 
-[![Release](https://img.shields.io/badge/Release-v0.0.2-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.2) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v0.0.4-0EA5E9?style=flat-square)](https://github.com/wybroot/alinksec/releases/tag/v0.0.4) [![CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/wybroot/alinksec/actions/workflows/ci.yml) [![Release CI](https://img.shields.io/github/actions/workflow/status/wybroot/alinksec/release.yml?style=flat-square&label=Release%20CI)](https://github.com/wybroot/alinksec/actions/workflows/release.yml) [![Docker Hub](https://img.shields.io/badge/Docker_Hub-wangyanbiao%2Falinksec-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/wangyanbiao/alinksec) [![License](https://img.shields.io/badge/License-Apache_2.0-16A34A?style=flat-square)](LICENSE)
 
 ![Go](https://img.shields.io/badge/Agent-Go_1.24-00ADD8?style=for-the-badge&logo=go&logoColor=white) ![Java](https://img.shields.io/badge/Server-Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white) ![Vue](https://img.shields.io/badge/Console-Vue_3-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white) ![Docker](https://img.shields.io/badge/Deploy-Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
@@ -32,7 +32,7 @@ ALinkSec 将主机资产、安全检查、威胁检测和响应处置汇集到�
 
 | 💻 原生 Agent | 📡 指令全程可观测 | 🛂 分级权限 |
 | :---: | :---: | :---: |
-| **Linux & Windows**<br/>单二进制 · systemd / Windows SCM | **11 种指令**<br/>接收、执行与终态 ACK | **3 类角色**<br/>管理员 · 操作员 · 只读用户 |
+| **Linux & Windows**<br/>单二进制 · systemd / Windows SCM | **14 种任务指令**<br/>接收、执行与终态 ACK | **3 类角色**<br/>管理员 · 操作员 · 只读用户 |
 | **2 种部署模式**<br/>PostgreSQL / 轻量 SQLite | **500 MiB 断网队列**<br/>报告落盘 · 最长保留 24 小时 | **15 分钟卸载口令**<br/>平台授权 · 限时有效 · 一次性消费 |
 
 > **轻量化设计，已有实测**：原生 Linux Agent 短时采样的空闲 RSS 约 **20 MiB**，空闲 CPU 约为单核的 **0.80%**。这是采样结果，具体负载随主机和任务变化，详见[验证范围](#validation)。
@@ -92,9 +92,9 @@ flowchart LR
     WINDOWS -->|HTTPS 下载| WEB
 ```
 
-**最新正式版本为 [v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)，于 2026-10-25 发布。** 安装请使用其[固定版本部署文档](https://github.com/wybroot/alinksec/blob/v0.0.3/docs/06-部署文档.md)，并按 `SHA256SUMS` 和 `release-manifest.json` 核对六个附件。发布证据及用户留待后续的真机验收项目见[发版与现场清单](docs/80-发版准备与现场交付.md)。
+**最新正式版本为 [v0.0.4](https://github.com/wybroot/alinksec/releases/tag/v0.0.4)，于 2026-10-25 发布。** 安装请使用其[固定版本部署文档](https://github.com/wybroot/alinksec/blob/v0.0.4/docs/06-部署文档.md)，并按 `SHA256SUMS` 和 `release-manifest.json` 核对六个附件。发布证据及用户留待后续的真机验收项目见[发版与现场清单](docs/80-发版准备与现场交付.md)。
 
-Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.3** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.3 发布说明](docs/releases/v0.0.3.md)。
+Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.4** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.4 发布说明](docs/releases/v0.0.4.md)。
 
 Linux amd64 与 arm64 分别使用原生 CI runner 验证和构建镜像。Agent 需匹配目标主机的系统与架构，安装、源码构建及验收范围见 [ARM64 部署说明](docs/14-ARM64支持.md)。此前 v0.0.1 成品仅支持 amd64。
 
@@ -133,6 +133,14 @@ alinksec/
 
 <a id="capabilities"></a>
 
+## v0.0.4 功能范围
+
+包含 Agent 升级回退、隔离租约、可信配置恢复、资源自适应、Linux 弱口令覆盖、Windows 登录／ETW／更新流程、事件驱动监控、ClamAV 接入及可选原生 YARA；同时包含合规规则包、离线 XCCDF／OVAL、签名上游候选、厂商公告、OpenCTI、来源冲突治理、报表快照、集中取证、检查点备份、应用集群和原始日志检索。
+
+启动新增空 JWT、CA 私钥／证书及服务端证书一致性拒绝，并修正单段相对证书目录初始化。错误材料保持原样，应恢复同一部署的匹配备份。见[发布说明](docs/releases/v0.0.4.md)、[凭据核查](docs/81-发布后启动凭据核查.md)和[完整文档索引](docs/README.md)。
+
+默认发布 Agent 使用 `CGO_ENABLED=0`，原生 YARA 需独立审核构建及运行库，ClamAV 需本机服务。真实系统覆盖、Windows 长期观测、200 台真实主机／72 小时与一秒指标目标继续保留现场待验收。
+
 ## 🔬 核心能力详解
 
 ### 📡 指令闭环：从下发到执行，每一步都看得见
@@ -157,7 +165,7 @@ sequenceDiagram
 ```
 
 <details>
-<summary><b>查看全部 11 种指令</b></summary>
+<summary><b>查看全部 14 种任务指令</b></summary>
 
 | 指令 | 用途 |
 | --- | --- |
@@ -172,6 +180,11 @@ sequenceDiagram
 | `agent_upgrade` | 下载、校验并替换 Agent 成品 |
 | `collect_now` | 立即触发指定采集器 |
 | `agent_control` | 重启、暂停/恢复采集或布防卸载口令 |
+| `windows_update_scan` | 通过原生 WUA 发现 Windows 更新 |
+| `scap_scan` | 执行已审核的离线 XCCDF／OVAL 内容 |
+| `evidence_collect` | 采集有界诊断与取证材料 |
+
+协议另含四种回执／控制消息：`isolation_confirm`、`windows_login_receipt`、`windows_update_receipt`、`evidence_receipt`，不计入带任务 ACK 的指令数量；完整定义见 [agent.proto](proto/agent.proto)。
 
 </details>
 
@@ -237,11 +250,11 @@ SHA256 特征与规则匹配支持**快速扫描、全盘扫描和自定义目�
 
 ### 1. 下载并校验发布成品
 
-确认发布工作流成功后，从 **[v0.0.3 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)** 下载全部六个附件。源码、Compose、镜像与 Agent 应使用同一版本。
+确认发布工作流成功后，从 **[v0.0.4 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.4)** 下载全部六个附件。源码、Compose、镜像与 Agent 应使用同一版本。
 
 | 附件 | 内容 |
 | --- | --- |
-| `alinksec-v0.0.3.tar.gz` | 源码、部署配置与文档 |
+| `alinksec-v0.0.4.tar.gz` | 源码、部署配置与文档 |
 | `alinksec-agent-linux-amd64` | Linux x86_64 原生 Agent |
 | `alinksec-agent-linux-arm64` | Linux aarch64 原生 Agent |
 | `alinksec-agent-windows-amd64.exe` | Windows x64 原生 Agent |
@@ -252,16 +265,16 @@ SHA256 特征与规则匹配支持**快速扫描、全盘扫描和自定义目�
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.3.tar.gz
-cd alinksec-v0.0.3/deploy/docker
+tar -xzf alinksec-v0.0.4.tar.gz
+cd alinksec-v0.0.4/deploy/docker
 ```
 
 发布完成后可直接拉取以下镜像，Docker 自动选择 Linux amd64 或 arm64，部署主机无需现场编译：
 
 ```text
-wangyanbiao/alinksec:server-v0.0.3
-wangyanbiao/alinksec:web-v0.0.3
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.3
+wangyanbiao/alinksec:server-v0.0.4
+wangyanbiao/alinksec:web-v0.0.4
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.4
 ```
 
 ### 2. 启动管理平台
@@ -344,7 +357,7 @@ systemctl status alinksec-agent
 
 **v0.0.1 是首次开发阶段发布版本。**开发验收清单共 28 项：**26 项 CLOSED、1 项 ACCEPTED、1 项 N/A**，无 OPEN 或 VERIFY 项。发布版本对应的[完整 CI](https://github.com/wybroot/alinksec/actions/runs/36978905551)和[发布工作流](https://github.com/wybroot/alinksec/actions/runs/36993494771)均已通过。
 
-**v0.0.3 汇总本轮已完成模块。**发布提交必须先通过精确 `main` 提交的全部 27 个作业，包含两个 Windows Server 版本、两个 Linux 架构、数据库、集群与专项检查；附件 `release-manifest.json` 记录该提交、验收 CI 和各镜像摘要，见 [发布说明](docs/releases/v0.0.3.md)及 [ARM64 验收证据](docs/14-ARM64支持.md)。
+**v0.0.4 包含已完成模块及四项启动凭据修正。**发布提交必须先通过精确 `main` 提交的全部 27 个作业，包含两个 Windows Server 版本、两个 Linux 架构、数据库、集群与专项检查；附件 `release-manifest.json` 记录该提交、验收 CI 和各镜像摘要，见 [发布说明](docs/releases/v0.0.4.md)及 [ARM64 验收证据](docs/14-ARM64支持.md)。
 
 | 验证领域 | 证据 |
 | --- | --- |
@@ -413,7 +426,7 @@ cd ../web && npm ci && npm test && npm run build
 
 **优先阅读：**[部署文档](docs/06-部署文档.md) · [部署检查清单](deploy/部署检查清单.md) · [变更记录](CHANGELOG.md) · [发布流程](docs/13-版本发布流程.md)
 
-详细设计与部署文档当前为中文，验证命令参考为英文。
+[完整文档索引](docs/README.md)列出全部设计、操作和历史记录；详细设计与部署文档为中文，验证命令参考为英文。
 
 <details>
 <summary><b>查看全部设计与验收文档</b></summary>
@@ -444,11 +457,13 @@ cd ../web && npm ci && npm test && npm run build
 
 </details>
 
-### 🧭 后续方向
+### 🧭 现场后续验收
 
 - 扩大 Linux 发行版与 Windows 安全引擎验收覆盖。
 - 完成长时间扫描负载与更大规模受控主机验证。
-- 完善交付工具与日常运营流程。
+- 验证真实私有情报源、指定 Windows 补丁安装及实际重启。
+
+原计划软件开发已完成；上述现场项目仍保留待验收。
 
 ### 🤝 开源协议与贡献
 

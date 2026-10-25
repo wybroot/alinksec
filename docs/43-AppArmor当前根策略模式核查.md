@@ -1,5 +1,7 @@
 # AppArmor当前根策略模式核查
 
+> 版本基线：v0.0.4。核查定义、适用系统和 pass／fail／error 边界沿用本文有限参考；分批实施计数仅属当时记录，当前旧规则处置及合规包分别见[收尾](44-基线模块收尾与认证-Agent-DNF核查.md)和[条款包](67-等保2.0主机合规规则包.md)。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
+
 旧BL-LINUX-0040的SELinux/AppArmor shell OR链无法区分查询失败与禁用。本批独立Ubuntu24候选仅实现AppArmor当前根视图的启用及模式参考，固定`apparmor_runtime/current-kernel/eq`与完整`enabled=Y,lsm=apparmor,global_mode=enforce,root_unstacked_view,profiles=nonempty/all_enforce`。服务端和Agent拒绝其他路径、命名空间、命令、弱比较及额外字段（含null）。候选[定义](../deploy/baseline/apparmor-definitions.json)与[不可变包v1](../deploy/baseline/packages/apparmor/linux-baseline.json)限定Ubuntu24.04 amd64/arm64，管理员按实际Agent版本和主机条件审核测试后发布。
 
 生产只读固定内核接口：`/sys/module/apparmor/parameters/enabled`及`mode`，`/sys/kernel/security/lsm`，以及`/sys/kernel/security/apparmor`下的`.ns_level/.stacked/.ns_stacked/profiles`。从`/sys`逐级openat，禁止符号链接与阻塞特殊文件，校验目录/普通接口类型、数值UID/GID 0、非组/其他可写，以及sysfs/securityfs文件系统身份；保留FD并在读取后核对路径/FD身份及元数据。不能用普通磁盘伪造内核输入。AppArmor的policy魔术链接不参与观测；生产不执行aa-status、加载策略或访问用户指定路径。
