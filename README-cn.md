@@ -92,7 +92,9 @@ flowchart LR
     WINDOWS -->|HTTPS 下载| WEB
 ```
 
-Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.2** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.2 发布说明](docs/releases/v0.0.2.md)。
+**当前源码为 v0.0.3 发版准备。** 是否发布以 GitHub Release 为准；最近已发布版本为 [v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)，安装该版本请使用其[固定版本部署文档](https://github.com/wybroot/alinksec/blob/v0.0.2/docs/06-部署文档.md)。用户已将真机验收留待后续，交接项目见[发版与现场清单](docs/80-发版准备与现场交付.md)。
+
+Agent 为原生单二进制，目标主机不需要 Docker、JRE、Node.js 或 Go 工具链。**v0.0.3** 支持 Linux amd64 / **ARM64（aarch64）** 双架构容器，以及 Linux amd64 / arm64 / Windows amd64 Agent，详见 [v0.0.3 发布说明](docs/releases/v0.0.3.md)。
 
 Linux amd64 与 arm64 分别使用原生 CI runner 验证和构建镜像。Agent 需匹配目标主机的系统与架构，安装、源码构建及验收范围见 [ARM64 部署说明](docs/14-ARM64支持.md)。此前 v0.0.1 成品仅支持 amd64。
 
@@ -235,11 +237,11 @@ SHA256 特征与规则匹配支持**快速扫描、全盘扫描和自定义目�
 
 ### 1. 下载并校验发布成品
 
-确认发布工作流成功后，从 **[v0.0.2 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)** 下载全部六个附件。源码、Compose、镜像与 Agent 应使用同一版本。
+确认发布工作流成功后，从 **[v0.0.3 Release](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)** 下载全部六个附件。源码、Compose、镜像与 Agent 应使用同一版本。
 
 | 附件 | 内容 |
 | --- | --- |
-| `alinksec-v0.0.2.tar.gz` | 源码、部署配置与文档 |
+| `alinksec-v0.0.3.tar.gz` | 源码、部署配置与文档 |
 | `alinksec-agent-linux-amd64` | Linux x86_64 原生 Agent |
 | `alinksec-agent-linux-arm64` | Linux aarch64 原生 Agent |
 | `alinksec-agent-windows-amd64.exe` | Windows x64 原生 Agent |
@@ -250,16 +252,16 @@ SHA256 特征与规则匹配支持**快速扫描、全盘扫描和自定义目�
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.2.tar.gz
-cd alinksec-v0.0.2/deploy/docker
+tar -xzf alinksec-v0.0.3.tar.gz
+cd alinksec-v0.0.3/deploy/docker
 ```
 
 发布完成后可直接拉取以下镜像，Docker 自动选择 Linux amd64 或 arm64，部署主机无需现场编译：
 
 ```text
-wangyanbiao/alinksec:server-v0.0.2
-wangyanbiao/alinksec:web-v0.0.2
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.2
+wangyanbiao/alinksec:server-v0.0.3
+wangyanbiao/alinksec:web-v0.0.3
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.3
 ```
 
 ### 2. 启动管理平台
@@ -342,7 +344,7 @@ systemctl status alinksec-agent
 
 **v0.0.1 是首次开发阶段发布版本。**开发验收清单共 28 项：**26 项 CLOSED、1 项 ACCEPTED、1 项 N/A**，无 OPEN 或 VERIFY 项。发布版本对应的[完整 CI](https://github.com/wybroot/alinksec/actions/runs/36978905551)和[发布工作流](https://github.com/wybroot/alinksec/actions/runs/36993494771)均已通过。
 
-**v0.0.2 增加 ARM64 原生验证与双架构发布。**发布提交必须先通过完整 CI 的四个作业；附件 `release-manifest.json` 记录该提交、验收 CI 和各镜像摘要，见 [发布说明](docs/releases/v0.0.2.md)及 [ARM64 验收证据](docs/14-ARM64支持.md)。
+**v0.0.3 汇总本轮已完成模块。**发布提交必须先通过精确 `main` 提交的全部 27 个作业，包含两个 Windows Server 版本、两个 Linux 架构、数据库、集群与专项检查；附件 `release-manifest.json` 记录该提交、验收 CI 和各镜像摘要，见 [发布说明](docs/releases/v0.0.3.md)及 [ARM64 验收证据](docs/14-ARM64支持.md)。
 
 | 验证领域 | 证据 |
 | --- | --- |
@@ -364,7 +366,7 @@ Linux 原生采样覆盖约 197 秒，包含启动、空闲、采集、短基线
 
 上述测量不覆盖长期扫描或持续高负载。Windows SCM 验证不等于 Windows 全量安全引擎与 Java 平台完整联动验收。100～2000 台的架构目标、各 Linux 发行版及全部 Windows 版本尚未完成规模或全平台验证。多租户尚未实现。详见[验收状态](docs/07-封版缺陷清单.md)与[原生 Agent 测量记录](docs/12-原生Agent本机验收记录.md)。
 
-发布 CI 核对同一源码提交的四个完整 CI 作业，复用已测试的 Agent 二进制，并在发布前冒烟测试实际容器；附件提供校验和与镜像摘要清单。
+发布 CI 核对同一源码提交的全部 27 个必需 CI 作业，复用已测试的 Agent 二进制，并在发布前冒烟测试实际容器；附件提供校验和与镜像摘要清单。
 
 </details>
 

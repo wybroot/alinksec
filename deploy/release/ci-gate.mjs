@@ -1,10 +1,25 @@
-const required = ['windows-agent', 'build-and-test (amd64)', 'build-and-test (arm64)', 'schema']
+export const requiredJobs = Object.freeze([
+  'cluster (amd64)', 'cluster (arm64)', 'scap-resolver',
+  'native-scap (ubuntu-24.04, linux-amd64)', 'native-scap (ubuntu-24.04-arm, linux-arm64)',
+  'native-scap (windows-latest, windows-amd64)',
+  'windows-agent (windows-2025)', 'windows-agent (windows-2022)',
+  'build-and-test (amd64)', 'build-and-test (arm64)',
+  'system-acceptance (amd64)', 'system-acceptance (arm64)',
+  'linux-native (amd64)', 'linux-native (arm64)',
+  'sqlite-maintenance (amd64)', 'sqlite-maintenance (arm64)',
+  'deployment (amd64)', 'deployment (arm64)',
+  'native-yara (linux-amd64)', 'native-yara (linux-arm64)', 'native-yara (windows-amd64)',
+  'schema', 'baseline-upstream', 'vendor-advisories', 'opencti-native', 'source-trust', 'reporting',
+])
 
 export function passesReleaseGate(run, jobs, sha) {
   return run.head_sha === sha && run.head_branch === 'main' &&
     ['push', 'workflow_dispatch'].includes(run.event) && run.status === 'completed' &&
-    run.conclusion === 'success' && required.every(name =>
-      jobs.some(job => job.name === name && job.conclusion === 'success'))
+    run.conclusion === 'success' && jobs.length === requiredJobs.length &&
+    requiredJobs.every(name => {
+      const matching = jobs.filter(job => job.name === name)
+      return matching.length === 1 && matching[0].status === 'completed' && matching[0].conclusion === 'success'
+    })
 }
 
 export async function findValidatedRun(github, owner, repo, sha) {
@@ -17,5 +32,5 @@ export async function findValidatedRun(github, owner, repo, sha) {
     })
     if (passesReleaseGate(run, jobs, sha)) return run
   }
-  throw new Error(`No successful full CI for ${sha}. Windows, both Linux architectures and schema must pass on main; partial CI cannot release.`)
+  throw new Error(`No successful full CI for ${sha}. All ${requiredJobs.length} required jobs must complete successfully on main; partial or outdated CI cannot release.`)
 }

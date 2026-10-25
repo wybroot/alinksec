@@ -102,10 +102,12 @@ flowchart LR
     WINDOWS -->|HTTPS downloads| WEB
 ```
 
+**Current source: v0.0.3 release preparation.** Publication status is recorded by the GitHub Release; the latest published version is [v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2). Use its [versioned deployment guide](https://github.com/wybroot/alinksec/blob/v0.0.2/docs/06-部署文档.md) when installing that release. The [handoff checklist](docs/80-发版准备与现场交付.md) tracks the field checks deferred by the project owner.
+
 The Agent is a native single binary. Managed hosts do not need Docker, a JRE,
-Node.js or a Go toolchain. **v0.0.2** supports Linux
+Node.js or a Go toolchain. **v0.0.3** supports Linux
 amd64 / **ARM64 (aarch64)** containers and Linux amd64 / arm64 / Windows amd64
-Agents. See the [v0.0.2 release notes](docs/releases/v0.0.2.md).
+Agents. See the [v0.0.3 release notes](docs/releases/v0.0.3.md).
 
 Linux amd64 and arm64 use native CI runners for validation and image builds.
 Choose the Agent matching the managed host's OS and architecture; the
@@ -280,13 +282,13 @@ For standard deployment, follow sections 5 and 6 of the
 
 ### 1. Download Verified Release Assets
 
-Download all six attachments from **[v0.0.2](https://github.com/wybroot/alinksec/releases/tag/v0.0.2)**
+Download all six attachments from **[v0.0.3](https://github.com/wybroot/alinksec/releases/tag/v0.0.3)**
 after its release workflow succeeds. Keep source, Compose files, images and
 Agents on the same version.
 
 | Asset | Contents |
 | --- | --- |
-| `alinksec-v0.0.2.tar.gz` | Source, deployment files and documentation |
+| `alinksec-v0.0.3.tar.gz` | Source, deployment files and documentation |
 | `alinksec-agent-linux-amd64` | Native Linux x86_64 Agent |
 | `alinksec-agent-linux-arm64` | Native Linux aarch64 Agent |
 | `alinksec-agent-windows-amd64.exe` | Native Windows x64 Agent |
@@ -297,17 +299,17 @@ Verify and extract them in the download directory:
 
 ```bash
 sha256sum --check SHA256SUMS
-tar -xzf alinksec-v0.0.2.tar.gz
-cd alinksec-v0.0.2/deploy/docker
+tar -xzf alinksec-v0.0.3.tar.gz
+cd alinksec-v0.0.3/deploy/docker
 ```
 
 After publication, pull these images; Docker selects Linux amd64 or arm64 for
 the deployment host, which does not need to compile:
 
 ```text
-wangyanbiao/alinksec:server-v0.0.2
-wangyanbiao/alinksec:web-v0.0.2
-wangyanbiao/alinksec:sqlite-maintenance-v0.0.2
+wangyanbiao/alinksec:server-v0.0.3
+wangyanbiao/alinksec:web-v0.0.3
+wangyanbiao/alinksec:sqlite-maintenance-v0.0.3
 ```
 
 ### 2. Start the Management Platform
@@ -403,10 +405,11 @@ VERIFY items. The [full CI](https://github.com/wybroot/alinksec/actions/runs/369
 and [release workflow](https://github.com/wybroot/alinksec/actions/runs/36993494771)
 passed for the published release.
 
-**v0.0.2 adds native ARM64 validation and multi-platform publication.** All four
-CI jobs must pass on the release commit before publication. The attached
+**v0.0.3 brings the completed module backlog together.** All 27 required
+CI jobs must pass on the exact release commit on `main`, including both Windows
+Server versions, both Linux architectures, database, cluster and module checks. The attached
 `release-manifest.json` identifies that commit, the validated CI run and each
-image digest; see the [release notes](docs/releases/v0.0.2.md) and
+image digest; see the [release notes](docs/releases/v0.0.3.md) and
 [ARM64 evidence](docs/14-ARM64支持.md).
 
 | Verified Area | Evidence |
@@ -435,7 +438,7 @@ distribution or Windows version have not been validated. Multi-tenancy is not
 implemented. See [acceptance status](docs/07-封版缺陷清单.md) and
 [native Agent measurements](docs/12-原生Agent本机验收记录.md) for details.
 
-Release CI checks all four full CI jobs on the exact source commit, reuses
+Release CI checks all 27 required CI jobs on the exact source commit, reuses
 the tested Agent binaries and smoke-tests the actual release containers before
 publication. Artifacts include checksums and an image-digest manifest.
 
