@@ -51,7 +51,7 @@ public class ComplianceReportService {
                 "主机和漏洞覆盖是生成时的当前快照；基线采用区间内最后分配任务，未回报不会回退到较早的通过结果。",
                 "基线通过率仅指自动检查项通过数 / 预期项数；异常、旧证据、待回报分别列出，不代表等保认证结论。",
                 "漏洞按发现记录创建时间统计，同一 CVE 可有多条记录；已记录的匹配标记不证明当前适用或已修复。零发现、无规则和未采集均不能证明安全。",
-                "告警按首次发生时间统计，处置状态以生成时为准；合并次数单列，未按次数重复计数。",
+                "告警按首次发生时间统计，处置状态以生成时为准；合并次数单列，未按次数重复计数。新事件按来源解释等级，未记录来源的历史告警沿用旧含义并单列。",
                 "明细最多展示 500 台主机；汇总和趋势覆盖全部所选主机。历史快照保留 30 天，全平台最多 200 份。"));
         var args=scopeArgs(q);
         report.put("assets",jdbc.queryForMap("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN status=1 THEN 1 ELSE 0 END),0) AS online,"
@@ -111,11 +111,14 @@ public class ComplianceReportService {
                 FROM t_agent a JOIN t_vuln_finding f ON f.agent_id=a.agent_id WHERE
                 """+scope(q)+" AND f.created_at>=? AND f.created_at<? GROUP BY f.severity,f.status ORDER BY f.severity DESC,f.status",periodArgs(q).toArray()));
         report.put("alerts",jdbc.queryForList("""
-                SELECT f.severity,COUNT(*) AS records,COALESCE(SUM(f.count),0) AS occurrences,
+                SELECT f.severity,f.severity_level,f.severity_source,COUNT(*) AS records,COALESCE(SUM(f.count),0) AS occurrences,
                   SUM(CASE WHEN f.status=2 THEN 1 ELSE 0 END) AS handled,SUM(CASE WHEN f.status=3 THEN 1 ELSE 0 END) AS ignored,
                   SUM(CASE WHEN f.status NOT IN (2,3) THEN 1 ELSE 0 END) AS open
-                FROM t_agent a JOIN t_alert f ON f.agent_id=a.agent_id WHERE
-                """+scope(q)+" AND f.first_time>=? AND f.first_time<? GROUP BY f.severity ORDER BY f.severity DESC",periodArgs(q).toArray()));
+                FROM t_agent a JOIN v_alert_severity f ON f.agent_id=a.agent_id WHERE
+                """+scope(q)+" AND f.first_time>=? AND f.first_time<? GROUP BY f.severity,f.severity_level,f.severity_source ORDER BY f.severity_level DESC,f.severity_source,f.severity DESC",periodArgs(q).toArray()));
+        report.put("alertSeverityContract", "source-aware-v1");
+        @SuppressWarnings("unchecked") var alertRows = (List<Map<String,Object>>) report.get("alerts");
+        for (var row : alertRows) row.put("severity_label", com.alinksec.service.alert.AlertSeverity.label(row));
         String day=database.isSqlite()?"strftime('%Y-%m-%d',f.{column},'+8 hours')":"to_char(f.{column} AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD')";
         var trend=new LinkedHashMap<String,Map<String,Object>>();
         for(LocalDate d=LocalDate.parse(q.from());!d.isAfter(LocalDate.parse(q.to()));d=d.plusDays(1))

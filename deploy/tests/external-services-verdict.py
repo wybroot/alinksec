@@ -22,13 +22,14 @@ def verify(root, reports, head):
     assert run["image"] == "quay.io/victoriametrics/victoria-metrics:v1.102.0" and run["imageDigests"]
     publisher_cases = ET.parse(reports / "TEST-com.alinksec.bootstrap.VendorAdvisoryLiveIntegrationTest.xml").getroot()
     metrics_cases = ET.parse(reports / "TEST-com.alinksec.bootstrap.ExternalMetricsIntegrationTest.xml").getroot()
-    for suite, count in [(publisher_cases, 4), (metrics_cases, 1)]:
+    for suite, count in [(publisher_cases, 4), (metrics_cases, 2)]:
         assert int(suite.attrib["tests"]) == count
         assert all(int(suite.attrib.get(key, 0)) == 0 for key in ["failures", "errors", "skipped"])
         assert len(suite.findall("testcase")) == count
         assert all(len(case) == 0 or not any(case.find(kind) is not None for kind in ["skipped", "failure", "error"]) for case in suite.findall("testcase"))
     assert all(case.attrib["name"].startswith("actualPublisherSyncCommitsRawBytesAndServesProtectedApis") for case in publisher_cases.findall("testcase"))
-    assert metrics_cases.find("testcase").attrib["name"] == "realVictoriaMetricsRetainsSampleMillisecondsLabelsAndQueryResults"
+    assert {case.attrib["name"] for case in metrics_cases.findall("testcase")} == {
+        "realVictoriaMetricsRetainsSampleMillisecondsLabelsAndQueryResults", "recentSamplesAreQueryableWithoutTheDefaultThirtySecondOffset"}
     accepted = []
     for kind, url in PUBLISHERS.items():
         receipt = json.loads((root / "publishers" / (kind + ".json")).read_text())
@@ -66,7 +67,27 @@ def verify(root, reports, head):
     assert float(instant["data"]["result"][0]["value"][1]) == 25.75
     interval = json.loads((root / "metrics/query-range.json").read_text())["data"]
     assert interval["status"] == "success" and interval["data"]["result"]
+    recent = json.loads((root / "metrics-recent/result.json").read_text())
+    assert recent["accepted"] and recent["queryLatencyOffset"] == "1ms" and 0 <= recent["elapsedMillis"] < 10000
+    assert recent["realHostLongSoakVerified"] is False and recent["oneSecondSlaAccepted"] is False
+    observations = json.loads((root / "metrics-recent/observations.json").read_text())
+    assert observations and observations[-1]["elapsedMillis"] == recent["elapsedMillis"]
+    assert all(0 <= a["elapsedMillis"] <= b["elapsedMillis"] for a, b in zip(observations, observations[1:]))
+    assert all(o["response"]["status"] == "success" for o in observations)
+    last = observations[-1]["response"]
+    assert last["status"] == "success" and len(last["data"]["result"]) == 1
+    assert float(last["data"]["result"][0]["value"][1]) == 42.125
+    raw_recent = [json.loads(line) for line in (root / "metrics-recent/export.ndjson").read_text().splitlines()]
+    assert len(raw_recent) == 1 and raw_recent[0]["metric"]["agent_id"] == recent["agentId"]
+    assert raw_recent[0]["metric"]["__name__"] == "alinksec_recent_probe"
+    assert raw_recent[0]["timestamps"] == [recent["timestamp"]] and raw_recent[0]["values"] == [42.125]
+    recent_range = json.loads((root / "metrics-recent/query-range.json").read_text())
+    assert recent_range["status"] == "success" and len(recent_range["data"]["result"]) == 1
+    series = recent_range["data"]["result"][0]
+    assert series["metric"]["agent_id"] == recent["agentId"]
+    assert series["values"] and all(float(point[1]) == 42.125 for point in series["values"])
     result = {"accepted": True, "head": head, "run": run["run"], "publishers": accepted, "realDisposableVictoriaMetrics": True,
+              "recentVisibilityMillis": recent["elapsedMillis"], "oneSecondSlaAccepted": False,
               "realPrivateServicesAccepted": False, "realWindowsPatchAccepted": False, "realHostLongSoakAccepted": False}
     (root / "accepted.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     return result

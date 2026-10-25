@@ -21,7 +21,7 @@ public final class ReportExport {
     private static List<Object> row(Object...v){return Arrays.asList(v);}
     private static Table table(Map<String,Object> report,String key,String name,String[] fields,String[] labels) {
         var rows=new ArrayList<List<Object>>();rows.add(row((Object[])labels));
-        for(var value:list(report,key)) {var cells=new ArrayList<Object>();for(String f:fields)cells.add(f.equals("severity")?severity(value.get(f)):value.get(f));rows.add(cells);}
+        for(var value:list(report,key)) {var cells=new ArrayList<Object>();for(String f:fields)cells.add(f.equals("severity")?(key.equals("alerts") && value.containsKey("severity_label")?value.get("severity_label"):severity(value.get(f))):value.get(f));rows.add(cells);}
         return new Table(name,rows);
     }
     private static List<Table> tables(Map<String,Object> r) {

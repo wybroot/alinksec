@@ -39,7 +39,7 @@ class SecurityEventServiceTest {
 
         ArgumentCaptor<String> fingerprint = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), any(String.class),
-                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture());
+                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture(), eq(event.getSeverityValue()));
         assertEquals("process:PR-0001:4321:1720000000000", fingerprint.getValue());
     }
 
@@ -57,7 +57,7 @@ class SecurityEventServiceTest {
 
         ArgumentCaptor<String> fingerprint = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), any(String.class),
-                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture());
+                eq(""), eq("agent-1"), eq("PR-0001"), fingerprint.capture(), eq(event.getSeverityValue()));
         assertEquals("process:PR-0001", fingerprint.getValue());
     }
 
@@ -78,7 +78,7 @@ class SecurityEventServiceTest {
                     .setActionTaken("restored").build());
             ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
             verify(targetJdbc).update(org.mockito.ArgumentMatchers.startsWith("UPDATE t_alert"), detail.capture(),
-                    eq("restored"), eq("agent-1"), eq("PR-test"), eq(expected));
+                    eq("restored"), eq("agent-1"), eq("PR-test"), eq(expected), eq(Severity.SEV_HIGH_VALUE));
             assertEquals(expected, JsonUtils.read(detail.getValue()).path("fingerprint").asText());
             assertEquals(value, JsonUtils.read(detail.getValue()).path(key).asText());
         }

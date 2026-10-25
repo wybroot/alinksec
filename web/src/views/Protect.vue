@@ -31,7 +31,7 @@
         <div v-for="b in blocks" :key="b.id" class="evt-item">
           <span class="t">{{ b.time }}</span>
           <div style="flex:1">
-            <el-tag size="small" :type="sevType(b.severity)">{{ sevLabel(b.severity) }}</el-tag> {{ b.title }}<br />
+            <el-tag size="small" :type="sevType(b.severity)">{{ sevLabel(b.severity) }}</el-tag> {{ b.title }} <el-tag v-if="b.legacySeverity" size="small" type="info">历史等级</el-tag><br />
             <span style="color:#94a3b8;font-size:11px">{{ b.hostname || b.agent_id }} · </span>
             <el-tag size="small" effect="plain" type="info">{{ actionLabel(b.action_taken) }}</el-tag>
           </div>

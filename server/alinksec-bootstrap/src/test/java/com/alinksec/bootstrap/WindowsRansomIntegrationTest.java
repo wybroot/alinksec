@@ -66,7 +66,7 @@ class WindowsRansomIntegrationTest {
     }
     @Test void evidenceAndTransportReceiptRollbackTogether() {
         var report=event("attributed","134000000000000001","C:\\data\\rollback");
-        doThrow(new IllegalStateException("controlled persistence failure")).when(notify).onAlert(anyString(),anyString(),anyString(),anyInt(),anyString(),anyString());
+        doThrow(new IllegalStateException("controlled persistence failure")).when(notify).onAlert(anyString());
         assertThrows(IllegalStateException.class,()->dispatcher.dispatch(a,report));assertTrue(rows(a).isEmpty());
         reset(notify);dispatcher.dispatch(a,report);dispatcher.dispatch(a,report);
         assertEquals(1,rows(a).size());assertEquals(1,((Number)rows(a).get(0).get("count")).intValue());

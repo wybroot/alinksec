@@ -47,7 +47,7 @@ class WindowsLoginIntegrationTest {
     Map<String,Object> row(String id){return ((List<Map<String,Object>>)service.status(1,100).get("items")).stream().filter(x->id.equals(x.get("agent_id"))).findFirst().orElseThrow();}
     @Test void receiptsAndAlertsCommitTogetherAndDeduplicateBeyondTransportWindow(){
         var report=event(a,"a".repeat(64));
-        doThrow(new IllegalStateException("synthetic post-insert failure")).when(notify).onAlert(anyString(),anyString(),anyString(),anyInt(),anyString(),anyString());
+        doThrow(new IllegalStateException("synthetic post-insert failure")).when(notify).onAlert(anyString());
         assertThrows(IllegalStateException.class,()->dispatcher.dispatch(a,report));
         assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_windows_login_receipt WHERE agent_id=?",Integer.class,a));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_alert WHERE agent_id=?",Integer.class,a));
         reset(notify);dispatcher.dispatch(a,report);dispatcher.dispatch(a,report);

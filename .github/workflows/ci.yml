@@ -383,6 +383,7 @@ jobs:
             Write-Host "Native ransomware attribution fresh process $attempt/3"
             go test -v -count=1 -timeout=3m -run '^TestNativeWindowsRansomAttribution$' ./internal/guard
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Copy-Item $env:ALINKSEC_RANSOM_EVIDENCE_FILE (Join-Path (Split-Path $env:ALINKSEC_RANSOM_EVIDENCE_FILE) "result-$attempt.json")
           }
         working-directory: agent
         env:
@@ -392,7 +393,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-ransom-validation-${{ matrix.platform }}
-          path: .tmp/windows-ransom-native/result.json
+          path: .tmp/windows-ransom-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -1423,7 +1424,7 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "35"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "36"
           test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "102"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
@@ -1573,7 +1574,7 @@ jobs:
         run: >-
           python3 ../deploy/tests/external-services.py --output ../.tmp/external-services --
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=MetricsForwarderTest,VendorAdvisoryAdapterTest,VendorAdvisoryIndexTest,VendorAdvisoryIntegrationTest,VendorAdvisoryLiveIntegrationTest,ExternalMetricsIntegrationTest
+          -Dtest=MetricsForwarderTest,VmQueryClientTest,VendorAdvisoryAdapterTest,VendorAdvisoryIndexTest,VendorAdvisoryIntegrationTest,VendorAdvisoryLiveIntegrationTest,ExternalMetricsIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false -DargLine=-Xmx256m test
         env:
           MAVEN_OPTS: -Xmx256m
@@ -1605,6 +1606,8 @@ jobs:
             .tmp/external-services
             server/**/target/surefire-reports/*VendorAdvisory*
             server/**/target/surefire-reports/*ExternalMetrics*
+            server/**/target/surefire-reports/*VmQueryClient*
+            server/**/target/surefire-reports/*MetricsForwarder*
           include-hidden-files: true
           if-no-files-found: error
 
@@ -1733,9 +1736,10 @@ jobs:
       - name: Check SQLite statistics, authority, snapshot integrity and schedule recovery
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest,EvidenceIntegrationTest,EvidenceControllerTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=AlertSeverityIntegrationTest,ReportingIntegrationTest,ReportControllerTest,JwtAuthInterceptorTest,EvidenceIntegrationTest,EvidenceControllerTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test
           mkdir -p ../.tmp/report-fixtures/junit-sqlite
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-sqlite/
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*AlertSeverityIntegrationTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*ReportControllerTest.xml ../.tmp/report-fixtures/junit-sqlite/
           cp alinksec-gateway/target/surefire-reports/TEST-*JwtAuthInterceptorTest.xml ../.tmp/report-fixtures/junit-sqlite/
           mkdir -p ../.tmp/evidence-fixtures/junit-sqlite
@@ -1745,6 +1749,7 @@ jobs:
           cp alinksec-gateway/target/surefire-reports/TEST-*EvidenceControllerTest.xml ../.tmp/evidence-fixtures/junit-sqlite/
         env:
           MAVEN_OPTS: -Xmx256m
+          ALINKSEC_SEVERITY_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
           ALINKSEC_LOG_SEARCH_FIXTURES: ${{ github.workspace }}/.tmp/log-search-fixtures
@@ -1766,9 +1771,10 @@ jobs:
       - name: Check identical PostgreSQL transactions with the restricted application role
         working-directory: server
         run: |
-          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=ReportingIntegrationTest,EvidenceIntegrationTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
+          mvn -B -T1 -pl alinksec-bootstrap -am -Dtest=AlertSeverityIntegrationTest,ReportingIntegrationTest,EvidenceIntegrationTest,LogSearchIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres test
           mkdir -p ../.tmp/report-fixtures/junit-postgres
           cp alinksec-bootstrap/target/surefire-reports/TEST-*ReportingIntegrationTest.xml ../.tmp/report-fixtures/junit-postgres/
+          cp alinksec-bootstrap/target/surefire-reports/TEST-*AlertSeverityIntegrationTest.xml ../.tmp/report-fixtures/junit-postgres/
           mkdir -p ../.tmp/evidence-fixtures/junit-postgres
           cp alinksec-bootstrap/target/surefire-reports/TEST-*EvidenceIntegrationTest.xml ../.tmp/evidence-fixtures/junit-postgres/
           mkdir -p ../.tmp/log-search-fixtures/junit-postgres
@@ -1778,6 +1784,7 @@ jobs:
           ALINKSEC_INTEGRATION_PG_URL: jdbc:postgresql://127.0.0.1:5432/reporting?stringtype=unspecified
           ALINKSEC_INTEGRATION_PG_USER: alinksec_app
           ALINKSEC_INTEGRATION_PG_PASSWORD: report-app-fixture
+          ALINKSEC_SEVERITY_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_REPORT_FIXTURES: ${{ github.workspace }}/.tmp/report-fixtures
           ALINKSEC_EVIDENCE_FIXTURES: ${{ github.workspace }}/.tmp/evidence-fixtures
           ALINKSEC_LOG_SEARCH_FIXTURES: ${{ github.workspace }}/.tmp/log-search-fixtures
@@ -1797,6 +1804,9 @@ jobs:
       - name: Check actual production report pages and PDF against database captures
         working-directory: web
         run: node test/reporting-browser.mjs
+      - name: Check source-aware alert levels against both database captures
+        working-directory: web
+        run: node test/alert-severity-browser.mjs
       - name: Check central evidence console and exact file downloads
         working-directory: web
         run: node test/evidence-browser.mjs

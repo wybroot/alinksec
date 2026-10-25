@@ -58,12 +58,14 @@ public class DashboardQueryService {
         alerts.put("open", jdbc.queryForObject(
                 "SELECT count(*) FROM t_alert WHERE status IN (0,1)", Long.class));
         alerts.put("criticalOpen", jdbc.queryForObject(
-                "SELECT count(*) FROM t_alert WHERE status IN (0,1) AND severity >= 4", Long.class));
+                "SELECT count(*) FROM v_alert_severity WHERE status IN (0,1) AND severity_level >= 4", Long.class));
+        alerts.put("legacyUnclassifiedOpen", jdbc.queryForObject(
+                "SELECT count(*) FROM v_alert_severity WHERE status IN (0,1) AND severity_source='legacy_unclassified'", Long.class));
         alerts.put("today", jdbc.queryForObject(
                 "SELECT count(*) FROM t_alert WHERE first_time >= ?", Long.class, database.startOfToday()));
         alerts.put("bySeverity", jdbc.queryForList("""
-                SELECT severity, count(*) AS count
-                FROM t_alert WHERE status IN (0,1) GROUP BY severity ORDER BY severity
+                SELECT severity_level AS severity, count(*) AS count
+                FROM v_alert_severity WHERE status IN (0,1) GROUP BY severity_level ORDER BY severity_level
                 """));
         result.put("alerts", alerts);
 

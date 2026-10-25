@@ -166,3 +166,42 @@ func TestPolicyRootsAndRetentionBoundaries(t *testing.T) {
 		t.Fatal("disable failed")
 	}
 }
+
+// A native consumer may report a loss while provider enablement is still in
+// progress. Successful return from start must not erase that health failure.
+type startupLoss struct {
+	monitor *Monitor
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (n *startupLoss) start() error { n.monitor.fail("etw_events_lost"); return nil }
+func (n *startupLoss) check() error { return nil }
+func (n *startupLoss) close() error { n.once.Do(func() { close(n.closed) }); return nil }
+func TestStartupCallbackLossCannotPublishReadyEpoch(t *testing.T) {
+	m := New(t.TempDir())
+	n := &startupLoss{monitor: m, closed: make(chan struct{})}
+	m.native = n
+	m.Configure([]string{`C:\data`}, 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	select {
+	case <-n.closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("unhealthy startup was not closed")
+	}
+	if s := m.Status(); s.Status != "unavailable" || s.Reason != "etw_events_lost" {
+		t.Fatalf("startup loss overwritten: %+v", s)
+	}
+	if r := m.Lookup([]string{`C:\data\one`}, time.Now()); r.Process != nil || r.Status != "unavailable" {
+		t.Fatalf("unhealthy epoch attributed: %+v", r)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("capture did not stop")
+	}
+}

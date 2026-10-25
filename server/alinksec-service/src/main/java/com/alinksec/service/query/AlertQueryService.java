@@ -28,7 +28,7 @@ public class AlertQueryService {
             where.append(" AND t.status <> 9"); // 默认排除已删除（如有）
         }
         if (severity != null) {
-            where.append(" AND t.severity >= ").append(severity);
+            where.append(" AND t.severity_level >= ").append(severity);
         }
         if (agentId != null && !agentId.isBlank()) {
             where.append(" AND t.agent_id = '").append(agentId.replace("'", "''")).append("'");
@@ -39,12 +39,12 @@ public class AlertQueryService {
         String cond = where.toString();
 
         Long total = jdbc.queryForObject(
-                "SELECT count(*) FROM t_alert t" + cond, Long.class);
+                "SELECT count(*) FROM v_alert_severity t" + cond, Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.event_type, t.severity, t.title,
+                SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.event_type, t.severity, t.severity_source, t.severity_level, t.title,
                        CAST(t.detail AS TEXT) AS detail, t.action_taken, t.status, t.count,
                        t.first_time, t.last_time, t.handle_remark, t.handled_at
-                FROM t_alert t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond
+                FROM v_alert_severity t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond
                 + " ORDER BY t.last_time DESC LIMIT ? OFFSET ?", size, (page - 1) * size);
 
         Map<String, Object> result = new HashMap<>();
@@ -55,9 +55,10 @@ public class AlertQueryService {
 
     public List<Map<String, Object>> severityDistribution() {
         return jdbc.queryForList("""
-                SELECT severity, count(*) AS count
-                FROM t_alert WHERE status IN (0,1)
-                GROUP BY severity ORDER BY severity
+                SELECT severity_level AS severity, count(*) AS count,
+                       SUM(CASE WHEN severity_source='legacy_unclassified' THEN 1 ELSE 0 END) AS legacy_count
+                FROM v_alert_severity WHERE status IN (0,1)
+                GROUP BY severity_level ORDER BY severity_level
                 """);
     }
 

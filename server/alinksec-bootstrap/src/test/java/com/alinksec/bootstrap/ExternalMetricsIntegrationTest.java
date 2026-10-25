@@ -25,6 +25,44 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @EnabledIfEnvironmentVariable(named="ALINKSEC_EXTERNAL_EVIDENCE",matches=".+")
 class ExternalMetricsIntegrationTest {
     @TempDir Path root;
+    @Test @Timeout(30)
+    void recentSamplesAreQueryableWithoutTheDefaultThirtySecondOffset() throws Exception {
+        String base=System.getenv("ALINKSEC_EXTERNAL_VM_URL");assertNotNull(base);
+        var props=new AlinkSecProperties();props.getMetrics().setEnabled(true);props.getMetrics().setVmBaseUrl(base);
+        var cfg=new HikariConfig();cfg.setJdbcUrl("jdbc:sqlite:"+root.resolve("recent.db"));cfg.setMaximumPoolSize(1);cfg.setMinimumIdle(1);
+        String agent="recent-"+UUID.randomUUID(),metric="alinksec_recent_probe";
+        Path evidence=Path.of(System.getenv("ALINKSEC_EXTERNAL_EVIDENCE")).resolve("metrics-recent");Files.createDirectories(evidence);
+        try(var pool=new HikariDataSource(cfg)) {
+            var jdbc=new JdbcTemplate(pool);jdbc.execute("CREATE TABLE t_agent(agent_id TEXT PRIMARY KEY,hostname TEXT)");jdbc.update("INSERT INTO t_agent VALUES (?, 'Recent sample')",agent);
+            var forwarder=new MetricsForwarder(props,jdbc);
+            long timestamp=System.currentTimeMillis(),started=System.nanoTime();
+            try {
+                forwarder.onBatch(agent,RptMetricsBatch.newBuilder().addSamples(MetricSample.newBuilder().setName(metric).setTs(timestamp).setValue(42.125)).build());
+                var query=new VmQueryClient(props);String selector=metric+"{agent_id=\""+agent+"\"}";
+                var observations=new ArrayList<Map<String,Object>>();JsonNode latest=null;long elapsed=0;
+                do {
+                    latest=(JsonNode)query.query(selector,null);elapsed=Duration.ofNanos(System.nanoTime()-started).toMillis();
+                    observations.add(Map.of("elapsedMillis",elapsed,"response",latest));
+                    if(!latest.path("data").path("result").isEmpty())break;
+                    Thread.sleep(100);
+                }while(elapsed<10_000);
+                Files.writeString(evidence.resolve("observations.json"),JsonUtils.write(observations)+"\n");
+                assertEquals(1,latest.path("data").path("result").size(),"Production queries must include recent samples without a30s wait");
+                assertEquals(42.125,latest.path("data").path("result").get(0).path("value").get(1).asDouble());assertTrue(elapsed<10_000);
+                String end=String.format(Locale.ROOT,"%.3f",System.currentTimeMillis()/1000.0);
+                JsonNode range=(JsonNode)query.queryRange(selector,Long.toString(timestamp/1000-1),end,"100ms");
+                Files.writeString(evidence.resolve("query-range.json"),range.toString()+"\n");
+                assertFalse(range.path("data").path("result").isEmpty());
+                var client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+                URI export=URI.create(base+"/api/v1/export?match%5B%5D="+URLEncoder.encode(selector,StandardCharsets.UTF_8));
+                var raw=client.send(HttpRequest.newBuilder(export).timeout(Duration.ofSeconds(3)).GET().build(),HttpResponse.BodyHandlers.ofString());
+                Files.writeString(evidence.resolve("export.ndjson"),raw.body());assertEquals(200,raw.statusCode());
+                var sample=JsonUtils.read(raw.body().strip());assertEquals(timestamp,sample.path("timestamps").get(0).asLong());assertEquals(42.125,sample.path("values").get(0).asDouble());
+                Files.writeString(evidence.resolve("result.json"),JsonUtils.write(Map.of("accepted",true,"agentId",agent,"timestamp",timestamp,"elapsedMillis",elapsed,
+                        "queryLatencyOffset","1ms","realHostLongSoakVerified",false,"oneSecondSlaAccepted",false))+"\n");
+            }finally{forwarder.stop();}
+        }
+    }
     @Test @Timeout(60)
     void realVictoriaMetricsRetainsSampleMillisecondsLabelsAndQueryResults() throws Exception {
         String base=System.getenv("ALINKSEC_EXTERNAL_VM_URL");assertNotNull(base);
@@ -36,7 +74,7 @@ class ExternalMetricsIntegrationTest {
             var jdbc=new JdbcTemplate(pool);jdbc.execute("CREATE TABLE t_agent(agent_id TEXT PRIMARY KEY,hostname TEXT)");
             jdbc.update("INSERT INTO t_agent VALUES (?,?)",agent,host);
             // The deployed VM defaults to a 30s query latency offset. This checks historical sample
-            // fidelity outside that window, without changing the production service/query settings.
+            // fidelity outside that window. Recent visibility is checked separately above.
             long first=(Instant.now().minusSeconds(60).toEpochMilli()/1000)*1000+123,second=first+1111;
             Path evidence=Path.of(System.getenv("ALINKSEC_EXTERNAL_EVIDENCE")).resolve("metrics");Files.createDirectories(evidence);
             String metric="alinksec_external_probe",label="C:\\监测\\\"\n目录";

@@ -42,10 +42,13 @@ public class NotifyService {
         this.jdbc = jdbc;
     }
 
-    /** 新告警异步通知（severity: 2=medium 3=high 4=critical） */
+    /** Eligibility and payload come from the committed source-aware alert. */
     @Async
-    public void onAlert(String alertNo, String agentId, String eventType,
-                        int severity, String title, String actionTaken) {
+    public void onAlert(String alertNo) {
+        var alerts = jdbc.queryForList("SELECT * FROM v_alert_severity WHERE alert_no=?", alertNo);
+        if (alerts.isEmpty()) return;
+        var alert = alerts.getFirst();
+        int severity = ((Number) alert.get("severity_level")).intValue();
         // Snapshot eligible channels before delivery. A later channel change only
         // affects future alerts, rather than unexpectedly replaying old alerts.
         jdbc.update("""
@@ -60,13 +63,16 @@ public class NotifyService {
 
         Map<String, Object> details = new HashMap<>();
         details.put("alertNo", alertNo);
-        details.put("agentId", agentId);
-        details.put("eventType", eventType);
-        details.put("severity", severity);
-        details.put("actionTaken", actionTaken == null ? "" : actionTaken);
+        details.put("agentId", alert.get("agent_id"));
+        details.put("eventType", alert.get("event_type"));
+        details.put("severity", alert.get("severity"));
+        details.put("severityLevel", severity);
+        details.put("severitySource", alert.get("severity_source"));
+        details.put("severityLabel", com.alinksec.service.alert.AlertSeverity.label(alert));
+        details.put("actionTaken", alert.get("action_taken") == null ? "" : alert.get("action_taken"));
         String payload = JsonUtils.write(Map.of(
                 "msgtype", "text",
-                "text", Map.of("content", "[ALinkSec 告警] " + title),
+                "text", Map.of("content", "[ALinkSec 告警] " + alert.get("title")),
                 "alinksec", details));
 
         List<Map<String, Object>> channels = jdbc.queryForList("""
@@ -100,17 +106,15 @@ public class NotifyService {
     @Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void retryRecent() {
         List<Map<String, Object>> missed = jdbc.queryForList("""
-                SELECT alert_no, agent_id, event_type, severity, title, action_taken
-                FROM t_alert a WHERE severity >= 3 AND status IN (0, 1) AND notified = false
+                SELECT alert_no
+                FROM v_alert_severity a WHERE severity_level >= 1 AND status IN (0, 1) AND notified = false
                   AND (NOT EXISTS(SELECT 1 FROM t_alert_notify_delivery d WHERE d.alert_no=a.alert_no)
                     OR EXISTS(SELECT 1 FROM t_alert_notify_delivery d JOIN t_notify_channel c ON c.id=d.channel_id
                       WHERE d.alert_no=a.alert_no AND d.delivered_at IS NULL AND d.attempts<5 AND c.enabled=true))
                 ORDER BY first_time LIMIT 20
                 """);
         for (Map<String, Object> a : missed) {
-            onAlert((String) a.get("alert_no"), (String) a.get("agent_id"),
-                    (String) a.get("event_type"), ((Number) a.get("severity")).intValue(),
-                    (String) a.get("title"), String.valueOf(a.get("action_taken")));
+            onAlert((String) a.get("alert_no"));
         }
     }
 

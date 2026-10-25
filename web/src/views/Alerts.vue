@@ -14,6 +14,7 @@
       <el-table-column label="类型" width="130"><template #default="{ row }"><span class="mono">{{ row.type }}</span></template></el-table-column>
       <el-table-column label="内容" min-width="260"><template #default="{ row }">
         {{ row.text }}
+        <el-tag v-if="row.legacySeverity" size="small" type="info">历史等级，沿用旧含义</el-tag>
         <el-button v-if="row.detail?.attribution?.source === 'windows_kernel_file_etw'" link type="primary" size="small" @click="evidence = row">查看归因证据</el-button>
       </template></el-table-column>
       <el-table-column prop="host" label="主机" width="130" />
