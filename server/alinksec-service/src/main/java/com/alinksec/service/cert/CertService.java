@@ -3,6 +3,7 @@ package com.alinksec.service.cert;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
@@ -172,6 +173,7 @@ public class CertService {
         X500Name subject = new X500Name("CN=" + agentId + ", O=ALinkSec, OU=Agent");
         JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
                 caCert, newSerial(), notBefore(), notAfter(props.getServer().getAgentCertDays()), subject, keyPair.getPublic());
+        addKeyIdentifiers(builder, keyPair.getPublic(), caCert.getPublicKey());
         // EKU clientAuth
         builder.addExtension(org.bouncycastle.asn1.x509.Extension.extendedKeyUsage, false,
                 new org.bouncycastle.asn1.x509.ExtendedKeyUsage(
@@ -193,6 +195,7 @@ public class CertService {
         X500Name subject = new X500Name("CN=ALinkSec Platform CA, O=ALinkSec");
         JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
                 subject, newSerial(), notBefore(), notAfter(3650), subject, keyPair.getPublic());
+        addKeyIdentifiers(builder, keyPair.getPublic(), keyPair.getPublic());
         builder.addExtension(org.bouncycastle.asn1.x509.Extension.basicConstraints, true,
                 new org.bouncycastle.asn1.x509.BasicConstraints(true));
         builder.addExtension(org.bouncycastle.asn1.x509.Extension.keyUsage, true,
@@ -210,6 +213,7 @@ public class CertService {
         X500Name subject = new X500Name("CN=alinksec-server, O=ALinkSec");
         JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
                 caCert, newSerial(), notBefore(), notAfter(3650), subject, keyPair.getPublic());
+        addKeyIdentifiers(builder, keyPair.getPublic(), caCert.getPublicKey());
         org.bouncycastle.asn1.x509.GeneralNames names = buildSans();
         builder.addExtension(org.bouncycastle.asn1.x509.Extension.subjectAlternativeName, false, names);
         builder.addExtension(org.bouncycastle.asn1.x509.Extension.extendedKeyUsage, false,
@@ -219,6 +223,16 @@ public class CertService {
         serverCert = new JcaX509CertificateConverter().getCertificate(builder.build(signer));
         writePem(dir.resolve("server.crt"), serverCert);
         writePem(dir.resolve("server.key"), keyPair.getPrivate());
+    }
+
+    private static void addKeyIdentifiers(JcaX509v3CertificateBuilder builder,
+                                          java.security.PublicKey subjectKey,
+                                          java.security.PublicKey issuerKey) throws Exception {
+        var extensions = new JcaX509ExtensionUtils();
+        builder.addExtension(org.bouncycastle.asn1.x509.Extension.subjectKeyIdentifier, false,
+                extensions.createSubjectKeyIdentifier(subjectKey));
+        builder.addExtension(org.bouncycastle.asn1.x509.Extension.authorityKeyIdentifier, false,
+                extensions.createAuthorityKeyIdentifier(issuerKey));
     }
 
     private void loadCa(Path dir) throws Exception {

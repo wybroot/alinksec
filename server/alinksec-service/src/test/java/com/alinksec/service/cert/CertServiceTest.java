@@ -26,10 +26,35 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class CertServiceTest {
 
     @TempDir Path temp;
+
+    @Test
+    void generatedServerAndAgentChainsPassStrictOpenSslVerification() throws Exception {
+        Path openssl = Path.of("/usr/bin/openssl");
+        assumeTrue(Files.isExecutable(openssl), "requires native OpenSSL strict certificate validation");
+        AlinkSecProperties props = initialized("strict-chain");
+        CertService service = new CertService(props);
+        service.init();
+        Path certs = Path.of(props.getServer().getCertDir());
+        Path client = certs.resolve("client.crt");
+        Files.writeString(client, service.issueClientCert("strict-agent").certPem());
+        for (var leaf : java.util.Map.of("server.crt", "sslserver", "client.crt", "sslclient").entrySet()) {
+            Process process = new ProcessBuilder(openssl.toString(), "verify", "-x509_strict",
+                    "-purpose", leaf.getValue(), "-CAfile", certs.resolve("ca.crt").toString(),
+                    certs.resolve(leaf.getKey()).toString()).redirectErrorStream(true).start();
+            try {
+                assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS), "OpenSSL verification timed out");
+                assertEquals(0, process.exitValue(), new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+            } finally {
+                process.destroyForcibly();
+            }
+        }
+    }
 
     @Test
     void rejectsMismatchedCaKeyBeforeIssuingCertificatesOrPublishingTls() throws Exception {
