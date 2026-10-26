@@ -10,7 +10,7 @@
       <div class="glow-title">主机安全态势感知中心</div>
       <div class="clock">
         <div class="time">{{ clock.time }}</div>
-        <div class="date">{{ clock.date }} {{ clock.week }} · 数据实时同步中</div>
+        <div class="date">{{ clock.date }} {{ clock.week }} · {{ loadError ? '数据更新暂不可用' : lastUpdated ? '数据已同步 ' + lastUpdated : '正在连接数据' }}</div>
       </div>
       <div class="deco-btn">
         <button type="button" @click="$router.push('/')">返回控制台</button>
@@ -51,27 +51,13 @@
         </div>
 
         <div class="panel" style="flex:1">
-          <h3>主机接入态势<span class="tail">Agent 实时接入 · 地域标注待 Agent 上报</span></h3>
-          <div ref="mapEl" class="chart"></div>
+          <h3>全球安全态势<span class="tail">地球视图 · 动态事件链路</span></h3>
+          <SecurityGlobe :events="events" :online="kpi.hosts" :total="kpi.total" />
         </div>
 
         <div class="panel" style="height:252px">
-          <h3>实时安全事件流<span class="tail">30s 轮询 · 新事件高亮</span></h3>
-          <div class="tick">
-            <table>
-              <thead><tr><th style="width:88px">时间</th><th style="width:74px">级别</th><th style="width:150px">类型</th><th>内容</th><th style="width:130px">主机</th><th style="width:120px">响应动作</th></tr></thead>
-              <tbody>
-                <tr v-for="ev in events" :key="ev.id" :class="{ 'enter-anim': ev.fresh }">
-                  <td class="num">{{ ev.time }}</td>
-                  <td><span class="sev" :class="ev.sev">{{ sevLabel(ev.sev) }}</span></td>
-                  <td class="num">{{ ev.type }}</td>
-                  <td>{{ ev.text }}</td>
-                  <td class="num">{{ ev.host }}</td>
-                  <td class="num" style="color:#00ffa3">{{ ev.action || '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <h3>实时安全事件流<span class="tail">循环滚动 · 悬停暂停</span></h3>
+          <SecurityEventTicker :events="events" />
         </div>
       </div>
 
@@ -99,9 +85,10 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import * as echarts from 'echarts'
-import { sevLabel } from '../utils/format'
 import { useChart } from '../composables/useChart'
 import { fetchScreen } from '../api'
+import SecurityGlobe from '../components/SecurityGlobe.vue'
+import SecurityEventTicker from '../components/SecurityEventTicker.vue'
 
 const C = { cyan: '#4dd5c0', blue: '#3b8a92', green: '#72c987', red: '#ef6c62', amber: '#e4ae4f', dim: '#89aaa2' }
 const AXT = { color: '#78948d', fontSize: 11 }
@@ -118,7 +105,9 @@ const riskHosts = ref([])
 const radarRows = ref([])
 const events = ref([])
 const engines = ref([])
+const lastUpdated = ref(''), loadError = ref(false)
 let knownEventIds = new Set()
+let highlightTimer, loading = false, disposed = false
 
 // 统一登记定时器，卸载时清理
 const timers = []
@@ -132,9 +121,7 @@ const toggleFullscreen = () => {
 const fitStage = () => {
   const s = Math.min(innerWidth / 1920, innerHeight / 1080)
   stageStyle.transform = 'translate(-50%,-50%) scale(' + s + ')'
-  Object.values(chartsAlive).forEach(c => c.resize())
 }
-const chartsAlive = {}
 
 const tickClock = () => {
   const d = new Date(), p = n => (n < 10 ? '0' : '') + n
@@ -155,15 +142,24 @@ const applyScreen = (d) => {
   const freshIds = new Set(d.events.filter(ev => !knownEventIds.has(ev.id)).map(ev => ev.id))
   events.value = d.events.map(ev => ({ ...ev, fresh: freshIds.has(ev.id) }))
   knownEventIds = new Set(d.events.map(ev => ev.id))
-  if (freshIds.size) setTimeout(() => events.value.forEach(ev => ev.fresh = false), 900)
+  clearTimeout(highlightTimer)
+  if (freshIds.size) highlightTimer = setTimeout(() => events.value.forEach(ev => ev.fresh = false), 900)
 }
 
 const load = async () => {
+  if (loading || disposed || document.hidden) return
+  loading = true
   try {
-    applyScreen(await fetchScreen())
+    const data = await fetchScreen()
+    if (disposed) return
+    applyScreen(data)
     gauge.render(); pie.render(); trend.render(); risk.render(); radar.render()
-  } catch (e) { /* 后端暂不可达时保持上次数据 */ }
+    lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    loadError.value = false
+  } catch (e) { if (!disposed) loadError.value = true /* 后端暂不可达时保持上次数据 */ }
+  finally { loading = false }
 }
+const resumeData = () => { if (!document.hidden) load() }
 
 /* ---- 图表 ---- */
 const gaugeEl = ref(null)
@@ -266,55 +262,25 @@ const radar = useChart(radarEl, () => {
   }
 })
 
-// 地图（china.json 加载失败不影响其余面板；地域标注待 Agent 上报归属地后启用）
-const mapEl = ref(null)
-const initMap = async () => {
-  try {
-    const r = await fetch(import.meta.env.BASE_URL + 'china.json')
-    echarts.registerMap('china', await r.json())
-  } catch (e) { return }
-  if (!mapEl.value) return
-  const chart = echarts.init(mapEl.value)
-  chartsAlive.map = chart
-  const renderMap = () => chart.setOption({
-    geo: {
-      map: 'china', roam: false, zoom: 1.18, center: [104.5, 36],
-      itemStyle: { areaColor: '#11342e', borderColor: '#38655a', borderWidth: 1, shadowColor: 'rgba(77, 213, 192, .16)', shadowBlur: 12 },
-      emphasis: { disabled: true }, select: { disabled: true }, label: { show: false }
-    },
-    graphic: [
-      { type: 'text', left: 'center', top: '36%', style: { text: `${kpi.hosts} / ${kpi.total}`, fill: '#e8f6ff', fontSize: 30, fontWeight: 700, fontFamily: 'Consolas', align: 'center' } },
-      { type: 'text', left: 'center', top: '43%', style: { text: '在线 Agent / 接入总数', fill: C.dim, fontSize: 13, align: 'center' } },
-      { type: 'text', left: 'center', top: '47%', style: { text: `防护开启 ${kpi.protectOn} 台 · 接入率 ${kpi.coverage}%`, fill: '#a7ccc2', fontSize: 14, align: 'center' } },
-    ]
-  })
-  renderMap()
-  addTimer(renderMap, 30000)
-}
-
 onMounted(() => {
-  chartsAlive.gauge = gauge.chart.value
-  chartsAlive.pie = pie.chart.value
-  chartsAlive.trend = trend.chart.value
-  chartsAlive.risk = risk.chart.value
-  chartsAlive.radar = radar.chart.value
-
   fitStage()
   tickClock()
   addTimer(tickClock, 1000)
-  initMap()
 
   // 真实数据首次加载 + 30s 轮询
   load()
   addTimer(load, 30000)
 
   window.addEventListener('resize', fitStage)
+  document.addEventListener('visibilitychange', resumeData)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   timers.forEach(clearInterval)
+  clearTimeout(highlightTimer)
   window.removeEventListener('resize', fitStage)
-  Object.values(chartsAlive).forEach(c => c && c.dispose())
+  document.removeEventListener('visibilitychange', resumeData)
 })
 </script>
 
@@ -354,9 +320,6 @@ onBeforeUnmount(() => {
 .kpi:nth-child(2) { border-top-color: #ef6c62; }.kpi:nth-child(3) { border-top-color: #e4ae4f; }.kpi:nth-child(4) { border-top-color: #72c987; }
 .kpi .v { font-family: Consolas, Menlo, monospace; font-size: 39px; font-weight: 700; line-height: 1; color: #68d7c4; }.kpi .v.red { color: #ef7b70; }.kpi .v.green { color: #83d594; }.kpi .v.amber { color: #e8b45b; }
 .kpi .l { color: #a7c1ba; font-size: 13px; letter-spacing: 1px; }.kpi .delta { color: #78978e; font-size: 11px; }.kpi .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: #48bca9; opacity: .55; }
-.tick { flex: 1; min-height: 0; overflow: hidden; position: relative; }.tick table { width: 100%; border-collapse: collapse; font-size: 13px; }.tick th { position: sticky; top: 0; background: #102f28; color: #91b5aa; font-size: 11px; font-weight: 600; padding: 7px 8px; text-align: left; letter-spacing: 1px; }.tick td { padding: 8px; border-bottom: 1px solid rgba(107, 154, 141, .16); color: #d9e8e3; }.tick tbody tr:hover { background: rgba(92, 191, 169, .05); }.tick .num { font-family: Consolas, Menlo, monospace; color: #a9c9c0; }
-.sev { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }.sev.critical { color: #ff958b; border: 1px solid rgba(239, 108, 98, .55); background: rgba(239, 108, 98, .10); }.sev.high { color: #f0c46f; border: 1px solid rgba(228, 174, 79, .55); background: rgba(228, 174, 79, .10); }.sev.medium { color: #7de2d0; border: 1px solid rgba(77, 213, 192, .45); background: rgba(77, 213, 192, .08); }.sev.low { color: #a9c9c0; border: 1px solid rgba(169, 201, 192, .35); }
-.enter-anim { animation: slideIn .5s ease; } @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 .engines { display: flex; flex-direction: column; gap: 11px; overflow: hidden; }.eng { display: flex; flex-direction: column; gap: 6px; }.eng .row { display: flex; align-items: center; font-size: 13px; }.eng .row b { color: #d9e8e3; font-weight: 600; width: 88px; }.eng .row .st { margin-left: auto; color: #7bd294; font-size: 11px; }.eng .row .st.off { color: #ef7b70; }.eng .track { height: 5px; background: #183b33; border-radius: 3px; overflow: hidden; }.eng .fill { height: 100%; border-radius: 3px; background: #4bbca9; transition: width .8s; }
 .foot-note { position: absolute; left: 0; right: 0; bottom: 4px; color: #52746b; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
 </style>
