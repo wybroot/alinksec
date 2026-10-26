@@ -14,6 +14,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
+    @Test void componentDiagnosticsRequireAdminEvenForEncodedMatchedPaths() throws Exception {
+        for (String role:new String[]{"admin","operator","viewer"}) {
+            var req=request(role);req.setRequestURI("/api/%73ystem;ignored/health");
+            req.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,"/api/system/health");
+            var response=new MockHttpServletResponse();
+            assertEquals(role.equals("admin"),interceptor().preHandle(req,response,new Object()));
+            if (!role.equals("admin")) assertEquals(403,response.getStatus());
+        }
+        var response=new MockHttpServletResponse();
+        assertFalse(interceptor().preHandle(new MockHttpServletRequest("GET","/api/system/health"),response,new Object()));
+        assertEquals(401,response.getStatus());
+    }
     @Test void reportReadSaveAndAdminSchedulePermissionsUseMatchedRoutes() throws Exception {
         for(String role:new String[]{"admin","operator","viewer"}) {
             for(String path:new String[]{"/api/reports/preview","/api/reports/compliance.xlsx","/api/reports/snapshots/{id}/export.html","/api/reports/schedules"}) {

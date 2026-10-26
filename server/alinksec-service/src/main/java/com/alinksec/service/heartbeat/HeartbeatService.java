@@ -39,11 +39,12 @@ public class HeartbeatService {
     private final com.alinksec.service.virus.ClamavService clamav;
     private final com.alinksec.service.virus.YaraService yara;
     private final JdbcTemplate jdbc;
+    private final HostRuntimeService hostRuntime;
 
     public HeartbeatService(AgentRepository agentRepository, CommandService commandService,
                             AlinkSecProperties props, PolicyStoreService policyStore,
                             VirusDbService virusDbService, com.alinksec.service.protect.WindowsLoginService windowsLogin,
-                            com.alinksec.service.protect.FileWatchService fileWatch, com.alinksec.service.virus.ClamavService clamav, com.alinksec.service.virus.YaraService yara, JdbcTemplate jdbc) {
+                            com.alinksec.service.protect.FileWatchService fileWatch, com.alinksec.service.virus.ClamavService clamav, com.alinksec.service.virus.YaraService yara, JdbcTemplate jdbc, HostRuntimeService hostRuntime) {
         this.agentRepository = agentRepository;
         this.commandService = commandService;
         this.props = props;
@@ -54,6 +55,7 @@ public class HeartbeatService {
         this.clamav = clamav;
         this.yara = yara;
         this.jdbc = jdbc;
+        this.hostRuntime=hostRuntime;
     }
 
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
@@ -72,6 +74,7 @@ public class HeartbeatService {
         clamav.heartbeat(agentId,hb);
         yara.heartbeat(agentId,hb);
         com.alinksec.service.baseline.ScapReadiness.heartbeat(jdbc,agentId,hb);
+        hostRuntime.heartbeat(agentId,hb);
 
         String current = policyStore.currentVersion();
         if (!current.equals(hb.getPolicyVersion())) {

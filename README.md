@@ -2,6 +2,8 @@
 
 # 🛡️ ALinkSec
 
+Current `develop` maintenance adds host hardware/boot/disk details, heartbeat performance and administrator component health. It is unreleased and comprehensive field acceptance is tracked separately. See [maintenance and acceptance](docs/83-主机详情与组件健康及全量验收.md).
+
 ### Unified Host Security & Operations
 
 **Know your hosts. Find the risks. Take action with confidence.**

@@ -79,6 +79,12 @@ public class HostsController {
         return ApiResult.ok(query.ports(agentId));
     }
 
+    @GetMapping("/{agentId}/runtime")
+    public ApiResult<Map<String,Object>> runtime(@PathVariable String agentId) {
+        if (query.detail(agentId)==null) return ApiResult.error(20007,"Agent 不存在");
+        return ApiResult.ok(query.runtime(agentId));
+    }
+
     @GetMapping("/{agentId}/processes")
     public ApiResult<List<Map<String, Object>>> processes(@PathVariable String agentId) {
         return ApiResult.ok(query.processes(agentId));

@@ -64,33 +64,79 @@
         :total="total" :page-size="pageSize" @current-change="loadHosts" /></div>
   </div>
 
-  <!-- 主机详情抽屉 -->
-  <el-drawer v-model="drawer" :title="curHost.host" size="min(480px, 100vw)">
-    <template v-if="curHost.host">
-      <el-descriptions :column="1" border size="small">
-        <el-descriptions-item label="IP">{{ curHost.ip }}</el-descriptions-item>
-        <el-descriptions-item label="操作系统">{{ curHost.os }} · {{ curHost.arch }}</el-descriptions-item>
-        <el-descriptions-item label="Agent 版本">{{ curHost.ver }}（策略 v20260820）</el-descriptions-item>
-        <el-descriptions-item label="隔离保护">{{ curHost.isolationContract === 1 ? '管理通道失联 10 秒后自动解除' : '当前 Agent 不支持安全隔离，请升级并使用原生服务' }}</el-descriptions-item>
-        <el-descriptions-item v-if="curHost.isolationError" label="隔离说明">{{ curHost.isolationError }}</el-descriptions-item>
-        <el-descriptions-item label="状态">连接 {{ hostStatusLabel(curHost.connectionStatus) }} · 隔离 {{ hostStatusLabel(curHost.isolationStatus) }} · 心跳 {{ curHost.hb }}</el-descriptions-item>
-      </el-descriptions>
-      <div class="panel" style="margin-top:14px;box-shadow:none;border:1px solid #eef2f7">
-        <h4>近 1h CPU / 内存</h4><div ref="miniEl" style="height:180px"></div>
+  <el-drawer v-model="drawer" size="min(1120px, 96vw)" class="host-detail-drawer" destroy-on-close
+    @opened="renderMiniChart(runtime)" @closed="disposeChart">
+    <template #header>
+      <div class="detail-heading"><span class="detail-kicker">主机详情</span><h2>{{ curHost.host }}</h2>
+        <div class="detail-identity"><span class="mono">{{ curHost.ip }}</span><el-tag size="small" :type="hostTagType(curHost.connectionStatus)">{{ hostStatusLabel(curHost.connectionStatus) }}</el-tag>
+          <el-tag size="small" :type="hostTagType(curHost.isolationStatus)">{{ hostStatusLabel(curHost.isolationStatus) }}</el-tag></div>
       </div>
-      <div class="panel" style="margin-top:14px;box-shadow:none;border:1px solid #eef2f7">
-        <h4>本机待处置</h4>
-        <p style="font-size:12px;line-height:2">
-          待处置安全告警 {{ curHost.alertCount || 0 }} 条<br />
-          最近事件：{{ curHost.lastEvt || '无' }}</p>
+    </template>
+    <div v-if="curHost.agentId" class="host-detail" v-loading="detailLoading">
+      <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" show-icon />
+      <div class="detail-actions">
+        <span class="hint">{{ runtimeFresh ? '性能采样正常' : '性能采样暂缺或已过期' }} · {{ formatDate(latest.sampled_at) }}</span>
+        <el-button :loading="detailLoading" @click="refreshDetail">刷新详情</el-button>
+        <el-button :loading="busyAction === 'collect'" @click="doCollect">立即采集</el-button>
+        <el-button :loading="busyAction === 'scan'" @click="doQuickScan">病毒快扫</el-button>
+        <el-button type="danger" v-if="canIsolate(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, true)">隔离主机</el-button>
+        <el-button type="success" v-if="canRestore(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, false)">解除隔离</el-button>
       </div>
-      <div style="display:flex;gap:10px;margin-top:14px">
-        <el-button size="small" :loading="busyAction === 'collect'" @click="doCollect">立即采集</el-button>
-        <el-button size="small" :loading="busyAction === 'scan'" @click="doQuickScan">病毒快扫</el-button>
-        <el-button size="small" type="danger" v-if="canIsolate(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, true)">隔离主机</el-button>
-        <el-button size="small" type="success" v-if="canRestore(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, false)">解除隔离</el-button>
+      <div class="host-stat-grid">
+        <div class="host-stat"><span>CPU 使用率</span><strong>{{ percentText(latest.cpu_percent) }}</strong><small>{{ hardware.logical_cpus ? hardware.logical_cpus + ' 个逻辑处理器' : '等待硬件信息' }}</small></div>
+        <div class="host-stat"><span>内存使用率</span><strong>{{ percentText(latest.memory_percent) }}</strong><small>总容量 {{ bytesText(hardware.memory_total_bytes) }}</small></div>
+        <div class="host-stat"><span>连续运行时间</span><strong class="uptime-value">{{ durationText(latest.uptime_sec) }}</strong><small>开机 {{ formatDate(hardware.boot_time_sec ? hardware.boot_time_sec * 1000 : null) }}</small></div>
+        <div class="host-stat"><span>待处置安全告警</span><strong>{{ curHost.alertCount || 0 }}</strong><small>{{ curHost.lastEvt || '暂无安全事件' }}</small></div>
       </div>
-      <section class="container-assets">
+      <el-tabs v-model="detailTab" class="host-detail-tabs" @tab-change="resizeChart">
+        <el-tab-pane label="主机概览" name="overview">
+          <div class="detail-overview-grid">
+            <section class="detail-section"><h3>系统与硬件</h3>
+              <dl class="host-info-grid">
+                <div><dt>操作系统</dt><dd>{{ curHost.os }}</dd></div>
+                <div><dt>内核版本</dt><dd class="mono">{{ hostInfo.kernel || '未上报' }}</dd></div>
+                <div><dt>CPU 型号</dt><dd>{{ hardware.cpu_model || '未上报，请更新 Agent 并等待心跳' }}</dd></div>
+                <div><dt>处理器架构</dt><dd>{{ hostInfo.arch || curHost.arch }}</dd></div>
+                <div><dt>物理核心 / 逻辑处理器</dt><dd>{{ hardware.physical_cores || '—' }} / {{ hardware.logical_cpus || '—' }}</dd></div>
+                <div><dt>物理内存</dt><dd>{{ bytesText(hardware.memory_total_bytes) }}</dd></div>
+                <div><dt>开机时间</dt><dd>{{ formatDate(hardware.boot_time_sec ? hardware.boot_time_sec * 1000 : null) }}</dd></div>
+                <div><dt>系统时区</dt><dd>{{ hardware.timezone || '未上报' }}</dd></div>
+                <div><dt>虚拟化</dt><dd>{{ [hardware.virtualization_system, hardware.virtualization_role].filter(Boolean).join(' / ') || '未上报' }}</dd></div>
+                <div><dt>硬件信息更新时间</dt><dd>{{ formatDate(latest.host_info_at) }}</dd></div>
+              </dl>
+            </section>
+            <section class="detail-section"><h3>接入与防护</h3>
+              <dl class="host-info-grid">
+                <div class="full-width"><dt>Agent ID</dt><dd class="mono">{{ curHost.agentId }}</dd></div>
+                <div><dt>Agent 版本</dt><dd>{{ hostInfo.agent_version || curHost.ver }}</dd></div>
+                <div><dt>策略版本</dt><dd>{{ hostInfo.policy_version || '未上报' }}</dd></div>
+                <div><dt>首次接入</dt><dd>{{ formatDate(hostInfo.created_at) }}</dd></div>
+                <div><dt>最近心跳</dt><dd>{{ formatDate(hostInfo.last_heartbeat) }}</dd></div>
+                <div class="full-width"><dt>IP 地址</dt><dd class="mono">{{ (hardware.ip_list || []).join(' · ') || curHost.ip }}</dd></div>
+                <div class="full-width"><dt>MAC 地址</dt><dd class="mono">{{ (hardware.mac_list || []).join(' · ') || '未上报' }}</dd></div>
+                <div class="full-width"><dt>隔离保护</dt><dd>{{ curHost.isolationContract === 1 ? '管理通道失联 10 秒后自动解除' : '当前 Agent 不支持安全隔离，请升级并使用原生服务' }}</dd></div>
+                <div v-if="curHost.isolationError" class="full-width"><dt>隔离说明</dt><dd>{{ curHost.isolationError }}</dd></div>
+              </dl>
+            </section>
+          </div>
+          <section class="detail-section performance-section"><div class="section-title"><h3>近一小时 CPU / 内存</h3><span class="hint">每分钟保留最近一次心跳采样 · 每 15 秒刷新</span></div>
+            <el-alert v-if="runtimeError" :title="runtimeError" type="warning" :closable="false" />
+            <div ref="miniEl" class="host-performance-chart"></div>
+            <p v-if="!hasMetricSamples" class="hint">暂无有效性能采样，等待 Agent 上报；缺失值不会显示为 0%。</p>
+          </section>
+          <section class="detail-section"><h3>磁盘与文件系统</h3>
+            <el-table v-if="hostInfo.disks?.length" :data="hostInfo.disks" size="small">
+              <el-table-column prop="mount" label="挂载点" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="fs_type" label="文件系统" width="110" />
+              <el-table-column label="已用 / 总容量" min-width="180"><template #default="{ row }">{{ bytesText(row.used_bytes) }} / {{ bytesText(row.total_bytes) }}</template></el-table-column>
+              <el-table-column label="使用率" min-width="160"><template #default="{ row }"><el-progress :percentage="Math.min(100, Math.round(row.used_bytes / row.total_bytes * 100))" :stroke-width="8" /></template></el-table-column>
+              <el-table-column label="采集时间" min-width="170"><template #default="{ row }">{{ formatDate(row.updated_at) }}</template></el-table-column>
+            </el-table>
+            <el-empty v-else :image-size="48" description="暂无磁盘清单，请立即采集" />
+          </section>
+        </el-tab-pane>
+        <el-tab-pane label="软件清单" name="software">
+          <section class="container-assets">
         <h4>软件清单</h4>
         <el-alert :type="softwareInventory.software_collection_status === 'complete' ? 'info' : 'warning'"
           :title="inventoryStatusLabel" :closable="false" />
@@ -109,7 +155,9 @@
         <el-empty v-if="!software.length" :image-size="48"
           :description="softwareInventory.software_collection_status === 'complete' ? '完整采集结果为空' : '暂无可用软件清单'" />
       </section>
-      <section class="container-assets">
+        </el-tab-pane>
+        <el-tab-pane label="容器与工作负载" name="containers">
+          <section class="container-assets">
         <h4>本机容器与工作负载 <span>{{ containers.length }}</span></h4>
         <el-table v-if="containers.length" :data="containers" size="small" max-height="220">
           <el-table-column prop="name" label="容器" min-width="110" show-overflow-tooltip />
@@ -123,7 +171,9 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未发现本机 Docker 容器或 K8s 工作负载" />
       </section>
-      <section class="container-assets">
+        </el-tab-pane>
+        <el-tab-pane label="进程" name="processes">
+          <section class="container-assets">
         <h4>本机进程 <span>{{ processes.length }}</span></h4>
         <el-table v-if="processes.length" :data="processes" size="small" max-height="220">
           <el-table-column prop="pid" label="PID" width="76" />
@@ -139,7 +189,9 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未采集到本机进程" />
       </section>
-      <section class="container-assets">
+        </el-tab-pane>
+        <el-tab-pane label="监听端口" name="ports">
+          <section class="container-assets">
         <h4>监听端口 <span>{{ ports.length }}</span></h4>
         <el-table v-if="ports.length" :data="ports" size="small" max-height="180">
           <el-table-column prop="protocol" label="协议" width="76" />
@@ -149,7 +201,9 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未发现监听端口" />
       </section>
-      <section class="container-assets">
+        </el-tab-pane>
+        <el-tab-pane label="风险账户" name="accounts">
+          <section class="container-assets">
         <h4>高风险账户 <span>{{ riskyAccounts.length }}</span></h4>
         <el-table v-if="riskyAccounts.length" :data="riskyAccounts" size="small" max-height="180">
           <el-table-column prop="name" label="账户" min-width="110" show-overflow-tooltip />
@@ -161,7 +215,9 @@
         </el-table>
         <el-empty v-else :image-size="48" description="未发现高风险账户" />
       </section>
-    </template>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
   </el-drawer>
 </template>
 
@@ -172,6 +228,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import { fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
+import { metricPoints, percentText, bytesText, durationText, formatDate } from '../utils/host-detail'
 
 const router = useRouter()
 
@@ -186,6 +243,20 @@ const total = ref(0)
 const loading = ref(false)
 const drawer = ref(false)
 const curHost = reactive({})
+const hostInfo = ref({})
+const detailTab = ref('overview')
+const detailLoading = ref(false)
+const detailError = ref('')
+const runtime = ref({})
+const runtimeError = ref('')
+const now = ref(Date.now())
+const latest = computed(() => runtime.value.latest || {})
+const hardware = computed(() => latest.value.host || {})
+const runtimeFresh = computed(() => !runtimeError.value && curHost.connectionStatus === 'online' && latest.value.sampled_at && now.value - Number(latest.value.sampled_at) < 90000)
+const hasMetricSamples = computed(() => {
+  const points = metricPoints(runtime.value)
+  return [...points.cpu, ...points.mem].some(value => value !== null)
+})
 const containers = ref([])
 const processes = ref([])
 const ports = ref([])
@@ -208,24 +279,24 @@ const riskReasons = row => {
 }
 const miniEl = ref(null)
 let miniChart = null
-
-const metricPoints = (metrics = {}) => {
-  const values = result => new Map((result?.[0]?.values || []).map(([ts, value]) => [Number(ts), Number(value)]))
-  const cpu = values(metrics.cpu)
-  const mem = values(metrics.mem)
-  const timestamps = [...new Set([...cpu.keys(), ...mem.keys()])].sort((a, b) => a - b)
-  return {
-    labels: timestamps.map(ts => new Date(ts * 1000).toTimeString().slice(0, 5)),
-    cpu: timestamps.map(ts => cpu.has(ts) ? Math.round(cpu.get(ts)) : null),
-    mem: timestamps.map(ts => mem.has(ts) ? Math.round(mem.get(ts)) : null),
-  }
+let chartObserver
+const disposeChart = () => {
+  chartObserver?.disconnect()
+  chartObserver = null
+  miniChart?.dispose()
+  miniChart = null
 }
+const resizeChart = () => nextTick(() => miniChart?.resize())
 
 const renderMiniChart = (metrics) => {
   const points = metricPoints(metrics)
   nextTick(() => {
-    if (!miniEl.value) return
-    if (!miniChart) miniChart = echarts.init(miniEl.value)
+    if (!drawer.value || !miniEl.value) return
+    if (!miniChart) {
+      miniChart = echarts.init(miniEl.value)
+      chartObserver = new ResizeObserver(() => miniChart?.resize())
+      chartObserver.observe(miniEl.value)
+    }
     miniChart.setOption({
       grid: { left: 34, right: 10, top: 24, bottom: 22 },
       tooltip: { trigger: 'axis' },
@@ -233,8 +304,8 @@ const renderMiniChart = (metrics) => {
       xAxis: { type: 'category', data: points.labels, ...AX },
       yAxis: { type: 'value', max: 100, ...AX },
       series: [
-        { name: 'CPU %', type: 'line', smooth: true, showSymbol: false, data: points.cpu, lineStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,.18)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } } },
-        { name: '内存 %', type: 'line', smooth: true, showSymbol: false, data: points.mem, lineStyle: { color: '#06b6d4' } },
+        { name: 'CPU %', type: 'line', connectNulls: false, symbolSize: 5, data: points.cpu, lineStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,.18)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } } },
+        { name: '内存 %', type: 'line', connectNulls: false, symbolSize: 5, data: points.mem, lineStyle: { color: '#06b6d4' } },
       ]
     }, true)
   })
@@ -304,8 +375,18 @@ const armUninstall = async row => {
   }
 }
 
-const openHost = async row => {
+let detailVersion = 0
+let runtimeVersion = 0
+const openHost = row => {
+  detailVersion++
+  runtimeVersion++
+  for (const key of Object.keys(curHost)) delete curHost[key]
   Object.assign(curHost, row)
+  hostInfo.value = {}
+  runtime.value = {}
+  runtimeError.value = ''
+  detailError.value = ''
+  detailTab.value = 'overview'
   containers.value = []
   processes.value = []
   ports.value = []
@@ -313,26 +394,45 @@ const openHost = async row => {
   software.value = []
   softwareInventory.value = {}
   drawer.value = true
-  renderMiniChart()
+  renderMiniChart({})
+  refreshDetail()
+}
+const refreshRuntime = async () => {
+  const version = ++runtimeVersion, agentId = curHost.agentId
+  now.value = Date.now()
   try {
-    const data = await fetchHostDetail(row.agentId)
-    if (curHost.agentId !== row.agentId) return
+    const metrics = await fetchHostMetrics(agentId)
+    if (version !== runtimeVersion || !drawer.value || curHost.agentId !== agentId) return
+    runtime.value = metrics
+    runtimeError.value = ''
+    renderMiniChart(metrics)
+  } catch (e) {
+    if (version === runtimeVersion && drawer.value) runtimeError.value = e?.message || '性能数据加载失败'
+  }
+}
+const refreshDetail = async () => {
+  const version = ++detailVersion, agentId = curHost.agentId
+  detailLoading.value = true
+  const performance = refreshRuntime()
+  try {
+    const data = await fetchHostDetail(agentId)
+    if (version !== detailVersion || !drawer.value || curHost.agentId !== agentId) return
     containers.value = data.containers || []
     processes.value = data.processes || []
     ports.value = data.ports || []
     riskyAccounts.value = (data.accounts || []).filter(account => account.risky)
     software.value = data.software || []
     softwareInventory.value = data.detail || {}
+    hostInfo.value = data.detail || {}
+    detailError.value = ''
   } catch (e) {
-    ElMessage({ message: e?.message || '主机资产加载失败', type: 'error' })
-  }
-  try {
-    const metrics = await fetchHostMetrics(row.agentId)
-    if (curHost.agentId === row.agentId) renderMiniChart(metrics)
-  } catch (e) {
-    console.warn('主机指标加载失败', e)
+    if (version === detailVersion && drawer.value) detailError.value = e?.message || '主机资产加载失败'
+  } finally {
+    if (version === detailVersion) detailLoading.value = false
+    await performance
   }
 }
+watch(drawer, value => { if (!value) { detailVersion++; runtimeVersion++; detailLoading.value = false } })
 
 // 隔离 / 解除隔离：CmdProtectAction.ISOLATE_HOST / RESTORE_ISOLATION（本机状态与认证往返确认后生效）
 const isolate = async (row, toIsolated) => {
@@ -401,7 +501,12 @@ const newInstallToken = async () => {
 }
 
 let isolationRefreshTimer
+let runtimeRefreshTimer
 onMounted(async () => {
+  runtimeRefreshTimer = setInterval(() => {
+    now.value = Date.now()
+    if (drawer.value && !detailLoading.value && document.visibilityState === 'visible') refreshRuntime()
+  }, 15000)
   isolationRefreshTimer = setInterval(() => {
     if (!hostRequestPending && !busyIsolation.value && document.visibilityState === 'visible') loadHosts(true)
   }, 3000)
@@ -410,5 +515,42 @@ onMounted(async () => {
     fetchGroups().then(value => { groups.value = value }),
   ])
 })
-onBeforeUnmount(() => { clearInterval(isolationRefreshTimer); clearTimeout(queryTimer); loadVersion++ })
+onBeforeUnmount(() => { clearInterval(runtimeRefreshTimer); clearInterval(isolationRefreshTimer); clearTimeout(queryTimer); loadVersion++; detailVersion++; runtimeVersion++; disposeChart() })
 </script>
+
+<style scoped>
+.detail-heading { min-width: 0; }
+.detail-kicker { color: #64748b; font-size: 12px; }
+.detail-heading h2 { margin: 5px 0 10px; font-size: 23px; overflow-wrap: anywhere; }
+.detail-identity, .detail-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.detail-actions { margin-bottom: 20px; }
+.detail-actions .hint { margin-right: auto; }
+.detail-actions .el-button { margin-left: 0; }
+.host-stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+.host-stat { border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; padding: 16px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.host-stat > span { color: #64748b; font-size: 13px; }
+.host-stat strong { font-size: 27px; color: #0f172a; font-weight: 650; }
+.host-stat strong.uptime-value { font-size: 19px; line-height: 32px; }
+.host-stat small { font-size: 12px; color: #64748b; overflow-wrap: anywhere; }
+.detail-overview-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.detail-section { border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin-bottom: 16px; min-width: 0; }
+.detail-section h3 { font-size: 15px; margin: 0 0 16px; color: #0f172a; }
+.host-info-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 0; gap: 18px 16px; }
+.host-info-grid > div { min-width: 0; }
+.host-info-grid .full-width { grid-column: 1 / -1; }
+.host-info-grid dt { color: #64748b; font-size: 12px; margin-bottom: 6px; }
+.host-info-grid dd { margin: 0; color: #1e293b; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.hint { color: #64748b; font-size: 12px; line-height: 1.6; }
+.host-performance-chart { height: 250px; width: 100%; }
+.host-detail-tabs { min-width: 0; }
+.container-assets h4 { margin: 16px 0; }
+@media (max-width: 760px) {
+  .host-stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .detail-overview-grid { grid-template-columns: 1fr; gap: 0; }
+  .detail-section { padding: 14px; }
+  .host-stat { padding: 12px; }
+  .host-stat strong { font-size: 24px; }
+}
+@media (max-width: 420px) { .host-info-grid { grid-template-columns: 1fr; } }
+</style>

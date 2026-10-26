@@ -1,6 +1,7 @@
 <template>
   <div class="panel">
     <el-tabs v-model="tab">
+      <el-tab-pane v-if="isAdmin" label="组件健康" name="health" lazy><ComponentHealthPanel v-if="tab === 'health'" /></el-tab-pane>
       <!-- ============ Agent 升级 ============ -->
       <el-tab-pane label="Agent 升级" name="upgrade">
         <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
@@ -116,12 +117,13 @@ import { onMounted, ref } from 'vue'
 import ReportPanel from '../components/ReportPanel.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
 import ClusterPanel from '../components/ClusterPanel.vue'
+import ComponentHealthPanel from '../components/ComponentHealthPanel.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
 
-const tab = ref('upgrade')
 const busy = ref(false)
 const isAdmin = getUser()?.role === 'admin'
+const tab = ref('upgrade')
 
 /* ---- 升级 ---- */
 const packages = ref([])

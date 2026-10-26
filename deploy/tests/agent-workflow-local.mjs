@@ -174,6 +174,25 @@ async function makeAgent(label, machineId = randomUUID().replaceAll('-', '')) {
   assert.equal(inventory.distro_version, process.env.ALINKSEC_SMOKE_AGENT_DISTRO_VERSION || '24.04')
   assert.equal(inventory.software_inventory_source, 'dpkg')
   assert.equal(inventory.package_repair_contract, 2)
+  // Exercise the real Agent -> heartbeat -> SQL -> REST path with VM disabled.
+  // An absent measurement must never be accepted as a fabricated idle value.
+  let runtime
+  await until(async () => {
+    runtime = await api(`/api/hosts/${id}/runtime`)
+    return runtime.latest.cpu_percent != null && runtime.latest.memory_percent != null
+  }, 'Actual Agent did not report valid performance samples')
+  assert.equal(runtime.source, 'heartbeat')
+  assert.ok(runtime.latest.cpu_percent >= 0 && runtime.latest.cpu_percent <= 100)
+  assert.ok(runtime.latest.memory_percent >= 0 && runtime.latest.memory_percent <= 100)
+  assert.ok(runtime.latest.host.cpu_model)
+  assert.ok(runtime.latest.host.logical_cpus > 0)
+  assert.ok(runtime.latest.host.memory_total_bytes > 0)
+  assert.ok(runtime.latest.host.boot_time_sec > 0)
+  assert.ok(runtime.latest.uptime_sec > 0)
+  assert.ok(runtime.samples.length > 0 && runtime.samples.length <= 60)
+  assert.ok(inventory.kernel)
+  assert.ok(inventory.disks.length > 0)
+  writeFileSync(join(dir, 'host-runtime.json'), JSON.stringify({ runtime, disks: inventory.disks }, null, 2) + '\n')
   const initial = sql("SELECT version,architecture,source FROM t_asset_software WHERE agent_id=? AND name='alinksec-smoke-package'", id)
   if(process.env.ALINKSEC_SMOKE_DETECTION_ONLY!=='true')
     assert.deepEqual(initial.map(row => ({ ...row })), [{ version: '1.0', architecture: 'all', source: 'dpkg' }])

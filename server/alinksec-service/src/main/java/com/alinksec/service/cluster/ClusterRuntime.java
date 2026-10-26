@@ -110,7 +110,7 @@ public class ClusterRuntime {
         try {
             var digest=MessageDigest.getInstance("SHA-256");
             Map<String,Object> values=new TreeMap<>();
-            values.put("compatibility","alinksec-0.0.2-schema34-cluster1");
+            values.put("compatibility","alinksec-0.0.4-schema37-cluster1");
             values.put("deployment",properties.getDeploymentId());
             values.put("shared",root.toString());
             values.put("publicHost",app.getServer().getPublicHost());

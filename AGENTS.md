@@ -28,6 +28,12 @@
 
 # Module development workflow
 
+- Current maintenance work uses only `main` and `develop`. Implement and validate
+  the host detail and component health improvements on `develop`; keep them there
+  for browser review. Do not automatically merge this maintenance batch into
+  `main` or publish a release. This user instruction supersedes the older module
+  merge workflow below for the current batch.
+
 - Run independent CI jobs in parallel on separate GitHub runners when GitHub
   capacity permits. Do not apply this machine's serial validation limits across
   independent CI runners. Keep checks that share ports, containers or state
@@ -62,8 +68,11 @@
   documentation corpus when updating a release: current commands and defaults
   must agree with source, while historical dates, commits, failures and test
   counts keep their original scope. The complete index is `docs/README.md`.
-- Field acceptance for backlog items 25/26/27 remains deferred by the user;
-  item 28 is not applicable to the current fresh-deployment scope. A software
-  release must not relabel those field checks as passed.
+- The user resumed comprehensive field acceptance on 2026-10-26. Validate every
+  function and explicitly track items 25/26/27 that require other operating
+  systems, private external services or the full host count and duration. Missing
+  environments and unexecuted cases must remain pending. Item 28 remains outside
+  the current fresh-deployment scope. CI and component health do not by themselves
+  establish complete field acceptance.
 - Keep earlier published tags/assets intact. A new version uses its own exact
   main CI, tested native Agents, image manifests and checksums.

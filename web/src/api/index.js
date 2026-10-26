@@ -307,13 +307,10 @@ async function fetchMetricsQueryRange(query, start, end, step) {
 }
 
 export async function fetchHostMetrics(agentId) {
-  const label = JSON.stringify(String(agentId))
-  const [cpu, mem] = await Promise.all([
-    fetchMetricsRange(`alinksec_cpu_usage{agent_id=${label}}`, '1m', 1),
-    fetchMetricsRange(`100 * alinksec_mem_used_bytes{agent_id=${label}} / alinksec_mem_total_bytes{agent_id=${label}}`, '1m', 1),
-  ])
-  return { cpu, mem }
+  return get(`/api/hosts/${encodeURIComponent(agentId)}/runtime`)
 }
+
+export const fetchSystemHealth = () => get('/api/system/health')
 
 /* ---------------- 安全大屏 ---------------- */
 

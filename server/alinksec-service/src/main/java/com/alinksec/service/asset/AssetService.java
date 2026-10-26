@@ -42,6 +42,18 @@ public class AssetService {
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
         Set<String> collected = new HashSet<>(snapshot.getCollectedList());
         boolean legacyFullSnapshot = collected.isEmpty();
+        if (legacyFullSnapshot || collected.contains("disks")) {
+            jdbc.update("DELETE FROM t_asset_disk WHERE agent_id=?",agentId);
+            for (var disk:snapshot.getDisksList()) {
+                if (disk.getMount().isBlank() || disk.getMount().length()>1024 || disk.getFsType().length()>128
+                        || disk.getTotalBytes()<=0 || disk.getUsedBytes()<0 || disk.getUsedBytes()>disk.getTotalBytes()) continue;
+                jdbc.update("""
+                        INSERT INTO t_asset_disk(agent_id,mount,fs_type,total_bytes,used_bytes) VALUES(?,?,?,?,?)
+                        ON CONFLICT(agent_id,mount) DO UPDATE SET fs_type=EXCLUDED.fs_type,
+                        total_bytes=EXCLUDED.total_bytes,used_bytes=EXCLUDED.used_bytes,updated_at=CURRENT_TIMESTAMP
+                        """,agentId,disk.getMount(),disk.getFsType(),disk.getTotalBytes(),disk.getUsedBytes());
+            }
+        }
         boolean replaceSoftware = (legacyFullSnapshot || collected.contains("software"))
                 && recordSoftwareAttempt(agentId, snapshot);
         if (replaceSoftware) {

@@ -596,6 +596,18 @@ jobs:
       - name: Check software inventory identity and incomplete collection in the production web bundle
         working-directory: web
         run: node test/software-inventory-browser.mjs
+      - name: Check host details and component diagnostics on desktop and mobile
+        working-directory: web
+        run: node test/host-detail-browser.mjs
+      - name: Retain host detail and component diagnostics screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-detail-browser-${{ matrix.arch }}
+          path: .tmp/host-detail-browser
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check rule provenance, backport declarations and unsafe historical references in the production web bundle
         working-directory: web
         run: node test/vulnerability-provenance-browser.mjs
@@ -1439,8 +1451,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "36"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "102"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "37"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "105"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"

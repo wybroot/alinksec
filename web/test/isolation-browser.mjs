@@ -42,7 +42,7 @@ try{
     else if(req.method()==='GET'&&path===`/api/hosts/${fixture.agent}`) data=fixture.stages[stage].list.find(h=>h.agent_id===fixture.agent)
     else if(req.method()==='GET'&&new RegExp(`^/api/hosts/${fixture.agent}/(ports|processes|accounts|containers)$`).test(path)) data=[]
     else if(req.method()==='GET'&&path===`/api/hosts/${fixture.agent}/software`) data={list:[],total:0}
-    else if(req.method()==='GET'&&path==='/api/metrics/query_range') data=[]
+    else if(req.method()==='GET'&&path===`/api/hosts/${fixture.agent}/runtime`) data={latest:{},samples:[],serverTime:Date.now(),source:'heartbeat'}
     else if(req.method()==='POST'&&path===`/api/hosts/${fixture.agent}/isolate`){
       writes.push(path);stage='isolating';data={cmdId:'isolate-1',isolationStatus:'isolating'}
     }else if(req.method()==='POST'&&path===`/api/hosts/${fixture.agent}/unisolate`){
@@ -86,9 +86,9 @@ try{
   await page.locator('.el-select').first().click()
   await page.getByRole('option',{name:'已隔离',exact:true}).click()
   await host().getByRole('button',{name:'详情',exact:true}).click()
-  await expect(drawer.getByText(/隔离 已隔离/)).toBeVisible()
+  await expect(drawer.locator('.detail-identity').getByText('已隔离',{exact:true})).toBeVisible()
   stage='restored'
-  await expect(drawer.getByText(/隔离 未隔离/)).toBeVisible()
+  await expect(drawer.locator('.detail-identity').getByText('未隔离',{exact:true})).toBeVisible()
   await expect(drawer.getByText('管理通道未在 10 秒内完成认证确认，已自动恢复网络',{exact:true})).toBeVisible()
   scenarios.push('filtered-away host detail receives the fresh restored state')
   await drawer.locator('.el-drawer__close-btn').click()

@@ -41,7 +41,7 @@ try {
     else if (path === '/api/hosts/inventory-host') data = { ...host, ...inventory }
     else if (path === '/api/hosts/inventory-host/software') data = software
     else if (/^\/api\/hosts\/inventory-host\/(ports|processes|accounts|containers)$/.test(path)) data = []
-    else if (path === '/api/metrics/query_range') data = []
+    else if (path === '/api/hosts/inventory-host/runtime') data = { latest: {}, samples: [], serverTime: Date.now(), source: 'heartbeat' }
     else if (path === '/api/vuln/findings') data = new URL(route.request().url()).searchParams.has('status') ? { list: [{ ...findings[0], status: 3, cve_id: 'CVE-2099-1999', observed_at: '2026-10-13 00:00:00' }], total: 1 } : { list: findings, total: findings.length }
     else if (path === '/api/vuln/coverage') data = { list: [coverageHost()], total: 1, limitation: '没有漏洞结果不代表安全；人工来源按整条 CVE 选择，不合并其他来源范围。' }
     else if (path === '/api/vuln/coverage/inventory-host/packages') data = { host: coverageHost(), total: 3, list: ['affected', 'unknown', 'no_applicable_rules'].map((status, i) => ({ software: 'coverage-fixture-' + i, installed_version: '1.0', source: 'dpkg', architecture: 'amd64', status, affected_cves: i === 0 ? 1 : 0, not_affected_cves: 0, unknown_cves: i === 1 ? 1 : 0, evidence: JSON.stringify({ examples: i === 1 ? [{ cve_id: 'CVE-2099-9999', assessment: 'unknown', reason: 'historical_rule', rule_source_id: '', rule_digest: '' }] : [] }) })) }
@@ -71,6 +71,7 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/hosts`)
     await page.getByRole('button', { name: '详情', exact: true }).click()
     const drawer = page.locator('.el-drawer')
+    await drawer.getByRole('tab', { name: '软件清单', exact: true }).click()
     await expect(drawer.getByText(label, { exact: true })).toBeVisible()
     if (['complete', 'failed'].includes(status)) {
       await expect(drawer.getByRole('cell', { name: 'amd64', exact: true })).toBeVisible()

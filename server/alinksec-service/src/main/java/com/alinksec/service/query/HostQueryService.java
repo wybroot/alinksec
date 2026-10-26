@@ -84,7 +84,9 @@ public class HostQueryService {
         if (rows.isEmpty()) {
             return null;
         }
-        return rows.get(0);
+        var result=rows.get(0);
+        result.put("disks",jdbc.queryForList("SELECT mount,fs_type,total_bytes,used_bytes,updated_at FROM t_asset_disk WHERE agent_id=? ORDER BY mount",agentId));
+        return result;
     }
 
     public List<Map<String, Object>> groups() {
@@ -94,6 +96,10 @@ public class HostQueryService {
                 LEFT JOIN t_agent a ON a.group_id = g.id AND a.status <> 4
                 GROUP BY g.id, g.name ORDER BY g.id
                 """);
+    }
+
+    public Map<String,Object> runtime(String agentId) {
+        return new com.alinksec.service.heartbeat.HostRuntimeService(jdbc).snapshot(agentId);
     }
 
     public List<Map<String, Object>> software(String agentId, String keyword, int page, int size) {

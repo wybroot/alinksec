@@ -95,6 +95,39 @@ class AgentChannelSecurityIntegrationTest {
 
     private final List<ManagedChannel> channels = new ArrayList<>();
 
+    @Test
+    void authenticatedHeartbeatAndDiskFactsPersistOnBothDatabaseProfiles() throws Exception {
+        var owner = enroll(); var other = enroll();
+        Stream stream = connect(owner);
+        long boot = System.currentTimeMillis() / 1000 - 1234;
+        stream.requests.onNext(report(owner.getAgentId()).setAsset(RptAssetSnapshot.newBuilder()
+                .addCollected("disks").addDisks(com.alinksec.proto.DiskInfo.newBuilder()
+                        .setMount("/").setFsType("ext4").setTotalBytes(1000).setUsedBytes(400))).build());
+        var measured = RptHeartbeat.newBuilder().setAgentVersion("runtime-profile-test")
+                .setPolicyVersion(policy.currentVersion()).setCpuUsage(0).setCpuUsageValid(true)
+                .setMemUsage(37.5f).setMemUsageValid(true).setUptimeSec(1234)
+                .setHost(HostInfo.newBuilder().setHostname("runtime-host").setKernel("runtime-kernel")
+                        .setCpuModel("runtime-cpu").setLogicalCpus(4).setPhysicalCores(2)
+                        .setMemoryTotalBytes(8L << 30).setBootTimeSec(boot));
+        stream.requests.onNext(report(owner.getAgentId()).setHeartbeat(measured).build());
+        await(() -> jdbc.queryForObject("SELECT COUNT(*) FROM t_host_runtime WHERE agent_id=? AND cpu_percent=0",
+                Integer.class, owner.getAgentId()) == 1);
+        var runtime = new com.alinksec.service.heartbeat.HostRuntimeService(jdbc).snapshot(owner.getAgentId());
+        var latest = (Map<?, ?>) runtime.get("latest");
+        assertEquals(0, ((Number) latest.get("cpu_percent")).doubleValue());
+        assertEquals(37.5, ((Number) latest.get("memory_percent")).doubleValue());
+        assertEquals("runtime-cpu", ((com.fasterxml.jackson.databind.JsonNode) latest.get("host")).path("cpu_model").asText());
+        assertEquals(boot, ((com.fasterxml.jackson.databind.JsonNode) latest.get("host")).path("boot_time_sec").asLong());
+        assertEquals("runtime-kernel", jdbc.queryForObject("SELECT kernel FROM t_agent WHERE agent_id=?", String.class, owner.getAgentId()));
+        assertEquals(400, jdbc.queryForObject("SELECT used_bytes FROM t_asset_disk WHERE agent_id=?", Long.class, owner.getAgentId()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_host_runtime WHERE agent_id=?", Integer.class, other.getAgentId()));
+        stream.requests.onNext(report(owner.getAgentId()).setHeartbeat(measured.setMemUsage(42.5f)).build());
+        await(() -> jdbc.queryForObject("SELECT COUNT(*) FROM t_host_runtime WHERE agent_id=? AND memory_percent=42.5",
+                Integer.class, owner.getAgentId()) == 1);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_host_metric WHERE agent_id=? AND bucket=(SELECT sampled_at/60000*60000 FROM t_host_runtime WHERE agent_id=?)",
+                Integer.class, owner.getAgentId(), owner.getAgentId()));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"baseline", "scan"})
     void resourceBusyReceiptFinishesOnlyTheOwnedActiveBulkTask(String kind) throws Exception {

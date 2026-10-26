@@ -32,6 +32,15 @@ message HostInfo {
   repeated string ip_list  = 7;
   repeated string mac_list = 8;
   string machine_id    = 9;   // Linux: /etc/machine-id; Windows: MachineGuid
+  string cpu_model = 10;
+  uint32 logical_cpus = 11;
+  uint32 physical_cores = 12;
+  uint64 memory_total_bytes = 13;
+  uint64 boot_time_sec = 14;   // OS boot time, UTC epoch seconds
+  string platform_family = 15;
+  string virtualization_system = 16;
+  string virtualization_role = 17;
+  string timezone = 18;
 }
 
 /* ==================== 注册服务 ==================== */
@@ -304,6 +313,9 @@ message RptHeartbeat {
   uint32 scap_contract = 23; // 1: pinned offline native SCAP interpreter and exact XCCDF outcomes
   string scap_status = 24; // bounded readiness; not a compliance certificate
   uint32 evidence_contract = 25;
+  HostInfo host = 26; // refreshed hardware/OS information; absent on legacy Agents
+  bool cpu_usage_valid = 27; // distinguish unavailable from measured 0%
+  bool mem_usage_valid = 28;
 }
 
 message RptIsolationState {

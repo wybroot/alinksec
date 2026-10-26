@@ -121,6 +121,10 @@
 - [v0.0.4 发布说明](releases/v0.0.4.md)
 - [全量文档核对与封版范围](82-v0.0.4文档核对与封版范围.md)
 
+## develop 维护与全量真机验收
+
+- [主机详情、组件健康及全量验收要求](83-主机详情与组件健康及全量验收.md)：未发布维护批次，开发只在 develop；全量现场验收尚不能由历史 CI 或短时可用性替代。
+
 ## 当前实现依据
 
 - [协议](../proto/agent.proto)、[应用配置](../server/alinksec-bootstrap/src/main/resources/application.yml)、[数据库迁移](../deploy/migrations)。

@@ -197,6 +197,28 @@ test(`${mode}: health, authentication and JWT access`, async () => {
   await ok('/api/hosts', { token: tokens.admin })
 })
 
+test(`${mode}: component diagnostics require admin; runtime preserves absent measurements`, async () => {
+  assert.equal((await request('/api/system/health')).status, 401)
+  for (const role of ['operator', 'viewer']) {
+    assert.equal((await request('/api/system/health', { token: tokens[role] })).status, 403)
+  }
+  const health = await ok('/api/system/health', { token: tokens.admin })
+  assert.ok(['healthy', 'degraded', 'down'].includes(health.status))
+  assert.equal(health.components.length, 9)
+  assert.equal(new Set(health.components.map(row => row.id)).size, 9)
+  assert.ok(health.components.every(row => ['healthy', 'degraded', 'down', 'disabled'].includes(row.status)))
+  assert.ok(Date.parse(health.checkedAt) > 0)
+  for (const role of ['admin', 'operator', 'viewer']) {
+    const runtime = await ok('/api/hosts/ci-smoke-001/runtime', { token: tokens[role] })
+    assert.equal(runtime.source, 'heartbeat')
+    assert.deepEqual(runtime.samples, [])
+    assert.equal(runtime.latest.cpu_percent, undefined)
+    assert.equal(runtime.latest.memory_percent, undefined)
+  }
+  assert.equal((await request('/api/hosts/ci-smoke-001/runtime')).status, 401)
+  assert.notEqual((await request('/api/hosts/ci-smoke-missing/runtime', { token: tokens.admin })).body.code, 0)
+})
+
 test(`${mode}: host pagination, filters and durable isolation state`, async () => {
   const options = { token: tokens.admin }
   const first = await ok('/api/hosts?keyword=ci-smoke-&size=100&page=1', options)
