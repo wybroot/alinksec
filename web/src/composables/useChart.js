@@ -5,15 +5,16 @@ import { onBeforeUnmount, onMounted, shallowRef } from 'vue'
 /**
  * @param elRef 模板 ref
  * @param optionFactory 返回 ECharts option 的函数（render 时求值）
+ * @param setOptionOptions ECharts 更新选项，例如完整替换动态分类图
  * @returns { chart, render, resize }
  */
-export function useChart(elRef, optionFactory) {
+export function useChart(elRef, optionFactory, setOptionOptions) {
   const chart = shallowRef(null)
 
   const render = () => {
     if (!elRef.value) return
     if (!chart.value) chart.value = echarts.init(elRef.value)
-    chart.value.setOption(optionFactory())
+    chart.value.setOption(optionFactory(), setOptionOptions)
   }
   const resize = () => chart.value && chart.value.resize()
 

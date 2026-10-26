@@ -18,11 +18,11 @@ const alerts = Array.from({ length: 20 }, (_, index) => ({ id: 100 - index, seve
   count: 1, hostname: 'acceptance-host', agent_id: 'screen-fixture', action_taken: index % 2 ? 'alert_only' : 'blocked',
   last_time: '2026-10-26T12:30:00Z' }))
 const responses = capture || {
-  '/api/dashboard/summary': { hosts: { online: 8, total: 10 }, alerts: { open: 12, bySeverity: [{ severity: 4, count: 4 }, { severity: 3, count: 8 }] }, virus: { findings30d: 9 }, baseline: { avgScore: 87, hostsChecked: 8 } },
+  '/api/dashboard/summary': { hosts: { online: 8, total: 10, protectOn: 6 }, alerts: { open: 12, bySeverity: [{ severity: 4, count: 4 }, { severity: 3, count: 8 }] }, virus: { findings30d: 9 }, baseline: { avgScore: 87, hostsChecked: 8 } },
   '/api/dashboard/screen-trend': [{ date: '10-26', virus: 4, blocked: 9 }],
   '/api/dashboard/event-distribution': [], '/api/dashboard/baseline-categories': [{ category: '身份鉴别', pass_rate: 87 }],
   '/api/dashboard/top-hosts': [{ hostname: 'acceptance-host', agent_id: 'screen-fixture', alert_count: 12 }],
-  '/api/alerts': { list: alerts, total: alerts.length }, '/api/protect/engines': [{ key: 'file', name: '文件防护' }],
+  '/api/alerts': { list: alerts, total: alerts.length }, '/api/protect/engines': [{ key: 'file', name: '文件防护', desc: '按实际规则检测文件变更', builtin: true }],
   '/api/protect/status': [{ agent_id: 'screen-fixture', protect_enabled: true }],
   '/api/dashboard/screen-situation': { providerStatus: 'configured', events: alerts.map((alert, index) => ({ id: alert.id,
     source: { ip: ['login_crack','sql_injection','web_attack'].includes(alert.event_type) ? alert.detail.source_ip : '', location: [1,4,7].includes(index)
@@ -46,7 +46,7 @@ const server = createServer((req, res) => {
 await new Promise(done => server.listen(0, '127.0.0.1', done))
 const origin = (process.env.ALINKSEC_SCREEN_BASE || `http://127.0.0.1:${server.address().port}`).replace(/\/$/, '')
 const checks = [], errors = [], unexpected = []
-let page, empty = false, failed = false, geoFailed = false
+let page, empty = false, failed = false, geoFailed = false, noBaseline = false
 try {
   await context.route('**/api/**', route => {
     const request = route.request(), path = new URL(request.url()).pathname
@@ -57,6 +57,8 @@ try {
     if (geoFailed && path === '/api/dashboard/screen-situation') return route.fulfill({ status: 503, json: { code: 50300 } })
     if (!(path in responses)) { unexpected.push(path); return route.fulfill({ status: 500, json: { code: 50000 } }) }
     if (failed) return route.fulfill({ status: 503, json: { code: 50300, msg: '暂不可用' } })
+    if (noBaseline && path === '/api/dashboard/summary') return route.fulfill({ json: { code: 0, data: { ...responses[path], baseline: {} } } })
+    if (noBaseline && path === '/api/dashboard/baseline-categories') return route.fulfill({ json: { code: 0, data: [] } })
     const data = empty && path === '/api/alerts' ? { list: [], total: 0 } : empty && path === '/api/dashboard/screen-situation' ? { providerStatus: 'configured', events: [] } : responses[path]
     return route.fulfill({ json: { code: 0, data } })
   })
@@ -70,6 +72,12 @@ try {
   const routeCount = capture ? 0 : 3
   await expect(globe).toHaveAttribute('aria-label', new RegExp(`${routeCount} 条可定位网络链路`))
   await expect(page.getByRole('complementary', { name: '真实事件归属与证据' })).toBeVisible()
+  await expect(page.locator('.engines')).not.toContainText('运行中')
+  await expect(page.locator('.engines .track')).toHaveCount(0)
+  await expect(page.getByText('各主机实际状态请查看防护与覆盖页面', { exact: true })).toBeVisible()
+  await expect(page.locator('.kpis')).not.toContainText('自动处置')
+  await expect(page.getByRole('heading', { name: /告警级别分布/ })).toContainText('全部待处置告警')
+  checks.push('capabilities_and_response_records_do_not_claim_engine_runtime_or_automatic_blocking')
   if (capture) {
     await expect(page.getByText('暂无带来源 IP 的网络告警', { exact: true })).toBeVisible()
     if (responses['/api/dashboard/screen-situation'].providerInfo?.providers?.some(p => p.id === 'offline' && p.status === 'configured')) {
@@ -162,6 +170,12 @@ try {
     assert.equal(await ticker.evaluate(el => getComputedStyle(el).overflowY), 'auto')
   }
   checks.push('reduced_motion_freezes_globe_and_preserves_manual_event_scrolling')
+  noBaseline = true; await page.reload()
+  await expect(page.locator('.clock')).toContainText('数据已同步')
+  await expect(page.getByRole('img', { name: '暂无基线评分', exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: '暂无已完成任务的分类结果', exact: true })).toBeVisible()
+  checks.push('missing_baseline_results_stay_unknown_without_zero_scores_or_invented_categories')
+  noBaseline = false
   empty = true; await page.reload()
   await expect(page.locator('.clock')).toContainText('数据已同步')
   await expect(page.getByText('暂无安全事件，正在持续监测', { exact: true })).toBeVisible()

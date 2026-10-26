@@ -316,7 +316,7 @@ export const fetchSystemHealth = () => get('/api/system/health')
 /* ---------------- 安全大屏 ---------------- */
 
 export async function fetchScreen() {
-  const [summary, trend, sevDist, categories, topHosts, alerts, engines, status, situation] = await Promise.all([
+  const [summary, trend, sevDist, categories, topHosts, alerts, engines, situation] = await Promise.all([
     get('/api/dashboard/summary'),
     get('/api/dashboard/screen-trend?days=7'),
     get('/api/dashboard/event-distribution'),
@@ -324,7 +324,6 @@ export async function fetchScreen() {
     get('/api/dashboard/top-hosts?limit=5'),
     get('/api/alerts?page=1&size=20'),
     get('/api/protect/engines'),
-    get('/api/protect/status'),
     get('/api/dashboard/screen-situation').catch(() => ({ providerStatus: 'unavailable', events: [] })),
   ])
   const s = summary || {}
@@ -370,19 +369,17 @@ export async function fetchScreen() {
     time: fmtTime(a.last_time),
   }))
 
-  const protectOn = (status || []).filter((a) => a.protect_enabled).length
   const total = Number(s.hosts?.total ?? 0)
   return {
     kpi: {
       hosts: Number(s.hosts?.online ?? 0),
       total,
       coverage: total ? Math.round((Number(s.hosts?.online ?? 0) / total) * 100) : 0,
-      protectOn,
+      protectOn: Number(s.hosts?.protectOn ?? 0),
       pending: Number(s.alerts?.open ?? 0),
       crit: critical,
       high: sevMap[3] ?? 0,
       virus: Number(s.virus?.findings30d ?? 0),
-      rtHit: (alerts?.list || []).filter((a) => a.action_taken).length,
       compliance: s.baseline?.avgScore != null ? Math.round(Number(s.baseline.avgScore)) : null,
       hostsChecked: Number(s.baseline?.hostsChecked ?? 0),
     },
@@ -394,7 +391,7 @@ export async function fetchScreen() {
     events,
     providerStatus: situation?.providerStatus || 'unavailable',
     providerInfo: situation?.providerInfo || null,
-    engines: (engines || []).map((e) => ({ key: e.key, name: e.name, desc: e.desc })),
+    engines: (engines || []).map((e) => ({ key: e.key, name: e.name, desc: e.desc, builtin: e.builtin === true })),
   }
 }
 
