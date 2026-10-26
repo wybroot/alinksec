@@ -42,6 +42,7 @@ try {
     if (path === `/api/hosts/${host.agent_id}/runtime`) return runtimeFailure ? route.fulfill({ status: 503, json: { code: 50300, msg: '性能读取暂不可用' } }) : ok(runtime)
     if (new RegExp(`^/api/hosts/${host.agent_id}/(software|ports|processes|accounts|containers)$`).test(path)) return ok(capture?.assets?.[path.split('/').at(-1)] || [])
     if (['/api/upgrade/packages', '/api/upgrade/versions', '/api/notify/channels'].includes(path)) return ok([])
+    if (path === '/api/audit/logs') return ok({ list: [], total: 0 })
     if (path === '/api/system/health') return healthFailure ? route.fulfill({ status: 503, json: { code: 50300, msg: '健康检测暂不可用' } }) : ok(health)
     unexpected.push(path); return route.fulfill({ status: 500, json: { code: 50000, msg: 'Unexpected request' } })
   })
@@ -93,6 +94,6 @@ try {
     await expect(page.getByRole('tab', { name: '组件健康', exact: true })).toHaveCount(0)
   }
   checks.push('health_management_is_hidden_from_non_admin_roles')
-  assert.deepEqual(errors, []); assert.deepEqual(unexpected, [])
+  assert.deepEqual(unexpected, []); assert.deepEqual(errors, [])
   writeFileSync(resolve(output, 'result.json'), JSON.stringify({ passed: true, input: capture ? 'actual_private_preview_readonly_rest_capture' : 'explicit_boundary_fixture', checks, screenshots, errors, unexpected }, null, 2) + '\n')
 } finally { if (browser) await browser.close(); await new Promise(done => server.close(done)) }
