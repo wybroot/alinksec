@@ -41,7 +41,7 @@ public class AlertQueryService {
         Long total = jdbc.queryForObject(
                 "SELECT count(*) FROM v_alert_severity t" + cond, Long.class);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT t.id, t.alert_no, t.agent_id, a.hostname, t.event_type, t.severity, t.severity_source, t.severity_level, t.title,
+                SELECT t.id, t.alert_no, t.agent_id, a.hostname, a.ip AS host_ip, t.event_type, t.severity, t.severity_source, t.severity_level, t.title,
                        CAST(t.detail AS TEXT) AS detail, t.action_taken, t.status, t.count,
                        t.first_time, t.last_time, t.handle_remark, t.handled_at
                 FROM v_alert_severity t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond

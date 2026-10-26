@@ -1,0 +1,16 @@
+# Copy to the server data directory as geoip.yml. Supply actual asset locations;
+# a private IP has no public geographic position. Never commit the token file.
+alinksec:
+  geoip:
+    provider: offline # Full manufacturer MMDB, downloaded separately.
+    database-file: /app/data/geoip.mmdb
+    # Set fallback-provider: ipip to query licensed IPIP only when offline data is unavailable.
+    # Set provider: ipip to use IPIP directly instead.
+    fallback-provider: disabled
+    token-file: /app/data/geoip.token
+    assets: {}
+    # assets:
+    #   actual-agent-id:
+    #     latitude: <actual latitude>
+    #     longitude: <actual longitude>
+    #     label: <actual site or datacenter>

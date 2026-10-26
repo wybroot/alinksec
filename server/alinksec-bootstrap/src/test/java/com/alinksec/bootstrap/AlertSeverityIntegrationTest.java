@@ -3,6 +3,9 @@ package com.alinksec.bootstrap;
 import com.alinksec.common.util.JsonUtils;
 import com.alinksec.proto.RptSecurityEvent;
 import com.alinksec.service.alert.SecurityEventService;
+import com.alinksec.service.geo.GeoIpProperties;
+import com.alinksec.service.geo.GeoIpService;
+import com.alinksec.service.geo.ScreenSituationService;
 import com.alinksec.service.notify.NotifyService;
 import com.alinksec.service.query.*;
 import com.alinksec.service.report.*;
@@ -111,5 +114,37 @@ class AlertSeverityIntegrationTest {
             assertEquals(2,f.jdbc.queryForObject("SELECT attempts FROM t_alert_notify_delivery WHERE alert_no=?",Integer.class,high));
             assertEquals(0,f.jdbc.queryForObject("SELECT COUNT(*) FROM t_alert_notify_delivery WHERE alert_no=? AND channel_id=?",Integer.class,high,channels.get(1)));
         }finally{http.stop(0);}
+    }
+
+    @Test void geographicSnapshotKeepsObservedLoginSourceAndDatabaseHostIdentity() {
+        f.jdbc.update("UPDATE t_agent SET ip='10.20.30.40' WHERE agent_id=?",agent);
+        events.onEvent(agent,RptSecurityEvent.newBuilder().setType("login_crack").setRuleId("geo-login")
+                .setSeverityValue(4).setDetail("{\"source_ip\":\"192.168.2.8\",\"hostname\":\"untrusted\"}").build());
+        var query=new AlertQueryService(f.jdbc);
+        var row=rows(query.list(null,null,agent,null,1,20).get("list")).getFirst();
+        assertEquals("10.20.30.40",row.get("host_ip")); assertEquals("等级验收主机",row.get("hostname"));
+        try(var geo=new GeoIpService(new GeoIpProperties())) {
+            var data=new ScreenSituationService(query,geo).snapshot();
+            var event=rows(data.get("events")).stream().filter(e->n(e,"id")==n(row,"id")).findFirst().orElseThrow();
+            var source=(Map<?,?>)event.get("source");var target=(Map<?,?>)event.get("target");
+            assertEquals("192.168.2.8",source.get("ip")); assertEquals("non_public_ip",((Map<?,?>)source.get("location")).get("status"));
+            assertEquals(agent,target.get("agentId"));assertEquals("10.20.30.40",target.get("ip"));
+            assertFalse(((Map<?,?>)target.get("location")).containsKey("latitude"));
+        }
+    }
+    @Test void webAttackAggregationKeepsDifferentAttackSourcesSeparate() {
+        for (String type : List.of("web_attack", "sql_injection", "xss")) {
+            for (String ip : List.of("192.168.2.8", "192.168.2.9", "192.168.2.8")) {
+                events.onEvent(agent,RptSecurityEvent.newBuilder().setType(type).setRuleId("web-"+type).setSeverityValue(4)
+                        .setDetail("{\"source_ip\":\""+ip+"\",\"request\":\"GET /example\"}").build());
+            }
+            var actual=f.jdbc.queryForList("SELECT detail, count FROM t_alert WHERE agent_id=? AND event_type=?", agent, type);
+            assertEquals(2,actual.size());
+            assertEquals(3,actual.stream().mapToInt(r->((Number)r.get("count")).intValue()).sum());
+        }
+        try(var geo=new GeoIpService(new GeoIpProperties())) {
+            var snapshot=new ScreenSituationService(new AlertQueryService(f.jdbc),geo).snapshot();
+            assertEquals(6,rows(snapshot.get("events")).stream().filter(e->Boolean.TRUE.equals(e.get("network"))).count());
+        }
     }
 }

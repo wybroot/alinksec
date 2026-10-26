@@ -7,6 +7,7 @@ spring:
     import:
       - optional:file:${ALINKSEC_LIBRARY_CONFIG:./data/libraries.yml}
       - optional:file:${ALINKSEC_BASELINE_UPSTREAM_CONFIG:./data/baseline-upstreams.yml}
+      - optional:file:${ALINKSEC_GEOIP_CONFIG:./data/geoip.yml}
   servlet:
     multipart:
       max-file-size: 500MB
@@ -17,6 +18,11 @@ server:
   port: 8080   # M2 REST API 占位
 
 alinksec:
+  geoip:
+    provider: ${ALINKSEC_GEOIP_PROVIDER:offline}
+    database-file: ${ALINKSEC_GEOIP_DATABASE_FILE:./data/geoip.mmdb}
+    fallback-provider: ${ALINKSEC_GEOIP_FALLBACK_PROVIDER:disabled}
+    token-file: ${ALINKSEC_GEOIP_TOKEN_FILE:}
   cluster:
     enabled: ${ALINKSEC_CLUSTER_ENABLED:false}
     deployment-id: ${ALINKSEC_CLUSTER_DEPLOYMENT_ID:}

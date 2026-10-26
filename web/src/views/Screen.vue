@@ -51,8 +51,8 @@
         </div>
 
         <div class="panel" style="flex:1">
-          <h3>全球安全态势<span class="tail">地球视图 · 动态事件链路</span></h3>
-          <SecurityGlobe :events="events" :online="kpi.hosts" :total="kpi.total" />
+          <h3>安全事件地理态势<span class="tail">来源与资产定位 · 真实事件归属</span></h3>
+          <SecurityGlobe :events="events" :ready="!!lastUpdated" :stale="loadError" :provider-status="providerStatus" :provider-info="providerInfo" />
         </div>
 
         <div class="panel" style="height:252px">
@@ -106,6 +106,8 @@ const radarRows = ref([])
 const events = ref([])
 const engines = ref([])
 const lastUpdated = ref(''), loadError = ref(false)
+const providerStatus = ref('unavailable')
+const providerInfo = ref(null)
 let knownEventIds = new Set()
 let highlightTimer, loading = false, disposed = false
 
@@ -141,6 +143,8 @@ const applyScreen = (d) => {
   // 事件流：新出现的 id 高亮
   const freshIds = new Set(d.events.filter(ev => !knownEventIds.has(ev.id)).map(ev => ev.id))
   events.value = d.events.map(ev => ({ ...ev, fresh: freshIds.has(ev.id) }))
+  providerStatus.value = d.providerStatus
+  providerInfo.value = d.providerInfo
   knownEventIds = new Set(d.events.map(ev => ev.id))
   clearTimeout(highlightTimer)
   if (freshIds.size) highlightTimer = setTimeout(() => events.value.forEach(ev => ev.fresh = false), 900)

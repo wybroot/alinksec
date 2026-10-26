@@ -28,6 +28,11 @@
 
 # Module development workflow
 
+- The user instructed on 2026-10-26 that the monitoring-screen changes must be
+  validated locally first, with CI deferred until production release. Do not
+  push changes or trigger workflows for this batch. Keep the current memory,
+  pressure and disk protection thresholds while validating locally.
+
 - Current maintenance work uses only `main` and `develop`. Implement and validate
   the host detail and component health improvements on `develop`; keep them there
   for browser review. Do not automatically merge this maintenance batch into

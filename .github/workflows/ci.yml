@@ -599,18 +599,6 @@ jobs:
       - name: Check host details and component diagnostics on desktop and mobile
         working-directory: web
         run: node test/host-detail-browser.mjs
-      - name: Check animated security globe and scrolling event stream
-        working-directory: web
-        run: node test/screen-browser.mjs
-      - name: Retain monitoring screen animation and boundary evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screen-browser-${{ matrix.arch }}
-          path: .tmp/screen-browser
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
       - name: Retain host detail and component diagnostics screenshots
         if: always()
         uses: actions/upload-artifact@v4

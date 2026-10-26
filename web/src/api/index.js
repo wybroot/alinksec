@@ -7,6 +7,7 @@
  * ===================================================================== */
 
 import { readRuleEvidence } from '../utils/vulnerabilityEvidence.js'
+import { eventEvidence } from '../utils/securitySituation.js'
 
 const TOKEN_KEY = 'alinksec_token'
 const USER_KEY = 'alinksec_user'
@@ -315,7 +316,7 @@ export const fetchSystemHealth = () => get('/api/system/health')
 /* ---------------- 安全大屏 ---------------- */
 
 export async function fetchScreen() {
-  const [summary, trend, sevDist, categories, topHosts, alerts, engines, status] = await Promise.all([
+  const [summary, trend, sevDist, categories, topHosts, alerts, engines, status, situation] = await Promise.all([
     get('/api/dashboard/summary'),
     get('/api/dashboard/screen-trend?days=7'),
     get('/api/dashboard/event-distribution'),
@@ -324,6 +325,7 @@ export async function fetchScreen() {
     get('/api/alerts?page=1&size=20'),
     get('/api/protect/engines'),
     get('/api/protect/status'),
+    get('/api/dashboard/screen-situation').catch(() => ({ providerStatus: 'unavailable', events: [] })),
   ])
   const s = summary || {}
   const sevMap = {}
@@ -355,7 +357,9 @@ export async function fetchScreen() {
   }))
 
   // 实时事件流
+  const locations = new Map((situation?.events || []).map(event => [event.id, event]))
   const events = (alerts?.list || []).map((a) => ({
+    ...eventEvidence(a, locations.get(a.id)),
     id: a.id,
     sev: alertSev(a),
     legacySeverity: a.severity_source === 'legacy_unclassified',
@@ -388,6 +392,8 @@ export async function fetchScreen() {
     radar,
     riskHosts,
     events,
+    providerStatus: situation?.providerStatus || 'unavailable',
+    providerInfo: situation?.providerInfo || null,
     engines: (engines || []).map((e) => ({ key: e.key, name: e.name, desc: e.desc })),
   }
 }

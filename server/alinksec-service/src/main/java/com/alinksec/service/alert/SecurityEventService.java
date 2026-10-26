@@ -76,7 +76,7 @@ public class SecurityEventService {
             case "virus" -> "恶意文件检出";
             case "decoy_tamper" -> "勒索诱饵被触碰";
             case "ransom_behavior" -> "勒索加密行为";
-            default -> "安全事件";
+            default -> SecurityEventTaxonomy.NETWORK_TYPES.getOrDefault(e.getType(), "安全事件");
         };
         return "[" + type + "] " + (e.getRuleName().isBlank() ? e.getRuleId() : e.getRuleName());
     }
@@ -110,7 +110,7 @@ public class SecurityEventService {
                 case "process" -> "process_key";
                 case "file_tamper" -> "path";
                 case "login_crack", "login_anomaly" -> "source_ip";
-                default -> "";
+                default -> SecurityEventTaxonomy.network(event.getType()) ? "source_ip" : "";
             };
             String value = key.isEmpty() ? "" : JsonUtils.read(detailJson).path(key).asText();
             return value.isBlank() ? base : base + ":" + value;
