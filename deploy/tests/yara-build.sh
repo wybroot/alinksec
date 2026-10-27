@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Optional native Agent build prerequisite. No installation or rule download is
-# performed by the running Agent. Run with one build worker on each native OS.
+# Optional native Agent build prerequisite. The running Agent never installs the
+# engine; rule updates use separately approved sources. Use one build worker.
 build_root=${1:?usage: yara-build.sh OUTPUT_DIRECTORY}
 mkdir -p "$build_root"
 build_root=$(cd "$build_root" && pwd)

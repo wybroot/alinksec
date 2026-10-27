@@ -25,14 +25,15 @@ const ioLimitRate int64 = 10 << 20
 const scanCoverage = "SHA256 of regular files <=500MiB; internal rules inspect first 2MiB of eligible files <=50MiB; symlinks, special files, virtual/container filesystems and Agent work directory excluded; archives not expanded"
 
 type Engine struct {
-	mu           sync.Mutex
-	db           *SigDB
-	whitelist    []whitelistEntry
-	log          *slog.Logger
-	policyReader func() ([]byte, error)
-	ioBudget     func(context.Context, int) error
-	clamav       *clamav.Client
-	yara         *yara.Client
+	mu             sync.Mutex
+	db             *SigDB
+	whitelist      []whitelistEntry
+	log            *slog.Logger
+	policyReader   func() ([]byte, error)
+	ioBudget       func(context.Context, int) error
+	clamav         *clamav.Client
+	yara           *yara.Client
+	realtimeIssues map[realtimeIssueKey]realtimeIssueWindow
 }
 
 func (e *Engine) SetClamAV(client *clamav.Client) { e.clamav = client }
@@ -427,28 +428,48 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 		ctx = context.WithValue(ctx, ioBudgetKey{}, e.ioBudget)
 	}
 	var s snapshot
+	var observed snapshot
 	var nativeFinding *pb.VirusFinding
 	var spent uint64
 	consume := func(scanCtx context.Context, sink io.Writer) error {
 		snap, err := readSnapshotScopedSink(scanCtx, path, 20<<20, (20<<20)-min(uint64(20<<20), spent), true, "", workDir, sink)
+		observed = snap
 		spent += snap.bytesRead
 		if snap.sum != "" {
 			s = snap
 		}
 		return err
 	}
+	var inputErr error
+	consumeObserved := func(scanCtx context.Context, sink io.Writer) error {
+		inputErr = consume(scanCtx, sink)
+		if inputErr != nil && scanCtx.Err() != nil {
+			inputErr = scanCtx.Err()
+		}
+		return inputErr
+	}
+	started := time.Now()
 	if useClamAV {
 		if version, err := e.clamav.Probe(ctx); err == nil {
-			if name, err := e.clamav.Scan(ctx, version, consume); err == nil {
+			if name, err := e.clamav.Scan(ctx, version, consumeObserved); err == nil {
 				nativeFinding = clamavFinding(path, s, name, version)
+			} else {
+				e.realtimeFailure("clamav", "scan", path, observed, spent, started, ctx, err, inputErr)
 			}
+		} else {
+			e.realtimeFailure("clamav", "probe", path, observed, spent, started, ctx, err, nil)
 		}
 	}
 	if useYARA && nativeFinding == nil && ctx.Err() == nil {
-		if version, err := e.yara.Probe(ctx); err == nil {
-			if matches, err := e.yara.Scan(ctx, version, consume); err == nil {
+		inputErr = nil
+		if version, err := e.yara.ProbeRealtime(ctx); err == nil {
+			if matches, err := e.yara.Scan(ctx, version, consumeObserved); err == nil {
 				nativeFinding = yaraFinding(path, s, matches, version)
+			} else {
+				e.realtimeFailure("yara", "scan", path, observed, spent, started, ctx, err, inputErr)
 			}
+		} else {
+			e.realtimeFailure("yara", "probe", path, observed, spent, started, ctx, err, nil)
 		}
 	}
 	// Native failures never suppress independent builtin detection from a fully
@@ -523,11 +544,17 @@ func readSnapshotScopedSink(ctx context.Context, path string, maxSize int64, bud
 	defer f.Close()
 	defer parent.Close()
 	if scope != "" && !within(parent.Name(), scope) || workDir != "" && protectedPath(filepath.Join(parent.Name(), filepath.Base(path)), workDir) {
-		return s, fmt.Errorf("opened parent escaped scan scope")
+		return s, errSnapshotScope
 	}
 	s.info, err = f.Stat()
-	if err != nil || !s.info.Mode().IsRegular() || s.info.Size() > maxSize {
-		return s, fmt.Errorf("invalid regular file")
+	if err != nil {
+		return s, err
+	}
+	if !s.info.Mode().IsRegular() {
+		return s, errSnapshotType
+	}
+	if s.info.Size() > maxSize {
+		return s, errSnapshotSize
 	}
 	h := sha256.New()
 	buf := acquireReadBuffer()
@@ -538,20 +565,26 @@ func readSnapshotScopedSink(ctx context.Context, path string, maxSize int64, bud
 		if ctx.Err() != nil {
 			return s, errScanBudget
 		}
+		// Pace the remaining pinned bytes, with a one-byte EOF probe. Charging
+		// a full buffer for a short tail or EOF needlessly consumes the deadline.
+		want := int(min(int64(len(buf)), max(int64(1), s.info.Size()-int64(s.bytesRead))))
 		wait, _ := ctx.Value(ioBudgetKey{}).(func(context.Context, int) error)
-		if wait != nil && wait(ctx, len(buf)) != nil {
+		if wait != nil && wait(ctx, want) != nil {
 			return s, errScanBudget
 		}
-		n, err := f.Read(buf)
+		n, err := f.Read(buf[:want])
 		if n > 0 {
 			s.bytesRead += uint64(n)
+			if s.bytesRead > uint64(s.info.Size()) {
+				return s, errSnapshotChanged
+			}
 			if s.bytesRead > budget || s.bytesRead > uint64(maxSize) {
 				return s, errScanBudget
 			}
 			h.Write(buf[:n])
 			if sink != nil {
 				if _, err := sink.Write(buf[:n]); err != nil {
-					return s, err
+					return s, snapshotSinkError{err}
 				}
 			}
 			if len(s.head) < ruleHeadBytes {
@@ -581,7 +614,7 @@ func readSnapshotScopedSink(ctx context.Context, path string, maxSize int64, bud
 	after, err := f.Stat()
 	current, cerr := statAt(parent, filepath.Base(path))
 	if err != nil || cerr != nil || !os.SameFile(s.info, after) || !os.SameFile(after, current) || after.Size() != s.info.Size() || uint64(after.Size()) != s.bytesRead || !after.ModTime().Equal(s.info.ModTime()) || !current.Mode().IsRegular() {
-		return s, fmt.Errorf("file changed during read")
+		return s, errSnapshotChanged
 	}
 	s.sum = hex.EncodeToString(h.Sum(nil))
 	return s, nil

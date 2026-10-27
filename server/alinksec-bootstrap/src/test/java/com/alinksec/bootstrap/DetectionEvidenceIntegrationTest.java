@@ -245,6 +245,93 @@ class DetectionEvidenceIntegrationTest {
         jdbc.update("UPDATE t_user SET status=0 WHERE id=?",actor);
         assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,scan)));
     }
+    long boundedTask(List<String> agents,VirusTaskService.ScanBudget budget,Long retry) {
+        long id=tx.execute(s->tasks.createTask("受限复核",agents,3,List.of("/tmp/missing"),actor,"builtin",budget,retry));created.add(id);return id;
+    }
+    @Test void configuredBudgetReachesCommandAndQueuedDeliveryKeepsOriginalDeadline() {
+        var budget=new VirusTaskService.ScanBudget(120,17,4096);
+        long id=boundedTask(List.of(a),budget,null);
+        Command command=commands.values().stream().filter(c->c.hasVirusScan() && c.getVirusScan().getTaskId().equals(Long.toString(id))).findFirst().orElseThrow();
+        assertEquals(120,command.getVirusScan().getTimeLimitSec());assertEquals(17,command.getVirusScan().getMaxFiles());assertEquals(4096,command.getVirusScan().getMaxTotalBytes());
+        var queued=command.toBuilder().setIssuedAt(System.currentTimeMillis()-30000).build();
+        int remaining=tx.execute(s->lifecycle.prepareDelivery(a,queued)).getVirusScan().getTimeLimitSec();
+        assertTrue(remaining>=88 && remaining<=90);
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,command.toBuilder().setIssuedAt(System.currentTimeMillis()-121000).build())));
+        Command oneSecond=command.toBuilder().setIssuedAt(System.currentTimeMillis()).setVirusScan(command.getVirusScan().toBuilder().setTimeLimitSec(1)).build();
+        assertEquals(1,tx.execute(s->lifecycle.prepareDelivery(a,oneSecond)).getVirusScan().getTimeLimitSec());
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->lifecycle.prepareDelivery(a,oneSecond.toBuilder().setIssuedAt(System.currentTimeMillis()-1100).build())));
+        assertEquals(120,JsonUtils.read((String)jdbc.queryForObject("SELECT CAST(scope AS TEXT) FROM t_virus_scan_task WHERE id=?",String.class,id)).path("time_limit_sec").asInt());
+    }
+    @Test void invalidBudgetsCannotCreateOrDispatchTasks() {
+        for(long[] b:List.of(new long[]{0,1,1},new long[]{7201,1,1},new long[]{1,0,1},new long[]{1,100001,1},new long[]{1,1,0},new long[]{1,1,(20L<<30)+1}))
+            assertThrows(IllegalArgumentException.class,()->new VirusTaskService.ScanBudget((int)b[0],(int)b[1],b[2]));
+        assertTrue(commands.isEmpty());assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_virus_scan_task",Integer.class));
+    }
+    @Test void restBudgetRequiresIntegralBoundedFieldsAndRetryId() {
+        var controller=new com.alinksec.gateway.rest.VirusController(query,tasks,actions,mock(VirusDbService.class),mock(com.alinksec.service.download.AgentDownloadTokenService.class));
+        var request=mock(jakarta.servlet.http.HttpServletRequest.class);when(request.getAttribute("uid")).thenReturn(actor);
+        var body=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.read(JsonUtils.write(Map.of("agentIds",List.of(a),"mode",3,"paths",List.of("/tmp"),"engine","builtin")));
+        for(String raw:List.of("null","{}","{\"timeLimitSec\":\"60\",\"maxFiles\":100,\"maxTotalBytes\":1024}","{\"timeLimitSec\":60.5,\"maxFiles\":100,\"maxTotalBytes\":1024}","{\"timeLimitSec\":60,\"maxFiles\":100,\"maxTotalBytes\":21474836481}")) {
+            body.set("budget",JsonUtils.read(raw));assertThrows(IllegalArgumentException.class,()->tx.execute(s->controller.createTask(body,request)));
+        }
+        body.remove("budget");body.put("retryOf","1");
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->controller.createTask(body,request)));
+        assertTrue(commands.isEmpty());
+    }
+    @Test void restTaskRouteBindsFiltersAndPaginationThroughMvc() throws Exception {
+        task(List.of(a));task(List.of(a));task(List.of(b));
+        var controller=new com.alinksec.gateway.rest.VirusController(query,tasks,actions,mock(VirusDbService.class),mock(com.alinksec.service.download.AgentDownloadTokenService.class));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/virus/tasks").param("page","2").param("size","1").param("agentId",a).param("engine","builtin").param("status","1")).andReturn().getResponse();
+        assertEquals(200,response.getStatus());
+        var body=JsonUtils.read(response.getContentAsString());assertEquals(0,body.path("code").asInt());
+        assertEquals(2,body.path("data").path("total").asInt());assertEquals(1,body.path("data").path("list").size());
+    }
+    @Test void retryPinsNewTaskAndPreservesOriginalEvidenceWhileRejectingDuplicatePendingRetry() {
+        long original=task(List.of(a,b));
+        tx.executeWithoutResult(s->results.onResult(a,report(original,false,RptVirusResult.Status.PARTIAL)));
+        tx.executeWithoutResult(s->results.onResult(b,report(original,false,RptVirusResult.Status.COMPLETE)));
+        String before=JsonUtils.write(query.taskEvidence(original));
+        var budget=new VirusTaskService.ScanBudget(60,100,1048576);
+        assertThrows(IllegalArgumentException.class,()->boundedTask(List.of(b),budget,original));
+        assertThrows(IllegalArgumentException.class,()->boundedTask(List.of(a),budget,original+99999));
+        long retry=boundedTask(List.of(a),budget,original);
+        assertThrows(IllegalArgumentException.class,()->boundedTask(List.of(a),budget,original));
+        assertEquals(original,JsonUtils.read(jdbc.queryForObject("SELECT CAST(scope AS TEXT) FROM t_virus_scan_task WHERE id=?",String.class,retry)).path("retry_of").asLong());
+        tx.executeWithoutResult(s->results.onResult(a,report(retry,false,RptVirusResult.Status.COMPLETE)));
+        assertEquals(before,JsonUtils.write(query.taskEvidence(original)));
+        assertEquals(2,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,retry));
+    }
+    @Test void retryCannotTargetPendingOrUnrelatedHostOrChangeEngine() {
+        long original=task(List.of(a));var budget=VirusTaskService.ScanBudget.defaults();
+        assertThrows(IllegalArgumentException.class,()->boundedTask(List.of(a),budget,original));
+        tx.executeWithoutResult(s->results.onResult(a,report(original,false,RptVirusResult.Status.PARTIAL)));
+        assertThrows(IllegalArgumentException.class,()->boundedTask(List.of(b),budget,original));
+        assertThrows(IllegalArgumentException.class,()->tx.execute(s->tasks.createTask("bad",List.of(a),3,List.of("/tmp"),actor,"yara",budget,original)));
+    }
+    @Test void taskFiltersAndPaginationRetainExactTotalsAndActor() {
+        long first=task(List.of(a));long second=task(List.of(b));long third=task(List.of(a,b));
+        tx.executeWithoutResult(s->results.onResult(a,report(first,false,RptVirusResult.Status.COMPLETE)));
+        var page=query.tasks(1,1,a,"builtin",1);
+        assertEquals(1L,page.get("total"));assertEquals(third,((Number)((List<Map<String,Object>>)page.get("list")).get(0).get("id")).longValue());
+        var all=query.tasks(2,1,a,"builtin",null);
+        assertEquals(2L,all.get("total"));assertEquals(first,((Number)((List<Map<String,Object>>)all.get("list")).get(0).get("id")).longValue());
+        assertNotNull(((List<Map<String,Object>>)all.get("list")).get(0).get("username"));
+        assertEquals(0L,query.tasks(1,20,a+"' OR 1=1 --",null,null).get("total"));
+        assertThrows(IllegalArgumentException.class,()->query.tasks(1,20,null,"bad",null));
+        assertThrows(IllegalArgumentException.class,()->query.tasks(1,20,null,null,9));
+    }
+    @Test void sweepExpiresShortBudgetWithoutWaitingForTwoHoursAndKeepsOtherTaskPending() {
+        long shortTask=boundedTask(List.of(a),new VirusTaskService.ScanBudget(60,100,1048576),null);
+        long normal=task(List.of(b));
+        var props=new AlinkSecProperties();props.getDatabase().setType("postgres".equals(System.getProperty("alinksec.integration.database"))?"postgres":"sqlite");
+        var cutoff=new DatabaseDialect(props).timestampBefore(java.time.Duration.ofSeconds(400));
+        for(long id:List.of(shortTask,normal))jdbc.update("UPDATE t_virus_scan_task SET created_at=? WHERE id=?",cutoff,id);
+        tx.executeWithoutResult(s->tasks.sweepTimeout());
+        assertEquals("timeout",query.taskEvidence(shortTask).get(0).get("state"));
+        assertEquals(3,jdbc.queryForObject("SELECT status FROM t_virus_scan_task WHERE id=?",Integer.class,shortTask));
+        assertEquals("pending",query.taskEvidence(normal).get(0).get("state"));
+    }
     @Test void concurrentDuplicatesRetainOneEvidenceAndExactHostProgress() throws Exception {
         long task=task(List.of(a,b)); var workers=Executors.newFixedThreadPool(2);
         try {
@@ -279,10 +366,75 @@ class DetectionEvidenceIntegrationTest {
         tx.executeWithoutResult(s->results.onResult(a,two));
         var ids=jdbc.queryForList("SELECT id FROM t_virus_finding WHERE task_id=? ORDER BY id",Long.class,task);
         var outcome=tx.execute(s->actions.act(ids,"quarantine",actor)); String command=((List<String>)outcome.get("commands")).get(0);
+        var actionIds=(List<String>)outcome.get("actionIds");
+        assertEquals(2,actionIds.size());
+        assertTrue(query.actionReceipts(actionIds).stream().allMatch(row->"pending".equals(row.get("state"))));
         receipt(command,Map.of(ids.get(0),true,ids.get(1),false),TerminalState.FAILED);
         assertEquals(1,jdbc.queryForObject("SELECT status FROM t_virus_finding WHERE id=?",Integer.class,ids.get(0)));
         assertEquals(0,jdbc.queryForObject("SELECT status FROM t_virus_finding WHERE id=?",Integer.class,ids.get(1)));
         assertEquals("succeeded",query.actionHistory(ids.get(0)).get(0).get("state")); assertEquals("failed",query.actionHistory(ids.get(1)).get(0).get("state"));
+        var receipts=query.actionReceipts(actionIds);
+        assertEquals(Set.of("succeeded","failed"),new HashSet<>(receipts.stream().map(row->row.get("state")).toList()));
+        for(var row:receipts) {
+            assertEquals(actor,((Number)row.get("actor")).longValue());
+            assertEquals(a,row.get("agent_id")); assertEquals("检测主机",row.get("hostname"));
+            assertTrue(((com.fasterxml.jackson.databind.JsonNode)row.get("request_evidence")).path("path").asText().startsWith("/tmp/"));
+        }
+        var original=JsonUtils.write(receipts);
+        tx.execute(s->actions.act(List.of(ids.get(0)),"whitelist",actor));
+        assertEquals(original,JsonUtils.write(query.actionReceipts(actionIds)),"later actions must not replace this batch's receipts");
+    }
+
+    @Test void actionReceiptLookupIsBoundedAndWhitelistReceiptsDoNotClaimFileChanges() throws Exception {
+        long task=task(List.of(a));tx.executeWithoutResult(s->results.onResult(a,report(task,true,RptVirusResult.Status.COMPLETE)));
+        long id=finding(task);
+        var outcome=tx.execute(s->actions.act(List.of(id),"whitelist",actor));
+        var ids=(List<String>)outcome.get("actionIds");assertEquals(1,ids.size());
+        assertEquals("committed",query.actionReceipts(ids).get(0).get("state"));
+        assertNull(query.actionReceipts(ids).get(0).get("receipt"));
+        assertEquals(0,jdbc.queryForObject("SELECT status FROM t_virus_finding WHERE id=?",Integer.class,id));
+        for(var invalid:List.of(List.<String>of(),List.of(ids.get(0),ids.get(0)),List.of("' OR 1=1 --"),java.util.stream.IntStream.range(0,33).mapToObj(i->UUID.randomUUID().toString()).toList()))
+            assertThrows(IllegalArgumentException.class,()->query.actionReceipts(invalid));
+        assertTrue(query.actionReceipts(List.of(UUID.randomUUID().toString())).isEmpty());
+        var controller=new com.alinksec.gateway.rest.VirusController(query,tasks,actions,mock(VirusDbService.class),mock(com.alinksec.service.download.AgentDownloadTokenService.class));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/virus/findings/actions/receipts").param("ids",String.join(",",ids))).andReturn().getResponse();
+        assertEquals(200,response.getStatus());assertEquals(ids.get(0),JsonUtils.read(response.getContentAsString()).path("data").get(0).path("id").asText());
+    }
+
+    @Test void taskFindingsFiltersKeepExactTotalsAndStablePaginationThroughMvc() throws Exception {
+        long one=task(List.of(a,b)),two=task(List.of(a));
+        tx.executeWithoutResult(s->{results.onResult(a,report(one,true,RptVirusResult.Status.COMPLETE));results.onResult(b,report(one,true,RptVirusResult.Status.COMPLETE));results.onResult(a,report(two,true,RptVirusResult.Status.COMPLETE));});
+        assertEquals(2L,query.findings(null,null,one,1,1).get("total"));
+        var first=(List<Map<String,Object>>)query.findings(null,null,one,1,1).get("list");
+        var second=(List<Map<String,Object>>)query.findings(null,null,one,2,1).get("list");
+        assertNotEquals(first.get(0).get("id"),second.get(0).get("id"));
+        assertEquals(1L,query.findings(0,a,one,1,20).get("total"));
+        assertEquals(0L,query.findings(null,a+"' OR 1=1 --",one,1,20).get("total"));
+        assertTrue(((List<?>)query.findings(null,null,one,Integer.MAX_VALUE,100).get("list")).isEmpty());
+        assertThrows(IllegalArgumentException.class,()->query.findings(null,null,0L,1,20));
+        var controller=new com.alinksec.gateway.rest.VirusController(query,tasks,actions,mock(VirusDbService.class),mock(com.alinksec.service.download.AgentDownloadTokenService.class));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/virus/findings").param("taskId",Long.toString(one)).param("agentId",a).param("page","1").param("size","20")).andReturn().getResponse();
+        assertEquals(200,response.getStatus());assertEquals(1,JsonUtils.read(response.getContentAsString()).path("data").path("total").asInt());
+    }
+
+    @Test void dispositionConsoleUsesCommittedBatchIdsAndPerFileReceipts() throws Exception {
+        long task=task(List.of(a));var report=report(task,true,RptVirusResult.Status.COMPLETE);
+        tx.executeWithoutResult(s->results.onResult(a,report.toBuilder().setFilesScanned(2).setFilesSeen(2).addFindings(report.getFindings(0).toBuilder().setPath("/tmp/second.sh")).build()));
+        var ids=jdbc.queryForList("SELECT id FROM t_virus_finding WHERE task_id=? ORDER BY id",Long.class,task);
+        var stages=new LinkedHashMap<String,Object>();stages.put("active",snapshot(task,ids.get(0)));
+        var batch=tx.execute(s->actions.act(ids,"quarantine",actor));var actionIds=(List<String>)batch.get("actionIds");
+        stages.put("pending",Map.of("console",snapshot(task,ids.get(0)),"receipts",query.actionReceipts(actionIds)));
+        String command=((List<String>)batch.get("commands")).get(0);receipt(command,Map.of(ids.get(0),true,ids.get(1),false),TerminalState.FAILED);
+        stages.put("partial",Map.of("console",snapshot(task,ids.get(0)),"receipts",query.actionReceipts(actionIds)));
+        var restore=tx.execute(s->actions.act(List.of(ids.get(0)),"restore",actor));receipt(((List<String>)restore.get("commands")).get(0),Map.of(ids.get(0),true),TerminalState.DONE);
+        stages.put("restored",Map.of("console",snapshot(task,ids.get(0)),"receipts",query.actionReceipts((List<String>)restore.get("actionIds"))));
+        var whitelist=tx.execute(s->actions.act(List.of(ids.get(1)),"whitelist",actor));
+        stages.put("whitelisted",Map.of("console",snapshot(task,ids.get(0)),"receipts",query.actionReceipts((List<String>)whitelist.get("actionIds"))));
+        String output=System.getProperty("alinksec.virus.disposition.fixture");
+        if(output!=null) Files.writeString(Path.of(output),JsonUtils.write(Map.of("task",task,"findingIds",ids,"batch",batch,"restore",restore,"whitelist",whitelist,"stages",stages)));
+        assertEquals(Set.of("succeeded","failed"),new HashSet<>(query.actionReceipts(actionIds).stream().map(row->row.get("state")).toList()));
     }
     @Test void reportFailureRollsBackDedupAndAuthenticatedHostScopesReplay() {
         var props=new AlinkSecProperties(); props.getDatabase().setType("postgres".equals(System.getProperty("alinksec.integration.database"))?"postgres":"sqlite");

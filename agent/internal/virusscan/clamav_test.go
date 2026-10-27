@@ -157,7 +157,7 @@ func TestClamavFileTimeoutDoesNotConsumeWholeTaskDeadline(t *testing.T) {
 	}
 	var blocked atomic.Bool
 	e.SetIOBudget(func(ctx context.Context, n int) error {
-		if n == 64<<10 && blocked.CompareAndSwap(false, true) {
+		if n == len("harmless") && blocked.CompareAndSwap(false, true) {
 			<-ctx.Done()
 			return ctx.Err()
 		}

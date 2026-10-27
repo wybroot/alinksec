@@ -1,0 +1,27 @@
+[Unit]
+Description=ALinkSec ClamAV official signature updates
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/alinksec/freshclam.conf
+
+[Service]
+Type=simple
+User=clamav
+Group=clamav
+ExecStart=/usr/bin/freshclam --daemon --foreground=true --config-file=/etc/alinksec/freshclam.conf
+Restart=on-failure
+RestartSec=300
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/clamav -/run/clamav
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

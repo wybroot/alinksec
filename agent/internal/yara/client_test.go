@@ -116,3 +116,22 @@ func TestNativeYARAWorker(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeScanFailureSurvivesSuccessfulProbeAndScan(t *testing.T) {
+	cfg, version := yaratest.Native(t)
+	c := yara.New(cfg, configguard.ReadFile)
+	if matches, err := c.Scan(context.Background(), version, func(context.Context, io.Writer) error { return os.ErrPermission }); len(matches) != 0 || yara.Code(err) != "yara_read_failed_or_changed" {
+		t.Fatal(matches, err)
+	}
+	failed := c.Status().ScanFailures
+	if _, err := c.Probe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Scan(context.Background(), version, feed([]byte("ordinary content"))); err != nil {
+		t.Fatal(err)
+	}
+	s := c.Status()
+	if s.State != "ready" || s.LastIssue != "" || s.Scans != 2 || s.Failures != 1 || failed.LastAt == 0 || s.ScanFailures.LastAt != failed.LastAt || s.ScanFailures.LastIssue != "yara_read_failed_or_changed" || s.ScanFailures.Counts["yara_read_failed_or_changed"] != 1 {
+		t.Fatalf("failure history lost after recovery: %+v", s)
+	}
+}

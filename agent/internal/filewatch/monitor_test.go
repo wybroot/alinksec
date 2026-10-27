@@ -73,6 +73,53 @@ func TestRegistrationFailureIsVisibleAndRecoveryRequestsRescan(t *testing.T) {
 	}
 }
 
+func TestLargeTreePreservesLaterRootsAndNativeEvents(t *testing.T) {
+	base := t.TempDir()
+	large, later := filepath.Join(base, "a-large"), filepath.Join(base, "z-later")
+	for _, path := range []string{large, later} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for n := 0; n < MaxWatches+16; n++ {
+		if err := os.Mkdir(filepath.Join(large, fmt.Sprintf("%04d", n)), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := New()
+	m.Update([]Root{{large, true}, {later, true}})
+	w := &failingRegistrar{}
+	m.reconcile(context.Background(), w, map[string]os.FileInfo{})
+	if s := m.Status(); !w.paths[later] || !w.paths[filepath.Dir(later)] || s.Watches > MaxWatches || s.Issue != "watch_budget" {
+		t.Fatal("large tree starved a configured root or concealed incomplete coverage", s)
+	}
+	// Exercise actual OS notifications as well as the registrar selection.
+	native, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	m.reconcile(context.Background(), native, map[string]os.FileInfo{})
+	path := filepath.Join(later, "harmless.txt")
+	if err := os.WriteFile(path, []byte("harmless native notification probe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-native.Events:
+			if event.Name == path && event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+				return
+			}
+		case err := <-native.Errors:
+			t.Fatal(err)
+		case <-timer.C:
+			t.Fatal("later root did not receive its actual native event")
+		}
+	}
+}
+
 func TestRemovedNativeWatchIsReinstalledEvenWhenDirectoryIdentityMatches(t *testing.T) {
 	root := t.TempDir()
 	m := New()

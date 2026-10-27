@@ -117,7 +117,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		configStore:     store,
 		resources:       resources.New(cfg.Resources),
 		clamav:          clamav.New(cfg.ClamAV),
-		yara:            yara.New(cfg.YARA, configguard.ReadFile),
+		yara:            yara.NewWithUpdates(cfg.YARA, configguard.ReadFile, workDir),
 		scap:            scap.New(cfg.SCAP, workDir),
 		workDir:         workDir,
 		state:           st,

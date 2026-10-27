@@ -504,3 +504,59 @@ PAM隔离验证同时成组覆盖core/nofile/nproc声明和实际getrlimit/普�
 OpenSSH名称解析/横幅批次：CI的`Check native OpenSSH name resolution and banner declarations with mandatory input boundaries`以root执行`TestNativeSSHNotice`，需`ALINKSEC_SSH_NOTICE_NATIVE_REQUIRED=true`和Ubuntu24精确OpenSSH9.6包。六组/十次原生比较，必须执行数值UID/GID、ACL、链接/FIFO、有限Include及变化/截止时间边界，不能跳过。仅临时主机密钥/配置、实际固定选择器只读，无监听/认证/宿主配置变更。SQLite/PostgreSQL REST保留两项完整快照和三种结果阶段，页面增加三张桌面/手机图；报告为协议夹具。范围见[核查说明](../../docs/36-OpenSSH名称解析与横幅声明核查.md)。
 
 `bash deploy/tests/ipv4-host-native.sh`依次创建九个独立Docker网络命名空间，退出或异常均清理本场景容器。Docker先设全局值，runner子进程确认目标与宿主命名空间不同后，仅以nsenter进入容器网络命名空间顺序准备局部值，避免全局写入重置和OCI映射顺序；容器/proc/sys保持只读。NET_ADMIN仅用于创建两个未启用dummy接口（含点名称）；每场景128MiB/一个CPU，容器无SYS_ADMIN、privileged或host网络、宿主/etc及数据卷。编译`.tmp/baseline-native.test`后运行，root、双开关和隔离镜像标记缺一拒绝测试角色写入。原生对照覆盖max(all,interface)、default继承、全部接口及局部/全局转发，强制角色可信性、ACL、输入上限/变化/共同截止时间不允许跳过。完整REST/页面报告是协议夹具，实际数据包强制未验证，见[IPv4主机范围](../../docs/39-IPv4主机角色与全部接口当前参考核查.md)。
+
+## YARA automatic update UI (local replay)
+
+检出处置交互验证使用 `web/test/virus-disposition-browser.mjs`，以
+`ALINKSEC_VIRUS_DISPOSITION_FIXTURE` 指定由
+`DetectionEvidenceIntegrationTest.dispositionConsoleUsesCommittedBatchIdsAndPerFileReceipts`
+生成的真实数据库快照（Java 属性 `alinksec.virus.disposition.fixture` 指定输出）。另需
+`.tmp/virus-disposition/browser-fixtures.json` 的引擎及主机接口快照；不保存登录响应或令牌。
+`ALINKSEC_YARA_UPDATE_DIST` 选择完整成品或页面预览，
+`ALINKSEC_VIRUS_DISPOSITION_OUTPUT` 指定独立结果目录。脚本拦截全部 API，覆盖任务
+关联筛选、对象核对／取消、提交错误、防重、逐文件部分成功、回执读取恢复、恢复文件、
+策略保存及手机／只读角色；真实 Agent 执行需单独验收。本机仍沿用下述资源保护线，
+先停止后端并在结束后恢复同一容器。
+
+扫描管理交互验证使用 `web/test/virus-operations-browser.mjs`。输入同样为
+`{capturedAt,responses}`，另需 `/api/hosts` 的真实分页快照。以
+`ALINKSEC_YARA_UPDATE_FIXTURE` 选择快照、`ALINKSEC_YARA_UPDATE_DIST` 选择完整前端，
+`ALINKSEC_VIRUS_OPERATIONS_OUTPUT` 选择结果目录。该脚本拦截全部 API，模拟创建失败、
+受限任务、部分回执与关联复扫，验证输入保留、确认、分页、手机布局及只读权限；
+这些模拟操作不能替代实际 Agent 验收。功能和边界见
+[扫描任务管理](../../docs/86-扫描任务管理与失败复扫.md)。
+
+`web/test/yara-update-browser.mjs` replays captured API responses against either
+the production frontend or a preview of the current virus page. Its JSON input
+contains `capturedAt` and `responses`, with the response `data` values keyed by
+`/api/virus/yara-status`, `/api/virus/clamav-status`, `/api/virus/stats`,
+`/api/virus/findings` and `/api/virus/db`. Capture the findings with
+`?page=1&size=100`. The snapshot must include a ready YARA host with an enabled
+updater and a successful check. Keep tokens and login responses out of it.
+
+After preparing that snapshot and the selected frontend, run from `web/`:
+
+```sh
+ALINKSEC_YARA_UPDATE_FIXTURE=/absolute/path/to/responses.json \
+  ALINKSEC_YARA_PREVIEW_DIST=/absolute/path/to/page-preview \
+  node --max-old-space-size=128 test/yara-update-browser.mjs
+```
+
+Omit `ALINKSEC_YARA_PREVIEW_DIST` to check `web/dist`, or set
+`ALINKSEC_YARA_UPDATE_DIST` to a full frontend bundle in another directory.
+These two selectors are mutually exclusive. Set `ALINKSEC_YARA_UPDATE_OUTPUT`
+to keep a separate run's results and screenshots without replacing prior evidence.
+On this small local host,
+stop the backend before building or launching Chromium, run under the existing
+512 MiB available-memory / 5% full memory PSI / 2 GiB disk reserve watchdog, and
+restore the same backend afterward. Do not run a second validation container.
+
+The check covers actual captured versions and all four update times, simulated
+unchanged checks and download/compile/storage/timeout failures, first-update
+failures, disabled and legacy Agents, API failure/retry, retained scan failure
+counts after recovery, missing history on legacy Agents, and desktop/mobile
+layout. All browser API calls are intercepted; the test rejects writes and
+unexpected endpoints. Results and screenshots go to `.tmp/yara-update-browser`.
+Page previews are labelled separately from production bundles. This verifies
+display behavior; it does not perform upstream updates, enable ClamAV, or replace
+the native, cross-platform and field acceptance checks.

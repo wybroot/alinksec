@@ -1,0 +1,10 @@
+# Install as server-data/libraries.yml (/app/data/libraries.yml in the server).
+# No API keys. Console schedule overrides may supersede these defaults.
+alinksec:
+  libraries:
+    sources:
+      - id: loki-signature-base
+        type: loki-hashes
+        enabled: true
+        url: https://api.github.com/repos/Neo23x0/signature-base/contents/iocs/hash-iocs.txt
+        interval-ms: 3600000

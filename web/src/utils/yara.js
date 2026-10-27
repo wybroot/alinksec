@@ -8,5 +8,12 @@ const issues = {
   yara_timeout: '等待、编译或扫描超时', yara_scan_error: '原生扫描失败',
   yara_worker_failed: '原生进程异常或达到资源限制', yara_worker_protocol: '原生进程响应无效',
   yara_resource_limit: '无法设置进程资源限制', yara_file_limit: '文件超过 20 MiB 上限',
+  yara_update_download: '规则下载失败', yara_update_storage: '规则保存或校验失败',
 }
 export const yaraIssueLabel = code => issues[code] || code
+export const yaraUpdateSummary = update => {
+  if (!update) return '尚未报告自动更新状态'
+  if (!update.enabled) return '未启用自动更新'
+  if (update.last_issue) return `自动更新失败：${yaraIssueLabel(update.last_issue)}${update.success_at ? '，保留上次可用规则' : ''}`
+  return update.success_at ? '已校验上游规则' : '等待首次成功更新'
+}

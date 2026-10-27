@@ -74,7 +74,22 @@ public class VirusController {
                                                      HttpServletRequest request) {
         var mode=body.get("mode");
         if(mode!=null && (!mode.isIntegralNumber() || !mode.canConvertToInt())) throw new IllegalArgumentException("mode 必须为整数");
-        long taskId = taskService.createTask(text(body,"name",true),texts(body,"agentIds",false),mode==null?1:mode.intValue(),texts(body,"paths",true),actor(request),text(body,"engine",true));
+        var budget=VirusTaskService.ScanBudget.defaults();
+        if(body.has("budget")) {
+            var b=body.get("budget");
+            if(!b.isObject())throw new IllegalArgumentException("budget 必须为对象");
+            for(String field:List.of("timeLimitSec","maxFiles","maxTotalBytes"))
+                if(!b.path(field).isIntegralNumber() || !b.path(field).canConvertToLong())throw new IllegalArgumentException(field+" 必须为整数");
+            if(!b.path("timeLimitSec").canConvertToInt() || !b.path("maxFiles").canConvertToInt())throw new IllegalArgumentException("扫描预算超出范围");
+            budget=new VirusTaskService.ScanBudget(b.get("timeLimitSec").intValue(),b.get("maxFiles").intValue(),b.get("maxTotalBytes").longValue());
+        }
+        Long retry=null;
+        if(body.has("retryOf")) {
+            var value=body.get("retryOf");
+            if(!value.isIntegralNumber() || !value.canConvertToLong())throw new IllegalArgumentException("retryOf 必须为整数");
+            retry=value.longValue();
+        }
+        long taskId = taskService.createTask(text(body,"name",true),texts(body,"agentIds",false),mode==null?1:mode.intValue(),texts(body,"paths",true),actor(request),text(body,"engine",true),budget,retry);
         return ApiResult.ok(Map.of("taskId", taskId));
     }
 
@@ -147,18 +162,25 @@ public class VirusController {
     @GetMapping("/findings/{id}/history")
     public ApiResult<List<Map<String,Object>>> history(@PathVariable long id) { return ApiResult.ok(query.actionHistory(id)); }
 
+    @GetMapping("/findings/actions/receipts")
+    public ApiResult<List<Map<String,Object>>> actionReceipts(@RequestParam("ids") List<String> ids) { return ApiResult.ok(query.actionReceipts(ids)); }
+
     @GetMapping("/tasks")
     public ApiResult<Map<String, Object>> tasks(@RequestParam(defaultValue = "1") int page,
-                                                @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(query.tasks(page, Math.min(size, 100)));
+                                                @RequestParam(defaultValue = "20") int size,
+                                                @RequestParam(required=false) String agentId,
+                                                @RequestParam(required=false) String engine,
+                                                @RequestParam(required=false) Integer status) {
+        return ApiResult.ok(query.tasks(page, Math.min(size, 100),agentId,engine,status));
     }
 
     @GetMapping("/findings")
     public ApiResult<Map<String, Object>> findings(@RequestParam(required = false) Integer status,
                                                    @RequestParam(required = false) String agentId,
+                                                   @RequestParam(required = false) Long taskId,
                                                    @RequestParam(defaultValue = "1") int page,
                                                    @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(query.findings(status, agentId, page, Math.min(size, 100)));
+        return ApiResult.ok(query.findings(status, agentId, taskId, page, Math.min(size, 100)));
     }
 
     @GetMapping("/db")

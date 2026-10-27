@@ -24,7 +24,7 @@ func TestResourceBudgetAppliesAcrossFilesAndPreservesPartialEvidence(t *testing.
 	e := NewEngine(work, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	reads := 0
 	e.SetIOBudget(func(ctx context.Context, n int) error {
-		if n == 64<<10 {
+		if n == len("harmless") {
 			reads++
 		}
 		return ctx.Err()

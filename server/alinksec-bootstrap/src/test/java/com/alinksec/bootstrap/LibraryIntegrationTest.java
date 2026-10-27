@@ -149,6 +149,26 @@ class LibraryIntegrationTest {
         source.setUrl("http://127.0.0.1:" + http.getAddress().getPort() + "/feed"); props.setSources(List.of(source));
         return source;
     }
+    @Test void lokiSnapshotFiltersWeakHashesRevokesRemovedEntriesAndRetainsOnInvalidUpdate() throws Exception {
+        String a="a".repeat(64), b="b".repeat(64);
+        var body=new AtomicReference<>("# upstream mixed hash file\n"+"c".repeat(32)+";MD5\n"+"d".repeat(40)+";SHA1\n"+a+";malware family A\n"+b+";malware family B\n");
+        var source=endpoint("loki-hashes",body);
+        sync.validate();sync.sync(source);
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='provider'",Integer.class));
+        assertTrue(artifactHashes().contains(a+" LOKI.SignatureBase.KnownHash"));
+        jdbc.update("UPDATE t_security_feed_state SET etag='' WHERE source_id='provider'");
+        body.set(b+";retained\n");sync.sync(source);
+        assertFalse(artifactHashes().contains(a));assertTrue(artifactHashes().contains(b));
+        String current=active();
+        for(String invalid:List.of("<html>upstream error</html>","c".repeat(32)+";only weak hashes\n",a+";valid first record\ninvalid;bad record\n")) {
+            jdbc.update("UPDATE t_security_feed_state SET etag='' WHERE source_id='provider'");
+            body.set(invalid);sync.sync(source);
+            assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_security_feed_state WHERE source_id='provider'",String.class));
+            assertEquals(current,active());assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id='provider'",Integer.class));
+        }
+        props.setMaxHashes(1);
+        assertThrows(IllegalArgumentException.class,()->LokiHashes.read(new ByteArrayInputStream((a+";one\n"+b+";two\n").getBytes(StandardCharsets.UTF_8)),1));
+    }
     @Test void realHttpSyncHonorsConditionalChecksAndKeepsDataDuringAnOutage() throws Exception {
         var body = new AtomicReference<>("a".repeat(64) + " Remote 4\n");
         var source = endpoint("hashes", body);

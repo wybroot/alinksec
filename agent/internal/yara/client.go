@@ -21,11 +21,15 @@ const MaxFileBytes int64 = 20 << 20
 const MaxRuleBytes = 256 << 10
 
 type Config struct {
-	Enabled     bool   `yaml:"enabled"`
-	Realtime    bool   `yaml:"realtime"`
-	RulesFile   string `yaml:"rules_file"`
-	RulesSHA256 string `yaml:"rules_sha256"`
-	TimeoutSec  int    `yaml:"timeout_sec"`
+	Enabled           bool     `yaml:"enabled"`
+	Realtime          bool     `yaml:"realtime"`
+	RulesFile         string   `yaml:"rules_file"`
+	RulesSHA256       string   `yaml:"rules_sha256"`
+	TimeoutSec        int      `yaml:"timeout_sec"`
+	UpdateURL         string   `yaml:"update_url"`
+	UpdateURLs        []string `yaml:"update_urls"`
+	UpdateCAFile      string   `yaml:"update_ca_file"`
+	UpdateIntervalSec int      `yaml:"update_interval_sec"`
 }
 
 func (c Config) Validate() error {
@@ -33,6 +37,12 @@ func (c Config) Validate() error {
 		if c.Realtime {
 			return errors.New("YARA realtime requires enabled")
 		}
+		return nil
+	}
+	if err := c.validateUpdate(); err != nil {
+		return err
+	}
+	if c.hasUpdates() && c.RulesFile == "" && c.RulesSHA256 == "" && c.TimeoutSec >= 0 && c.TimeoutSec <= 30 {
 		return nil
 	}
 	pin, err := hex.DecodeString(c.RulesSHA256)
@@ -43,25 +53,40 @@ func (c Config) Validate() error {
 }
 
 type Status struct {
-	State      string `json:"state"`
-	Version    string `json:"version"`
-	ObservedAt int64  `json:"observed_at"`
-	Realtime   bool   `json:"realtime"`
-	LastScanAt int64  `json:"last_scan_at"`
-	LastIssue  string `json:"last_issue"`
-	Scans      uint64 `json:"scans"`
-	Failures   uint64 `json:"failures"`
+	State        string       `json:"state"`
+	Version      string       `json:"version"`
+	ObservedAt   int64        `json:"observed_at"`
+	Realtime     bool         `json:"realtime"`
+	LastScanAt   int64        `json:"last_scan_at"`
+	LastIssue    string       `json:"last_issue"`
+	Scans        uint64       `json:"scans"`
+	Failures     uint64       `json:"failures"`
+	ScanFailures ScanFailures `json:"scan_failures"`
+	Update       UpdateStatus `json:"update"`
+}
+
+// ScanFailures survives successful probes and scans until the Agent restarts.
+// Only bounded issue codes are retained; file paths and raw errors never leave
+// the scanner through readiness telemetry.
+type ScanFailures struct {
+	LastAt    int64             `json:"last_at"`
+	LastIssue string            `json:"last_issue"`
+	Counts    map[string]uint64 `json:"counts"`
 }
 type Match struct {
 	Rule     string `json:"rule"`
 	Severity int32  `json:"severity"`
 }
 type Client struct {
-	cfg    Config
-	read   func(string, int) ([]byte, error)
-	mu     sync.Mutex
-	status Status
-	gate   chan struct{}
+	cfg            Config
+	read           func(string, int) ([]byte, error)
+	mu             sync.Mutex
+	status         Status
+	gate           chan struct{}
+	updateGate     chan struct{}
+	updateDir      string
+	updateFailures int
+	validatedAt    time.Time
 }
 
 func Contract() uint32 {
@@ -71,7 +96,13 @@ func Contract() uint32 {
 	return 1
 }
 func New(cfg Config, read func(string, int) ([]byte, error)) *Client {
-	s := Status{State: "disabled"}
+	return NewWithUpdates(cfg, read, "")
+}
+
+// NewWithUpdates stores validated upstream snapshots in the private Agent work
+// directory. Static, digest-pinned rules continue to work without an updater.
+func NewWithUpdates(cfg Config, read func(string, int) ([]byte, error), workDir string) *Client {
+	s := Status{State: "disabled", ScanFailures: ScanFailures{Counts: make(map[string]uint64)}}
 	if cfg.Enabled {
 		s.State = "starting"
 		s.Realtime = cfg.Realtime
@@ -81,7 +112,12 @@ func New(cfg Config, read func(string, int) ([]byte, error)) *Client {
 		s.LastIssue = "yara_not_built"
 		s.Realtime = false
 	}
-	return &Client{cfg: cfg, read: read, status: s, gate: make(chan struct{}, 1)}
+	s.Update.Enabled = cfg.Enabled && cfg.hasUpdates() && Contract() == 1
+	dir := ""
+	if workDir != "" {
+		dir = filepath.Join(workDir, "yara-updates")
+	}
+	return &Client{cfg: cfg, read: read, status: s, gate: make(chan struct{}, 1), updateGate: make(chan struct{}, 1), updateDir: dir}
 }
 func (c *Client) Realtime() bool {
 	return c != nil && Contract() == 1 && c.cfg.Enabled && c.cfg.Realtime
@@ -92,7 +128,12 @@ func (c *Client) Status() Status {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.status
+	s := c.status
+	s.ScanFailures.Counts = make(map[string]uint64, len(c.status.ScanFailures.Counts))
+	for code, count := range c.status.ScanFailures.Counts {
+		s.ScanFailures.Counts[code] = count
+	}
+	return s
 }
 func (c *Client) StatusJSON() string { b, _ := json.Marshal(c.Status()); return string(b) }
 func (c *Client) Run(ctx context.Context) {
@@ -100,6 +141,7 @@ func (c *Client) Run(ctx context.Context) {
 		return
 	}
 	c.Probe(ctx)
+	c.refreshIfDue(ctx)
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
@@ -107,6 +149,7 @@ func (c *Client) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			c.refreshIfDue(ctx)
 			c.Probe(ctx)
 		}
 	}
@@ -145,6 +188,13 @@ func (c *Client) rules() ([]byte, string, error) {
 	if c.cfg.Validate() != nil || c.read == nil {
 		return nil, "", issue("yara_invalid_config")
 	}
+	if c.cfg.hasUpdates() {
+		if b, err := c.updatedRules(); err == nil {
+			return ruleVersion(b)
+		} else if !errors.Is(err, errNoUpdate) || c.cfg.RulesFile == "" {
+			return nil, "", issue("yara_rules_unavailable")
+		}
+	}
 	b, err := c.read(c.cfg.RulesFile, MaxRuleBytes)
 	if err != nil || len(b) == 0 || len(b) > MaxRuleBytes || !utf8.Valid(b) || bytes.IndexByte(b, 0) >= 0 {
 		return nil, "", issue("yara_rules_unavailable")
@@ -170,6 +220,7 @@ func (c *Client) observe(v string, err error) {
 		c.status.State = "ready"
 		c.status.Version = v
 		c.status.LastIssue = ""
+		c.validatedAt = time.Now()
 	}
 }
 func (c *Client) lock(ctx context.Context) error {
@@ -184,21 +235,52 @@ func (c *Client) lock(ctx context.Context) error {
 	}
 }
 func (c *Client) Probe(ctx context.Context) (v string, err error) {
+	return c.probe(ctx, false)
+}
+
+// ProbeRealtime avoids a second native compilation immediately before Scan.
+// It re-reads the approved source and only reuses a successful validation of
+// that exact digest for 30 seconds. Scan still runs a disposable native worker
+// and validates the source again before and after consuming file bytes.
+func (c *Client) ProbeRealtime(ctx context.Context) (v string, err error) {
+	return c.probe(ctx, true)
+}
+
+func (c *Client) probe(ctx context.Context, reuse bool) (v string, err error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	if err = c.lock(ctx); err != nil {
 		return "", err
 	}
 	defer func() { <-c.gate }()
+	reused := false
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			err = ctx.Err()
 		}
-		c.observe(v, err)
+		if !reused || err != nil {
+			c.observe(v, err)
+		}
 	}()
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
 	rules, v, err := c.rules()
 	if err != nil {
 		return "", err
+	}
+	if reuse {
+		c.mu.Lock()
+		age := time.Since(c.validatedAt)
+		reused = c.status.State == "ready" && c.status.Version == v && !c.validatedAt.IsZero() && age >= 0 && age < 30*time.Second
+		c.mu.Unlock()
+		if reused {
+			if err = ctx.Err(); err != nil {
+				return "", err
+			}
+			// A cached lookup must not refresh readiness or clear a scan failure.
+			return v, nil
+		}
 	}
 	_, err = runWorker(ctx, rules, true, nil)
 	if err != nil {
@@ -210,28 +292,38 @@ func (c *Client) Probe(ctx context.Context) (v string, err error) {
 // Scan serializes active and realtime work and pins the exact source digest.
 // consume must finish identity validation before closing the input stream.
 func (c *Client) Scan(ctx context.Context, expected string, consume func(context.Context, io.Writer) error) (matches []Match, err error) {
+	if c == nil {
+		return nil, issue("yara_disabled")
+	}
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	if err = c.lock(ctx); err != nil {
-		return nil, err
-	}
-	defer func() { <-c.gate }()
+	locked := false
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			matches = nil
 			err = ctx.Err()
 		}
 		c.mu.Lock()
-		defer c.mu.Unlock()
 		c.status.Scans++
 		c.status.LastScanAt = time.Now().Unix()
 		if err != nil {
 			c.status.Failures++
 			c.status.LastIssue = Code(err)
+			c.status.ScanFailures.LastAt = c.status.LastScanAt
+			c.status.ScanFailures.LastIssue = Code(err)
+			c.status.ScanFailures.Counts[Code(err)]++
 		} else {
 			c.status.LastIssue = ""
 		}
+		c.mu.Unlock()
+		if locked {
+			<-c.gate
+		}
 	}()
+	if err = c.lock(ctx); err != nil {
+		return nil, err
+	}
+	locked = true
 	rules, v, err := c.rules()
 	if err != nil {
 		c.observe("", err)

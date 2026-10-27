@@ -1,0 +1,19 @@
+# Merge this block into the Agent's agent.yml through `agent config apply`.
+# Linux profile, ReversingLabs MIT rules, complete update every hour.
+# Copy sources/ReversingLabs.LICENSE into the Agent's yara-updates directory.
+yara:
+  enabled: true
+  realtime: true
+  timeout_sec: 10
+  update_interval_sec: 3600
+  update_urls:
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/backdoor/Linux.Backdoor.BPFDoor.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/backdoor/Linux.Backdoor.GTPDOOR.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/backdoor/Linux.Backdoor.AutoColor.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/backdoor/Linux.Backdoor.NoodRAT.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/backdoor/Linux.Backdoor.PygmyGoat.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/rootkit/Linux.Rootkit.Pumakit.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/ransomware/Linux.Ransomware.GwisinLocker.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/ransomware/Linux.Ransomware.Helldown.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/ransomware/Linux.Ransomware.KillDisk.yara
+    - https://api.github.com/repos/reversinglabs/reversinglabs-yara-rules/contents/yara/trojan/Linux.Trojan.BiBiWiper.yara

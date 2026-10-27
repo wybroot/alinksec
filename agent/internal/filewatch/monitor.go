@@ -53,6 +53,8 @@ type Monitor struct {
 	mu           sync.Mutex
 	roots        []Root
 	pending      map[string]string
+	pendingOrder [MaxPending]string
+	pendingHead  int
 	rescan       bool
 	topology     bool
 	revision     uint64
@@ -139,6 +141,8 @@ func (m *Monitor) Update(roots []Root) {
 	m.status.State = "starting"
 	m.status.Issue = ""
 	m.pending = map[string]string{}
+	clear(m.pendingOrder[:])
+	m.pendingHead = 0
 	m.rescan = true
 	m.topology = true
 	select {
@@ -199,15 +203,18 @@ func (m *Monitor) observe(e fsnotify.Event) {
 	}
 	m.status.LastEvent = time.Now().UnixMilli()
 	k := key(e.Name)
-	if _, ok := m.pending[k]; !ok && len(m.pending) >= MaxPending {
-		m.status.Dropped++
-		if !m.rescan {
-			m.status.Gaps++
+	if _, ok := m.pending[k]; !ok {
+		if len(m.pending) >= MaxPending {
+			m.status.Dropped++
+			if !m.rescan {
+				m.status.Gaps++
+			}
+			m.rescan = true
+			m.status.State = "degraded"
+			m.status.Issue = "queue_overflow"
+			return
 		}
-		m.rescan = true
-		m.status.State = "degraded"
-		m.status.Issue = "queue_overflow"
-		return
+		m.pendingOrder[(m.pendingHead+len(m.pending))%MaxPending] = k
 	}
 	m.pending[k] = filepath.Clean(e.Name)
 }
@@ -231,16 +238,13 @@ func (m *Monitor) Drain(limit int) Batch {
 	}
 	b := Batch{Rescan: m.rescan}
 	m.rescan = false
-	// Sorting makes bounded batches deterministic and allows queued work to drain.
-	keys := make([]string, 0, len(m.pending))
-	for k := range m.pending {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if len(b.Paths) == limit {
-			break
-		}
+	// Keep the first pending arrival's place when writes coalesce. A drained
+	// path that changes again joins the tail, so hot paths cannot starve older
+	// events. The fixed ring shares the deduplication map's capacity bound.
+	for len(b.Paths) < limit && len(m.pending) > 0 {
+		k := m.pendingOrder[m.pendingHead]
+		m.pendingOrder[m.pendingHead] = ""
+		m.pendingHead = (m.pendingHead + 1) % MaxPending
 		b.Paths = append(b.Paths, m.pending[k])
 		delete(m.pending, k)
 	}
@@ -419,7 +423,14 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 			}
 			parent = filepath.Dir(parent)
 		}
-		walk(r.Path, 0, r.Recursive)
+		// Reserve each configured root and its replacement anchor before a
+		// large recursive tree can exhaust the shared registration budget.
+		walk(r.Path, 0, false)
+	}
+	for _, r := range roots {
+		if r.Recursive && len(r.Path) <= MaxPathBytes {
+			walk(r.Path, 0, true)
+		}
 	}
 	changed := false
 	registered := map[string]bool{}

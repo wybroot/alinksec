@@ -26,8 +26,12 @@ public class VirusCommandLifecycle implements CommandLifecycleListener {
             if(c.getExecutionContract()!=(yara?4:clamav?3:2) || !Set.of("","builtin","clamav","yara").contains(c.getEngine()) || jdbc.queryForObject("SELECT count(*) FROM t_virus_task_agent m JOIN t_virus_scan_task t ON t.id=m.task_id WHERE m.command_id=? AND m.agent_id=? AND m.state='pending' AND t.status=1 AND t.scan_engine=? AND m.expected_engine_version=?",Integer.class,command.getCmdId(),agent,engine,c.getExpectedDbVersion())!=1) throw new IllegalArgumentException("扫描任务已过期或结果已接受");
             String current=yara?YaraService.requireReady(jdbc,agent):clamav?ClamavService.requireReady(jdbc,agent):jdbc.queryForObject("SELECT db_version FROM t_virus_db ORDER BY id DESC LIMIT 1",String.class);
             if(!c.getExpectedDbVersion().equals(current)) throw new IllegalArgumentException("扫描固定的特征库已被替代，请重新创建任务");
-            long remaining=(command.getIssuedAt()+7200000-System.currentTimeMillis())/1000;
-            if(remaining<=0 || remaining>7200) throw new IllegalArgumentException("扫描任务执行期限已失效");
+            int configured=c.getTimeLimitSec();
+            if(configured<1 || configured>7200) throw new IllegalArgumentException("扫描任务预算无效");
+            long millis=command.getIssuedAt()+configured*1000L-System.currentTimeMillis();
+            if(millis<=0 || millis>configured*1000L) throw new IllegalArgumentException("扫描任务执行期限已失效");
+            // The wire budget is whole seconds; keep a positive sub-second remainder usable.
+            long remaining=(millis+999)/1000;
             return command.toBuilder().setVirusScan(c.toBuilder().setTimeLimitSec((int)remaining)).build();
         } else {
             var c=command.getVirusAction();

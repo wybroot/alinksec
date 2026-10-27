@@ -33,12 +33,13 @@ public class VirusActionService {
             }
             findings.add(row);
         }
+        var actionIds=new ArrayList<String>();
         if(action.equals("whitelist")) {
             for(var f:findings) {
                 insertWhitelist("hash",VirusExecution.hash((String)f.get("sha256")),"检出记录加白: "+f.get("path"),actor);
-                history(f,"",action,"committed",actor);
+                actionIds.add(history(f,"",action,"committed",actor));
             }
-            policies.rebuild(); return Map.of("count",findings.size(),"state","policy_committed");
+            policies.rebuild(); return Map.of("count",findings.size(),"state","policy_committed","actionIds",actionIds);
         }
         Map<String,List<Map<String,Object>>> grouped=new LinkedHashMap<>();
         for(var f:findings) grouped.computeIfAbsent((String)f.get("agent_id"),a->new ArrayList<>()).add(f);
@@ -46,13 +47,15 @@ public class VirusActionService {
         for(var group:grouped.entrySet()) {
             var targets=group.getValue().stream().map(f->VirusTarget.newBuilder().setFindingId(String.valueOf(f.get("id"))).setPath((String)f.get("path")).setSha256(VirusExecution.hash((String)f.get("sha256"))).setQuarantineId((String)f.get("quarantine_id")).build()).toList();
             String cmd=commands.dispatchAfterCommit(group.getKey(),Command.newBuilder().setVirusAction(CmdVirusAction.newBuilder().setExecutionContract(2).setAction(CmdVirusAction.Action.valueOf(action.toUpperCase(Locale.ROOT))).addAllTargets(targets)),actor);
-            for(var f:group.getValue()) history(f,cmd,action,"pending",actor);
+            for(var f:group.getValue()) actionIds.add(history(f,cmd,action,"pending",actor));
             commandsOut.add(cmd);
         }
-        return Map.of("count",findings.size(),"state","pending","commands",commandsOut);
+        return Map.of("count",findings.size(),"state","pending","commands",commandsOut,"actionIds",actionIds);
     }
-    private void history(Map<String,Object> f,String command,String action,String state,Long actor) {
-        jdbc.update("INSERT INTO t_virus_action_evidence(id,finding_id,agent_id,command_id,action,state,actor,created_at,finished_at,request_evidence) VALUES(?,?,?,?,?,?,?,?,?,?)",UUID.randomUUID().toString(),f.get("id"),f.get("agent_id"),command,action,state,actor,Instant.now().toString(),state.equals("pending")?null:Instant.now().toString(),com.alinksec.common.util.JsonUtils.write(Map.of("path",f.get("path"),"sha256",f.get("sha256"),"quarantine_id",f.get("quarantine_id"),"status",f.get("status"))));
+    private String history(Map<String,Object> f,String command,String action,String state,Long actor) {
+        String id=UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO t_virus_action_evidence(id,finding_id,agent_id,command_id,action,state,actor,created_at,finished_at,request_evidence) VALUES(?,?,?,?,?,?,?,?,?,?)",id,f.get("id"),f.get("agent_id"),command,action,state,actor,Instant.now().toString(),state.equals("pending")?null:Instant.now().toString(),com.alinksec.common.util.JsonUtils.write(Map.of("path",f.get("path"),"sha256",f.get("sha256"),"quarantine_id",f.get("quarantine_id"),"status",f.get("status"))));
+        return id;
     }
     private void insertWhitelist(String type,String value,String remark,Long actor) {
         if(jdbc.queryForObject("SELECT count(*) FROM t_virus_whitelist WHERE type=? AND value=?",Integer.class,type,value)>0) return;

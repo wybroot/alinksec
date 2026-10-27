@@ -55,6 +55,44 @@ class YaraIntegrationTest {
         service.heartbeat(a,RptHeartbeat.newBuilder().setYaraContract(99).setYaraStatus("ignored").build());assertEquals("unsupported",row(a).get("state"));
         jdbc.update("DELETE FROM t_agent WHERE agent_id=?",a);assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_yara_status WHERE agent_id=?",Integer.class,a));
     }
+    @Test void automaticUpdateFailureKeepsReadinessAndReportsSanitizedFreshness() {
+        long now=System.currentTimeMillis()/1000;
+        var update=new LinkedHashMap<String,Object>();
+        update.put("enabled",true);update.put("checked_at",now);update.put("success_at",now-3600);update.put("changed_at",now-7200);update.put("next_check_at",now+300);update.put("last_issue","yara_update_download");
+        update.put("url","secret upstream");update.put("ca_file","secret local path");
+        var data=coverage("ready");data.put("update",update);heartbeat(a,data);
+        String stored=JsonUtils.write(row(a).get("coverage"));
+        assertTrue(stored.contains("yara_update_download"));assertTrue(stored.contains("next_check_at"));assertFalse(stored.contains("secret"));
+        assertEquals("ready",row(a).get("state"));assertTrue(YaraService.requireReady(jdbc,a).startsWith("YARA "));
+        for(var change:List.of(Map.of("enabled","true"),Map.of("last_issue","secret body"),Map.of("checked_at",-1),Map.of("success_at",now+1),Map.of("changed_at",now),Map.of("next_check_at",Long.MAX_VALUE))) {
+            var bad=new LinkedHashMap<>(update);bad.putAll(change);data.put("update",bad);
+            assertThrows(IllegalArgumentException.class,()->heartbeat(a,data));assertEquals(stored,JsonUtils.write(row(a).get("coverage")));
+        }
+        var recovered=new LinkedHashMap<>(update);recovered.put("success_at",now);recovered.put("last_issue","");data.put("update",recovered);heartbeat(a,data);
+        assertFalse(JsonUtils.write(row(a).get("coverage")).contains("yara_update_download"));
+        // Legacy Agents remain readable and do not acquire an invented update timestamp.
+        heartbeat(a,coverage("ready"));assertFalse(JsonUtils.write(row(a).get("coverage")).contains("next_check_at"));
+    }
+    @Test void scanFailureHistoryIsBoundedConsistentAndIndependentOfReadiness() {
+        long now=System.currentTimeMillis()/1000;
+        var data=coverage("ready");data.put("last_scan_at",now);data.put("failures",2);
+        var history=new LinkedHashMap<String,Object>();
+        history.put("last_at",now-1);history.put("last_issue","yara_timeout");
+        history.put("counts",Map.of("yara_timeout",1,"yara_read_failed_or_changed",1));history.put("path","secret local file");
+        data.put("scan_failures",history);heartbeat(a,data);
+        String stored=JsonUtils.write(row(a).get("coverage"));
+        assertTrue(stored.contains("yara_read_failed_or_changed"));assertFalse(stored.contains("secret"));
+        assertEquals("ready",row(a).get("state"));assertTrue(YaraService.requireReady(jdbc,a).startsWith("YARA "));
+        for(var change:List.of(Map.of("last_at",now+1),Map.of("last_at",0),Map.of("last_at","1"),Map.of("last_issue",""),Map.of("last_issue","yara_compile_error"),Map.of("last_issue","secret error"),Map.of("counts",Map.of("secret path",2)),Map.of("counts",Map.of("",2)),Map.of("counts",Map.of("yara_timeout",-1)),Map.of("counts",Map.of("yara_timeout",0)),Map.of("counts",Map.of("yara_timeout",1)),Map.of("counts",Map.of("yara_timeout",3)),Map.of("counts",Map.of("yara_timeout",1.5)),Map.of("counts",Map.of("yara_timeout",Long.MAX_VALUE)))) {
+            var bad=new LinkedHashMap<>(history);bad.putAll(change);data.put("scan_failures",bad);
+            assertThrows(IllegalArgumentException.class,()->heartbeat(a,data));assertEquals(stored,JsonUtils.write(row(a).get("coverage")));
+        }
+        data.put("scan_failures",Map.of("last_at",0,"last_issue","","counts",Map.of()));data.put("failures",0);heartbeat(a,data);
+        assertTrue(JsonUtils.write(row(a).get("coverage")).contains("\"counts\":{}"));
+        // Old heartbeat metadata remains valid without invented history.
+        data.remove("scan_failures");data.put("failures",2);heartbeat(a,data);
+        assertFalse(JsonUtils.write(row(a).get("coverage")).contains("scan_failures"));
+    }
     void capture(String name) {
         String directory=System.getenv("ALINKSEC_YARA_BROWSER_FIXTURES");if(directory==null||directory.isBlank())return;
         try{var dest=Path.of(directory);Files.createDirectories(dest);Files.writeString(dest.resolve(name+".json"),JsonUtils.write(service.status(1,100)));if(name.equals("ready"))Files.writeString(dest.resolve("hosts.json"),JsonUtils.write(new com.alinksec.service.query.HostQueryService(jdbc).list(null,null,null,1,100)));}catch(Exception ex){throw new IllegalStateException(ex);}

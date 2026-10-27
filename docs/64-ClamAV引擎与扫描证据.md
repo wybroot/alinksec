@@ -2,6 +2,10 @@
 
 > 版本基线：v0.0.4。已按本版核对「ClamAV 引擎与扫描证据」的操作、实现引用与适用边界；历史日期及验证结果仍只对应其原始提交。版本差异见[发布说明](releases/v0.0.4.md)，全部资料见[文档索引](README.md)。
 
+> 未发布 develop 增加每小时检查、校验并通知 clamd 重载的 FreshClam 配置与 Linux systemd 模板，见[病毒库自动更新](85-病毒库自动更新.md)及[部署入口](../deploy/antivirus/README.md)。Agent 仍不安装／启动外部引擎；该配置尚未在现有预览加载完整官方库，不能把模板视为现场启用结果。
+
+> 2026-10-27 后续使用发行版 FreshClam 1.5.4 完成官方 bytecode 小库下载、加载校验和无变化复查，并增加只读初始化检查。该检查不包含 main/daily 或 clamd，不改变下文官方 1.4.6 原生引擎验收的历史范围，也不代表当前 Agent 已启用 ClamAV。
+
 ClamAV 为可选的本机外部引擎。Linux amd64、Linux arm64 和 Windows amd64
 Agent 使用 INSTREAM 将文件内容交给管理员维护的 ClamAV 服务；内置 SHA256
 和内部规则保持独立。默认不启用、不下载特征库，也不启动或安装系统服务。

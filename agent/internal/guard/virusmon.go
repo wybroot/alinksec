@@ -75,10 +75,7 @@ func virusSnapshot(root string, remaining *int, deadline time.Time) treeSnapshot
 
 // virusSweep 窗口 diff 文件批量检查：Modified + Created（改名为新路径的加密产物也覆盖）
 func (g *Guard) virusSweep(paths []string) {
-	g.mu.Lock()
-	check := g.virusCheck
-	g.mu.Unlock()
-	if check == nil || len(paths) == 0 {
+	if len(paths) == 0 {
 		return
 	}
 	if len(paths) > virusSweepMax {
@@ -90,8 +87,10 @@ func (g *Guard) virusSweep(paths []string) {
 		if time.Now().After(deadline) {
 			break
 		}
-		if f := check(p); f != nil {
-			hits = append(hits, f)
+		if check := g.virusCheckForPath(p); check != nil {
+			if f := check(p); f != nil {
+				hits = append(hits, f)
+			}
 		}
 	}
 	if len(hits) == 0 {

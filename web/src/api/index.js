@@ -720,15 +720,19 @@ export async function fetchAgentsForSelect() {
 
 const VIRUS_STATUS = { 0: 'todo', 1: 'quarantined', 2: 'deleted', 3: 'restored', 4: 'whitelisted' }
 
-export async function fetchVirus(status) {
-  const qs = status !== '' && status != null ? `?status=${status}&page=1&size=100` : '?page=1&size=100'
+export async function fetchVirus(status, { page = 1, size = 100, agentId = '', taskId = null } = {}) {
+  const qs = new URLSearchParams({ page, size })
+  if (status !== '' && status != null) qs.set('status', status)
+  if (agentId) qs.set('agentId', agentId)
+  if (taskId != null) qs.set('taskId', taskId)
   const [stats, findings, dbVersions] = await Promise.all([
     get('/api/virus/stats'),
-    get('/api/virus/findings' + qs),
+    get('/api/virus/findings?' + qs),
     get('/api/virus/db'),
   ])
   const db = (dbVersions || [])[0]
   return {
+    total: Number(findings?.total || 0),
     db: {
       version: db?.db_version || '未导入',
       updated: fmtTime(db?.imported_at),
@@ -765,14 +769,16 @@ export async function fetchVirus(status) {
 }
 
 /** 创建病毒扫描任务：mode 1快速 2全盘 3自定义（paths 必填） */
-export async function createVirusTask(agentIds, mode, paths, name, engine = 'builtin') {
-  return post('/api/virus/tasks', { agentIds, mode, paths: paths || [], name, engine })
+export async function createVirusTask(agentIds, mode, paths, name, engine = 'builtin', options = {}) {
+  return post('/api/virus/tasks', { agentIds, mode, paths: paths || [], name, engine,
+    ...(options.budget ? { budget: options.budget } : {}), ...(options.retryOf ? { retryOf: options.retryOf } : {}) })
 }
 
 /** 检出处置：action = quarantine / delete / restore / whitelist */
 export async function virusAct(findingIds, action) {
   return post('/api/virus/findings/actions', { findingIds, action })
 }
+export const fetchVirusActionReceipts = ids => get('/api/virus/findings/actions/receipts?' + new URLSearchParams({ ids: ids.join(',') }))
 
 /** 导入特征库包（zip：manifest.json + hashes.txt），成功后自动推送全部 Agent */
 export async function importVirusDb(file) {
@@ -784,8 +790,12 @@ export async function pushVirusDb() {
   return post('/api/virus/db/push', {})
 }
 
-export async function fetchVirusTasks() {
-  return get('/api/virus/tasks?page=1&size=50')
+export async function fetchVirusTasks({ page = 1, size = 50, agentId = '', engine = '', status = '' } = {}) {
+  const q = new URLSearchParams({ page, size })
+  if (agentId) q.set('agentId', agentId)
+  if (engine) q.set('engine', engine)
+  if (status !== '' && status != null) q.set('status', status)
+  return get('/api/virus/tasks?' + q)
 }
 
 export const fetchVirusTaskEvidence = id => get(`/api/virus/tasks/${id}/evidence`)
@@ -898,7 +908,7 @@ export async function fetchProtect() {
     process: '高危进程名/路径/命令行特征阻断，挖矿、反弹 Shell 特征内置',
     file_tamper: 'Linux 关键文件内容与权限监控，可按规则自动恢复',
     login: 'Linux SSH 爆破与异常时段登录检测，可按规则限时封禁来源',
-    decoy: '诱饵文件触碰即阻断加密进程（本地响应）',
+    decoy: '诱饵篡改与批量文件变化检测，按策略告警或隔离；核实写入者后才终止进程',
   }
   const cards = (engines || []).map((e) => ({
     title: keyMap[e.key] || e.name,

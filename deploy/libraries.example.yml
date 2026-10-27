@@ -27,6 +27,8 @@ alinksec:
       # access-key: ${ALINKSEC_LIBRARY_S3_ACCESS_KEY:}
       # secret-key: ${ALINKSEC_LIBRARY_S3_SECRET_KEY:}
     sources:
+      # Ready-to-use public malware profile: deploy/antivirus/libraries.public.yml.
+      # LOKI mixed hashes require type loki-hashes, not generic type hashes.
       # Native formats require no API key. Blank URL selects the official endpoint.
       # Identity/scope is pinned on first sync: use a new ID after changes, retire the old source.
       - id: ubuntu-usn

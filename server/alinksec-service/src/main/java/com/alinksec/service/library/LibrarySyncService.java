@@ -95,7 +95,7 @@ public class LibrarySyncService {
                 || props.getMaxCvesPerImport() < 1 || props.getRetainVersions() < 2 || props.getRetainDays() < 1) throw new IllegalArgumentException("安全库容量或保留配置非法");
         for (var source : props.getSources()) {
             if (!source.getId().matches("[A-Za-z0-9-]{1,64}") || "manual".equals(source.getId()) || !ids.add(source.getId())
-                    || (!Set.of("hashes", "signature-zip", "malwarebazaar", "misp", "cve-json", "nvd", "opencti").contains(source.getType()) && !VendorAdvisoryAdapter.TYPES.contains(source.getType()))
+                    || (!Set.of("hashes", "loki-hashes", "signature-zip", "malwarebazaar", "misp", "cve-json", "nvd", "opencti").contains(source.getType()) && !VendorAdvisoryAdapter.TYPES.contains(source.getType()))
                     || source.getIntervalMs() < 300_000 || source.getInitialDays() < 1 || source.getInitialDays() > 120) throw new IllegalArgumentException("安全库数据源配置非法");
             LibrarySchedule.validateInterval(source.getType(), source.getIntervalMs());
             if (VendorAdvisoryAdapter.TYPES.contains(source.getType())) vendors.validate(source);
@@ -231,6 +231,8 @@ public class LibrarySyncService {
                 if (!modified.isBlank()) headers.put("If-Modified-Since", modified);
             }
             String address = source.getUrl().isBlank() && "malwarebazaar".equals(source.getType()) ? "https://mb-api.abuse.ch/api/v1/" : source.getUrl();
+            if ("loki-hashes".equals(source.getType()) && "api.github.com".equals(FeedDownload.validateAddress(address).getHost()))
+                headers.put("Accept", "application/vnd.github.raw+json");
             try (var fetched = download.fetch(address, headers, form)) {
                 int count = 0;
                 if (fetched.status() == 200) {
@@ -242,6 +244,7 @@ public class LibrarySyncService {
                         SignaturePackage pkg;
                         boolean replace = false;
                         if ("signature-zip".equals(source.getType())) { pkg = SignaturePackage.read(fetched.file(), props); replace = true; }
+                        else if ("loki-hashes".equals(source.getType())) { pkg = LokiHashes.read(Files.newInputStream(fetched.file()), props.getMaxHashes()); replace = true; }
                         else if ("malwarebazaar".equals(source.getType())) pkg = malwareBazaar(fetched.file());
                         else { try (var in = Files.newInputStream(fetched.file())) { pkg = new SignaturePackage("", SignaturePackage.readHashes(in, props.getMaxHashes()), List.of()); } }
                         if (!pkg.hashes().isEmpty() || !pkg.rules().isEmpty()) {

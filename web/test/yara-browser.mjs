@@ -64,6 +64,7 @@ try {
   const readyHost = stages.ready.items.find(x => x.state === 'ready'), unavailableHost = stages.ready.items.find(x => x.state === 'unavailable')
   await expect(page.getByRole('option').filter({ hasText: unavailableHost.hostname })).toHaveAttribute('aria-disabled', 'true')
   await page.getByRole('option').filter({ hasText: readyHost.hostname }).click(); await hostSelect.press('Escape')
+  await dialog.locator('.el-checkbox__label').click()
   await dialog.getByRole('button', { name: '开始扫描', exact: true }).click(); await expect(page.getByText('目标主机的 YARA 尚未就绪，请检查引擎状态并等待心跳', { exact: true })).toBeVisible(); await expect(dialog).toBeVisible(); await dialog.getByRole('button', { name: '取消', exact: true }).click(); checks.push('explicit-engine-ready-host-filter-and-server-recheck')
   await page.getByRole('tab', { name: '扫描任务', exact: true }).click()
   const taskRow = page.getByRole('row').filter({ hasText: 'YARA 测试' }); await expect(taskRow).toContainText('YARA'); await taskRow.getByRole('button', { name: '逐主机证据', exact: true }).click()

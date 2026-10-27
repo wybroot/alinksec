@@ -1,6 +1,6 @@
 // L2 规则层（docs/05 §1.1）：
 // 纯 Go 原生规则引擎，语义对齐 internal JSON rule 子集（strings + all/any 条件 + 平台/扩展/大小过滤）。
-// 真正的 go-yara（CGO）后端可后续在同名接口下替换；受限环境保持本实现（hash+rule 纯 Go 构建）。
+// 此处仅处理内部 JSON 规则；原生 YARA 在 internal/yara 独立编译和执行。
 //
 // 特征库包内 rules.json 格式：
 //

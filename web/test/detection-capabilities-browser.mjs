@@ -37,11 +37,12 @@ try {
   else if(method==='GET' && path==='/api/virus/whitelist') data=current.whitelist
   else if(method==='GET' && path===`/api/virus/tasks/${fixture.task}/evidence`) data=current.evidence
   else if(method==='GET' && path===`/api/virus/findings/${fixture.finding}/history`) data=current.history
+  else if(method==='GET' && path==='/api/virus/findings/actions/receipts') data=current.history.filter(h=>h.id && new URL(req.url()).searchParams.get('ids').split(',').includes(h.id)).map(h=>({...h,finding_id:fixture.finding,hostname:'检测主机'}))
   else if(method==='POST' && path==='/api/virus/findings/actions') {
    const body=req.postDataJSON();assert.deepEqual(body.findingIds,[fixture.finding]);writes.push({path,body,rejected:reject})
    if(reject) return route.fulfill({status:400,json:{code:400,msg:'处置提交失败，原状态保留'}})
-   if(body.action==='quarantine') {stage='pending';data={state:'pending',count:1}}
-   else if(body.action==='restore') {stage='restored';data={state:'pending',count:1}}
+   if(body.action==='quarantine') {stage='pending';data={state:'pending',count:1,actionIds:fixture.stages.pending.history.filter(h=>h.id && h.action==='quarantine').slice(0,1).map(h=>h.id)}}
+   else if(body.action==='restore') {stage='restored';data={state:'pending',count:1,actionIds:fixture.stages.restored.history.filter(h=>h.id && h.action==='restore').slice(0,1).map(h=>h.id)}}
    else throw new Error('Unexpected action')
   } else if(method==='POST' && path==='/api/virus/realtime') {
    const body=req.postDataJSON();writes.push({path,body});assert.equal(body.enabled,false);assert.equal(body.action,'alert_only');data={state:'policy_committed'}
@@ -56,9 +57,10 @@ try {
  await expect(page.getByRole('heading',{name:'周期病毒检测',exact:true})).toBeVisible()
  await expect(page.getByText('零检出不代表安全。',{exact:false})).toBeVisible()
  await expect(page.getByRole('row').filter({hasText:'Legacy.Allowlist'})).toContainText('旧加白，文件状态未知')
- await row().getByRole('button',{name:'隔离',exact:true}).click();await expect(page.getByText('处置提交失败，原状态保留',{exact:true})).toBeVisible()
+ const confirm=async(label)=>{const d=page.getByRole('dialog',{name:'确认'+label,exact:true});await d.locator('.el-checkbox__label').click();await d.getByRole('button',{name:'确认'+label+' 1 项',exact:true}).click();return d}
+ await row().getByRole('button',{name:'隔离',exact:true}).click();let review=await confirm('隔离');await expect(review).toContainText('处置提交失败，原状态保留');await review.getByRole('button',{name:'取消',exact:true}).click()
  await expect(row()).toContainText('待处置');assert.equal(stage,'active');scenarios.push('failed-submission-keeps-confirmed-state')
- reject=false;await row().getByRole('button',{name:'隔离',exact:true}).click()
+ reject=false;await row().getByRole('button',{name:'隔离',exact:true}).click();await confirm('隔离');await page.getByRole('dialog',{name:'本次处置回执',exact:true}).getByRole('button',{name:'关闭',exact:true}).click()
  await expect(row()).toContainText('处置待确认');await expect(row()).toContainText('待处置');await expect(row().getByRole('button',{name:'隔离',exact:true})).toHaveCount(0)
  await shot('pending-per-file-receipt');scenarios.push('pending-receipt-never-optimistically-quarantines')
  stage='failed';await reload();await expect(row()).toContainText('处置失败，请查看历史')
@@ -67,7 +69,7 @@ try {
  await expect(dialog).toContainText('identity_changed');await expect(dialog).toContainText('首次检出证据');await shot('failed-action-and-initial-evidence')
  await dialog.locator('.el-dialog__headerbtn').click();scenarios.push('failed-receipt-keeps-initial-evidence')
  stage='quarantined';await reload();await expect(row()).toContainText('已隔离');await expect(row()).toContainText('隔离编号：'+'c'.repeat(32));await shot('confirmed-quarantine')
- await row().getByRole('button',{name:'恢复',exact:true}).click();await expect(row()).toContainText('已恢复');scenarios.push('confirmed-quarantine-and-restoration')
+ await row().getByRole('button',{name:'复核恢复',exact:true}).click();await confirm('恢复');await page.getByRole('dialog',{name:'本次处置回执',exact:true}).getByRole('button',{name:'关闭',exact:true}).click();await expect(row()).toContainText('已恢复');scenarios.push('confirmed-quarantine-and-restoration')
  await page.getByRole('tab',{name:'扫描任务',exact:true}).click();await expect(page.getByText('未完整完成',{exact:true})).toBeVisible()
  await page.getByRole('button',{name:'逐主机证据',exact:true}).click();dialog=page.getByRole('dialog',{name:'逐主机扫描证据',exact:true})
  await expect(dialog).toContainText('部分覆盖');await expect(dialog).toContainText('失败 1');await expect(dialog).toContainText('无法读取');await expect(dialog).toContainText('证据摘要');await expect(dialog).toContainText('限定范围完成')

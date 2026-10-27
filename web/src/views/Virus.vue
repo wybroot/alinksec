@@ -34,7 +34,7 @@
       </div>
     </div>
     <ClamavStatus />
-    <YaraStatus />
+    <YaraStatus :manageable="canWrite" @scan="row => openScan(3, { engine: 'yara', agentIds: [row.agent_id] })" @tasks="viewHostTasks" />
     <div class="panel">
       <h4>周期病毒检测</h4>
       <div class="toolbar">
@@ -47,13 +47,16 @@
     <div class="panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane label="检出处置" name="findings">
+          <div v-if="findingTask" class="toolbar"><el-tag closable @close="clearFindingTask">任务 #{{ findingTask.id }} · {{ findingTask.name }}</el-tag><span class="digest">仅显示此任务的检出；清除筛选可查看其他来源。</span></div>
           <div class="toolbar">
-            <el-select v-model="statusFilter" placeholder="处置状态" clearable style="width:130px" @change="loadFindings">
+            <el-select v-model="statusFilter" placeholder="处置状态" clearable style="width:130px" @change="resetFindings">
               <el-option label="待处置" value="0" /><el-option label="已隔离" value="1" /><el-option label="已删除" value="2" /><el-option label="已恢复" value="3" /></el-select>
+            <el-input v-model="findingHost" placeholder="按主机编号筛选" clearable style="width:200px" @change="resetFindings" />
+            <el-button @click="loadFindings(false)">刷新检出</el-button>
             <div class="spacer"></div>
-            <el-button v-if="canWrite" type="danger" plain :disabled="!canBatch('todo')" @click="act(selIds(), 'quarantine')">批量隔离（{{ selFindings.length }}）</el-button>
-            <el-button v-if="canWrite" type="danger" plain :disabled="!canBatch('todo')" @click="act(selIds(), 'delete')">批量删除</el-button>
-            <el-button v-if="canWrite" plain :disabled="!selFindings.length || selFindings.length > 32 || selFindings.some(f => f.pending)" @click="act(selIds(), 'whitelist')">批量加白</el-button>
+            <el-button v-if="canWrite" type="danger" plain :disabled="!canBatch('quarantine')" @click="act(selIds(), 'quarantine')">批量隔离（{{ selFindings.length }}）</el-button>
+            <el-button v-if="canWrite" type="danger" plain :disabled="!canBatch('delete')" @click="act(selIds(), 'delete')">批量删除</el-button>
+            <el-button v-if="canWrite" plain :disabled="!canBatch('whitelist')" @click="act(selIds(), 'whitelist')">批量加白</el-button>
           </div>
           <el-table :data="findings" stripe @selection-change="s => selFindings = s">
             <el-table-column type="selection" width="42" />
@@ -85,26 +88,29 @@
             <el-table-column label="操作" width="180" fixed="right">
               <template #default="{ row }">
                 <el-button link size="small" @click="showHistory(row)">处置历史</el-button>
-                <template v-if="canWrite && !row.pending && row.executionSupported && row.status === 'todo'">
-                  <el-button v-if="!row.quarantineId" link type="danger" size="small" @click="act([row.id], 'quarantine')">隔离</el-button>
-                  <el-button v-else link type="success" size="small" @click="act([row.id], 'restore')">复核恢复</el-button>
-                  <el-button link type="danger" size="small" @click="act([row.id], 'delete')">删除</el-button>
-                  <el-button link size="small" @click="act([row.id], 'whitelist')">加白</el-button>
-                </template>
-                <template v-else-if="canWrite && !row.pending && row.executionSupported && row.status === 'quarantined' && row.quarantineId">
-                  <el-button link type="success" size="small" @click="act([row.id], 'restore')">恢复</el-button>
-                  <el-button link type="danger" size="small" @click="act([row.id], 'delete')">删除</el-button>
+                <template v-if="canWrite">
+                  <el-button v-if="canDispose(row, 'quarantine')" link type="danger" size="small" @click="act([row.id], 'quarantine')">隔离</el-button>
+                  <el-button v-if="canDispose(row, 'restore')" link type="success" size="small" @click="act([row.id], 'restore')">复核恢复</el-button>
+                  <el-button v-if="canDispose(row, 'delete')" link type="danger" size="small" @click="act([row.id], 'delete')">删除</el-button>
+                  <el-button v-if="canDispose(row, 'whitelist')" link size="small" @click="act([row.id], 'whitelist')">加白</el-button>
                 </template>
                 <span v-else style="font-size:12px;color:#94a3b8">—</span>
               </template>
             </el-table-column>
           </el-table>
+          <el-pagination v-model:current-page="findingPage" :total="findingTotal" :page-size="20" layout="total, prev, pager, next" @current-change="loadFindings(false)" />
         </el-tab-pane>
 
         <el-tab-pane label="扫描任务" name="tasks">
+          <div class="toolbar">
+            <el-input v-model="taskFilter.agentId" placeholder="按主机编号筛选" clearable style="width:200px" @change="resetTasks" />
+            <el-select v-model="taskFilter.engine" placeholder="全部引擎" clearable style="width:145px" @change="resetTasks"><el-option label="内置特征库" value="builtin" /><el-option label="ClamAV" value="clamav" /><el-option label="原生 YARA" value="yara" /></el-select>
+            <el-select v-model="taskFilter.status" placeholder="全部状态" clearable style="width:145px" @change="resetTasks"><el-option label="执行中" :value="1" /><el-option label="限定范围完成" :value="2" /><el-option label="未完整完成" :value="3" /></el-select>
+            <el-button @click="loadTasks">刷新任务</el-button>
+          </div>
           <el-table :data="tasks" stripe>
             <el-table-column prop="taskNo" label="任务号" width="180"><template #default="{ row }"><span class="mono">{{ row.taskNo }}</span></template></el-table-column>
-            <el-table-column prop="name" label="任务名" min-width="160" />
+            <el-table-column label="任务名" min-width="160"><template #default="{ row }">{{ row.name }}<div class="digest">#{{ row.id }} · {{ row.actor }}<template v-if="row.scope.retry_of"> · 复扫自 #{{ row.scope.retry_of }}</template></div></template></el-table-column>
             <el-table-column label="引擎" width="100"><template #default="{ row }">{{ engineLabel(row.engine) }}</template></el-table-column>
             <el-table-column label="模式" width="90">
               <template #default="{ row }">
@@ -123,8 +129,9 @@
               </template>
             </el-table-column>
             <el-table-column prop="createdAt" label="创建时间" width="120" />
-            <el-table-column label="覆盖与证据" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="showEvidence(row)">逐主机证据</el-button><div>{{ row.completeHosts }}/{{ row.totalHosts }} 台完成</div></template></el-table-column>
+            <el-table-column label="覆盖与证据" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="showEvidence(row)">逐主机证据</el-button><el-button link type="primary" @click="viewTaskFindings(row)">查看本次检出</el-button><div>{{ row.completeHosts }}/{{ row.totalHosts }} 台完成</div></template></el-table-column>
           </el-table>
+          <el-pagination v-model:current-page="taskPage" :total="taskTotal" :page-size="20" layout="total, prev, pager, next" @current-change="loadTasks" />
         </el-tab-pane>
 
         <el-tab-pane label="白名单" name="whitelist">
@@ -153,8 +160,10 @@
 
   <!-- 发起扫描对话框 -->
   <el-dialog v-model="scanDlg" :title="'发起' + modeLabel(scanForm.mode) + '扫描'" width="min(560px, calc(100vw - 24px))">
+    <el-alert v-if="scanForm.retryOf" :title="`复扫自任务 #${scanForm.retryOf}：将新建任务并按当前规则版本扫描，原证据保留。`" type="info" :closable="false" />
     <el-form label-width="96px">
-      <el-form-item label="扫描引擎"><el-select v-model="scanForm.engine" @change="changeEngine" style="width:100%"><el-option label="内置特征库" value="builtin" /><el-option label="ClamAV" value="clamav" /><el-option label="原生 YARA" value="yara" /></el-select></el-form-item>
+      <el-form-item label="任务名称"><el-input v-model="scanForm.name" maxlength="128" show-word-limit placeholder="选填，便于后续追踪" /></el-form-item>
+      <el-form-item label="扫描引擎"><el-select v-model="scanForm.engine" :disabled="!!scanForm.retryOf" @change="changeEngine" style="width:100%"><el-option label="内置特征库" value="builtin" /><el-option label="ClamAV" value="clamav" /><el-option label="原生 YARA" value="yara" /></el-select></el-form-item>
       <p v-if="scanForm.engine === 'yara'" class="coverage-note">仅可选择原生 YARA 就绪的主机；单文件最多 20 MiB，不解包压缩内容。任务固定每台主机的原生版本及规则源码 SHA256，提交时重新检查状态。</p>
       <p v-if="scanForm.engine === 'clamav'" class="coverage-note">仅可选择 ClamAV 就绪的主机；单文件最多 20 MiB，压缩内容受引擎配置限制。引擎状态在提交时重新检查。</p>
       <el-alert v-if="engineError && scanForm.engine !== 'builtin'" :title="engineError" type="error" :closable="false"><el-button size="small" @click="changeEngine">重试</el-button></el-alert>
@@ -173,14 +182,20 @@
       <el-form-item v-if="scanForm.mode === 3" label="扫描路径">
         <el-input v-model="scanForm.pathsText" type="textarea" :rows="3" placeholder="每行一个绝对路径，如 /tmp 或 D:\home" />
       </el-form-item>
+      <el-form-item label="预算预设"><el-button size="small" @click="setBudget('diagnostic')">小范围排查</el-button><el-button size="small" @click="setBudget('standard')">标准上限</el-button></el-form-item>
+      <el-form-item label="最长秒数"><el-input-number v-model="scanForm.timeLimitSec" :min="1" :max="7200" :precision="0" /></el-form-item>
+      <el-form-item label="最多文件"><el-input-number v-model="scanForm.maxFiles" :min="1" :max="100000" :precision="0" /></el-form-item>
+      <el-form-item label="读取 MiB"><el-input-number v-model="scanForm.maxMiB" :min="1" :max="20480" :precision="0" /></el-form-item>
+      <p class="coverage-note">预算按每台主机执行，排队时间计入期限。达到任一上限将报告未完整覆盖；提交成功后请以 Agent 回执为准。</p>
       <el-alert v-if="scanForm.mode === 2" type="warning" :closable="false" show-icon
-        title="扫描源文件读取限速 10 MiB/s，隔离另有验证和复制开销；最多执行 2 小时，建议在维护窗口执行" />
+        title="扫描源文件读取限速 10 MiB/s，隔离另有验证和复制开销；建议在维护窗口执行" />
       <el-alert v-else type="info" :closable="false" show-icon
         title="扫描在 Agent 后台执行，结果实时上报；检出默认自动隔离" />
+      <el-checkbox v-model="scanForm.confirmed">已确认目标、路径和预算；本次主动扫描检出后自动隔离</el-checkbox>
     </el-form>
     <template #footer>
       <el-button @click="scanDlg = false">取消</el-button>
-      <el-button type="primary" :loading="scanSubmitting || engineLoading" :disabled="scanForm.engine !== 'builtin' && !!engineError" @click="submitScan">开始扫描</el-button>
+      <el-button type="primary" :loading="scanSubmitting || engineLoading" :disabled="!scanForm.confirmed || (scanForm.engine !== 'builtin' && !!engineError)" @click="submitScan">开始扫描</el-button>
     </template>
   </el-dialog>
 
@@ -206,18 +221,25 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="detail.visible" :title="detail.kind === 'evidence' ? '逐主机扫描证据' : '文件处置历史'" width="min(860px, calc(100vw - 24px))">
+  <el-dialog v-model="detail.visible" :title="detail.kind === 'evidence' ? '逐主机扫描证据' : '文件处置历史'" width="min(860px, calc(100vw - 24px))" @closed="++detail.serial">
+    <div class="toolbar"><span v-if="detail.kind === 'evidence'">任务 #{{ detail.id }} · {{ detail.task?.name || '扫描任务' }}</span><el-button :loading="detail.loading" @click="refreshDetail">刷新回执</el-button><span class="digest">待回报时每 5 秒刷新</span></div>
+    <p v-if="detail.kind === 'evidence' && detail.task?.scope" class="coverage-note">每台主机预算：{{ detail.task.scope.time_limit_sec ?? '未知' }} 秒 / {{ detail.task.scope.max_files ?? '未知' }} 文件 / {{ detail.task.scope.max_total_bytes ?? '未知' }} 字节。<template v-if="detail.task.scope.retry_of">复扫自 #{{ detail.task.scope.retry_of }}。</template></p>
     <el-alert v-if="detail.error" :title="detail.error" type="error" :closable="false" />
     <p v-if="detail.loading">正在读取证据…</p>
     <template v-else-if="detail.kind === 'evidence'">
       <p class="coverage-note">完成仅表示声明范围内的扫描结束。未检查、读取错误和预算限制请逐项核对；迟到回报保留原任务状态。</p>
       <div v-for="item in detail.rows" :key="item.agent_id" class="evidence-item">
-        <strong>{{ item.agent_id }}</strong> · {{ evidenceLabel(item.state) }} <el-tag v-if="Number(item.late) === 1" size="small" type="warning">迟到证据</el-tag>
+        <strong>{{ item.hostname || item.agent_id }}</strong> · {{ evidenceLabel(item.state) }} <el-tag v-if="Number(item.late) === 1" size="small" type="warning">迟到证据</el-tag>
+        <p class="digest">{{ item.agent_id }} · {{ item.ip || '地址未知' }} · 回报时间 {{ fmt(item.received_at) }}</p>
+        <el-button v-if="canWrite && ['partial', 'failed', 'timeout'].includes(item.state)" size="small" type="primary" @click="retryScan(item)">复核范围并复扫</el-button>
+        <el-button v-if="detail.task" size="small" @click="viewTaskFindings(detail.task, item.agent_id)">查看该主机检出</el-button>
         <p class="digest">固定版本：{{ item.expected_engine_version || '旧任务未记录' }}</p>
         <template v-if="item.evidence && typeof item.evidence === 'object'">
           <p>已扫描 {{ item.evidence.files_scanned || 0 }}，跳过 {{ item.evidence.files_skipped || 0 }}，失败 {{ item.evidence.files_failed || 0 }}；读取 {{ item.evidence.bytes_read || 0 }} 字节。</p>
           <p class="digest">{{ engineLabel(item.evidence.scan_engine || 'builtin') }} · 执行版本 {{ item.evidence.db_version || '未报告' }}；证据摘要 {{ item.evidence_sha256 || '未收到回报' }}</p>
           <p v-if="item.evidence.error" class="action-failure">{{ item.evidence.error }}</p>
+          <p v-if="item.evidence.budget_exhausted" class="action-failure">已达到预算：请缩小范围或调整预算后复扫。</p>
+          <p v-if="item.evidence.coverage" class="digest">覆盖声明：{{ item.evidence.coverage }}</p>
           <p v-for="(issue, index) in item.evidence.issues || []" :key="index" class="digest">{{ issue.path || '任务范围' }}：{{ issueLabel(issue.code) }}</p>
         </template>
       </div>
@@ -237,20 +259,23 @@
       <el-empty v-if="!detail.rows.length" description="此记录没有可复核的处置历史，旧文件状态未知" />
     </template>
   </el-dialog>
+  <VirusDisposition ref="disposition" :manageable="canWrite" @updated="loadFindings(false)" @history="showHistory" />
 </template>
 
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  fetchVirus, fetchVirusTasks, fetchVirusWhitelist, createVirusTask, virusAct,
+  fetchVirus, fetchVirusTasks, fetchVirusWhitelist, createVirusTask,
   importVirusDb, pushVirusDb, addVirusWhitelist, removeVirusWhitelist, fetchAgentsForSelect,
   fetchClamavStatus, fetchYaraStatus, getUser, fetchVirusTaskEvidence, fetchVirusActionHistory, updateVirusRealtime,
 } from '../api'
 import ClamavStatus from '../components/ClamavStatus.vue'
 import YaraStatus from '../components/YaraStatus.vue'
+import VirusDisposition from '../components/VirusDisposition.vue'
 import { yaraIssueLabel } from '../utils/yara'
 import { clamavIssueLabel } from '../utils/clamav'
+import { readScanScope, retryPaths, scanBudget, canDispose } from '../utils/virus'
 import { sevType, sevLabel } from '../utils/format'
 
 const tab = ref('findings')
@@ -258,13 +283,17 @@ const role = getUser()?.role ?? getUser()?.roleName
 const canWrite = role === 'admin' || role === 'operator'
 const loadError = ref('')
 const realtime = reactive({ enabled: true, action: 'quarantine', saving: false })
-const detail = reactive({ visible: false, kind: '', loading: false, rows: [], error: '', serial: 0 })
+const detail = reactive({ visible: false, kind: '', id: null, task: null, loading: false, rows: [], error: '', serial: 0 })
 const db = reactive({ version: '—', updated: '—', hashCount: '—', ruleCount: '—' })
 const stats = reactive({ findings30d: 0, quarantined: 0, todo: 0 })
 const findings = ref([])
 const selFindings = ref([])
 const statusFilter = ref('')
 const tasks = ref([])
+const findingPage = ref(1), findingTotal = ref(0), findingHost = ref('')
+const taskPage = ref(1), taskTotal = ref(0), taskFilter = reactive({ agentId: '', engine: '', status: '' })
+const findingTask = ref(null), disposition = ref(null)
+let findingSerial = 0, taskSerial = 0
 const whitelist = ref([])
 const agents = ref([])
 const engineReady = ref(new Set())
@@ -275,7 +304,9 @@ const eligible = a => a.virusExecutionContract === 2 && (scanForm.value.engine =
 
 const scanDlg = ref(false)
 const scanSubmitting = ref(false)
-const scanForm = ref({ agentIds: [], mode: 1, pathsText: '', engine: 'builtin' })
+const newScan = (mode, engine = 'builtin') => ({ agentIds: [], mode, pathsText: '', engine, name: '', timeLimitSec: 300, maxFiles: 1000, maxMiB: 256, confirmed: false, retryOf: null })
+const scanForm = ref(newScan(1))
+const setBudget = kind => Object.assign(scanForm.value, kind === 'standard' ? { timeLimitSec: 7200, maxFiles: 100000, maxMiB: 20480 } : { timeLimitSec: 300, maxFiles: 1000, maxMiB: 256 })
 
 const wlDlg = ref(false)
 const wlSubmitting = ref(false)
@@ -288,7 +319,7 @@ const pushing = ref(false)
 const msg = t => ElMessage({ message: t, type: 'success', duration: 1800 })
 
 const selIds = () => selFindings.value.map(f => f.id)
-const canBatch = (st) => selFindings.value.length && selFindings.value.length <= 32 && selFindings.value.every(f => f.status === st && !f.pending && f.executionSupported)
+const canBatch = action => selFindings.value.length && selFindings.value.length <= 32 && selFindings.value.every(f => canDispose(f, action))
 
 const statusTag = (s) => ({
   todo: { type: 'danger', label: '待处置' },
@@ -310,34 +341,53 @@ const fmt = (iso) => iso ? String(iso).replace('T', ' ').slice(0, 16) : '—'
 /* ---------- 数据加载 ---------- */
 
 const loadFindings = async (refreshPolicy = true) => {
+  const serial = ++findingSerial
   try {
-  const res = await fetchVirus(statusFilter.value)
+  const res = await fetchVirus(statusFilter.value, { page: findingPage.value, size: 20, agentId: findingHost.value.trim(), taskId: findingTask.value?.id })
+  if (serial !== findingSerial) return
   Object.assign(db, res.db)
   if (statusFilter.value === '' || statusFilter.value == null) Object.assign(stats, res.stats)
   findings.value = res.findings
+  findingTotal.value = res.total
   selFindings.value = []
   if (refreshPolicy === true) {
     realtime.enabled = Number(res.stats.realtime.realtime_enabled) === 1
     realtime.action = res.stats.realtime.realtime_action || 'quarantine'
   }
   loadError.value = ''
-  } catch (e) { loadError.value = e?.message || '读取检测数据失败' }
+  } catch (e) { if (serial === findingSerial) loadError.value = e?.message || '读取检测数据失败' }
+}
+const resetFindings = () => { findingPage.value = 1; loadFindings(false) }
+const clearFindingTask = () => { findingTask.value = null; resetFindings() }
+const viewTaskFindings = (task, agentId = '') => {
+  detail.visible = false; findingTask.value = { id: task.id, name: task.name }
+  findingHost.value = agentId; statusFilter.value = ''; tab.value = 'findings'; resetFindings()
 }
 
 const loadTasks = async () => {
+  const serial = ++taskSerial
   try {
-  const data = await fetchVirusTasks()
+  const data = await fetchVirusTasks({ ...taskFilter, agentId: taskFilter.agentId.trim(), page: taskPage.value, size: 20 })
+  if (serial !== taskSerial) return
+  taskTotal.value = Number(data?.total || 0)
   tasks.value = (data?.list || []).map(t => ({
     id: t.id, totalHosts: Number(t.total_hosts || 0), completeHosts: Number(t.complete_hosts || 0),
     taskNo: t.task_no,
     name: t.name,
+    scope: readScanScope(t.scope), actor: t.username || t.created_by || '系统策略',
     mode: Number(t.mode), engine: t.scan_engine || 'builtin',
     progress: Number(t.progress || 0),
     findings: Number(t.findings || 0),
     status: Number(t.status),
     createdAt: fmt(t.created_at),
   }))
-  } catch (e) { loadError.value = e?.message || '读取任务失败' }
+  loadError.value = ''
+  } catch (e) { if (serial === taskSerial) loadError.value = e?.message || '读取任务失败' }
+}
+const resetTasks = () => { taskPage.value = 1; loadTasks() }
+const viewHostTasks = row => {
+  Object.assign(taskFilter, { agentId: row.agent_id, engine: '', status: '' })
+  tab.value = 'tasks'; resetTasks()
 }
 
 const loadWhitelist = async () => {
@@ -377,29 +427,37 @@ const changeEngine = async () => {
   } catch (e) { if (serial === engineSerial) engineError.value = e.message || engineLabel(engine) + ' 状态加载失败' }
   finally { if (serial === engineSerial) engineLoading.value = false }
 }
-const openScan = async (mode) => {
+const openScan = async (mode, preset = {}) => {
+  if (!canWrite || scanSubmitting.value) return
   try {
     agents.value = await fetchAgentsForSelect()
-    scanForm.value = { agentIds: [], mode, pathsText: '', engine: 'builtin' }
-    changeEngine()
+    scanForm.value = { ...newScan(mode, preset.engine), ...preset, agentIds: [] }
     scanDlg.value = true
+    await changeEngine()
+    scanForm.value.agentIds = (preset.agentIds || []).filter(id => agents.value.some(a => a.id === id && eligible(a)))
+    if (preset.agentIds?.length && !scanForm.value.agentIds.length) ElMessage.warning('目标主机当前未就绪，请刷新状态后选择')
   } catch (e) { ElMessage.error(e.message || '主机状态加载失败') }
 }
 
 const submitScan = async () => {
   const form = scanForm.value
-  if (engineLoading.value) return
+  if (!canWrite || scanSubmitting.value || engineLoading.value) return
+  if (!form.confirmed) return ElMessage.warning('请先确认扫描范围和自动隔离行为')
   if (form.agentIds.some(id => !agents.value.some(a => a.id === id && eligible(a)))) return ElMessage.warning('目标主机当前不可用，请重新选择')
   if (!form.agentIds.length) return ElMessage({ message: '请选择目标主机', type: 'warning' })
   const paths = form.pathsText.split('\n').map(p => p.trim()).filter(Boolean)
   if (form.mode === 3 && !paths.length) return ElMessage({ message: '自定义扫描需填写路径', type: 'warning' })
+  let budget
+  try { budget = scanBudget(form) } catch (e) { return ElMessage.warning(e.message) }
   scanSubmitting.value = true
   try {
-    await createVirusTask(form.agentIds, form.mode, paths, undefined, form.engine)
+    const accepted = await createVirusTask(form.agentIds, form.mode, paths, form.name.trim() || undefined, form.engine, { budget, retryOf: form.retryOf })
     scanDlg.value = false
-    msg('扫描任务已下发，结果将实时上报')
+    msg(`任务 #${accepted.taskId} 已创建，等待 Agent 回执`)
     tab.value = 'tasks'
-    setTimeout(loadTasks, 3000)
+    Object.assign(taskFilter, { agentId: '', engine: '', status: '' }); taskPage.value = 1
+    await loadTasks()
+    showEvidence(tasks.value.find(t => t.id === accepted.taskId) || { id: accepted.taskId, name: form.name, engine: form.engine, mode: form.mode, scope: { paths, time_limit_sec: budget.timeLimitSec, max_files: budget.maxFiles, max_total_bytes: budget.maxTotalBytes, retry_of: form.retryOf } })
   } catch (e) {
     ElMessage({ message: e?.message || '任务创建失败', type: 'error' })
   } finally {
@@ -409,23 +467,10 @@ const submitScan = async () => {
 
 /* ---------- 检出处置 ---------- */
 
-const act = async (ids, action) => {
-  if (!ids || !ids.length) return
-  const labels = {
-    quarantine: '隔离', delete: '删除', restore: '恢复', whitelist: '加白',
-  }
-  const warnings = {
-    delete: '删除会永久移除经摘要校验的文件或隔离对象，确定继续？',
-    whitelist: '加白后该哈希全局生效（跨路径），后续扫描自动过滤，确定继续？',
-  }
-  try {
-    if (warnings[action]) await ElMessageBox.confirm(warnings[action], `确认${labels[action]}`, { type: 'warning' })
-    await virusAct(ids, action)
-    msg(action === 'whitelist' ? '白名单策略已保存，已有证据保留' : `已提交${labels[action]}（${ids.length} 项），等待每个文件的回执`)
-    loadFindings()
-  } catch (e) {
-    if (e !== 'cancel' && e?.message) ElMessage({ message: e.message, type: 'error' })
-  }
+const act = (ids, action) => {
+  const rows = ids.map(id => findings.value.find(row => row.id === id))
+  if (rows.some(row => !row)) return ElMessage.warning('检出列表已变化，请重新选择')
+  disposition.value?.open(rows, action)
 }
 
 /* ---------- 特征库 ---------- */
@@ -495,24 +540,40 @@ const saveRealtime = async () => {
   catch (e) { ElMessage.error(e?.message || '保存周期策略失败') }
   finally { realtime.saving = false }
 }
-const showDetail = async (kind, id) => {
+const refreshDetail = async () => {
+  if (!detail.visible || detail.loading) return
   const serial = ++detail.serial
-  Object.assign(detail, { visible: true, kind, loading: true, rows: [], error: '' })
+  const { kind, id } = detail
+  detail.loading = true; detail.error = ''
   try { const rows = await (kind === 'evidence' ? fetchVirusTaskEvidence(id) : fetchVirusActionHistory(id)); if (serial === detail.serial) detail.rows = rows || [] }
   catch (e) { if (serial === detail.serial) detail.error = e?.message || '读取证据失败' }
   finally { if (serial === detail.serial) detail.loading = false }
 }
-const showEvidence = row => showDetail('evidence', row.id)
+const showDetail = (kind, id, task = null) => {
+  ++detail.serial
+  Object.assign(detail, { visible: true, kind, id, task, loading: false, rows: [], error: '' })
+  return refreshDetail()
+}
+const showEvidence = row => showDetail('evidence', row.id, row)
 const showHistory = row => showDetail('history', row.id)
+const retryScan = item => {
+  const task = detail.task
+  if (!task) return ElMessage.warning('请从任务列表重新打开证据后复扫')
+  const paths = retryPaths(item.evidence)
+  const scope = task.scope || {}
+  const selected = paths.length ? paths : (scope.paths || [])
+  openScan(selected.length ? 3 : task.mode, { engine: task.engine, agentIds: [item.agent_id], pathsText: selected.join('\n'), name: `复扫 #${task.id}`, retryOf: task.id })
+}
 let poll
 onMounted(() => {
   loadFindings()
   poll = setInterval(() => {
     if (tab.value === 'tasks' && tasks.value.some(t => t.status === 1)) loadTasks()
     if (tab.value === 'findings' && findings.value.some(f => f.pending)) loadFindings(false)
+    if (detail.visible && detail.rows.some(r => r.state === 'pending')) refreshDetail()
   }, 5000)
 })
-onUnmounted(() => { clearInterval(poll); ++detail.serial; ++engineSerial })
+onUnmounted(() => { clearInterval(poll); ++detail.serial; ++engineSerial; ++findingSerial; ++taskSerial })
 </script>
 
 <style scoped>
@@ -523,5 +584,8 @@ onUnmounted(() => { clearInterval(poll); ++detail.serial; ++engineSerial })
 .toolbar { flex-wrap: wrap; }
 .version-chip { flex-direction: column; align-items: flex-start; gap: 4px; }
 .version-chip .n { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+:deep(.el-checkbox) { height: auto; max-width: 100%; align-items: flex-start; white-space: normal; }
+:deep(.el-checkbox__label) { white-space: normal; line-height: 1.7; overflow-wrap: anywhere; }
+:deep(.el-checkbox__input) { margin-top: 5px; }
 :deep(.el-tag) { white-space: normal; height: auto; min-height: 20px; }
 </style>

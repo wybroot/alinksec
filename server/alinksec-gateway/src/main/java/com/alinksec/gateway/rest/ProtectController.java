@@ -47,7 +47,7 @@ public class ProtectController {
                 Map.of("key", "login", "name", "登录防护", "desc",
                         "Linux SSH 与 Windows 远程登录检测，可按规则限时封禁来源", "builtin", true),
                 Map.of("key", "decoy", "name", "勒索诱饵防护", "desc",
-                        "诱饵文件触碰即阻断加密进程（本地响应）", "builtin", true)));
+                        "诱饵篡改与批量文件变化检测，按策略告警或隔离；核实写入者后才终止进程", "builtin", true)));
     }
 
     /** 各主机防护开关状态 */

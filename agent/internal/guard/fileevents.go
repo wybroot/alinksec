@@ -18,6 +18,26 @@ func (g *Guard) virusRoots() ([]string, bool) {
 	return roots, check != nil && (enabled == nil || enabled())
 }
 
+// Recheck dispatch authorization for each file. Policy changes must affect the
+// next check even when an event batch or recovery traversal is already running.
+// The enablement and scan callbacks run outside the policy mutex.
+func (g *Guard) virusCheckForPath(path string) VirusCheckFunc {
+	g.mu.Lock()
+	check, enabled := g.virusCheck, g.virusEnabled
+	allowed := false
+	for _, root := range g.virusTrees {
+		if filewatch.Within(path, root) {
+			allowed = true
+			break
+		}
+	}
+	g.mu.Unlock()
+	if !allowed || check == nil || enabled != nil && !enabled() {
+		return nil
+	}
+	return check
+}
+
 func (g *Guard) updateFileWatches() {
 	var roots []filewatch.Root
 	g.files.mu.Lock()
@@ -138,11 +158,15 @@ func (g *Guard) fileEventLoop() {
 		g.watchIssue = ""
 		g.watchMu.Unlock()
 	}
-	// Reserve progress for recovery even under sustained event traffic. Reader
-	// collection runs independently, with its own fixed queue bound.
+	// Reserve one recovery step even under sustained event traffic, then yield
+	// before advancing the cursor if events are waiting. Collection continues
+	// independently, so events arriving during a scan get priority next dispatch.
 	if g.virusRecovery != nil {
 		recoveryDeadline := time.Now().Add(250 * time.Millisecond)
 		for n := 0; n < 8 && time.Now().Before(recoveryDeadline); n++ {
+			if n > 0 && (len(g.eventPending) > 0 || g.watcher.Status().Pending > 0) {
+				break
+			}
 			p, done := g.virusRecovery.Next(recoveryDeadline)
 			if p != "" {
 				for _, r := range roots {

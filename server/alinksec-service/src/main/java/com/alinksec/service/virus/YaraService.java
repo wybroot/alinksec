@@ -44,6 +44,38 @@ public class YaraService {
                 output.put(key,v.asLong());
             }
             if(output.path("failures").asLong()>output.path("scans").asLong())throw new IllegalArgumentException("invalid YARA failures");
+            if(input.has("scan_failures")) {
+                var failures=input.path("scan_failures");
+                var counts=failures.path("counts");
+                var at=failures.path("last_at");
+                String issue=failures.path("last_issue").asText();
+                if(!failures.isObject()||!counts.isObject()||!at.isIntegralNumber()||!at.canConvertToLong()||at.asLong()<0||at.asLong()>output.path("last_scan_at").asLong()||!failures.path("last_issue").isTextual()||!ISSUES.contains(issue))throw new IllegalArgumentException("invalid YARA scan failures");
+                var clean=output.putObject("scan_failures");
+                clean.put("last_at",at.asLong());clean.put("last_issue",issue);
+                var cleanCounts=clean.putObject("counts");
+                long total=0,expected=output.path("failures").asLong();
+                var fields=counts.fields();
+                while(fields.hasNext()) {
+                    var entry=fields.next();var value=entry.getValue();
+                    if(entry.getKey().isEmpty()||!ISSUES.contains(entry.getKey())||!value.isIntegralNumber()||!value.canConvertToLong()||value.asLong()<=0||value.asLong()>expected-total)throw new IllegalArgumentException("invalid YARA scan failure count");
+                    total+=value.asLong();cleanCounts.put(entry.getKey(),value.asLong());
+                }
+                if(total!=expected||expected==0&&(at.asLong()!=0||!issue.isEmpty())||expected>0&&(at.asLong()==0||issue.isEmpty()||!cleanCounts.has(issue)))throw new IllegalArgumentException("inconsistent YARA scan failures");
+            }
+            if(input.has("update")) {
+                var update=input.path("update");
+                if(!update.isObject()||!update.path("enabled").isBoolean())throw new IllegalArgumentException("invalid YARA update status");
+                var clean=output.putObject("update");clean.put("enabled",update.path("enabled").asBoolean());
+                String issue=update.path("last_issue").asText();
+                if(!update.path("last_issue").isTextual()||!ISSUES.contains(issue)&&!Set.of("yara_update_download","yara_update_storage").contains(issue))throw new IllegalArgumentException("invalid YARA update issue");
+                clean.put("last_issue",issue);
+                for(String key:List.of("checked_at","success_at","changed_at","next_check_at")) {
+                    var value=update.path(key);
+                    if(!value.isIntegralNumber()||!value.canConvertToLong()||value.asLong()<0||value.asLong()>4102444800L)throw new IllegalArgumentException("invalid YARA update time");
+                    clean.put(key,value.asLong());
+                }
+                if(clean.path("changed_at").asLong()>clean.path("success_at").asLong()||clean.path("success_at").asLong()>clean.path("checked_at").asLong())throw new IllegalArgumentException("inconsistent YARA update times");
+            }
             data=output.toString();
         }
         jdbc.update("INSERT INTO t_yara_status(agent_id,contract,coverage,observed_at) VALUES(?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET contract=excluded.contract,coverage=excluded.coverage,observed_at=excluded.observed_at",agent,contract,data,System.currentTimeMillis());
