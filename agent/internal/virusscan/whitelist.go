@@ -74,32 +74,42 @@ func parseRealtimePolicy(data []byte, err error) (bool, bool) {
 	return p.Virus.Enabled, p.Virus.Action == "quarantine"
 }
 func (e *Engine) RealtimePolicy(workDir string) (bool, bool) {
+	data, err := e.readPolicy(workDir)
+	return parseRealtimePolicy(data, err)
+}
+func (e *Engine) readPolicy(workDir string) ([]byte, error) {
 	if e.policyReader != nil {
-		data, err := e.policyReader()
-		return parseRealtimePolicy(data, err)
+		return e.policyReader()
 	}
-	return RealtimePolicy(workDir)
+	return readVirusPolicy(workDir)
 }
 func (e *Engine) CheckRealtime(path, workDir string) *pb.VirusFinding {
-	enabled, quarantine := e.RealtimePolicy(workDir)
+	// An active scan can hold mu while policy changes. Authorize the next
+	// realtime file only after its wait, including the current action choice.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	data, err := e.readPolicy(workDir)
+	enabled, quarantine := parseRealtimePolicy(data, err)
 	if !enabled {
 		return nil
 	}
-	return e.CheckFile(path, workDir, quarantine)
+	// Whitelist and disposition belong to the same authorized snapshot. A
+	// concurrent update takes effect for the next file, without mixing revisions.
+	e.refreshWithPolicy(workDir, data, err)
+	return e.checkFileLocked(path, workDir, quarantine)
 }
 
-// Refresh long-lived engines after signature or policy changes, before consulting clean caches.
+// Refresh long-lived engines after signature or policy changes.
 func (e *Engine) refresh(workDir string) {
+	data, err := e.readPolicy(workDir)
+	e.refreshWithPolicy(workDir, data, err)
+}
+func (e *Engine) refreshWithPolicy(workDir string, data []byte, err error) {
 	db := LoadDB(workDir)
 	if e.db != db {
 		e.db = db
 	}
-	if e.policyReader != nil {
-		data, err := e.policyReader()
-		e.whitelist = parseWhitelist(data, err)
-	} else {
-		e.whitelist = loadWhitelist(workDir)
-	}
+	e.whitelist = parseWhitelist(data, err)
 }
 
 func (e *Engine) whitelisted(path, hash string) bool {

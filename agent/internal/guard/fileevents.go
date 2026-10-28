@@ -155,7 +155,8 @@ func (g *Guard) fileEventLoop() {
 		g.virusRescan = false
 		g.watchMu.Lock()
 		g.watchRecovery = true
-		g.watchIssue = ""
+		// A retry has not yet established recovery. Keep the previous gap
+		// until a complete sweep can replace it with its final result.
 		g.watchMu.Unlock()
 	}
 	// Reserve one recovery step even under sustained event traffic, then yield
@@ -168,6 +169,13 @@ func (g *Guard) fileEventLoop() {
 				break
 			}
 			p, done := g.virusRecovery.Next(recoveryDeadline)
+			if issue := g.virusRecovery.Issue; issue != "" {
+				// Long sweeps span many heartbeats; publish known gaps before
+				// content checks and the eventual end of the traversal.
+				g.watchMu.Lock()
+				g.watchIssue = issue
+				g.watchMu.Unlock()
+			}
 			if p != "" {
 				for _, r := range roots {
 					if filewatch.Within(p, r) && filewatch.SafePath(p) {

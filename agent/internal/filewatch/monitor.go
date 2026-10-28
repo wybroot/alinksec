@@ -61,6 +61,7 @@ type Monitor struct {
 	active       map[string]bool
 	invalidated  map[string]bool
 	resetWatches bool
+	gapRevision  uint64
 	status       Status
 	wake         chan struct{}
 }
@@ -194,6 +195,7 @@ func (m *Monitor) observe(e fsnotify.Event) {
 		return
 	}
 	if len(e.Name) > MaxPathBytes {
+		m.gapRevision++
 		m.status.Dropped++
 		m.status.Gaps++
 		m.rescan = true
@@ -205,6 +207,7 @@ func (m *Monitor) observe(e fsnotify.Event) {
 	k := key(e.Name)
 	if _, ok := m.pending[k]; !ok {
 		if len(m.pending) >= MaxPending {
+			m.gapRevision++
 			m.status.Dropped++
 			if !m.rescan {
 				m.status.Gaps++
@@ -222,6 +225,7 @@ func (m *Monitor) observe(e fsnotify.Event) {
 func (m *Monitor) gap(issue string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.gapRevision++
 	m.rescan = true
 	m.topology = true
 	m.resetWatches = true
@@ -341,6 +345,7 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 	m.mu.Lock()
 	roots := append([]Root(nil), m.roots...)
 	rev := m.revision
+	gapRev := m.gapRevision
 	invalidated := m.invalidated
 	m.invalidated = map[string]bool{}
 	resetWatches := m.resetWatches
@@ -378,9 +383,9 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 		if !recursive || depth >= MaxDepth {
 			return
 		}
-		d, err := os.Open(path)
-		if err != nil {
-			issue = "directory_unreadable"
+		d, openIssue := openDirectory(path, s)
+		if openIssue != "" {
+			issue = openIssue
 			return
 		}
 		defer d.Close()
@@ -479,6 +484,12 @@ func (m *Monitor) reconcile(ctx context.Context, w registrar, watched map[string
 	m.status.LastSync = time.Now().UnixMilli()
 	if rev != m.revision {
 		m.topology = true
+		return
+	}
+	// The independent reader can report another gap while registration is
+	// in flight, even after its rescan request has already been drained.
+	// Only a reconciliation started after that gap may clear its status.
+	if gapRev != m.gapRevision {
 		return
 	}
 	m.status.State = "watching"

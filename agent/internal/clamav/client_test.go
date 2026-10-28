@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -108,6 +109,7 @@ func TestTLSConfigAndCancellation(t *testing.T) {
 }
 
 func TestScanReplyDeadlineIsReportedAsTimeout(t *testing.T) {
+	var streams atomic.Int32
 	cfg := clamavtest.Start(t, func(c net.Conn) {
 		cmd, _ := clamavtest.Command(c)
 		if cmd == "zVERSION\x00" {
@@ -116,7 +118,11 @@ func TestScanReplyDeadlineIsReportedAsTimeout(t *testing.T) {
 		}
 		if cmd == "zINSTREAM\x00" {
 			_, _ = clamavtest.Stream(c)
-			_, _ = io.Copy(io.Discard, c)
+			if streams.Add(1) == 1 {
+				_, _ = io.Copy(io.Discard, c)
+			} else {
+				clamavtest.Reply(c, "stream: Test.Marker FOUND")
+			}
 		}
 	})
 	client := clamav.New(cfg)
@@ -126,10 +132,21 @@ func TestScanReplyDeadlineIsReportedAsTimeout(t *testing.T) {
 	if name != "" || clamav.Code(err) != "clamav_timeout" || client.Status().LastIssue != "clamav_timeout" {
 		t.Fatalf("stalled reply name=%q err=%v status=%+v", name, err, client.Status())
 	}
+	name, err = client.Scan(context.Background(), version, consume)
+	if name != "Test.Marker" || err != nil {
+		t.Fatalf("scan after stalled reply name=%q err=%v", name, err)
+	}
+	if recovered := client.Status(); recovered.Scans != 2 || recovered.Failures != 1 || recovered.LastIssue != "" || recovered.State != "ready" || streams.Load() != 2 {
+		t.Fatalf("stalled reply recovery status=%+v streams=%d", recovered, streams.Load())
+	}
 }
 func TestScanSerializationAndCancelledWaiter(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var streams atomic.Int32
 	cfg := clamavtest.Start(t, func(c net.Conn) {
 		cmd, _ := clamavtest.Command(c)
 		if cmd == "zVERSION\x00" {
@@ -137,8 +154,10 @@ func TestScanSerializationAndCancelledWaiter(t *testing.T) {
 			return
 		}
 		if cmd == "zINSTREAM\x00" {
-			close(entered)
-			<-release
+			if streams.Add(1) == 1 {
+				close(entered)
+				<-release
+			}
 			_, _ = clamavtest.Stream(c)
 			clamavtest.Reply(c, "stream: OK")
 		}
@@ -155,12 +174,27 @@ func TestScanSerializationAndCancelledWaiter(t *testing.T) {
 	defer cancel()
 	called := false
 	_, err := c.Scan(ctx, version, func(_ context.Context, w io.Writer) error { called = true; return nil })
-	close(release)
-	if err == nil || called {
-		t.Fatalf("waiter err=%v consumed=%v", err, called)
+	if clamav.Code(err) != "clamav_timeout" || called {
+		t.Errorf("waiter err=%v consumed=%v", err, called)
 	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	failed := c.Status()
+	if failed.Scans != 1 || failed.Failures != 1 || failed.LastIssue != "clamav_timeout" || failed.LastScanAt == 0 || streams.Load() != 1 {
+		t.Errorf("queued timeout was not counted independently of the running scan: %+v streams=%d", failed, streams.Load())
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("running scan did not finish after queued timeout")
+	}
+	if name, err := c.Scan(context.Background(), version, consume); err != nil || name != "" {
+		t.Fatalf("scan after queued timeout name=%q err=%v", name, err)
+	}
+	if recovered := c.Status(); recovered.Scans != 3 || recovered.Failures != 1 || recovered.LastIssue != "" || recovered.LastScanAt < failed.LastScanAt || streams.Load() != 2 {
+		t.Fatalf("queue did not recover with cumulative failure count: %+v streams=%d", recovered, streams.Load())
 	}
 }
 

@@ -12,6 +12,7 @@ type frame struct {
 	path  string
 	dir   *os.File
 	depth int
+	info  os.FileInfo
 }
 
 // Sweep keeps at most MaxDepth+1 directory descriptors and resumes where the
@@ -48,7 +49,9 @@ func (s *Sweep) open(path string, depth int) string {
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if depth == 0 && os.IsNotExist(err) {
+			s.Issue = "root_unavailable"
+		} else if !os.IsNotExist(err) {
 			s.Issue = "directory_unreadable"
 		}
 		return ""
@@ -56,21 +59,21 @@ func (s *Sweep) open(path string, depth int) string {
 	if info.Mode().IsRegular() {
 		return path
 	}
-	if !info.IsDir() || depth > MaxDepth {
+	if !info.IsDir() {
+		if depth == 0 {
+			s.Issue = "root_unavailable"
+		}
 		return ""
 	}
-	d, err := os.Open(path)
-	if err != nil {
-		s.Issue = "directory_unreadable"
+	if depth > MaxDepth {
 		return ""
 	}
-	after, err := d.Stat()
-	if err != nil || !os.SameFile(info, after) || !SafePath(path) {
-		d.Close()
-		s.Issue = "path_changed"
+	d, issue := openDirectory(path, info)
+	if issue != "" {
+		s.Issue = issue
 		return ""
 	}
-	s.stack = append(s.stack, frame{path, d, depth})
+	s.stack = append(s.stack, frame{path: path, dir: d, depth: depth, info: info})
 	return ""
 }
 
@@ -90,6 +93,15 @@ func (s *Sweep) Next(deadline time.Time) (path string, done bool) {
 			continue
 		}
 		f := s.stack[len(s.stack)-1]
+		// A batch may resume after this directory was retired or replaced.
+		// Never join entries from the old descriptor to the replacement path.
+		current, err := os.Lstat(f.path)
+		if err != nil || !current.IsDir() || !os.SameFile(f.info, current) || !SafePath(f.path) {
+			f.dir.Close()
+			s.stack = s.stack[:len(s.stack)-1]
+			s.Issue = "path_changed"
+			continue
+		}
 		list, err := f.dir.ReadDir(1)
 		if len(list) > 0 {
 			s.Entries++

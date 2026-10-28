@@ -261,18 +261,13 @@ func (c *Client) Scan(ctx context.Context, expected string, consume func(context
 	}
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	select {
-	case c.gate <- struct{}{}:
-		defer func() { <-c.gate }()
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
+	locked := false
+	// Waiting for the serial gate is part of the attempt and its deadline.
 	defer func() {
 		if err != nil && ctx.Err() != nil {
 			name, err = "", ctx.Err()
 		}
 		c.mu.Lock()
-		defer c.mu.Unlock()
 		c.status.Scans++
 		c.status.LastScanAt = time.Now().Unix()
 		if err != nil {
@@ -281,7 +276,17 @@ func (c *Client) Scan(ctx context.Context, expected string, consume func(context
 		} else {
 			c.status.LastIssue = ""
 		}
+		c.mu.Unlock()
+		if locked {
+			<-c.gate
+		}
 	}()
+	select {
+	case c.gate <- struct{}{}:
+		locked = true
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	v, err := c.Probe(ctx)
 	if err != nil {
 		return "", err

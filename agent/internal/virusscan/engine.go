@@ -418,6 +418,12 @@ func (e *Engine) CheckFile(path, workDir string, quarantine bool) *pb.VirusFindi
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.refresh(workDir)
+	return e.checkFileLocked(path, workDir, quarantine)
+}
+
+// The caller refreshes the scan inputs and holds mu through policy
+// authorization, scanning and disposition.
+func (e *Engine) checkFileLocked(path, workDir string, quarantine bool) *pb.VirusFinding {
 	useClamAV, useYARA := e.clamav.Realtime(), e.yara.Realtime()
 	if !utf8.ValidString(path) || len(path) > 512 || (!useClamAV && !useYARA && (e.db == nil || !e.db.Valid || len(e.db.hashes)+len(e.db.rules) == 0)) || protectedPath(path, workDir) || isExcludedDir(path) || e.whitelisted(path, "") {
 		return nil

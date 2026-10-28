@@ -57,6 +57,80 @@ func (w *failingRegistrar) WatchList() []string {
 	return paths
 }
 
+type notifyingRegistrar struct {
+	failingRegistrar
+	onAdd func()
+}
+
+func (w *notifyingRegistrar) Add(path string) error {
+	if err := w.failingRegistrar.Add(path); err != nil {
+		return err
+	}
+	if notify := w.onAdd; notify != nil {
+		w.onAdd = nil
+		notify()
+	}
+	return nil
+}
+
+func TestReconcilePreservesNewCollectionGap(t *testing.T) {
+	for _, kind := range []string{"kernel_overflow_or_error", "queue_overflow", "path_limit"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			m := New()
+			m.Update([]Root{{root, true}})
+			// Keep the startup rescan pending: queue overflow may coalesce
+			// its gap counter while still reporting newly dropped events.
+			if kind == "queue_overflow" {
+				for n := 0; n < MaxPending; n++ {
+					m.observe(fsnotify.Event{Name: filepath.Join(root, fmt.Sprint(n)), Op: fsnotify.Write})
+				}
+			}
+			w := &notifyingRegistrar{}
+			var gap Status
+			w.onAdd = func() {
+				// Reproduce the independent event reader reporting a gap
+				// after registration took its snapshot, before it publishes.
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					switch kind {
+					case "kernel_overflow_or_error":
+						m.gap(kind)
+					case "queue_overflow":
+						m.observe(fsnotify.Event{Name: filepath.Join(root, "overflow"), Op: fsnotify.Write})
+					case "path_limit":
+						m.observe(fsnotify.Event{Name: filepath.Join(root, strings.Repeat("x", MaxPathBytes)), Op: fsnotify.Write})
+					}
+					gap = m.Status()
+					// The dispatcher can consume this request while the old
+					// reconciliation is still in flight.
+					if !m.Drain(1).Rescan {
+						t.Error("new collection gap did not request recovery")
+					}
+				}()
+				<-done
+			}
+			watched := map[string]os.FileInfo{}
+			m.reconcile(context.Background(), w, watched)
+			if got := m.Status(); got.State != "degraded" || got.Issue != kind || got.Gaps != gap.Gaps || got.Dropped != gap.Dropped {
+				t.Errorf("stale reconciliation concealed newer collection gap: got=%+v gap=%+v", got, gap)
+			}
+			if !m.Drain(MaxPending).Rescan {
+				t.Fatal("registration changes did not retain a recovery request")
+			}
+			adds := w.adds
+			m.reconcile(context.Background(), w, watched)
+			if got := m.Status(); got.State != "watching" || got.Issue != "" || got.Gaps != gap.Gaps || got.Dropped != gap.Dropped {
+				t.Fatal("subsequent clean reconciliation failed to recover", got)
+			}
+			if kind == "kernel_overflow_or_error" && (w.adds <= adds || !m.Drain(MaxPending).Rescan) {
+				t.Fatal("new kernel gap failed to rebuild watches and request recovery")
+			}
+		})
+	}
+}
+
 func TestRegistrationFailureIsVisibleAndRecoveryRequestsRescan(t *testing.T) {
 	m := New()
 	m.Update([]Root{{t.TempDir(), true}})

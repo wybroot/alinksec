@@ -3,6 +3,7 @@ package guard
 import (
 	"fmt"
 	"github.com/alinksec/alinksec-agent/internal/config"
+	"github.com/alinksec/alinksec-agent/internal/filewatch"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 	"io"
 	"log/slog"
@@ -11,6 +12,64 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRecoveryRetainsRepeatedRescanRequests(t *testing.T) {
+	root, later, anchor := t.TempDir(), t.TempDir(), t.TempDir()
+	for dir, count := range map[string]int{root: 2, later: 24} {
+		for n := 0; n < count; n++ {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprint(n)), []byte("harmless rescan fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	disabled := false
+	g := New(&config.DecoyConfig{Enabled: &disabled}, nil, t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	defer func() {
+		if g.virusRecovery != nil {
+			g.virusRecovery.Close()
+		}
+	}()
+	seen := map[string]int{}
+	g.SetVirusEngine(func(p string) *pb.VirusFinding { seen[p]++; return nil })
+	g.SetVirusRoots([]string{root, later}, nil)
+	g.updateFileWatches()
+	g.fileEventLoop()
+	old := g.virusRecovery
+	if old == nil || seen[filepath.Join(root, "0")] != 1 || seen[filepath.Join(root, "1")] != 1 {
+		t.Fatal("fixture did not finish the first root while retaining the later traversal")
+	}
+	late := filepath.Join(root, "created-after-cursor-left")
+	if err := os.WriteFile(late, []byte("harmless late recovery fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 2; n++ {
+		// A watch configuration change requests recovery without delivering
+		// a file event for the newly created file in the already visited root.
+		g.watcher.Update([]filewatch.Root{{Path: root, Recursive: true}, {Path: later, Recursive: true}, {Path: filepath.Join(anchor, fmt.Sprint(n))}})
+		g.fileEventLoop()
+		if g.virusRecovery != old || !g.virusRescan {
+			t.Fatal("new rescan restarted or disappeared behind the active traversal")
+		}
+	}
+	for n := 0; n < 10 && g.virusRecovery != nil; n++ {
+		g.fileEventLoop()
+	}
+	if g.virusRecovery != nil || !g.virusRescan || seen[late] != 0 || len(seen) != 26 {
+		t.Fatal("first traversal lost progress or the pending recovery request", seen)
+	}
+	g.fileEventLoop()
+	for n := 0; n < 10 && g.virusRecovery != nil; n++ {
+		g.fileEventLoop()
+	}
+	if g.virusRecovery != nil || g.virusRescan || len(seen) != 27 || seen[late] != 1 {
+		t.Fatal("coalesced recovery did not cover the previously visited root", seen)
+	}
+	for p, count := range seen {
+		if p != late && count != 2 {
+			t.Fatalf("recovery skipped or repeatedly restarted a file: %s count=%d", p, count)
+		}
+	}
+}
 
 func TestRecoveryScopeReplacementClosesOldTraversal(t *testing.T) {
 	old, next := t.TempDir(), t.TempDir()
