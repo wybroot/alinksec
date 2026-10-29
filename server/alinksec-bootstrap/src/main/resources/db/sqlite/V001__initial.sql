@@ -850,7 +850,19 @@ INSERT INTO t_protect_rule (rule_id, name, type, match, actions, severity, enabl
    '["kill","alert"]', 4, TRUE, TRUE),
   ('PR-0001', 'EDR miner process block', 'process',
    '{"exe_regex":"(?i)(^|/)(xmrig|minerd|kdevtmpfsi|kinsing)$"}',
-   '["kill","alert"]', 4, TRUE, TRUE)
+   '["kill","alert"]', 4, TRUE, TRUE),
+  ('PR-0005', '反弹 Shell 行为检测', 'process',
+   '{"platforms":["linux"],"cmdline_regex":"(?i)(?:bash|sh|zsh|dash)\\\\s+.*(?:-i\\\\s+.*>&|/dev/tcp/[0-9.]+/|nc\\\\s+.*-e\\\\s+/(?:bin/)?(?:ba)?sh|socat\\\\s+exec:.*pty|pty\\\\.spawn\\\\()"}',
+   '["alert"]', 4, TRUE, TRUE),
+  ('PR-0006', '非交互式远程工具衍生', 'process',
+   '{"platforms":["linux"],"exe_regex":"(?i)(^|/)(ncat|socat|chisel|frpc|frps|gost)$"}',
+   '["alert"]', 3, TRUE, TRUE),
+  ('PR-0007', '常见渗透与 C2 工具特征', 'process',
+   '{"platforms":["linux","windows"],"exe_regex":"(?i)(^|/)(fscan|mimikatz|bloodhound|sliver-client|havoc)$"}',
+   '["alert"]', 4, TRUE, TRUE),
+  ('PR-0008', '恶意持久化与历史清除', 'process',
+   '{"platforms":["linux"],"cmdline_regex":"(?i)(?:rm\\\\s+-[a-zA-Z]*f?[a-zA-Z]*\\\\s+.*(?:/\\\\.bash_history|/\\\\.zsh_history)|history\\\\s+-c|unset\\\\s+HISTFILE|export\\\\s+HISTSIZE=0|echo\\\\s+.*>>\\\\s*/var/spool/cron/|echo\\\\s+.*>>\\\\s*/etc/crontab)"}',
+   '["alert"]', 3, TRUE, TRUE)
 ON CONFLICT (rule_id) DO NOTHING;
 
 -- 绛栫暐鐗堟湰涓庡叏閲忓揩鐓э紙鍗曡琛紱t_protect_rule 鍙樻洿 鈫?version 閫掑 + content 閲嶅缓锛孭olicySync 鐑笅鍙戯級

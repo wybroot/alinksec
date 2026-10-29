@@ -20,15 +20,29 @@ import (
  * ④ 证据快照（进程链 + 变更文件前 100）
  * ⑤ RptSecurityEvent(type=decoy_tamper / ransom_behavior, severity=critical) */
 
-// suspectProc 涉事进程取证（进程五元组 + 父链 + 二进制哈希）
+// procNetConn 记录进程持有的监听/已建立连接
+type procNetConn struct {
+	Family string `json:"family"`
+	Local  string `json:"local"`
+	Remote string `json:"remote"`
+	State  string `json:"state"`
+}
+
+// suspectProc 涉事进程取证（进程五元组 + 父链 + 二进制哈希 + 容器上下文 + 网络关联）
 type suspectProc struct {
-	Pid     int32            `json:"pid"`
-	PPid    int32            `json:"ppid"`
-	Exe     string           `json:"exe"`
-	Cmdline string           `json:"cmdline"`
-	User    string           `json:"user"`
-	ExeSHA  string           `json:"exe_sha256,omitempty"`
-	Lineage []processLineage `json:"lineage,omitempty"`
+	Pid         int32            `json:"pid"`
+	PPid        int32            `json:"ppid"`
+	Exe         string           `json:"exe"`
+	Cmdline     string           `json:"cmdline"`
+	User        string           `json:"user"`
+	ExeSHA      string           `json:"exe_sha256,omitempty"`
+	Created     int64            `json:"created,omitempty"`
+	Lineage     []processLineage `json:"lineage,omitempty"`
+	PidTree     []string         `json:"pid_tree,omitempty"`
+	InContainer bool             `json:"in_container"`
+	ContainerID string           `json:"container_id,omitempty"`
+	NetStatus   string           `json:"net_status,omitempty"`
+	Connections []procNetConn    `json:"connections,omitempty"`
 }
 
 // processLineage is ordered from the implicated process toward init/root.
@@ -40,6 +54,7 @@ type processLineage struct {
 	Cmdline string `json:"cmdline"`
 	User    string `json:"user"`
 	ExeSHA  string `json:"exe_sha256,omitempty"`
+	Created int64  `json:"created,omitempty"`
 }
 
 // respond 执行响应链，产出安全事件
@@ -171,15 +186,53 @@ func takeForensics(p *process.Process) *suspectProc {
 		if err != nil {
 			break
 		}
+		// PID reuse detection:
+		// Parent must have been created before (or at the same time as) the child.
+		// If parent.CreateTime() > node.Created, the original parent has exited
+		// and the OS has recycled its PID for an unrelated new process.
+		if parentCreated, err := parent.CreateTime(); err == nil && node.Created > 0 {
+			if parentCreated > node.Created {
+				break
+			}
+		}
 		current = parent
 	}
 	if len(lineage) == 0 {
 		return nil
 	}
 	first := lineage[0]
+	pidTree := make([]string, 0, len(lineage))
+	for _, l := range lineage {
+		name := filepath.Base(l.Exe)
+		if name == "" || name == "." {
+			name = l.Cmdline
+			if idx := strings.Index(name, " "); idx > 0 {
+				name = name[:idx]
+			}
+		}
+		if name == "" {
+			name = fmt.Sprintf("pid_%d", l.Pid)
+		}
+		pidTree = append(pidTree, fmt.Sprintf("%d:%s", l.Pid, name))
+	}
+
+	inContainer, containerID := inspectProcessContainer(first.Pid)
+	netStatus, conns := inspectProcessNetwork(first.Pid)
+
 	return &suspectProc{
-		Pid: first.Pid, PPid: first.PPid, Exe: first.Exe, Cmdline: first.Cmdline,
-		User: first.User, ExeSHA: first.ExeSHA, Lineage: lineage,
+		Pid:         first.Pid,
+		PPid:        first.PPid,
+		Exe:         first.Exe,
+		Cmdline:     first.Cmdline,
+		User:        first.User,
+		ExeSHA:      first.ExeSHA,
+		Created:     first.Created,
+		Lineage:     lineage,
+		PidTree:     pidTree,
+		InContainer: inContainer,
+		ContainerID: containerID,
+		NetStatus:   netStatus,
+		Connections: conns,
 	}
 }
 
@@ -187,6 +240,9 @@ func snapshotProcess(p *process.Process) processLineage {
 	node := processLineage{Pid: p.Pid}
 	if pp, err := p.Ppid(); err == nil {
 		node.PPid = pp
+	}
+	if ct, err := p.CreateTime(); err == nil {
+		node.Created = ct
 	}
 	if exe, err := p.Exe(); err == nil {
 		node.Exe = exe

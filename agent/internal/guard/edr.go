@@ -77,11 +77,20 @@ func (g *Guard) evaluateProcessWithActions(proc *process.Process, created int64,
 		if !processRuleMatches(rule, obs) {
 			continue
 		}
+		forensics := takeForensics(proc)
 		detail := map[string]any{
 			"startup_inventory": !allowActions,
-			"process":           takeForensics(proc),
+			"process":           forensics,
 			"process_key":       fmt.Sprintf("%d:%d", obs.pid, obs.created),
 			"match":             map[string]any{"exe": obs.exe, "cmdline": redactCommandLine(strings.Fields(obs.cmdline))},
+		}
+		if forensics != nil {
+			detail["pid_tree"] = forensics.PidTree
+			detail["in_container"] = forensics.InContainer
+			if forensics.ContainerID != "" {
+				detail["container_id"] = forensics.ContainerID
+			}
+			detail["net_status"] = forensics.NetStatus
 		}
 		action := "alert_only"
 		if allowActions && hasAction(rule.Actions, "kill") && KillProcess(proc.Pid) {
