@@ -129,6 +129,7 @@
 - [防护能力与开源实现差距](84-防护能力与开源实现差距.md)：对照 Elkeid Driver、Falco、Wazuh Active Response、OWASP CRS 的完整差距矩阵、六批分批实现计划、当前能力声明边界及历史修复记录。
 - [病毒库自动更新](85-病毒库自动更新.md)：哈希情报、FreshClam、原生 YARA 的定时更新、生效证据与尚未启用范围。
 - [业务站点 WAF 防护接入指南](89-业务站点WAF防护接入指南.md)：OWASP CRS 与 Coraza/ModSecurity 反向代理接入、误报调优基线与拦截模式上线流程。
+- [内核与 eBPF 遥测接入规范](90-内核与eBPF遥测接入规范.md)：Falco eBPF 与 Elkeid Driver Kprobe 内核事件接入网关、格式映射、无感降级与探针健康心跳机制。
 
 ## 当前实现依据
 

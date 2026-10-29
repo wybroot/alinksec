@@ -21,6 +21,7 @@ public class RestConfig implements WebMvcConfigurer {
         registry.addInterceptor(jwtAuthInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/auth/login", "/api/health", "/api/ready",
-                        "/api/virus/db/download", "/api/fix/patches/download", "/api/upgrade/download");
+                        "/api/virus/db/download", "/api/fix/patches/download", "/api/upgrade/download",
+                        "/api/telemetry/falco/events", "/api/telemetry/elkeid/events");
     }
 }

@@ -17,6 +17,7 @@
         {{ row.text }}
         <el-tag v-if="row.legacySeverity" size="small" type="info">历史等级，沿用旧含义</el-tag>
         <el-button v-if="row.detail?.attribution?.source === 'windows_kernel_file_etw'" link type="primary" size="small" @click="evidence = row">查看归因证据</el-button>
+        <el-button v-if="row.detail?.telemetry_source === 'falco_ebpf' || row.detail?.telemetry_source === 'elkeid_driver'" link type="primary" size="small" @click="telemetryEvidence = row">查看内核遥测详情</el-button>
       </template></el-table-column>
       <el-table-column prop="host" label="主机" width="130" />
       <el-table-column prop="time" label="时间" width="150" />
@@ -54,6 +55,9 @@
     <el-dialog :model-value="!!evidence" title="Windows 勒索进程归因证据" width="min(680px, 94vw)" top="5vh" style="max-height:90vh;overflow-y:auto" @close="evidence = null">
       <RansomAttribution v-if="evidence" :detail="evidence.detail" :action="evidence.action" />
     </el-dialog>
+    <el-dialog :model-value="!!telemetryEvidence" title="内核级遥测事件详情 (Falco / Elkeid)" width="min(760px, 94vw)" top="5vh" style="max-height:90vh;overflow-y:auto" @close="telemetryEvidence = null">
+      <KernelTelemetryDetail v-if="telemetryEvidence" :detail="telemetryEvidence.detail" />
+    </el-dialog>
   </div>
 </template>
 
@@ -63,6 +67,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchAlertResponses, createAlertResponse, fetchAlertPage, getUser, handleAlert } from '../api'
 import { sevType, sevLabel } from '../utils/format'
 import RansomAttribution from '../components/RansomAttribution.vue'
+import KernelTelemetryDetail from '../components/KernelTelemetryDetail.vue'
 
 const responseAlert = ref(null), responses = ref([]), responsePage = ref(1), responseTotal = ref(0), responseError = ref(''), responseBusy = ref(false)
 const responseStatus = value => ({0:'排队中',1:'已发送，待回执',2:'已接收',3:'执行中',4:'Agent 已完成回执',5:'执行失败',6:'回执超时'}[value] || '未知')
@@ -94,6 +99,7 @@ async function respond(action) {
 const alerts = ref([])
 const tab = ref('all')
 const evidence = ref(null)
+const telemetryEvidence = ref(null)
 const page = ref(1)
 const total = ref(0)
 const loading = ref(false)

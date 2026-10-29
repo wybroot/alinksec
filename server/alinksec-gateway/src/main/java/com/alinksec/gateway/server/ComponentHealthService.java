@@ -60,6 +60,9 @@ public class ComponentHealthService {
         components.add(clusterProperties.isEnabled()?probe("rabbitmq","RabbitMQ",()->state(rabbit.healthy()?"healthy":"down","报告队列检测",Map.of())):disabled("rabbitmq","RabbitMQ","当前为单机模式"));
         components.add(probe("cluster","运行模式",()->state(cluster.ready()?"healthy":"down",
                 clusterProperties.isEnabled()?"集群就绪状态":"单机运行",Map.of("mode",clusterProperties.isEnabled()?"cluster":"single"))));
+        components.add(app.getTelemetry().isEnabled()
+                ? probe("telemetry", "内核/eBPF 遥测接入", () -> state("healthy", "内核与 eBPF 事件接入接口就绪", Map.of("mode", "webhook_ingest")))
+                : disabled("telemetry", "内核/eBPF 遥测接入", "未启用内核遥测；Agent 采用内置轻量级安全轮询机制"));
         String overall=components.stream().anyMatch(c->"down".equals(c.get("status")))?"down":
                 components.stream().anyMatch(c->"degraded".equals(c.get("status")))?"degraded":"healthy";
         cached=Map.of("checkedAt",Instant.now().toString(),"status",overall,"components",components,"cacheSeconds",10,

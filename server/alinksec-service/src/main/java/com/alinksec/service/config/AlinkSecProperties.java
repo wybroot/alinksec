@@ -123,4 +123,19 @@ public class AlinkSecProperties {
         public String getDownloadBaseUrl() { return downloadBaseUrl; }
         public void setDownloadBaseUrl(String downloadBaseUrl) { this.downloadBaseUrl = downloadBaseUrl; }
     }
+
+    /** 内核/eBPF 遥测接入（Falco / Elkeid Driver，docs/84 第六批） */
+    public static class Telemetry {
+        private boolean enabled = false;
+        private String falcoSecret = "";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getFalcoSecret() { return falcoSecret; }
+        public void setFalcoSecret(String falcoSecret) { this.falcoSecret = falcoSecret; }
+    }
+
+    private Telemetry telemetry = new Telemetry();
+    public Telemetry getTelemetry() { return telemetry; }
+    public void setTelemetry(Telemetry telemetry) { this.telemetry = telemetry; }
 }

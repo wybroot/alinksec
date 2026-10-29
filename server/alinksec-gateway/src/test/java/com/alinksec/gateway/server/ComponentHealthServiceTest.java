@@ -44,7 +44,7 @@ class ComponentHealthServiceTest {
     @Test void inactiveDependenciesAreExplicitAndDoNotTriggerConnections() {
         var health=service();var result=health.snapshot();
         assertEquals("healthy",result.get("status"));
-        for(String id:List.of("metrics","redis","rabbitmq")) assertEquals("disabled",component(result,id).get("status"));
+        for(String id:List.of("metrics","redis","rabbitmq","telemetry")) assertEquals("disabled",component(result,id).get("status"));
         verifyNoInteractions(redis,rabbit);
         assertSame(result,health.snapshot());verify(jdbc,times(1)).queryForObject("SELECT 1",Integer.class);
     }
