@@ -1,4 +1,12 @@
 <template>
+  <el-dialog v-model="groupDialog" title="管理主机分组" width="min(600px, 94vw)">
+    <el-input v-model="newGroupName" maxlength="128" placeholder="新分组名称" /><el-button @click="editGroup(null, newGroupName)">创建分组</el-button>
+    <el-table :data="groups">
+      <el-table-column label="名称"><template #default="{ row }"><el-input v-model="row.name" maxlength="128" /></template></el-table-column>
+      <el-table-column prop="host_count" label="主机数" width="80" />
+      <el-table-column label="操作"><template #default="{ row }"><el-button link @click="editGroup(row.id, row.name)">保存</el-button><el-button link type="danger" @click="removeGroup(row)">删除</el-button></template></el-table-column>
+    </el-table>
+  </el-dialog>
   <div class="panel">
     <div class="toolbar">
       <el-input v-model="query" placeholder="主机名 / IP 搜索" style="width:220px" clearable>
@@ -8,8 +16,9 @@
         <el-option label="隔离中" value="isolating" /><el-option label="已隔离" value="isolated" />
         <el-option label="隔离状态待确认" value="isolation_unknown" /><el-option label="解除中" value="restoring" /><el-option label="隔离失败" value="isolate_failed" />
         <el-option label="解除失败" value="restore_failed" /><el-option label="待激活" value="pending" /></el-select>
-      <el-select placeholder="主机组" clearable style="width:150px">
-        <el-option v-for="g in groups" :key="g" :label="g" :value="g" /></el-select>
+      <el-select v-model="groupFilter" placeholder="主机组" clearable style="width:150px">
+        <el-option label="未分组" :value="0" /><el-option v-for="g in groups" :key="g.id" :label="`${g.name} (${g.host_count})`" :value="Number(g.id)" /></el-select>
+      <el-button v-if="canManageGroups" @click="groupDialog = true">管理分组</el-button>
       <div class="spacer"></div>
       <el-button type="primary" @click="newInstallToken">+ 安装 Agent</el-button>
       <el-button @click="router.push('/system')">Agent 升级</el-button>
@@ -19,7 +28,11 @@
         <template #default="{ row }"><div><div class="host-name">{{ row.host }}</div><div class="host-ip mono">{{ row.ip }}</div></div></template>
       </el-table-column>
       <el-table-column prop="os" label="系统" width="160" />
-      <el-table-column prop="group" label="分组" width="110" />
+      <el-table-column label="分组" width="155"><template #default="{ row }">
+        <el-select v-if="canManageGroups" :model-value="row.groupId" @change="value => changeGroup(row, value)">
+          <el-option label="未分组" :value="0" /><el-option v-for="g in groups" :key="g.id" :label="g.name" :value="Number(g.id)" />
+        </el-select><span v-else>{{ row.group }}</span>
+      </template></el-table-column>
       <el-table-column prop="ver" label="Agent" width="80" />
       <el-table-column label="容器" width="76">
         <template #default="{ row }"><el-tag v-if="row.containerCount" size="small" type="info">{{ row.containerCount }}</el-tag><span v-else>—</span></template>
@@ -73,6 +86,10 @@
       </div>
     </template>
     <div v-if="curHost.agentId" class="host-detail" v-loading="detailLoading">
+      <el-alert v-if="!hostInfo.collection_attempts?.length" title="资产采集完整性未知，不能将空列表视为没有资产。" type="warning" :closable="false" />
+      <el-alert v-for="attempt in hostInfo.collection_attempts || []" :key="attempt.source"
+        :type="attempt.status === 'complete' ? 'info' : 'warning'" :closable="false"
+        :title="`${attempt.source}：${attempt.status === 'complete' ? '完整采集' : '采集未完成，当前为保留数据，可能过期'}；最近尝试 ${attempt.attempted_at || '未知'}；最近成功 ${attempt.succeeded_at || '无'} ${attempt.error || ''}`" />
       <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" show-icon />
       <div class="detail-actions">
         <span class="hint">{{ runtimeFresh ? '性能采样正常' : '性能采样暂缺或已过期' }} · {{ formatDate(latest.sampled_at) }}</span>
@@ -226,7 +243,7 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } 
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+import { getUser, saveHostGroup, deleteHostGroup, assignHostGroup, fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 import { metricPoints, percentText, bytesText, durationText, formatDate } from '../utils/host-detail'
 
@@ -235,6 +252,27 @@ const router = useRouter()
 // 数据源：GET /api/hosts → t_agent（注册/心跳/策略版本均来自 Agent 实采）
 const hosts = reactive([])
 const groups = ref([])
+const groupFilter = ref('')
+const groupDialog = ref(false)
+const newGroupName = ref('')
+const canManageGroups = ['admin', 'operator'].includes(getUser()?.role)
+const reloadGroups = async () => { groups.value = await fetchGroups() }
+const editGroup = async (id, name) => {
+  try { await saveHostGroup(id, name); newGroupName.value = ''; await reloadGroups(); await loadHosts() }
+  catch (e) { ElMessage.error(e.message || '分组保存失败') }
+}
+const removeGroup = async row => {
+  try {
+    await ElMessageBox.confirm(`删除分组“${row.name}”后，成员主机将变为未分组。`, '删除分组', { type: 'warning' })
+    await deleteHostGroup(row.id)
+    if (Number(groupFilter.value) === Number(row.id)) groupFilter.value = ''
+    await reloadGroups(); await loadHosts()
+  } catch(e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message || '删除失败') }
+}
+const changeGroup = async (row, groupId) => {
+  try { await assignHostGroup(row.agentId, groupId); await reloadGroups(); await loadHosts() }
+  catch(e) { ElMessage.error(e.message || '成员变更失败') }
+}
 const query = ref('')
 const statusFilter = ref('')
 const page = ref(1)
@@ -322,6 +360,7 @@ const loadHosts = async (silent = false) => {
     const result = await fetchHosts({
       keyword: query.value,
       status: statusFilter.value,
+      groupId: groupFilter.value,
       page: page.value,
       size: pageSize,
     })
@@ -348,7 +387,7 @@ watch(query, () => {
   clearTimeout(queryTimer)
   queryTimer = setTimeout(loadHosts, 250)
 })
-watch(statusFilter, () => {
+watch([statusFilter, groupFilter], () => {
   page.value = 1
   loadHosts()
 })

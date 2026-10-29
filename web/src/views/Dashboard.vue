@@ -39,7 +39,7 @@
     </section>
 
     <section class="lower-grid">
-      <article class="workspace-panel trend-panel"><header class="panel-heading"><div><span class="section-kicker">7 DAY WINDOW</span><h2>告警处置趋势</h2></div><span class="panel-note">新增与已处置</span></header><div ref="alertEl" class="chart alert-chart"></div></article>
+      <article class="workspace-panel trend-panel"><header class="panel-heading"><div><span class="section-kicker">7 DAY WINDOW</span><h2>告警记录确认趋势</h2></div><span class="panel-note">新增与已确认记录</span></header><div ref="alertEl" class="chart alert-chart"></div></article>
       <article class="workspace-panel event-panel">
         <header class="panel-heading"><div><span class="section-kicker">LATEST SIGNALS</span><h2>最新安全事件</h2></div><button class="text-action" @click="$router.push('/alerts')">全部事件 <el-icon><ArrowRight /></el-icon></button></header>
         <div v-if="d.events.length" class="event-list"><div v-for="e in d.events" :key="e.id" class="event-row"><div class="event-time">{{ e.time }}</div><span class="severity-rail" :class="e.sev"></span><div class="event-main"><div><el-tag size="small" :type="sevType(e.sev)" :effect="e.sev === 'critical' ? 'dark' : 'plain'">{{ sevLabel(e.sev) }}</el-tag><strong>{{ e.text }}</strong></div><span>{{ e.host || '未识别主机' }} · {{ e.action || 'alert_only' }}</span></div></div></div>

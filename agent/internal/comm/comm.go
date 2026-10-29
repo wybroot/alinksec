@@ -1367,6 +1367,9 @@ func (c *Client) pushMetrics(samples []*pb.MetricSample) {
 // 日志含入侵检测线索，经 pushReport 走离线队列保全路径。
 func (c *Client) logLoop(ctx context.Context) {
 	lc := logcollect.New(c.workDir, c.log, func(source string, lines []*pb.LogLine) bool {
+		if source == "audit-exec" {
+			return c.grd.ObserveProcessAudit(lines)
+		}
 		if !c.queueLogBatch(source, lines) {
 			return false
 		}
@@ -1377,6 +1380,9 @@ func (c *Client) logLoop(ctx context.Context) {
 		c.grd.ObserveLoginLogs(source, lines)
 		return true
 	})
+	if c.cfg.ProcessAuditLog {
+		lc.EnableAuditExec()
+	}
 	lc.Run(ctx)
 }
 

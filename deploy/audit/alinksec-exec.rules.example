@@ -1,0 +1,5 @@
+# OPTIONAL: review host audit capacity and existing policy before installation.
+# Native 64-bit syscalls only. Do not use on a 32-bit kernel.
+-a always,exit -F arch=b64 -S execve,execveat -F success=1 -k alinksec_exec
+# For x86_64 compatibility programs, add a separately reviewed b32 rule.
+# Never flush existing audit policy with -D.

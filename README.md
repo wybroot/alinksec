@@ -557,7 +557,7 @@ validation reference is in English.
 - Sustained scan workloads and larger managed-host deployments.
 - Real private intelligence sources, a selected Windows patch installation and reboot.
 
-These field checks remain open; the planned software development is complete.
+These field checks remain open. Current develop also has disconnected operations, missing repair content and misleading result displays; see the [functional usability review](docs/87-功能真实性与可用性审查.md). Module delivery records do not establish practical readiness.
 
 ### 🤝 License & Contributions
 

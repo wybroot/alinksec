@@ -3,7 +3,9 @@
 package collector
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -26,20 +28,28 @@ func collectContainersForNode(snap *pb.RptAssetSnapshot, kubernetesNodeName stri
 }
 
 func collectDockerContainers(snap *pb.RptAssetSnapshot) {
-	out, err := exec.Command("docker", "ps", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}").Output()
+	out, err := containerCommand("docker", "ps", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
 	if err != nil {
+		recordAttempt(snap, "docker", pb.AssetCollectionAttempt_FAILED, "docker_list_failed")
 		return
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	recordAttempt(snap, "docker", pb.AssetCollectionAttempt_COMPLETE, "")
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\r\n"), "\n") {
+		if line == "" {
+			continue
+		}
 		parts := strings.Split(line, "\t")
-		if len(parts) < 5 || parts[0] == "" {
+		if len(parts) != 5 || parts[0] == "" {
+			recordAttempt(snap, "docker", pb.AssetCollectionAttempt_PARTIAL, "docker_list_invalid")
 			continue
 		}
 		c := &pb.ContainerInfo{ContainerId: parts[0], Name: parts[1], Image: parts[2], Status: parts[3], Orchestrator: "docker"}
 		if parts[4] != "" {
 			c.Ports = strings.Split(parts[4], ", ")
 		}
-		fillContainerDetails(c)
+		if err := fillContainerDetails(c); err != nil {
+			recordAttempt(snap, "docker", pb.AssetCollectionAttempt_PARTIAL, "docker_inspect_failed")
+		}
 		snap.Containers = append(snap.Containers, c)
 	}
 }
@@ -75,17 +85,21 @@ func collectKubernetesContainers(snap *pb.RptAssetSnapshot, configuredNodeName s
 		var err error
 		nodeName, err = os.Hostname()
 		if err != nil || strings.TrimSpace(nodeName) == "" {
+			recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_FAILED, "node_name_unavailable")
 			return
 		}
 	}
-	out, err := exec.Command("kubectl", kubernetesPodArgs(nodeName)...).Output()
+	out, err := containerCommand("kubectl", kubernetesPodArgs(nodeName)...)
 	if err != nil {
+		recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_FAILED, "kubernetes_list_failed")
 		return
 	}
 	var pods podList
-	if json.Unmarshal(out, &pods) != nil {
+	if json.Unmarshal(out, &pods) != nil || pods.Items == nil {
+		recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_FAILED, "kubernetes_list_invalid")
 		return
 	}
+	recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_COMPLETE, "")
 	for _, pod := range pods.Items {
 		for _, status := range pod.Status.ContainerStatuses {
 			id := status.ContainerID
@@ -105,12 +119,15 @@ func kubernetesPodArgs(nodeName string) []string {
 	return []string{"get", "pods", "--all-namespaces", "--field-selector", "spec.nodeName=" + nodeName, "-o", "json"}
 }
 
-func fillContainerDetails(c *pb.ContainerInfo) {
-	out, err := exec.Command("docker", "inspect", "--format", "{{.Image}}\t{{.Created}}\t{{.State.StartedAt}}\t{{json .Config.Labels}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.NetworkMode}}\t{{.Config.User}}", c.ContainerId).Output()
+func fillContainerDetails(c *pb.ContainerInfo) error {
+	out, err := containerCommand("docker", "inspect", "--format", "{{.Image}}\t{{.Created}}\t{{.State.StartedAt}}\t{{json .Config.Labels}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.NetworkMode}}\t{{.Config.User}}", c.ContainerId)
 	if err != nil {
-		return
+		return err
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 7)
+	parts := strings.SplitN(strings.TrimRight(string(out), "\r\n"), "\t", 7)
+	if len(parts) != 7 {
+		return fmt.Errorf("invalid inspect result")
+	}
 	if len(parts) > 0 {
 		c.ImageId = parts[0]
 	}
@@ -121,7 +138,9 @@ func fillContainerDetails(c *pb.ContainerInfo) {
 		c.StartedAt = dockerTime(parts[2])
 	}
 	if len(parts) > 3 {
-		_ = json.Unmarshal([]byte(parts[3]), &c.Labels)
+		if err := json.Unmarshal([]byte(parts[3]), &c.Labels); err != nil {
+			return err
+		}
 	}
 	if len(parts) > 4 && parts[4] == "true" {
 		c.Risky, c.RiskReasons = true, append(c.RiskReasons, "privileged")
@@ -132,6 +151,13 @@ func fillContainerDetails(c *pb.ContainerInfo) {
 	if len(parts) > 6 && (parts[6] == "" || parts[6] == "0" || parts[6] == "root") {
 		c.Risky, c.RiskReasons = true, append(c.RiskReasons, "runs_as_root")
 	}
+	return nil
+}
+
+var containerCommand = func(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
 }
 
 func dockerTime(value string) int64 {

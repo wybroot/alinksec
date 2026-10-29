@@ -53,7 +53,7 @@ class UpgradeServiceTest {
         host("host-1", os, arch);
         when(tokens.issue("host-1", "agent-upgrade", "agent.bin")).thenReturn("token");
         assertEquals(1, service().dispatch(1L, List.of("host-1"), null).get("dispatched"));
-        verify(commands).dispatch(eq("host-1"), any(Command.Builder.class), isNull());
+        verify(commands).dispatchAfterCommit(eq("host-1"), any(Command.Builder.class), isNull());
     }
 
     @Test
@@ -65,7 +65,7 @@ class UpgradeServiceTest {
         when(tokens.issue("host-1", "agent-upgrade", key)).thenReturn("token");
         service().dispatch(1L, List.of("host-1"), null);
         var sent = org.mockito.ArgumentCaptor.forClass(Command.Builder.class);
-        verify(commands).dispatch(eq("host-1"), sent.capture(), isNull());
+        verify(commands).dispatchAfterCommit(eq("host-1"), sent.capture(), isNull());
         assertEquals("https://127.0.0.1:8443/api/upgrade/download?packageKey=1.2.3%2Bbuild-linux-amd64.bin&token=token",
                 sent.getValue().getAgentUpgrade().getDownloadUrl());
     }

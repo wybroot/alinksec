@@ -76,7 +76,10 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V034__cluster_coordination.sql",
                 "db/common/V035__central_log_search.sql",
                 "db/common/V036__alert_severity_source.sql",
-                "db/common/V037__host_runtime.sql"
+                "db/common/V037__host_runtime.sql",
+                "db/common/V038__asset_collection_status.sql",
+                "db/common/V039__upgrade_batches.sql",
+                "db/common/V040__alert_responses.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

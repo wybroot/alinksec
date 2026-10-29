@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "code": "ALINKSEC-LINUX-ACCOUNT-PERM",
+  "name": "Linux 账户文件权限核查与修复",
+  "standard": "ALinkSec 专项核查（非完整合规基线）",
+  "product": "Ubuntu 22.04/24.04、Debian 12/13",
+  "osType": 1,
+  "osVersionPattern": "^(ubuntu (22\\.04|24\\.04)(\\.[0-9]+)?|debian (12|13)(\\.[0-9]+)?)$",
+  "version": "1",
+  "source": {
+    "name": "ALinkSec bounded account permission definitions",
+    "version": "1",
+    "url": "https://github.com/wybroot/alinksec/blob/develop/deploy/baseline/account-permissions-package.json",
+    "sha256": "5ae52b7fa04822f219230d440d3166f1557a2b4820db4665c15a988f5373cb7d"
+  },
+  "items": [
+    {
+      "code": "ACCOUNT-PERM-PASSWD",
+      "ruleId": "ALINKSEC-ACCOUNT-PERM-PASSWD",
+      "name": "/etc/passwd 权限为 0644",
+      "category": "账户文件权限",
+      "severity": 2,
+      "check": {
+        "type": "file_perm",
+        "target": "/etc/passwd",
+        "perm": "0644",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅将现有普通文件权限恢复为 0644；不修改内容、属主，不需服务重载。存在 ACL、符号链接或特殊文件时需人工核查。",
+      "fix": {
+        "risk": "auto",
+        "steps": [
+          {
+            "action": "chmod",
+            "path": "/etc/passwd",
+            "mode": "0644"
+          }
+        ]
+      }
+    },
+    {
+      "code": "ACCOUNT-PERM-GROUP",
+      "ruleId": "ALINKSEC-ACCOUNT-PERM-GROUP",
+      "name": "/etc/group 权限为 0644",
+      "category": "账户文件权限",
+      "severity": 2,
+      "check": {
+        "type": "file_perm",
+        "target": "/etc/group",
+        "perm": "0644",
+        "timeout_ms": 5000
+      },
+      "remediation": "仅将现有普通文件权限恢复为 0644；不修改内容、属主，不需服务重载。存在 ACL、符号链接或特殊文件时需人工核查。",
+      "fix": {
+        "risk": "auto",
+        "steps": [
+          {
+            "action": "chmod",
+            "path": "/etc/group",
+            "mode": "0644"
+          }
+        ]
+      }
+    }
+  ],
+  "unsupported": []
+}

@@ -102,10 +102,10 @@ public class BaselinePackageService {
                     doc.path("standard").asText(), doc.path("osType").intValue(), doc.path("version").asText(),
                     doc.path("items").size(), id, doc.path("osVersionPattern").asText());
             for (JsonNode item : doc.path("items")) jdbc.update("""
-                    INSERT INTO t_baseline_item(template_id,code,name,category,severity,"check",remediation,rule_id)
-                    VALUES (?,?,?,?,?,?,?,?)
+                    INSERT INTO t_baseline_item(template_id,code,name,category,severity,"check",remediation,rule_id,fix_spec)
+                    VALUES (?,?,?,?,?,?,?,?,?)
                     """, template, item.path("code").asText(), item.path("name").asText(), item.path("category").asText(),
-                    item.path("severity").intValue(), JsonUtils.write(item.path("check")), item.path("remediation").asText(""), item.path("ruleId").asText());
+                    item.path("severity").intValue(), JsonUtils.write(item.path("check")), item.path("remediation").asText(""), item.path("ruleId").asText(), item.has("fix") ? JsonUtils.write(item.path("fix")) : null);
         }
         jdbc.update("UPDATE t_baseline_package SET status=?,template_id=?,reviewed_by=?,review_note=?,reviewed_at=? WHERE id=?",
                 approve ? "approved" : "rejected", template, user, note, now(), id);

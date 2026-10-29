@@ -48,7 +48,7 @@ func upgradeResultClient(t *testing.T, success bool) *Client {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	r := upgrade.Outcome{ID: strings.Repeat("b", 32), CommandID: "upgrade-command", Version: "test", Success: success, RolledBack: !success, Message: "durable result", Time: time.Now()}
+	r := upgrade.Outcome{ID: strings.Repeat("b", 32), CommandID: "upgrade-command", Version: "test", Complete: true, Success: success, RolledBack: !success, Message: "durable result", Time: time.Now()}
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -142,5 +142,17 @@ func TestReconnectAdvertisesUpgradeCapabilityBeforeBacklog(t *testing.T) {
 				t.Fatalf("heartbeat ordering lost failed backlog: %v, %v", remaining, err)
 			}
 		})
+	}
+}
+
+func TestIncompleteRollbackOutcomeDoesNotSealCommand(t *testing.T) {
+	result := upgrade.Outcome{CommandID: "pending-rollback", Message: "rollback retry pending"}
+	if ack := upgradeAck(result); ack.Stage != pb.RptAck_RUNNING {
+		t.Fatalf("incomplete rollback became terminal: %v", ack)
+	}
+	result.Complete = true
+	result.RolledBack = true
+	if ack := upgradeAck(result); ack.Stage != pb.RptAck_FAILED {
+		t.Fatalf("completed rollback not terminal: %v", ack)
 	}
 }

@@ -12,7 +12,7 @@
             <el-option label="windows-amd64" value="windows-amd64" />
           </el-select>
           <input ref="pkgFile" type="file" style="display:none" @change="onPkgFile" />
-          <el-button type="primary" size="small" :disabled="!upVersion || !upPlatform" @click="pkgFile.click()">上传升级包</el-button>
+          <el-button v-if="isAdmin" type="primary" size="small" :disabled="!upVersion || !upPlatform" @click="pkgFile.click()">上传升级包</el-button>
           <span class="hint">上传后 Agent 侧校验 SHA256 并原子替换，退出后由 systemd/SCM 拉起新版本，旧版本保留可回滚</span>
         </div>
         <el-table :data="packages" stripe size="small">
@@ -24,10 +24,28 @@
           <el-table-column prop="notes" label="说明" min-width="160" show-overflow-tooltip />
           <el-table-column label="操作" width="110">
             <template #default="{ row }">
-              <el-button type="primary" link size="small" @click="openDispatch(row)">灰度下发</el-button>
+              <el-button v-if="canUpgrade" type="primary" link size="small" @click="openDispatch(row)">灰度下发</el-button>
             </template>
           </el-table-column>
         </el-table>
+        <h4>升级批次 <el-button size="small" @click="loadBatches">刷新</el-button></h4>
+        <el-alert v-if="upgradeError" :title="upgradeError" type="error" :closable="false" />
+        <el-table :data="upgradeBatches" size="small">
+          <el-table-column prop="id" label="批次" min-width="230" /><el-table-column prop="version" label="目标版本" /><el-table-column prop="platform" label="平台" /><el-table-column prop="target_count" label="主机数" />
+          <el-table-column label="结果"><template #default="{ row }"><el-button link @click="openBatch(row.id)">查看逐机结果</el-button></template></el-table-column>
+        </el-table>
+        <el-pagination v-model:current-page="batchPage" :total="batchTotal" :page-size="20" layout="total, prev, pager, next" @current-change="loadBatches" />
+        <template v-if="batchId">
+          <h4>批次 {{ batchId }} <el-button size="small" @click="loadBatch">刷新结果</el-button></h4>
+          <p>发送成功不代表升级完成。只有最终回执中的版本、摘要及启动健康确认均匹配，才显示验证成功；未收到的安装／重启阶段保持待确认。</p>
+          <el-table :data="batchRows" size="small">
+            <el-table-column prop="agent_id" label="主机" min-width="150" /><el-table-column prop="command_id" label="指令编号" min-width="210" />
+            <el-table-column label="执行状态" min-width="170"><template #default="{ row }">{{ commandStatus(row.status) }}{{ row.rolled_back ? '；已回退' : '' }}</template></el-table-column>
+            <el-table-column label="版本／摘要确认" min-width="150"><template #default="{ row }">{{ row.confirmation === 'verified' ? '验证成功' : '未验证' }}<div>{{ row.expected_version }}</div><small class="mono">{{ row.expected_sha256 }}</small></template></el-table-column>
+            <el-table-column prop="result_message" label="回执／失败原因" min-width="240" />
+          </el-table>
+          <el-pagination v-model:current-page="batchTargetPage" :total="batchTargetTotal" :page-size="20" layout="total, prev, pager, next" @current-change="loadBatch" />
+        </template>
         <h4 style="margin:16px 0 8px">版本分布（心跳实时）</h4>
         <el-table :data="versions" stripe size="small">
           <el-table-column prop="version" label="Agent 版本" min-width="140" />
@@ -81,9 +99,13 @@
     </el-tabs>
 
     <!-- 灰度下发弹窗 -->
-    <el-dialog v-model="dispatchDlg" title="灰度下发升级" width="420px">
+    <el-dialog v-model="dispatchDlg" title="灰度下发升级" width="min(700px, 94vw)">
       <p style="margin:0 0 8px;font-size:13px">目标：{{ dispatchPkg?.version }} / {{ dispatchPkg?.platform }}</p>
-      <el-input v-model="dispatchAgents" type="textarea" :rows="4" placeholder="Agent ID 列表，逗号或换行分隔" />
+      <p>仅列出匹配升级包平台且具备原生升级看护能力的主机。离线主机将保持排队。</p>
+      <el-alert v-if="upgradeError" :title="upgradeError" type="error" :closable="false" />
+      <el-checkbox-group v-model="dispatchAgents"><div v-for="host in upgradeTargets" :key="host.agent_id"><el-checkbox :value="host.agent_id">{{ host.hostname }} · {{ host.agent_id }} · {{ host.agent_version }} · {{ Number(host.status) === 1 ? '在线' : '离线／待激活' }}</el-checkbox></div></el-checkbox-group>
+      <el-pagination v-model:current-page="targetPage" :total="targetTotal" :page-size="20" layout="total, prev, pager, next" @current-change="loadTargets" />
+      <p>已选择 {{ dispatchAgents.length }} 台（包含其他页选择）</p>
       <template #footer>
         <el-button @click="dispatchDlg = false">取消</el-button>
         <el-button type="primary" :loading="busy" @click="doDispatch">下发</el-button>
@@ -119,9 +141,10 @@ import EvidencePanel from '../components/EvidencePanel.vue'
 import ClusterPanel from '../components/ClusterPanel.vue'
 import ComponentHealthPanel from '../components/ComponentHealthPanel.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
+import { fetchUpgradeTargets, fetchUpgradeBatches, fetchUpgradeBatch, getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
 
 const busy = ref(false)
+const canUpgrade = ['admin', 'operator'].includes(getUser()?.role)
 const isAdmin = getUser()?.role === 'admin'
 const tab = ref('upgrade')
 
@@ -133,12 +156,31 @@ const upPlatform = ref('linux-amd64')
 const pkgFile = ref(null)
 const dispatchDlg = ref(false)
 const dispatchPkg = ref(null)
-const dispatchAgents = ref('')
+const dispatchAgents = ref([])
+const upgradeTargets = ref([]), targetPage = ref(1), targetTotal = ref(0)
+const upgradeBatches = ref([]), batchPage = ref(1), batchTotal = ref(0)
+const batchId = ref(''), batchRows = ref([]), batchTargetPage = ref(1), batchTargetTotal = ref(0)
+const upgradeError = ref('')
+const commandStatus = status => ({ 0:'排队中', 1:'已发送，待回执', 2:'Agent 已接收', 3:'执行中，待最终回执', 4:'收到完成回执', 5:'执行失败', 6:'回执超时' }[status] || '状态未知')
+async function loadTargets() {
+  try { const r = await fetchUpgradeTargets(dispatchPkg.value.id, targetPage.value); upgradeTargets.value = r.list; targetTotal.value = r.total; upgradeError.value = '' }
+  catch(e) { upgradeTargets.value = []; upgradeError.value = e.message || '目标加载失败' }
+}
+async function loadBatches() {
+  try { const r = await fetchUpgradeBatches(batchPage.value); upgradeBatches.value = r.list; batchTotal.value = r.total; upgradeError.value = '' }
+  catch(e) { upgradeError.value = e.message || '批次加载失败' }
+}
+async function loadBatch() {
+  try { const r = await fetchUpgradeBatch(batchId.value, batchTargetPage.value); batchRows.value = r.list; batchTargetTotal.value = r.total; upgradeError.value = '' }
+  catch(e) { batchRows.value = []; upgradeError.value = e.message || '逐机结果加载失败' }
+}
+function openBatch(id) { batchId.value = id; batchTargetPage.value = 1; loadBatch() }
 
 const msg = (t, type = 'success') => ElMessage({ message: t, type, duration: 2200 })
 
 async function loadUpgrade() {
   const [pkgs, vers] = await Promise.all([fetchUpgradePackages(), fetchAgentVersions()])
+  await loadBatches()
   packages.value = pkgs || []
   versions.value = (vers || []).map((v) => ({ version: v.version, count: v.count }))
 }
@@ -156,18 +198,19 @@ function onPkgFile(e) {
 
 function openDispatch(row) {
   dispatchPkg.value = row
-  dispatchAgents.value = ''
+  dispatchAgents.value = []; targetPage.value = 1; loadTargets()
   dispatchDlg.value = true
 }
 
 async function doDispatch() {
-  const agentIds = dispatchAgents.value.split(/[\n,，\s]+/).filter(Boolean)
-  if (!agentIds.length) return msg('请填写目标 Agent ID', 'warning')
+  const agentIds = dispatchAgents.value
+  if (!agentIds.length) return msg('请选择目标主机', 'warning')
   busy.value = true
   try {
     const r = await dispatchUpgrade(dispatchPkg.value.id, agentIds)
     msg(`已向 ${r?.dispatched ?? agentIds.length} 台主机下发升级指令`)
     dispatchDlg.value = false
+    await loadBatches(); openBatch(r.batchId)
   } catch (e) {
     msg(e?.message || '下发失败', 'error')
   } finally {

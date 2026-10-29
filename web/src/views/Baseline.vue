@@ -352,12 +352,18 @@ async function submitFix() {
   if (fixSel.value.length > 50) return msg('单次最多修复 50 项，请分批提交', 'warning')
   fixLoading.value = true
   try {
+    const preview = fixSel.value.map(row => {
+      const spec = typeof row.fix_spec === 'string' ? JSON.parse(row.fix_spec) : row.fix_spec
+      if (!spec?.steps?.length) throw new Error('修复定义缺失，请刷新核查结果')
+      return `${row.name || row.item_id}：${spec.steps.map(step => `${step.action} ${step.path || step.key || ''} ${step.mode || step.value || ''}`).join('；')}`
+    }).join('\n')
+    await ElMessageBox.confirm(`目标主机：${detail.agentId}\n${preview}\nAgent 将先备份，再执行并复核；失败回滚。不自动重启服务。`, '确认配置变更预览', { type: 'warning', confirmButtonText: '创建修复任务' })
     const items = fixSel.value.map((r) => ({ agentId: detail.agentId, itemId: r.item_id }))
     const res = await createFixTask(items)
     detail.visible = false
     msg(`修复任务已下发（任务号 ${res?.taskId ?? ''}）：Agent 执行中，完成后可在「修复任务记录」查看结果`)
   } catch (e) {
-    msg(e.message || '修复任务创建失败', 'error')
+    if (e !== 'cancel' && e !== 'close') msg(e.message || '修复任务创建失败', 'error')
   } finally {
     fixLoading.value = false
   }

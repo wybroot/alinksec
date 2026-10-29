@@ -34,7 +34,7 @@ func (g *Guard) processLoop() {
 func (g *Guard) scanProcesses(evaluate bool) {
 	procs, err := process.Processes()
 	if err != nil {
-		g.log.Debug("EDR 进程枚举失败", "err", err)
+		g.log.Debug("进程规则枚举失败", "err", err)
 		return
 	}
 	current := make(map[int32]int64, len(procs))
@@ -48,10 +48,10 @@ func (g *Guard) scanProcesses(evaluate bool) {
 		previous, seen := g.processSeen[proc.Pid]
 		g.processSeen[proc.Pid] = created
 		g.mu.Unlock()
-		if !evaluate || (seen && previous == created) {
+		if seen && previous == created {
 			continue
 		}
-		g.evaluateProcess(proc, created)
+		g.evaluateProcessWithActions(proc, created, evaluate)
 	}
 	g.mu.Lock()
 	g.processSeen = current
@@ -59,6 +59,10 @@ func (g *Guard) scanProcesses(evaluate bool) {
 }
 
 func (g *Guard) evaluateProcess(proc *process.Process, created int64) {
+	g.evaluateProcessWithActions(proc, created, true)
+}
+
+func (g *Guard) evaluateProcessWithActions(proc *process.Process, created int64, allowActions bool) {
 	obs := processObservation{pid: proc.Pid, created: created}
 	obs.exe, _ = proc.Exe()
 	if args, err := proc.CmdlineSlice(); err == nil {
@@ -74,12 +78,13 @@ func (g *Guard) evaluateProcess(proc *process.Process, created int64) {
 			continue
 		}
 		detail := map[string]any{
-			"process":     takeForensics(proc),
-			"process_key": fmt.Sprintf("%d:%d", obs.pid, obs.created),
-			"match":       map[string]any{"exe": obs.exe, "cmdline": redactCommandLine(strings.Fields(obs.cmdline))},
+			"startup_inventory": !allowActions,
+			"process":           takeForensics(proc),
+			"process_key":       fmt.Sprintf("%d:%d", obs.pid, obs.created),
+			"match":             map[string]any{"exe": obs.exe, "cmdline": redactCommandLine(strings.Fields(obs.cmdline))},
 		}
 		action := "alert_only"
-		if hasAction(rule.Actions, "kill") && KillProcess(proc.Pid) {
+		if allowActions && hasAction(rule.Actions, "kill") && KillProcess(proc.Pid) {
 			action = "killed"
 		}
 		payload, _ := json.Marshal(detail)
@@ -92,7 +97,7 @@ func (g *Guard) evaluateProcess(proc *process.Process, created int64) {
 			ActionTaken: action,
 			EventTs:     time.Now().UnixMilli(),
 		}
-		g.log.Warn("EDR 进程规则命中", "rule", rule.ID, "pid", proc.Pid, "exe", obs.exe, "action", action)
+		g.log.Warn("进程规则命中", "rule", rule.ID, "pid", proc.Pid, "exe", obs.exe, "action", action)
 		if g.report != nil {
 			g.report(event)
 		}

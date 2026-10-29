@@ -10,8 +10,12 @@ import (
 )
 
 func upgradeAck(result upgrade.Outcome) *pb.RptAck {
-	ack := &pb.RptAck{CmdId: result.CommandID, Stage: pb.RptAck_FAILED, Code: 1, Message: result.Message}
-	if result.Success {
+	data, _ := json.Marshal(result)
+	ack := &pb.RptAck{CmdId: result.CommandID, Stage: pb.RptAck_FAILED, Code: 1, Message: string(data)}
+	if !result.Complete {
+		ack.Stage = pb.RptAck_RUNNING
+		ack.Code = 0
+	} else if result.Success {
 		ack.Stage = pb.RptAck_DONE
 		ack.Code = 0
 	}

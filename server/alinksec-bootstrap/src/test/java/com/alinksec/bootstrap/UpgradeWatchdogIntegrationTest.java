@@ -28,17 +28,18 @@ class UpgradeWatchdogIntegrationTest {
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type,arch,status) VALUES(?,?,1,'amd64',1)",agent,agent);
         pkg=jdbc.queryForObject("INSERT INTO t_agent_upgrade_package(version,platform,package_key,sha256,size) VALUES(?,'linux-amd64',?, ?,1) RETURNING id",Long.class,agent,agent+".bin","a".repeat(64));
     }
-    @AfterEach void close() { if(jdbc!=null) { jdbc.update("DELETE FROM t_agent_upgrade_package WHERE id=?",pkg);jdbc.update("DELETE FROM t_agent WHERE agent_id=?",agent); } if(pool!=null) pool.close(); }
+    @AfterEach void close() { if(jdbc!=null) { jdbc.update("DELETE FROM t_upgrade_target WHERE batch_id IN (SELECT id FROM t_upgrade_batch WHERE package_id=?)",pkg);jdbc.update("DELETE FROM t_upgrade_batch WHERE package_id=?",pkg);jdbc.update("DELETE FROM t_agent_upgrade_package WHERE id=?",pkg);jdbc.update("DELETE FROM t_agent WHERE agent_id=?",agent); } if(pool!=null) pool.close(); }
     @Test void upgradeRequiresCurrentDeclaredCapabilityAndRechecksOfflineDelivery() {
         var commands=mock(CommandService.class);var props=new AlinkSecProperties();
         var tokens=mock(AgentDownloadTokenService.class);
         var service=new UpgradeService(jdbc,commands,props,tokens);
+        when(commands.dispatchAfterCommit(eq(agent),any(Command.Builder.class),isNull())).thenReturn("cmd-"+agent);
         assertEquals(0,jdbc.queryForObject("SELECT upgrade_contract FROM t_agent WHERE agent_id=?",Integer.class,agent));
         assertThrows(IllegalArgumentException.class,()->service.dispatch(pkg,List.of(agent),null));
         jdbc.update("UPDATE t_agent SET upgrade_contract=1 WHERE agent_id=?",agent);
         assertEquals(1,service.dispatch(pkg,List.of(agent),null).get("dispatched"));
         var capture=org.mockito.ArgumentCaptor.forClass(Command.Builder.class);
-        verify(commands).dispatch(eq(agent),capture.capture(),isNull());
+        verify(commands).dispatchAfterCommit(eq(agent),capture.capture(),isNull());
         Command command=capture.getValue().build();assertEquals(1,command.getAgentUpgrade().getExecutionContract());
         var lifecycle=new UpgradeCommandLifecycle(jdbc);assertSame(command,lifecycle.prepareDelivery(agent,command));
         jdbc.update("UPDATE t_agent SET upgrade_contract=0 WHERE agent_id=?",agent);

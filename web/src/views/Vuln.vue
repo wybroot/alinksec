@@ -122,9 +122,7 @@
   <!-- 一键修复对话框 -->
   <el-dialog v-model="fixDlg" :title="'一键修复 · ' + fixRow.cve" width="min(560px, calc(100% - 24px))">
     <template v-if="fixRow.cve">
-      <el-alert v-if="fixRow.fixType === 'config'" type="success" :closable="false" show-icon
-        title="配置类修复：Agent 将自动执行，改前备份 → 执行 → 复核，失败自动回滚" />
-      <el-alert v-else type="warning" :closable="false" show-icon
+      <el-alert type="warning" :closable="false" show-icon
         title="软件包类修复：由指定账号审批，可设置维护窗口；修复后自动复核，需重启时仅标记不自动重启" />
       <el-form label-width="96px" style="margin-top:16px">
         <el-form-item label="影响范围">{{ fixRow.hosts }} 台主机</el-form-item>
@@ -133,14 +131,6 @@
         <el-alert v-if="fixRow.repairUnreviewed" type="warning" :closable="false" :title="`${fixRow.repairUnreviewed} 项缺少对应当前规则与包范围的补丁人工复核，请先到基线核查的离线补丁仓库复核`" />
         <el-alert v-if="fixRow.executionUnsupported" type="warning" :closable="false" :title="`${fixRow.executionUnsupported} 项未声明受支持的执行校验能力，请更新支持该系统的 Agent 或人工处理`" />
         <el-alert v-if="fixRow.blocked" type="warning" :closable="false" :title="`${fixRow.blocked} 项缺少当前身份、执行能力、规则依据、修复版本或补丁复核证据，仅提交符合条件的检测项`" />
-        <template v-if="fixRow.fixType === 'config'">
-          <el-form-item label="修复步骤">
-            <div class="mono" style="font-size:12px;color:#475569;line-height:1.9">
-              1. 备份 /etc/pam.d/sshd<br />2. file_line_ensure: pam_faillock preauth<br />3. service_restart: sshd（可关）
-            </div>
-          </el-form-item>
-        </template>
-        <template v-else>
           <el-form-item label="目标版本">
             <span class="mono">{{ fixRow.target }}（漏洞库 fixed_version，逐主机按已装版本升级）</span>
           </el-form-item>
@@ -154,12 +144,11 @@
           <p style="color:#64748b;font-size:12px">不填窗口则审批后排队；设置时起止必须齐全。截止后停止新安装和重推，已经开始的安装需查看结果，不承诺自动回滚。</p>
           <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
             title="创建时校验补丁仓库覆盖率：任一主机无对应补丁包将阻断提交" />
-        </template>
       </el-form>
     </template>
     <template #footer>
       <el-button @click="fixDlg = false">取消</el-button>
-      <el-button type="primary" :loading="fixSubmitting" @click="submitFix">{{ fixRow.fixType === 'config' ? '确认执行' : '提交审批' }}</el-button>
+      <el-button type="primary" :loading="fixSubmitting" @click="submitFix">提交审批</el-button>
     </template>
   </el-dialog>
 
@@ -301,11 +290,7 @@ async function loadApprovers() {
 }
 const iso = d => (d instanceof Date ? d.toISOString() : (d || ''))
 const submitFix = async () => {
-  if (fixRow.value.fixType === 'config') {
-    fixDlg.value = false
-    fixRow.value.status = 'fixing'
-    return msg('配置类修复任务已下发，Agent 自动执行')
-  }
+  if (fixRow.value.fixType !== 'pkg') return ElMessage.error('该漏洞没有受支持的软件包修复定义，请人工整改')
   if (!fixForm.value.approver.trim()) {
     return ElMessage({ message: '请填写审批人', type: 'warning' })
   }

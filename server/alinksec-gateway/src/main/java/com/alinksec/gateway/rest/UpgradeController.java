@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -58,6 +59,17 @@ public class UpgradeController {
         List<String> agentIds = (List<String>) body.getOrDefault("agentIds", List.of());
         return ApiResult.ok(upgradeService.dispatch(packageId, agentIds, uid));
     }
+
+    @GetMapping("/targets")
+    public ApiResult<?> targets(@RequestParam long packageId, @RequestParam(defaultValue="1") int page) {
+        return ApiResult.ok(upgradeService.targets(packageId, page));
+    }
+
+    @GetMapping("/batches")
+    public ApiResult<?> batches(@RequestParam(defaultValue="1") int page) { return ApiResult.ok(upgradeService.batches(page)); }
+
+    @GetMapping("/batches/{id}")
+    public ApiResult<?> batch(@PathVariable String id, @RequestParam(defaultValue="1") int page) { return ApiResult.ok(upgradeService.batchTargets(id, page)); }
 
     @GetMapping("/packages")
     public ApiResult<List<Map<String, Object>>> packages() {

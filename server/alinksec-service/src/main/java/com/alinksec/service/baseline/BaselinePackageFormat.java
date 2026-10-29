@@ -66,7 +66,7 @@ public final class BaselinePackageFormat {
         require(unsupported.isArray() && items.size() + unsupported.size() <= 2000, "规则总数最多 2000，unsupported 必须为数组");
         Set<String> codes = new HashSet<>(), rules = new HashSet<>();
         for (JsonNode item : items) {
-            fields(item, "code", "ruleId", "name", "category", "severity", "check", "remediation");
+            fields(item, "code", "ruleId", "name", "category", "severity", "check", "remediation", "fix");
             String code = text(item, "code", 64);
             require(code.matches("[A-Za-z0-9][A-Za-z0-9_.-]*") && codes.add(code), "检查编号无效或重复: " + code);
             require(rules.add(text(item, "ruleId", 255)), "原始规则编号重复");
@@ -74,6 +74,7 @@ public final class BaselinePackageFormat {
             require(item.path("severity").isInt() && item.path("severity").intValue() >= 1
                     && item.path("severity").intValue() <= 4, "检查严重度必须为 1 至 4");
             validateCheck(item.path("check"), os);
+            if (item.has("fix")) validateFix(item.path("fix"), item.path("check"), os);
         }
         for (JsonNode item : unsupported) {
             fields(item, "ruleId", "reason");
@@ -90,6 +91,22 @@ public final class BaselinePackageFormat {
                     .digest(JsonUtils.write(canonical).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             return new Validated(canonical, digest);
         } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+
+    /** Initial supported repair: restore read-only account database permissions.
+     * No service reload, content changes, owner changes or arbitrary targets. */
+    public static void validateFix(JsonNode fix, JsonNode check, int os) {
+        fields(fix, "risk", "steps");
+        require(os == 1 && text(fix, "risk", 16).equals("auto"), "自动修复当前仅支持 Linux 账户文件权限");
+        require(fix.path("steps").isArray() && fix.path("steps").size() == 1, "权限修复必须且只能包含一个步骤");
+        JsonNode step = fix.path("steps").get(0);
+        fields(step, "action", "path", "mode");
+        require(text(step, "action", 32).equals("chmod") && text(step, "mode", 4).equals("0644"), "仅支持 chmod 0644");
+        String path = text(step, "path", 128);
+        require(Set.of("/etc/passwd", "/etc/group").contains(path), "修复目标不在审核允许范围内");
+        require(check.path("type").asText().equals("file_perm") && check.path("target").asText().equals(path)
+                && check.path("perm").asText().equals("0644") && !check.has("owner") && !check.has("group"),
+                "修复必须绑定同一目标、同一权限且不含属主变更的复核");
     }
 
     public static void validateCheck(JsonNode check, int os) {

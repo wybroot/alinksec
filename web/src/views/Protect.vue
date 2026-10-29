@@ -11,7 +11,7 @@
         <el-form label-width="90px" style="max-width:420px" v-loading="loading">
           <el-form-item label="响应级别">
             <el-radio-group v-model="decoyLevel" :disabled="!ruleLoaded">
-              <el-radio value="alert_only">仅告警</el-radio><el-radio value="kill">结束进程</el-radio><el-radio value="kill_and_isolate">隔离主机</el-radio>
+              <el-radio value="alert_only">仅告警</el-radio><el-radio value="kill">结束进程（仅 Windows 可信归因）</el-radio><el-radio value="kill_and_isolate">隔离主机</el-radio>
             </el-radio-group>
           </el-form-item>
           <el-form-item label="投放目录">
@@ -24,10 +24,10 @@
             <el-button type="primary" size="small" :disabled="!ruleLoaded" @click="saveRule">保存配置</el-button>
           </el-form-item>
         </el-form>
-        <p style="font-size:12px;color:#94a3b8">默认 kill_and_isolate：文件触发后按配置响应并上报告警。Windows 通过内核文件事件关联写入进程；无法核实、存在多个写入者或采集不可用时跳过进程终止，主机隔离仍独立执行。告警中心可查看归因证据。</p>
+        <p style="font-size:12px;color:#94a3b8">Linux 不支持可信写入者归因，勒索自动结束进程能力已禁用：选择 kill 时仅告警，选择 kill_and_isolate 时仅按策略隔离，不会终止进程。Windows 通过内核文件事件关联写入进程；无法核实、存在多个写入者或采集不可用时跳过进程终止，主机隔离仍独立执行。告警中心可查看归因证据。</p>
       </div>
-      <div class="panel"><h4>最近拦截记录</h4>
-        <el-empty v-if="!blocks.length" description="暂无拦截记录" :image-size="60" />
+      <div class="panel"><h4>最近检测与响应记录</h4>
+        <el-empty v-if="!blocks.length" description="暂无检测记录" :image-size="60" />
         <div v-for="b in blocks" :key="b.id" class="evt-item">
           <span class="t">{{ b.time }}</span>
           <div style="flex:1">
@@ -74,7 +74,8 @@
     </div>
     <WindowsLoginProtection :rule="windowsLoginRule" />
     <FileWatchStatus />
-    <div class="panel" style="margin-top:16px"><h4>EDR 进程行为规则</h4>
+    <div class="panel" style="margin-top:16px"><h4>进程路径／命令行匹配规则</h4>
+      <p>启动或策略更新时对已有进程仅告警，随后每 2 秒枚举新进程并按规则响应。当前规则不是完整 EDR：短生命周期进程可能漏检，仅按程序名的规则可被改名绕过；不提供通用提权、注入或凭据窃取检测。Linux 可由管理员另行启用 audit 执行日志补充短命进程线索，该来源只告警，不使用历史 PID 终止进程；默认未启用。</p>
       <el-table v-if="processRules.length" :data="processRules" size="small" v-loading="loading">
         <el-table-column prop="name" label="规则" min-width="150" />
         <el-table-column label="匹配条件" min-width="260" show-overflow-tooltip>
@@ -83,7 +84,7 @@
         <el-table-column label="处置" width="120"><template #default="{ row }"><el-tag size="small" :type="(row.actions || []).includes('kill') ? 'danger' : 'info'">{{ (row.actions || []).includes('kill') ? '结束进程树' : '仅告警' }}</el-tag></template></el-table-column>
         <el-table-column label="启用" width="90"><template #default="{ row }"><el-switch v-model="row.enabled" @change="toggleProcessRule(row)" /></template></el-table-column>
       </el-table>
-      <el-empty v-else description="暂无 EDR 进程规则" :image-size="48" />
+      <el-empty v-else description="暂无进程匹配规则" :image-size="48" />
     </div>
   </div>
 </template>

@@ -44,13 +44,17 @@ func Snapshot(names []string, log *slog.Logger) *pb.RptAssetSnapshot {
 // workloads scheduled on kubernetesNodeName (or the local hostname when empty),
 // so a cluster-wide kubectl context never becomes a host asset snapshot.
 func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNodeName string) *pb.RptAssetSnapshot {
-	snap := &pb.RptAssetSnapshot{}
+	snap := &pb.RptAssetSnapshot{CollectionContract: 1, Collected: []string{"collection-contract-1"}}
 	for _, t := range selectedTasks(names) {
-		snap.Collected = append(snap.Collected, t.name)
 		start := time.Now()
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					recordAttempt(snap, t.name, pb.AssetCollectionAttempt_FAILED, "collector_panic")
+					if t.name == "containers" {
+						recordAttempt(snap, "docker", pb.AssetCollectionAttempt_FAILED, "collector_panic")
+						recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_FAILED, "collector_panic")
+					}
 					if t.name == "software" {
 						snap.Software = nil
 						snap.SoftwareInventory = &pb.SoftwareInventory{Status: pb.SoftwareInventory_FAILED, Error: "collector_panic"}
@@ -64,6 +68,11 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 				t.fn(snap)
 			}
 		}()
+		// Old servers only understand Collected. Never authorize replacement
+		// there after failure; keep a sentinel to avoid legacy full-snapshot mode.
+		if safeForLegacyReplacement(snap, t.name) {
+			snap.Collected = append(snap.Collected, t.name)
+		}
 		log.Info("采集完成",
 			"collector", t.name,
 			"software", len(snap.GetSoftware()),
@@ -98,8 +107,10 @@ func selectedTasks(names []string) []task {
 func collectPorts(snap *pb.RptAssetSnapshot) {
 	conns, err := gnet.Connections("inet")
 	if err != nil {
+		recordAttempt(snap, "ports", pb.AssetCollectionAttempt_FAILED, "port_query_failed")
 		return
 	}
+	recordAttempt(snap, "ports", pb.AssetCollectionAttempt_COMPLETE, "")
 	nameCache := make(map[int32]string)
 	for _, c := range conns {
 		isUDP := c.Type == syscall.SOCK_DGRAM
@@ -143,10 +154,16 @@ func procName(pid int32, cache map[int32]string) string {
 func collectProcesses(snap *pb.RptAssetSnapshot) {
 	procs, err := process.Processes()
 	if err != nil {
+		recordAttempt(snap, "processes", pb.AssetCollectionAttempt_FAILED, "process_query_failed")
 		return
 	}
+	recordAttempt(snap, "processes", pb.AssetCollectionAttempt_COMPLETE, "")
 	for _, p := range procs {
-		name, _ := p.Name()
+		name, nameErr := p.Name()
+		if nameErr != nil {
+			recordAttempt(snap, "processes", pb.AssetCollectionAttempt_PARTIAL, "process_details_unavailable")
+			continue
+		}
 		exe, _ := p.Exe()
 		args, _ := p.CmdlineSlice()
 		user, _ := p.Username()
@@ -194,11 +211,14 @@ func sensitiveArgumentKey(arg string) string {
 func collectDisks(snap *pb.RptAssetSnapshot) {
 	parts, err := disk.Partitions(false) // false = 仅物理文件系统
 	if err != nil {
+		recordAttempt(snap, "disks", pb.AssetCollectionAttempt_FAILED, "disk_query_failed")
 		return
 	}
+	recordAttempt(snap, "disks", pb.AssetCollectionAttempt_COMPLETE, "")
 	for _, p := range parts {
 		u, err := disk.Usage(p.Mountpoint)
 		if err != nil || u.Total == 0 {
+			recordAttempt(snap, "disks", pb.AssetCollectionAttempt_PARTIAL, "disk_usage_unavailable")
 			continue
 		}
 		snap.Disks = append(snap.Disks, &pb.DiskInfo{
@@ -208,4 +228,30 @@ func collectDisks(snap *pb.RptAssetSnapshot) {
 			UsedBytes:  u.Used,
 		})
 	}
+}
+
+// One final outcome per source. Attempt time is informational; server records receipt time.
+func recordAttempt(snap *pb.RptAssetSnapshot, source string, status pb.AssetCollectionAttempt_Status, reason string) {
+	for _, attempt := range snap.CollectionAttempts {
+		if attempt.Source == source {
+			attempt.Status = status
+			attempt.Error = reason
+			return
+		}
+	}
+	snap.CollectionAttempts = append(snap.CollectionAttempts, &pb.AssetCollectionAttempt{Source: source, Status: status, Error: reason, AttemptedAt: time.Now().UnixMilli()})
+}
+
+func safeForLegacyReplacement(snap *pb.RptAssetSnapshot, name string) bool {
+	if name == "software" {
+		return true
+	} // Existing software inventory status protects this source.
+	complete := map[string]bool{}
+	for _, attempt := range snap.CollectionAttempts {
+		complete[attempt.Source] = attempt.Status == pb.AssetCollectionAttempt_COMPLETE
+	}
+	if name == "containers" {
+		return complete["docker"] && complete["kubernetes"]
+	}
+	return complete[name]
 }

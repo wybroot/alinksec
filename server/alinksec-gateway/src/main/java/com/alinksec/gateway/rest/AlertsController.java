@@ -31,9 +31,10 @@ public class AlertsController {
                                                @RequestParam(required = false) Integer severity,
                                                @RequestParam(required = false) String agentId,
                                                @RequestParam(required = false) String eventType,
+                                               @RequestParam(defaultValue = "false") boolean exactSeverity,
                                                @RequestParam(defaultValue = "1") int page,
                                                @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(query.list(status, severity, agentId, eventType, page, Math.min(size, 100)));
+        return ApiResult.ok(query.list(status, severity, agentId, eventType, page, Math.min(size, 100), exactSeverity));
     }
 
     @GetMapping("/severity-distribution")
@@ -45,7 +46,7 @@ public class AlertsController {
     public ApiResult<Void> handle(@PathVariable long id, @RequestBody Map<String, String> body,
                                   HttpServletRequest request) {
         long uid = ((Number) request.getAttribute("uid")).longValue();
-        boolean ok = query.handle(id, uid, body.getOrDefault("remark", ""));
-        return ok ? ApiResult.ok() : ApiResult.error(30001, "告警不存在或已处置");
+        boolean ok = query.close(id, uid, body.getOrDefault("remark", ""), body.getOrDefault("resolution", "acknowledge"));
+        return ok ? ApiResult.ok() : ApiResult.error(30001, "告警不存在或记录已关闭");
     }
 }

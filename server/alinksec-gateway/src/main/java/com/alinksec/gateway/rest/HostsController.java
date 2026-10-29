@@ -9,6 +9,8 @@ import com.alinksec.service.enroll.EnrollTokenService;
 import com.alinksec.service.protect.ProtectRuleService;
 import com.alinksec.service.query.HostQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,15 +48,33 @@ public class HostsController {
     public ApiResult<Map<String, Object>> list(@RequestParam(required = false) String keyword,
                                                @RequestParam(required = false) Integer status,
                                                @RequestParam(required = false) Integer isolationStatus,
+                                               @RequestParam(required = false) Long groupId,
                                                @RequestParam(defaultValue = "1") int page,
                                                @RequestParam(defaultValue = "20") int size) {
         return ApiResult.ok(query.list(keyword, status, isolationStatus,
-                Math.max(page, 1), Math.max(1, Math.min(size, 100))));
+                Math.max(page, 1), Math.max(1, Math.min(size, 100)), groupId));
     }
 
     @GetMapping("/groups")
     public ApiResult<List<Map<String, Object>>> groups() {
         return ApiResult.ok(query.groups());
+    }
+
+    public record GroupInput(String name) {}
+    public record MembershipInput(Long groupId) {}
+
+    @PostMapping("/groups")
+    public ApiResult<?> createGroup(@RequestBody GroupInput input) { return ApiResult.ok(query.saveGroup(null, input.name())); }
+
+    @PostMapping("/groups/{id}")
+    public ApiResult<?> renameGroup(@PathVariable long id, @RequestBody GroupInput input) { return ApiResult.ok(query.saveGroup(id, input.name())); }
+
+    @DeleteMapping("/groups/{id}")
+    public ApiResult<?> deleteGroup(@PathVariable long id) { query.deleteGroup(id); return ApiResult.ok(); }
+
+    @PostMapping("/{agentId}/group")
+    public ApiResult<?> assignGroup(@PathVariable String agentId, @RequestBody MembershipInput input) {
+        query.assignGroup(agentId, input.groupId()); return ApiResult.ok();
     }
 
     @GetMapping("/{agentId}")

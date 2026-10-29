@@ -3,6 +3,7 @@ package fixer
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"log/slog"
@@ -57,6 +58,36 @@ func fixOne(f *pb.FixItem, workDir string, log *slog.Logger) *pb.FixResultItem {
 	}
 	if spec.Risk == "manual" {
 		item.Success, item.Log = false, "risk=manual 项不支持自动修复（需人工处理）"
+		return item
+	}
+
+	// Preflight every action before backup or mutation. A deferred restart is
+	// not a successful repair, even if an on-disk check would already pass.
+	for _, step := range spec.Steps {
+		switch step.Action {
+		case "file_line_ensure", "file_replace", "sysctl_set":
+		case "chmod":
+			info, err := os.Lstat(step.Path)
+			if err != nil || !info.Mode().IsRegular() {
+				item.Log = "未执行：权限修复目标必须为现有普通文件，禁止符号链接"
+				return item
+			}
+		case "service_restart":
+			item.RebootRequired = true
+			item.Log = "未执行：服务重启需人工维护窗口；未修改任何配置"
+			return item
+		default:
+			item.Log = fmt.Sprintf("未执行：不支持动作 %q；未修改任何配置", step.Action)
+			return item
+		}
+	}
+	if spec.RequiresRestart != "" {
+		item.RebootRequired = true
+		item.Log = "未执行：配置依赖服务重启，需人工维护窗口；未修改任何配置"
+		return item
+	}
+	if spec.Check == "" {
+		item.Log = "未执行：缺少效果复核定义"
 		return item
 	}
 

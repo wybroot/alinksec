@@ -20,10 +20,12 @@ import (
 
 // Config Agent 运行配置（工作目录下 agent.yml，可用 --config 覆盖）
 type Config struct {
-	SCAP      scapconfig.Config `yaml:"scap"`
-	YARA      yara.Config       `yaml:"yara"`
-	ClamAV    clamav.Config     `yaml:"clamav"`
-	Resources resources.Config  `yaml:"resources"`
+	// Opt-in Linux audit EXECVE consumer; requires explicit administrator audit rules.
+	ProcessAuditLog bool              `yaml:"process_audit_log"`
+	SCAP            scapconfig.Config `yaml:"scap"`
+	YARA            yara.Config       `yaml:"yara"`
+	ClamAV          clamav.Config     `yaml:"clamav"`
+	Resources       resources.Config  `yaml:"resources"`
 	// 服务端 gRPC 地址（host:port）
 	ServerAddr string `yaml:"server_addr"`
 	// 注册码（首次安装使用，注册成功后证书落盘即不再依赖）
@@ -48,8 +50,8 @@ type Config struct {
 	LoginRules   []LoginRule   `yaml:"login_rules"`
 }
 
-// ProcessRule 声明式进程行为规则。仅匹配新出现的进程，避免 Agent 启动或
-// 规则热更新时将已运行的正常业务进程重复告警。
+// ProcessRule 声明式进程规则。启动和策略更新时对已有进程仅告警；
+// 后续轮询识别新 PID/创建时间并按规则响应。短生命周期进程可能漏检。
 type ProcessRule struct {
 	ID       string       `yaml:"id" json:"id"`
 	Name     string       `yaml:"name" json:"name"`

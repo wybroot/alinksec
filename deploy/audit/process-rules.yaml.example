@@ -1,0 +1,17 @@
+# Merge into the Agent configuration; do not overwrite connection credentials.
+process_audit_log: true
+process_rules:
+  - id: local-stratum-indicator
+    name: Mining protocol command-line indicator
+    enabled: true
+    severity: 3
+    match:
+      cmdline_regex: '(?i)stratum(\+tcp|\+ssl)?://'
+    actions: [alert]
+  - id: local-shell-network-indicator
+    name: Shell network redirection indicator
+    enabled: true
+    severity: 3
+    match:
+      cmdline_regex: '/dev/(tcp|udp)/[^ /]+/[0-9]+'
+    actions: [alert]

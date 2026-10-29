@@ -2,6 +2,7 @@ package com.alinksec.service.query;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -22,6 +23,12 @@ public class HostQueryService {
 
     public Map<String, Object> list(String keyword, Integer status, Integer isolationStatus,
                                     int page, int size) {
+        return list(keyword, status, isolationStatus, page, size, null);
+    }
+
+    public Map<String, Object> list(String keyword, Integer status, Integer isolationStatus,
+                                    int page, int size, Long groupId) {
+        page = Math.max(1, page); size = Math.max(1, Math.min(100, size));
         StringBuilder where = new StringBuilder(" WHERE a.status <> 4");
         List<Object> args = new ArrayList<>();
         if (keyword != null && !keyword.isBlank()) {
@@ -39,6 +46,10 @@ public class HostQueryService {
             where.append(" AND a.isolation_status = ?");
             args.add(isolationStatus);
         }
+        if (groupId != null) {
+            if (groupId == 0) where.append(" AND a.group_id IS NULL");
+            else { where.append(" AND a.group_id = ?"); args.add(groupId); }
+        }
         String cond = where.toString();
         Long total = jdbc.queryForObject(
                 "SELECT count(*) FROM t_agent a" + cond, Long.class,
@@ -48,7 +59,7 @@ public class HostQueryService {
         pageArgs.add(size);
         pageArgs.add((page - 1) * size);
         List<Map<String, Object>> list = jdbc.queryForList("""
-                SELECT a.agent_id, a.hostname, a.ip, a.os_type, a.os_version, a.kernel, a.arch,
+                SELECT a.group_id, (SELECT name FROM t_host_group g WHERE g.id=a.group_id) AS group_name, a.agent_id, a.hostname, a.ip, a.os_type, a.os_version, a.kernel, a.arch,
                        a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,a.virus_execution_contract,a.virus_db_version,
                        a.isolation_status, a.isolation_command_id, a.isolation_error, a.isolation_updated_at, a.isolation_contract, a.isolation_automatic, a.isolation_lease_deadline,
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
@@ -62,7 +73,7 @@ public class HostQueryService {
                         ORDER BY t2.last_time DESC LIMIT 1) AS last_event
                 FROM t_agent a
                 """ + cond + "\n" + """
-                ORDER BY a.status, a.hostname
+                ORDER BY a.status, a.hostname, a.agent_id
                 LIMIT ? OFFSET ?
                 """, pageArgs.toArray());
 
@@ -85,6 +96,7 @@ public class HostQueryService {
             return null;
         }
         var result=rows.get(0);
+        result.put("collection_attempts", jdbc.queryForList("SELECT source,status,error,attempted_at,succeeded_at FROM t_asset_collection WHERE agent_id=? ORDER BY source", agentId));
         result.put("disks",jdbc.queryForList("SELECT mount,fs_type,total_bytes,used_bytes,updated_at FROM t_asset_disk WHERE agent_id=? ORDER BY mount",agentId));
         return result;
     }
@@ -96,6 +108,27 @@ public class HostQueryService {
                 LEFT JOIN t_agent a ON a.group_id = g.id AND a.status <> 4
                 GROUP BY g.id, g.name ORDER BY g.id
                 """);
+    }
+
+    @Transactional
+    public Map<String,Object> saveGroup(Long id, String name) {
+        if (name == null || name.isBlank() || name.trim().length() > 128) throw new IllegalArgumentException("分组名称须为 1–128 个字符");
+        name = name.trim();
+        if (id == null) jdbc.update("INSERT INTO t_host_group(name) VALUES(?)", name);
+        else if (jdbc.update("UPDATE t_host_group SET name=? WHERE id=?", name, id) != 1) throw new IllegalArgumentException("分组不存在");
+        return jdbc.queryForMap("SELECT id,name FROM t_host_group WHERE name=?", name);
+    }
+
+    @Transactional
+    public void deleteGroup(long id) {
+        jdbc.update("UPDATE t_agent SET group_id=NULL WHERE group_id=?", id);
+        if (jdbc.update("DELETE FROM t_host_group WHERE id=?", id) != 1) throw new IllegalArgumentException("分组不存在");
+    }
+
+    @Transactional
+    public void assignGroup(String agentId, Long groupId) {
+        if (groupId != null && groupId != 0 && jdbc.queryForObject("SELECT count(*) FROM t_host_group WHERE id=?", Integer.class, groupId) != 1) throw new IllegalArgumentException("分组不存在");
+        if (jdbc.update("UPDATE t_agent SET group_id=? WHERE agent_id=? AND status<>4", groupId == null || groupId == 0 ? null : groupId, agentId) != 1) throw new IllegalArgumentException("主机不存在");
     }
 
     public Map<String,Object> runtime(String agentId) {

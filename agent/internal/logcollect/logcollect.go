@@ -47,6 +47,7 @@ type stateJSON struct {
 	Files   map[string]fileState `json:"files"`
 }
 type Collector struct {
+	auditExec    bool
 	log          *slog.Logger
 	statePath    string
 	mu           sync.Mutex
@@ -60,6 +61,10 @@ func New(workDir string, log *slog.Logger, send func(string, []*pb.LogLine) bool
 	c.loadState()
 	return c
 }
+
+// EnableAuditExec must be called before Run. Raw audit arguments are consumed locally.
+func (c *Collector) EnableAuditExec() { c.auditExec = true }
+
 func (c *Collector) Run(ctx context.Context) {
 	tk := time.NewTicker(pollInterval())
 	defer tk.Stop()

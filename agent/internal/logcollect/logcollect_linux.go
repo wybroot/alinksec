@@ -14,6 +14,9 @@ func pollInterval() time.Duration { return 5 * time.Second }
 func (c *Collector) pollOnce() {
 	c.tailFile("/var/log/secure", "secure")
 	c.tailFile("/var/log/auth.log", "auth.log")
+	if c.auditExec {
+		c.tailFile("/var/log/audit/audit.log", "audit-exec")
+	}
 }
 func openLog(path string) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)

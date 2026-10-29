@@ -7,12 +7,10 @@ package fixer
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // Step fix_spec.steps 单步定义
@@ -39,9 +37,7 @@ func execStep(s Step, log func(string, ...any)) error {
 	case "file_replace":
 		return fileReplace(s.Path, s.Pattern, s.Value)
 	case "service_restart":
-		// 客户可能不接受业务瞬断：默认仅提示，不执行重启（复核若依赖服务重载则不通过，人工介入）
-		log("service_restart 默认不执行（requires_restart 人工窗口处理）", "service", s.Value)
-		return nil
+		return fmt.Errorf("service_restart 未执行：需人工维护窗口，禁止报告重启成功")
 	case "chown", "registry_set", "audit_rule":
 		return fmt.Errorf("动作 %s 暂不支持（当前版本）", s.Action)
 	default:
@@ -273,14 +269,3 @@ func splitLines(s string) []string {
 	}
 	return strings.Split(s, "\n")
 }
-
-// runServiceCtl 服务控制（预留：service_restart 打开开关后启用）
-func runServiceCtl(service string) error {
-	if runtime.GOOS == "windows" {
-		return exec.Command("net", "stop", service).Run()
-	}
-	ctx := exec.Command("/bin/sh", "-c", "systemctl restart "+service+" 2>/dev/null || service "+service+" restart")
-	return ctx.Run()
-}
-
-var _ = time.Second // 保留 time 引用（runServiceCtl 超时控制后续接入）

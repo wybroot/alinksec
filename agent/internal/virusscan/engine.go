@@ -65,9 +65,6 @@ func (e *Engine) Scan(taskID string, mode pb.CmdVirusScan_Mode, paths []string, 
 	return e.ScanCommand(context.Background(), &pb.CmdVirusScan{TaskId: taskID, Mode: mode, Paths: paths, ExecutionContract: 2}, workDir)
 }
 func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir string) *pb.RptVirusResult {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.refresh(workDir)
 	start := time.Now()
 	selected := cmd.GetEngine()
 	if selected == "" {
@@ -89,9 +86,6 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 		fileLimit = yara.MaxFileBytes
 	}
 	finish := func() *pb.RptVirusResult { r.DurationMs = uint32(time.Since(start).Milliseconds()); return r }
-	if e.db != nil && !external {
-		r.DbVersion = e.db.Version
-	}
 	fail := func(code string) *pb.RptVirusResult {
 		r.Status = pb.RptVirusResult_FAILED
 		issue(r, "", code)
@@ -99,12 +93,6 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 	}
 	if selected != "builtin" && !external || cmd.GetExecutionContract() != r.ExecutionContract {
 		return fail("unsupported_contract")
-	}
-	if !external && e.db != nil && !e.db.Valid {
-		return fail("invalid_signatures")
-	}
-	if !external && (e.db == nil || len(e.db.hashes)+len(e.db.rules) == 0) {
-		return fail("no_signatures")
 	}
 	seconds, files, bytesLimit := cmd.GetTimeLimitSec(), cmd.GetMaxFiles(), cmd.GetMaxTotalBytes()
 	if seconds == 0 {
@@ -121,6 +109,41 @@ func (e *Engine) ScanCommand(ctx context.Context, cmd *pb.CmdVirusScan, workDir 
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
+	budgetFailure := func() *pb.RptVirusResult {
+		r.BudgetExhausted = true
+		return fail("budget_exhausted")
+	}
+	// Queue time belongs to the task budget. Do not leave a canceled command
+	// waiting behind a long scan or start file IO after its deadline expires.
+	if ctx.Err() != nil {
+		return budgetFailure()
+	}
+	if !e.mu.TryLock() {
+		tick := time.NewTicker(10 * time.Millisecond)
+		for !e.mu.TryLock() {
+			select {
+			case <-ctx.Done():
+				tick.Stop()
+				return budgetFailure()
+			case <-tick.C:
+			}
+		}
+		tick.Stop()
+	}
+	defer e.mu.Unlock()
+	if ctx.Err() != nil {
+		return budgetFailure()
+	}
+	e.refresh(workDir)
+	if e.db != nil && !external {
+		r.DbVersion = e.db.Version
+	}
+	if !external && e.db != nil && !e.db.Valid {
+		return fail("invalid_signatures")
+	}
+	if !external && (e.db == nil || len(e.db.hashes)+len(e.db.rules) == 0) {
+		return fail("no_signatures")
+	}
 	if e.ioBudget != nil {
 		ctx = context.WithValue(ctx, ioBudgetKey{}, e.ioBudget)
 	}

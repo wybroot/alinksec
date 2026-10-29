@@ -25,18 +25,31 @@ var nologinShells = map[string]bool{
 func collectAccounts(snap *pb.RptAssetSnapshot) {
 	passwd, err := os.ReadFile("/etc/passwd")
 	if err != nil {
+		recordAttempt(snap, "accounts", pb.AssetCollectionAttempt_FAILED, "passwd_read_failed")
 		return
 	}
+	recordAttempt(snap, "accounts", pb.AssetCollectionAttempt_COMPLETE, "")
 	shadow := loadShadow()
+	if len(shadow) == 0 {
+		recordAttempt(snap, "accounts", pb.AssetCollectionAttempt_PARTIAL, "shadow_unavailable")
+	}
 
 	for _, line := range strings.Split(string(passwd), "\n") {
 		f := strings.Split(line, ":")
-		if len(f) < 7 || f[0] == "" {
+		if line == "" {
+			continue
+		}
+		if len(f) != 7 || f[0] == "" {
+			recordAttempt(snap, "accounts", pb.AssetCollectionAttempt_PARTIAL, "passwd_record_invalid")
 			continue
 		}
 		name := f[0]
-		uid, _ := strconv.ParseUint(f[2], 10, 32)
-		gid, _ := strconv.ParseUint(f[3], 10, 32)
+		uid, uidErr := strconv.ParseUint(f[2], 10, 32)
+		gid, gidErr := strconv.ParseUint(f[3], 10, 32)
+		if uidErr != nil || gidErr != nil {
+			recordAttempt(snap, "accounts", pb.AssetCollectionAttempt_PARTIAL, "passwd_identity_invalid")
+			continue
+		}
 		shell := f[6]
 		loginEnabled := !nologinShells[shell]
 
@@ -44,18 +57,18 @@ func collectAccounts(snap *pb.RptAssetSnapshot) {
 		switch {
 		case uid == 0 && name != "root":
 			risky, reason = true, "UID=0 的非 root 账户"
-		case loginEnabled && shadow[name] == "":
+		case loginEnabled && hasEmptyPassword(shadow, name):
 			risky, reason = true, "空口令账户"
 		}
 
 		snap.Accounts = append(snap.Accounts, &pb.AccountInfo{
-			Name:        name,
-			Uid:         uint32(uid),
-			Gid:         uint32(gid),
-			Shell:       shell,
+			Name:         name,
+			Uid:          uint32(uid),
+			Gid:          uint32(gid),
+			Shell:        shell,
 			LoginEnabled: loginEnabled,
-			Risky:       risky,
-			RiskyReason: reason,
+			Risky:        risky,
+			RiskyReason:  reason,
 		})
 	}
 }
@@ -74,4 +87,9 @@ func loadShadow() map[string]string {
 		}
 	}
 	return m
+}
+
+func hasEmptyPassword(shadow map[string]string, name string) bool {
+	hash, known := shadow[name]
+	return known && hash == ""
 }

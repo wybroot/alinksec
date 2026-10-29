@@ -57,6 +57,7 @@ type Guard struct {
 	healthSince    time.Time
 	rateSince      time.Time
 	traceStatus    string
+	execAudit      *auditExecMonitor
 	watcher        *filewatch.Monitor
 	eventPending   []string // Run goroutine only; unprocessed work survives read budgets
 	virusRecovery  *filewatch.Sweep
@@ -148,8 +149,8 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 	g.mu.Lock()
 	g.cfg = cfg
 	g.processRules = append([]config.ProcessRule(nil), processRules...)
-	// Rules apply to future execs. Re-baselining prevents retroactive actions
-	// against already-running business processes after a policy edit.
+	// Existing processes are checked in alert-only mode. Policy changes must
+	// not retroactively terminate already-running business processes.
 	g.processSeen = map[int32]int64{}
 	g.ratePrev = map[string]treeSnapshot{}
 	g.mu.Unlock()

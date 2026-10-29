@@ -2,6 +2,9 @@ package com.alinksec.service.asset;
 
 import com.alinksec.proto.RptAssetSnapshot;
 import com.alinksec.proto.SoftwareInventory;
+import com.alinksec.proto.AssetCollectionAttempt;
+import java.util.Map;
+import java.util.HashMap;
 import com.alinksec.service.scan.PackageVersions;
 import com.alinksec.service.scan.VulnMatchService;
 import com.alinksec.service.alert.SecurityEventService;
@@ -41,8 +44,10 @@ public class AssetService {
     @Transactional
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
         Set<String> collected = new HashSet<>(snapshot.getCollectedList());
-        boolean legacyFullSnapshot = collected.isEmpty();
-        if (legacyFullSnapshot || collected.contains("disks")) {
+        boolean legacyFullSnapshot = collected.isEmpty() && snapshot.getCollectionContract() == 0;
+        Set<String> complete = recordCollectionAttempts(agentId, snapshot);
+        boolean modern = snapshot.getCollectionContract() != 0;
+        if ((modern ? complete.contains("disks") : legacyFullSnapshot || collected.contains("disks"))) {
             jdbc.update("DELETE FROM t_asset_disk WHERE agent_id=?",agentId);
             for (var disk:snapshot.getDisksList()) {
                 if (disk.getMount().isBlank() || disk.getMount().length()>1024 || disk.getFsType().length()>128
@@ -59,16 +64,20 @@ public class AssetService {
         if (replaceSoftware) {
             jdbc.update("DELETE FROM t_asset_software WHERE agent_id = ?", agentId);
         }
-        if (legacyFullSnapshot || collected.contains("ports")) {
+        if ((modern ? complete.contains("ports") : legacyFullSnapshot || collected.contains("ports"))) {
             jdbc.update("DELETE FROM t_asset_port WHERE agent_id = ?", agentId);
         }
-        if (legacyFullSnapshot || collected.contains("processes")) {
+        if ((modern ? complete.contains("processes") : legacyFullSnapshot || collected.contains("processes"))) {
             jdbc.update("DELETE FROM t_asset_process WHERE agent_id = ?", agentId);
         }
-        if (legacyFullSnapshot || collected.contains("accounts")) {
+        if ((modern ? complete.contains("accounts") : legacyFullSnapshot || collected.contains("accounts"))) {
             jdbc.update("DELETE FROM t_asset_account WHERE agent_id = ?", agentId);
         }
-        if (legacyFullSnapshot || collected.contains("containers")) {
+        if (modern) {
+            for (String source : Set.of("docker", "kubernetes")) {
+                if (complete.contains(source)) jdbc.update("DELETE FROM t_asset_container WHERE agent_id=? AND orchestrator=?", agentId, source);
+            }
+        } else if (legacyFullSnapshot || collected.contains("containers")) {
             jdbc.update("DELETE FROM t_asset_container WHERE agent_id = ?", agentId);
         }
 
@@ -82,7 +91,7 @@ public class AssetService {
                         sw.getSource(), sw.getArchitecture());
             }
         }
-        if (legacyFullSnapshot || collected.contains("ports")) {
+        if ((modern ? complete.contains("ports") : legacyFullSnapshot || collected.contains("ports"))) {
             for (var p : snapshot.getPortsList()) {
                 jdbc.update("""
                         INSERT INTO t_asset_port (agent_id, port, protocol, process, bind_addr)
@@ -90,7 +99,7 @@ public class AssetService {
                         """, agentId, p.getPort(), p.getProtocol(), p.getProcess(), p.getBindAddr());
             }
         }
-        if (legacyFullSnapshot || collected.contains("accounts")) {
+        if ((modern ? complete.contains("accounts") : legacyFullSnapshot || collected.contains("accounts"))) {
             for (var a : snapshot.getAccountsList()) {
                 jdbc.update("""
                         INSERT INTO t_asset_account (agent_id, name, uid, gid, shell, login_enabled, last_login, risky, risky_reason)
@@ -100,14 +109,15 @@ public class AssetService {
                         a.getRisky(), a.getRiskyReason());
             }
         }
-        if (legacyFullSnapshot || collected.contains("processes")) {
+        if ((modern ? complete.contains("processes") : legacyFullSnapshot || collected.contains("processes"))) {
             for (var p : snapshot.getProcessesList()) {
                 jdbc.update("INSERT INTO t_asset_process (agent_id, pid, name, exe, cmdline, username, rss_bytes) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         agentId, p.getPid(), p.getName(), p.getExe(), p.getCmdline(), p.getUser(), p.getRssBytes());
             }
         }
-        if (legacyFullSnapshot || collected.contains("containers")) {
+        if (modern || legacyFullSnapshot || collected.contains("containers")) {
             for (var c : snapshot.getContainersList()) {
+                if (modern && !complete.contains(c.getOrchestrator())) continue;
                 jdbc.update("""
                         INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -142,6 +152,48 @@ public class AssetService {
         } catch (Exception e) {
             log.warn("快照后漏洞比对失败: agent={} err={}", agentId, e.getMessage());
         }
+    }
+
+    private Set<String> recordCollectionAttempts(String agentId, RptAssetSnapshot snapshot) {
+        Set<String> allowed = Set.of("ports", "processes", "accounts", "disks", "docker", "kubernetes");
+        Map<String, AssetCollectionAttempt> attempts = new HashMap<>();
+        Set<String> duplicate = new HashSet<>();
+        for (var attempt : snapshot.getCollectionAttemptsList()) {
+            if (!allowed.contains(attempt.getSource())) continue;
+            if (attempts.put(attempt.getSource(), attempt) != null) duplicate.add(attempt.getSource());
+        }
+        Set<String> requested = new HashSet<>(snapshot.getCollectedList());
+        if (requested.remove("containers")) { requested.add("docker"); requested.add("kubernetes"); }
+        if (snapshot.getCollectionContract() == 0 && snapshot.getCollectedCount() == 0) requested.addAll(allowed);
+        requested.addAll(attempts.keySet());
+        requested.retainAll(allowed);
+        Set<String> complete = new HashSet<>();
+        for (String source : requested) {
+            var attempt = attempts.get(source);
+            String status = "unknown", error = "collection_outcome_missing";
+            if (snapshot.getCollectionContract() == 0) { status = "legacy"; error = "legacy_completeness_unknown"; }
+            else if (snapshot.getCollectionContract() != 1) error = "unsupported_collection_contract";
+            else if (duplicate.contains(source)) error = "duplicate_collection_outcome";
+            else if (attempt != null) {
+                status = switch (attempt.getStatus()) {
+                    case COMPLETE -> "complete";
+                    case FAILED -> "failed";
+                    case PARTIAL -> "partial";
+                    case UNSUPPORTED -> "unsupported";
+                    default -> "unknown";
+                };
+                error = bounded(attempt.getError(), 128);
+            }
+            if (status.equals("complete")) complete.add(source);
+            jdbc.update("""
+                INSERT INTO t_asset_collection(agent_id,source,status,error,attempted_at,succeeded_at)
+                VALUES(?,?,?,?,CURRENT_TIMESTAMP,CASE WHEN ?='complete' THEN CURRENT_TIMESTAMP ELSE NULL END)
+                ON CONFLICT(agent_id,source) DO UPDATE SET status=EXCLUDED.status,error=EXCLUDED.error,
+                attempted_at=CURRENT_TIMESTAMP,succeeded_at=CASE WHEN EXCLUDED.status='complete'
+                THEN CURRENT_TIMESTAMP ELSE t_asset_collection.succeeded_at END
+                """, agentId, source, status, error, status);
+        }
+        return complete;
     }
 
     private boolean recordSoftwareAttempt(String agentId, RptAssetSnapshot snapshot) {

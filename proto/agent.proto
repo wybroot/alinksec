@@ -354,6 +354,17 @@ message RptAssetSnapshot {
   // in this report so that a targeted collection cannot remove other assets.
   repeated string collected = 7;
   SoftwareInventory software_inventory = 8;
+  // Version 1 requires explicit COMPLETE per source before replacing rows.
+  uint32 collection_contract = 9;
+  repeated AssetCollectionAttempt collection_attempts = 10;
+}
+
+message AssetCollectionAttempt {
+  string source = 1; // ports, processes, accounts, disks, docker, kubernetes
+  enum Status { UNKNOWN = 0; COMPLETE = 1; FAILED = 2; PARTIAL = 3; UNSUPPORTED = 4; }
+  Status status = 2;
+  string error = 3; // bounded code; never command output or credentials
+  int64 attempted_at = 4;
 }
 
 // Describes this software collection attempt, independently of other assets.

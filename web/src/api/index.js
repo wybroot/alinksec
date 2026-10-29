@@ -360,6 +360,7 @@ export async function fetchScreen() {
   const events = (alerts?.list || []).map((a) => ({
     ...eventEvidence(a, locations.get(a.id)),
     id: a.id,
+    agentId: a.agent_id,
     sev: alertSev(a),
     legacySeverity: a.severity_source === 'legacy_unclassified',
     type: a.event_type,
@@ -417,9 +418,10 @@ export async function isolateHost(agentId, isolated) {
   return post(`/api/hosts/${agentId}/${isolated ? 'isolate' : 'unisolate'}`, {})
 }
 
-export async function fetchHosts({ keyword = '', status = '', page = 1, size = 20 } = {}) {
+export async function fetchHosts({ keyword = '', status = '', groupId = '', page = 1, size = 20 } = {}) {
   const params = new URLSearchParams({ page: String(page), size: String(size) })
   if (keyword.trim()) params.set('keyword', keyword.trim())
+  if (groupId !== '' && groupId != null) params.set('groupId', groupId)
   const connectionFilter = { pending: 0, online: 1, offline: 2 }[status]
   const isolationFilter = {
     normal: 0, isolating: 1, isolated: 2, restoring: 3, isolate_failed: 4, restore_failed: 5, isolation_unknown: 6,
@@ -436,7 +438,8 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
       ip: h.ip || '—',
       os: OS[h.os_type]?.(h.os_version) || h.os_version || '—',
       arch: h.arch || '—',
-      group: '—',
+      group: h.group_name || '未分组',
+      groupId: h.group_id == null ? 0 : Number(h.group_id),
       ver: h.agent_version || '—',
       ...state,
       protect: !!h.protect_enabled,
@@ -489,8 +492,12 @@ function alertText(alert) {
 
 export async function fetchGroups() {
   const list = await get('/api/hosts/groups')
-  return (list || []).map((g) => g.name)
+  return list || []
 }
+
+export const saveHostGroup = (id, name) => post(id == null ? '/api/hosts/groups' : `/api/hosts/groups/${id}`, { name })
+export const deleteHostGroup = id => request(`/api/hosts/groups/${id}`, { method: 'DELETE' })
+export const assignHostGroup = (agentId, groupId) => post(`/api/hosts/${encodeURIComponent(agentId)}/group`, { groupId })
 
 export async function fetchHostDetail(agentId) {
   const [detail, software, ports, processes, accounts, containers] = await Promise.all([
@@ -939,9 +946,13 @@ function parseAlertDetail(detail) {
   try { const value=JSON.parse(detail || '{}'); return value && typeof value==='object' ? value : {} } catch { return {} }
 }
 
-export async function fetchAlerts() {
-  const data = await get('/api/alerts?page=1&size=100')
-  return (data?.list || []).map((a) => ({
+export async function fetchAlertPage({ page = 1, size = 20, tab = 'all' } = {}) {
+  const params = new URLSearchParams({ page, size, exactSeverity: true })
+  if (tab === 'open') params.set('status', '-1')
+  if (tab === 'critical') params.set('severity', '4')
+  if (tab === 'high') params.set('severity', '3')
+  const data = await get(`/api/alerts?${params}`)
+  return { total: Number(data?.total || 0), list: (data?.list || []).map((a) => ({
     id: a.id,
     sev: alertSev(a),
     legacySeverity: a.severity_source === 'legacy_unclassified',
@@ -949,15 +960,21 @@ export async function fetchAlerts() {
     text: a.title,
     host: a.hostname || a.agent_id || '—',
     time: fmtTime(a.last_time),
-    done: Number(a.status) === 2,
+    done: [2, 3].includes(Number(a.status)),
+    status: Number(a.status),
+    statusLabel: Number(a.status) === 3 || (Number(a.status) === 2 && a.handle_remark === '已忽略') ? '已忽略' : ({ 0: '待确认', 1: '跟进中', 2: '已确认记录' }[Number(a.status)] || '未知'),
     handler: a.handle_remark || '',
     action: a.action_taken || '',
     detail: parseAlertDetail(a.detail),
-  }))
+  })) }
 }
 
-export async function handleAlert(id, remark) {
-  return post(`/api/alerts/${id}/handle`, { remark })
+export async function fetchAlerts() {
+  return (await fetchAlertPage({ size: 100 })).list
+}
+
+export async function handleAlert(id, remark, resolution = 'acknowledge') {
+  return post(`/api/alerts/${id}/handle`, { remark, resolution })
 }
 
 export const fetchPatchReviewContext = (id, cveId) => get(`/api/fix/patches/${id}/review-context?cveId=${encodeURIComponent(cveId)}`)
@@ -972,3 +989,10 @@ export const fetchWindowsLoginStatus = (page = 1) => get(`/api/protect/windows-l
 export async function fetchClamavStatus(page = 1, size = 20) { return get(`/api/virus/clamav-status?page=${page}&size=${size}`) }
 
 export async function fetchYaraStatus(page = 1, size = 20) { return get(`/api/virus/yara-status?page=${page}&size=${size}`) }
+
+export const fetchUpgradeTargets = (packageId, page = 1) => get(`/api/upgrade/targets?${new URLSearchParams({packageId, page})}`)
+export const fetchUpgradeBatches = (page = 1) => get(`/api/upgrade/batches?page=${page}`)
+export const fetchUpgradeBatch = (id, page = 1) => get(`/api/upgrade/batches/${encodeURIComponent(id)}?page=${page}`)
+
+export const fetchAlertResponses = (id, page = 1) => get(`/api/alerts/${id}/responses?page=${page}`)
+export const createAlertResponse = (id, action) => post(`/api/alerts/${id}/responses`, { action })

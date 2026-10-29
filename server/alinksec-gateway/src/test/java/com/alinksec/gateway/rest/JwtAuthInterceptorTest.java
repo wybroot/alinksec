@@ -14,6 +14,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class JwtAuthInterceptorTest {
+    @Test void defectRepairWritesRejectViewerAndUseMatchedGroupRoutes() throws Exception {
+        for (String role : new String[]{"admin", "operator", "viewer"}) {
+            for (String pattern : new String[]{"/api/hosts/groups", "/api/hosts/groups/{id}", "/api/hosts/{agentId}/group", "/api/alerts/{id}/handle", "/api/alerts/{id}/responses", "/api/upgrade/dispatch"}) {
+                var req = request(role); req.setMethod("POST"); req.setRequestURI("/api/hosts/%67roups;ignored");
+                req.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, pattern);
+                assertEquals(!role.equals("viewer"), interceptor().preHandle(req, new MockHttpServletResponse(), new Object()));
+            }
+            var deletion = request(role); deletion.setMethod("DELETE"); deletion.setRequestURI("/api/hosts/groups/7");
+            assertEquals(!role.equals("viewer"), interceptor().preHandle(deletion, new MockHttpServletResponse(), new Object()));
+        }
+    }
+
     @Test void componentDiagnosticsRequireAdminEvenForEncodedMatchedPaths() throws Exception {
         for (String role:new String[]{"admin","operator","viewer"}) {
             var req=request(role);req.setRequestURI("/api/%73ystem;ignored/health");

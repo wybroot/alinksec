@@ -39,6 +39,7 @@ type transaction struct {
 // Outcome remains on disk across restarts and is replayed on each authenticated
 // connection. A transport send is not a server acknowledgement of persistence.
 type Outcome struct {
+	SHA256     string    `json:"sha256,omitempty"`
 	ID         string    `json:"id"`
 	CommandID  string    `json:"command_id"`
 	Version    string    `json:"version"`

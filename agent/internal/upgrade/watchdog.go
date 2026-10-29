@@ -150,6 +150,7 @@ func finish(workDir string, tx *transaction, r Outcome, now time.Time) (bool, er
 		}
 	}
 	r.ID, r.CommandID, r.Version, r.Time = tx.ID, tx.CommandID, tx.Version, now
+	r.SHA256 = tx.NewHash
 	r.Complete = true
 	if err := writeJSON(resultPath(workDir, tx.ID), r); err != nil {
 		return false, err

@@ -38,7 +38,7 @@ public final class ReportExport {
         var tables=new ArrayList<Table>();tables.add(new Table("概览",overview));
         tables.add(table(r,"hosts","主机与基线",new String[]{"agent_id","hostname","os_type","status","task_id","task_name","expected","passed","failed","errors","legacy","pending"},new String[]{"Agent ID","主机","系统（1 Linux/2 Windows）","状态（1 在线/2 离线）","最后分配任务 ID","任务","预期项","通过","不通过","异常","旧证据","待回报"}));
         tables.add(table(r,"vulnerabilities","漏洞记录",new String[]{"severity","status","records","recorded_match"},new String[]{"等级","处置状态（0 新增/1 确认/2 忽略/3 已修复）","发现记录数","记录中仍匹配标记数（可能过期）"}));
-        tables.add(table(r,"alerts","告警处置",new String[]{"severity","records","occurrences","handled","ignored","open"},new String[]{"等级","告警条数","合并发生次数","已处置","忽略","未处置"}));
+        tables.add(table(r,"alerts","告警记录状态",new String[]{"severity","records","occurrences","handled","ignored","open"},new String[]{"等级","告警条数","合并发生次数","已确认记录","忽略","待确认／跟进中"}));
         tables.add(table(r,"trend","每日趋势",new String[]{"day","alerts","vulnerabilities"},new String[]{"自然日","新增告警条数","新增漏洞记录数"}));
         tables.add(table(r,"coverage","漏洞覆盖",new String[]{"status","hosts"},new String[]{"采集或评估状态","主机数"}));
         var source=table(r,"sourceHolds","来源待处理",new String[]{"status","items"},new String[]{"CVE 声明状态","条数"});source.rows.add(row("范围",r.get("sourceHoldsScope")));tables.add(source);return tables;

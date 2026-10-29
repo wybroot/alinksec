@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -101,6 +102,7 @@ public class UpgradeService {
     }
 
     /** 灰度下发：按 agent 列表（前端选分组/多选），逐台下发指令。 */
+    @Transactional
     public Map<String, Object> dispatch(long packageId, List<String> agentIds, Long operatedBy) {
         Map<String, Object> pkg = jdbc.queryForMap(
                 "SELECT version, platform, package_key, sha256 FROM t_agent_upgrade_package WHERE id = ?",
@@ -109,8 +111,8 @@ public class UpgradeService {
         requirePlatform(platform);
         agentIds = agentIds == null ? List.of() : agentIds.stream()
                 .filter(a -> a != null && !a.isBlank()).distinct().toList();
-        if (agentIds.isEmpty()) {
-            throw new IllegalArgumentException("请选择升级目标主机");
+        if (agentIds.isEmpty() || agentIds.size() > 500) {
+            throw new IllegalArgumentException("请选择 1 至 500 台升级目标主机");
         }
         // Validate every target before creating any command in a mixed-architecture batch.
         for (String agentId : agentIds) {
@@ -129,6 +131,8 @@ public class UpgradeService {
                         + " 的平台 " + target + " 不匹配");
             }
         }
+        String batchId = java.util.UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO t_upgrade_batch(id,package_id,created_by) VALUES(?,?,?)", batchId, packageId, operatedBy);
         for (String agentId : agentIds) {
             CmdAgentUpgrade cmd = CmdAgentUpgrade.newBuilder()
                     .setVersion((String) pkg.get("version"))
@@ -136,10 +140,63 @@ public class UpgradeService {
                     .setSha256((String) pkg.get("sha256"))
                     .setExecutionContract(1)
                     .build();
-            commandService.dispatch(agentId, Command.newBuilder().setAgentUpgrade(cmd), operatedBy);
+            String commandId = commandService.dispatchAfterCommit(agentId, Command.newBuilder().setAgentUpgrade(cmd), operatedBy);
+            jdbc.update("INSERT INTO t_upgrade_target(batch_id,agent_id,command_id) VALUES(?,?,?)", batchId, agentId, commandId);
         }
         log.info("升级指令已下发: version={} agents={}", pkg.get("version"), agentIds.size());
-        return Map.of("dispatched", agentIds.size(), "version", pkg.get("version"));
+        return Map.of("batchId", batchId, "dispatched", agentIds.size(), "version", pkg.get("version"));
+    }
+
+    public Map<String,Object> targets(long packageId, int page) {
+        String platform = jdbc.queryForObject("SELECT platform FROM t_agent_upgrade_package WHERE id=?", String.class, packageId);
+        requirePlatform(platform);
+        String[] parts = platform.split("-");
+        int os = parts[0].equals("linux") ? 1 : 2;
+        String[] arches = parts[1].equals("amd64") ? new String[]{"amd64", "x86_64", "x64"} : new String[]{"arm64", "aarch64", "arm64"};
+        String condition = " FROM t_agent WHERE status<>4 AND deleted=false AND upgrade_contract=1 AND os_type=? AND LOWER(arch) IN (?,?,?)";
+        return Map.of("total", jdbc.queryForObject("SELECT count(*)" + condition, Long.class, os, arches[0], arches[1], arches[2]),
+            "list", jdbc.queryForList("SELECT agent_id,hostname,ip,agent_version,status" + condition + " ORDER BY hostname,agent_id LIMIT 20 OFFSET ?",
+                os, arches[0], arches[1], arches[2], (Math.max(1,page)-1)*20));
+    }
+
+    public Map<String,Object> batches(int page) {
+        return Map.of("total", jdbc.queryForObject("SELECT count(*) FROM t_upgrade_batch", Long.class),
+            "list", jdbc.queryForList("""
+                SELECT b.id,b.created_at,p.version,p.platform,p.sha256,
+                  (SELECT count(*) FROM t_upgrade_target t WHERE t.batch_id=b.id) AS target_count
+                FROM t_upgrade_batch b JOIN t_agent_upgrade_package p ON p.id=b.package_id
+                ORDER BY b.created_at DESC,b.id DESC LIMIT 20 OFFSET ?
+                """, (Math.max(1,page)-1)*20));
+    }
+
+    public Map<String,Object> batchTargets(String batchId, int page) {
+        var rows = jdbc.queryForList("""
+            SELECT t.agent_id,a.hostname,a.agent_version,a.status AS host_status,t.command_id,
+                c.status,c.result,c.created_at,c.acked_at,c.finished_at,p.version AS expected_version,p.sha256 AS expected_sha256
+            FROM t_upgrade_target t JOIN t_upgrade_batch b ON b.id=t.batch_id
+            JOIN t_agent_upgrade_package p ON p.id=b.package_id
+            LEFT JOIN t_agent a ON a.agent_id=t.agent_id LEFT JOIN t_command c ON c.cmd_id=t.command_id
+            WHERE t.batch_id=? ORDER BY t.agent_id LIMIT 20 OFFSET ?
+            """, batchId, (Math.max(1,page)-1)*20);
+        for (var row : rows) {
+            var result = com.alinksec.common.util.JsonUtils.read(String.valueOf(row.getOrDefault("result", "null")));
+            String message = result == null ? "" : result.path("message").asText("");
+            row.put("result_message", message);
+            // A legacy plain-text acknowledgement is not a digest confirmation.
+            row.put("confirmation", "unverified");
+            try {
+                var evidence = com.alinksec.common.util.JsonUtils.read(message);
+                if (evidence != null && evidence.isObject()) {
+                    row.put("result_message", evidence.path("message").asText(message));
+                    row.put("rolled_back", evidence.path("rolled_back").asBoolean(false));
+                    row.put("receipt", evidence);
+                    if (((Number)row.get("status")).intValue()==4 && evidence.path("success").asBoolean()
+                        && evidence.path("complete").asBoolean() && row.get("expected_version").equals(evidence.path("version").asText())
+                        && row.get("expected_sha256").equals(evidence.path("sha256").asText())) row.put("confirmation", "verified");
+                }
+            } catch (RuntimeException ignored) { /* Legacy acknowledgement: show message and unknown confirmation. */ }
+        }
+        return Map.of("total", jdbc.queryForObject("SELECT count(*) FROM t_upgrade_target WHERE batch_id=?", Long.class, batchId), "list", rows);
     }
 
     private static void requirePlatform(String platform) {
