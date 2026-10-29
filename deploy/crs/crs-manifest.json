@@ -1,0 +1,11 @@
+{
+  "release": "v4.1.0",
+  "sha256": "82a8740f91fefbcfbaaeec2a9bbf62f559779df3f58a74e1d1e441cbba205d15",
+  "rules_count": 224,
+  "release_date": "2024-07-18",
+  "engine": "coraza/modsecurity",
+  "anomaly_scoring": true,
+  "default_inbound_threshold": 5,
+  "default_outbound_threshold": 4,
+  "default_paranoia_level": 1
+}
