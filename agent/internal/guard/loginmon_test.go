@@ -150,9 +150,12 @@ func TestSSHBlockPersistenceExpiryAndPolicyRemoval(t *testing.T) {
 				rule.Match.SSHPorts = []int{22}
 			}
 			m.update([]config.LoginRule{rule})
-			m.tick()
+			events := m.tick()
 			if disabled != 1 || len(m.state.Blocks) != 0 {
 				t.Fatalf("block not removed: %s", removal)
+			}
+			if len(events) != 1 || events[0].GetActionTaken() != "block_expired" || events[0].GetType() != "login_crack" {
+				t.Fatalf("expected block_expired event on removal (%s), got: %+v", removal, events)
 			}
 		})
 	}

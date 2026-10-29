@@ -79,7 +79,8 @@ public class SqliteDatabaseConfiguration {
                 "db/common/V037__host_runtime.sql",
                 "db/common/V038__asset_collection_status.sql",
                 "db/common/V039__upgrade_batches.sql",
-                "db/common/V040__alert_responses.sql"
+                "db/common/V040__alert_responses.sql",
+                "db/common/V041__response_rules.sql"
         );
 
         private final AtomicBoolean initialized = new AtomicBoolean();

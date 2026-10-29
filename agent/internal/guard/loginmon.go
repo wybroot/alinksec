@@ -289,20 +289,21 @@ func (m *loginMonitor) observe(source string, lines []*pb.LogLine) []*pb.RptSecu
 	return events
 }
 
-func (m *loginMonitor) tick() {
+func (m *loginMonitor) tick() []*pb.RptSecurityEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.reconcile(m.now())
+	return m.reconcile(m.now())
 }
 
-func (m *loginMonitor) reconcile(now time.Time) {
+func (m *loginMonitor) reconcile(now time.Time) []*pb.RptSecurityEvent {
 	if m.needsReset {
 		if err := m.reset(); err != nil {
 			m.log.Warn("登录来源封禁清理失败，将重试", "err", err)
-			return
+			return nil
 		}
 		m.needsReset = false
 	}
+	var expiredEvents []*pb.RptSecurityEvent
 	changed := false
 	for key, block := range m.state.Blocks {
 		rule, enabled := m.rules[block.RuleID]
@@ -316,6 +317,33 @@ func (m *loginMonitor) reconcile(now time.Time) {
 			delete(m.state.Blocks, key)
 			delete(m.applied, key)
 			changed = true
+
+			// 生成封禁到期/撤销安全事件（与 Windows login block_expired 对齐）
+			detail := map[string]any{
+				"source_ip":    block.IP,
+				"ssh_ports":    block.Ports,
+				"rule_id":      block.RuleID,
+				"trigger":      "ssh_block_expired",
+				"expired_at":   now.UnixMilli(),
+				"original_exp": block.Expires,
+			}
+			payload, _ := json.Marshal(detail)
+			ruleName := "SSH 暴力破解来源封禁撤销"
+			ruleId := block.RuleID
+			sev := pb.Severity_SEV_LOW
+			if rule != (config.LoginRule{}) {
+				ruleName = rule.Name + " (封禁解除)"
+				ruleId = rule.ID
+			}
+			expiredEvents = append(expiredEvents, &pb.RptSecurityEvent{
+				RuleId:      ruleId,
+				RuleName:    ruleName,
+				Type:        "login_crack",
+				Severity:    sev,
+				Detail:      string(payload),
+				ActionTaken: "block_expired",
+				EventTs:     now.UnixMilli(),
+			})
 		} else if !m.applied[key] {
 			if err := m.apply(block, true); err != nil {
 				m.log.Warn("登录来源封禁恢复失败，将重试", "err", err)
@@ -329,6 +357,7 @@ func (m *loginMonitor) reconcile(now time.Time) {
 			m.log.Error("来源封禁状态保存失败", "err", err)
 		}
 	}
+	return expiredEvents
 }
 
 func (m *loginMonitor) save() error {

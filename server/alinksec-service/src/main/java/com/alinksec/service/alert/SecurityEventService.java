@@ -24,11 +24,14 @@ public class SecurityEventService {
     private final JdbcTemplate jdbc;
     private final NotifyService notifyService;
     private final DatabaseDialect database;
+    private final org.springframework.beans.factory.ObjectProvider<com.alinksec.service.response.ResponseAutomationService> responseAutomation;
 
-    public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService, DatabaseDialect database) {
+    public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService, DatabaseDialect database,
+                                org.springframework.beans.factory.ObjectProvider<com.alinksec.service.response.ResponseAutomationService> responseAutomation) {
         this.jdbc = jdbc;
         this.notifyService = notifyService;
         this.database = database;
+        this.responseAutomation = responseAutomation;
     }
 
     public void onEvent(String agentId, RptSecurityEvent event) {
@@ -64,6 +67,16 @@ public class SecurityEventService {
         log.info("新告警: agent={} type={} severity={} rule={}",
                 agentId, event.getType(), event.getSeverity(), event.getRuleId());
         notifyService.onAlert(alertNo);
+        Long insertedId = jdbc.queryForObject("SELECT id FROM t_alert WHERE alert_no=?", Long.class, alertNo);
+        if (insertedId != null) {
+            responseAutomation.ifAvailable(svc -> {
+                try {
+                    svc.evaluateAndDispatch(insertedId, alertNo);
+                } catch (Exception ex) {
+                    log.warn("自动响应评估失败 (alertId={}): {}", insertedId, ex.getMessage());
+                }
+            });
+        }
     }
 
     private String buildTitle(RptSecurityEvent e) {

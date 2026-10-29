@@ -205,7 +205,7 @@ func (g *Guard) Run(ctx context.Context) {
 	defer fileTick.Stop()
 	defer loginTick.Stop()
 	g.fileLoop()
-	g.login.tick()
+	g.loginLoop()
 
 	for {
 		select {
@@ -226,7 +226,7 @@ func (g *Guard) Run(ctx context.Context) {
 		case <-fileTick.C:
 			g.fileLoop()
 		case <-loginTick.C:
-			g.login.tick()
+			g.loginLoop()
 		}
 		// 策略热更新可能改变监测窗口：不一致则重建 ticker
 		if w := time.Duration(g.cur().RateWindowSec) * time.Second; w != rateWindow && w > 0 {
@@ -239,6 +239,14 @@ func (g *Guard) Run(ctx context.Context) {
 
 func (g *Guard) fileLoop() {
 	for _, event := range g.files.check() {
+		if g.report != nil {
+			g.report(event)
+		}
+	}
+}
+
+func (g *Guard) loginLoop() {
+	for _, event := range g.login.tick() {
 		if g.report != nil {
 			g.report(event)
 		}
