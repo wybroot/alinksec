@@ -68,6 +68,9 @@ func (m *fileMonitor) update(rules []config.FileRule) {
 				continue
 			}
 			path = filepath.Clean(path)
+			if slices.Contains(rule.Match.ExcludePaths, path) {
+				continue
+			}
 			sum := sha256.Sum256([]byte(rule.ID + "\x00" + path))
 			key := hex.EncodeToString(sum[:])
 			if !rule.Enabled {
@@ -358,7 +361,14 @@ func (m *fileMonitor) restoreFile(w *watchedFile, root *os.Root) error {
 }
 
 func (m *fileMonitor) fileEvent(w *watchedFile, change string, current fileObservation, action string, err error) *pb.RptSecurityEvent {
-	detail := map[string]any{"path": w.path, "change": change, "current_sha256": current.SHA256, "current_mode": current.Mode}
+	detail := map[string]any{
+		"path":           w.path,
+		"change":         change,
+		"current_sha256": current.SHA256,
+		"current_mode":   current.Mode,
+		"writer_pid":     0,
+		"writer_status":  "unavailable",
+	}
 	if w.baseline != nil {
 		detail["baseline_sha256"] = w.baseline.SHA256
 		detail["baseline_mode"] = w.baseline.Mode

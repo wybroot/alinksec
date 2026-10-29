@@ -23,6 +23,7 @@ type FileRule struct {
 type FileMatch struct {
 	Platforms    []string `yaml:"platforms" json:"platforms"`
 	Paths        []string `yaml:"paths" json:"paths"`
+	ExcludePaths []string `yaml:"exclude_paths,omitempty" json:"exclude_paths,omitempty"`
 	MaxFileBytes int64    `yaml:"max_file_bytes" json:"max_file_bytes"`
 }
 
@@ -100,7 +101,7 @@ func ValidateProtection(files []FileRule, logins []LoginRule) error {
 		if !validRuleID(rule.ID) || len(rule.Match.Paths) == 0 || paths > 64 || rule.Match.Limit() < 1 || rule.Match.Limit() > MaxProtectedFileBytes {
 			return fmt.Errorf("文件规则 %s 的路径数量或大小上限无效", rule.ID)
 		}
-		for _, path := range rule.Match.Paths {
+		for _, path := range append(append([]string(nil), rule.Match.Paths...), rule.Match.ExcludePaths...) {
 			windowsAbsolute := len(path) > 2 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
 			if len(path) > 4096 || strings.ContainsRune(path, 0) || (!filepath.IsAbs(path) && !windowsAbsolute && !strings.HasPrefix(path, "/")) {
 				return fmt.Errorf("文件规则 %s 需要绝对路径", rule.ID)

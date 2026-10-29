@@ -244,3 +244,37 @@ func TestProtectionStateReadsAreBoundedAndPolicyUpdatesAreConcurrent(t *testing.
 	}()
 	wg.Wait()
 }
+
+func TestFileRuleExcludePaths(t *testing.T) {
+	root := t.TempDir()
+	path1 := filepath.Join(root, "file1")
+	path2 := filepath.Join(root, "file2")
+	putFile(t, path1, "protected1")
+	putFile(t, path2, "protected2")
+
+	rule := config.FileRule{
+		ID:       "PR-TEST",
+		Enabled:  true,
+		Severity: 3,
+		Match: config.FileMatch{
+			Paths:        []string{path1, path2},
+			ExcludePaths: []string{path2},
+		},
+		Actions: []string{"alert"},
+	}
+
+	m := newFileMonitor(root, protectionLogger())
+	m.update([]config.FileRule{rule})
+
+	if len(m.files) != 1 {
+		t.Fatalf("expected exactly 1 watched file after exclusion, got %d", len(m.files))
+	}
+	for _, w := range m.files {
+		if w.path == path2 {
+			t.Fatalf("excluded path %s must not be in watched files", path2)
+		}
+		if w.path != path1 {
+			t.Fatalf("unexpected watched path: %s", w.path)
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -81,12 +82,17 @@ func (g *Guard) respondWithAttributionFiles(trigger, ruleID, ruleName string, ta
 	proc, terminate := g.attributeResponse(attributionFiles, since, detail)
 	if proc != nil {
 		detail["process"] = proc
+		detail["writer_pid"] = proc.Pid
+		detail["writer_status"] = "trusted"
 		if g.excluded(proc.Exe) {
 			// 排除清单命中（备份/杀毒类）：降级为仅告警，避免误杀备份作业
 			g.log.Warn("触发进程在排除清单，降级为仅告警", "exe", proc.Exe)
 			detail["excluded_exe"] = proc.Exe
 			c.Response = "alert_only"
 		}
+	} else {
+		detail["writer_pid"] = 0
+		detail["writer_status"] = "unavailable"
 	}
 
 	// ② kill
@@ -94,6 +100,9 @@ func (g *Guard) respondWithAttributionFiles(trigger, ruleID, ruleName string, ta
 	if c.Response == "kill" || c.Response == "kill_and_isolate" {
 		if proc == nil {
 			detail["kill_error"] = "未确认写入进程身份，已跳过自动终止"
+			if runtime.GOOS == "linux" {
+				detail["kill_not_supported"] = true
+			}
 		} else if err := terminate(); err == nil {
 			actionTaken = "killed"
 		} else {
