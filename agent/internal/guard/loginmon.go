@@ -47,22 +47,24 @@ type loginState struct {
 }
 
 type loginMonitor struct {
-	mu         sync.Mutex
-	path       string
-	log        *slog.Logger
-	rules      map[string]config.LoginRule
-	state      loginState
-	applied    map[string]bool
-	apply      func(loginBlock, bool) error
-	now        func() time.Time
-	reset      func() error
-	needsReset bool
+	mu           sync.Mutex
+	path         string
+	log          *slog.Logger
+	rules        map[string]config.LoginRule
+	state        loginState
+	applied      map[string]bool
+	apply        func(loginBlock, bool) error
+	now          func() time.Time
+	reset        func() error
+	needsReset   bool
+	recentDedupe map[string]int64
 }
 
 func newLoginMonitor(workDir string, log *slog.Logger, apply func(loginBlock, bool) error) *loginMonitor {
 	m := &loginMonitor{path: filepath.Join(workDir, "login-protection.json"), log: log,
 		rules: map[string]config.LoginRule{}, state: loginState{Buckets: map[string]*loginBucket{}, Blocks: map[string]loginBlock{}},
-		applied: map[string]bool{}, apply: apply, now: time.Now, reset: func() error { return nil }}
+		applied: map[string]bool{}, apply: apply, now: time.Now, reset: func() error { return nil },
+		recentDedupe: make(map[string]int64)}
 	if _, err := os.Stat(m.path); err == nil {
 		m.needsReset = true
 		if data, err := readPrivateLimited(m.path, 4<<20); err == nil {
@@ -104,7 +106,7 @@ func validLoginState(state loginState) bool {
 	return true
 }
 
-func (m *loginMonitor) update(rules []config.LoginRule) {
+func (m *loginMonitor) update(rules []config.LoginRule) []*pb.RptSecurityEvent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.needsReset {
@@ -127,7 +129,7 @@ func (m *loginMonitor) update(rules []config.LoginRule) {
 			delete(m.state.Buckets, key)
 		}
 	}
-	m.reconcile(m.now())
+	return m.reconcile(m.now())
 }
 
 func parseSSHAttempt(line *pb.LogLine) (loginAttempt, bool) {
@@ -191,6 +193,17 @@ func (m *loginMonitor) observe(source string, lines []*pb.LogLine) []*pb.RptSecu
 	var events []*pb.RptSecurityEvent
 	changed := false
 	for _, line := range lines {
+		content := line.GetContent()
+		// R55: 消除跨日志源（如 /var/log/secure 与 /var/log/auth.log）双写同一 SSH 事件导致的重复计数
+		if content != "" {
+			if m.recentDedupe == nil {
+				m.recentDedupe = make(map[string]int64)
+			}
+			if ts, ok := m.recentDedupe[content]; ok && now.UnixMilli()-ts < 10000 {
+				continue
+			}
+			m.recentDedupe[content] = now.UnixMilli()
+		}
 		attempt, ok := parseSSHAttempt(line)
 		if !ok {
 			continue
@@ -281,6 +294,14 @@ func (m *loginMonitor) observe(source string, lines []*pb.LogLine) []*pb.RptSecu
 			events = append(events, &pb.RptSecurityEvent{RuleId: rule.ID, RuleName: rule.Name, Type: typ, Severity: processSeverity(rule.Severity), Detail: string(payload), ActionTaken: action, EventTs: attempt.Time.UnixMilli()})
 		}
 	}
+	if len(m.recentDedupe) > 2048 {
+		cutoff := now.UnixMilli() - 10000
+		for k, ts := range m.recentDedupe {
+			if ts < cutoff {
+				delete(m.recentDedupe, k)
+			}
+		}
+	}
 	if changed {
 		if err := m.save(); err != nil {
 			m.log.Error("登录检测状态保存失败", "err", err)
@@ -331,7 +352,7 @@ func (m *loginMonitor) reconcile(now time.Time) []*pb.RptSecurityEvent {
 			ruleName := "SSH 暴力破解来源封禁撤销"
 			ruleId := block.RuleID
 			sev := pb.Severity_SEV_LOW
-			if rule != (config.LoginRule{}) {
+			if enabled {
 				ruleName = rule.Name + " (封禁解除)"
 				ruleId = rule.ID
 			}

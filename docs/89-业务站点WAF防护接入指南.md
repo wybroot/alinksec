@@ -1,5 +1,7 @@
 # 受保护业务站点接入 WAF 防护指南 (OWASP CRS / Coraza / ModSecurity)
 
+> **2026-11-06 状态更新：** 经第 13 轮缺陷修复（R06、R07、R08、R60）：平台过滤器已接入请求正文缓存与检测、多重 URL 编码递归解包、Cookie/Header 深度检测与 PL1-4 多层异常评分；配置已接入 `t_system_config` 持久化热更新；`update-crs.py` 补齐真实下载、SHA-256 校验与回滚能力；Agent 日志采集已接通 `/var/log/nginx/modsec_audit.log` 审计日志自动转化为平台 `web_attack` 安全告警。外部独立反代部署需配置 ModSecurity/Coraza 生成对应格式日志。
+
 本文档面向系统管理员与安全运维工程师，指导如何将受 ALinkSec Agent 监控的 Linux 主机上的业务 Web 服务接入 WAF 检查与实时防护体系。
 
 ---

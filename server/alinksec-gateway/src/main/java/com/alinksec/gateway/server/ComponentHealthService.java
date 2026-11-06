@@ -97,11 +97,36 @@ public class ComponentHealthService {
     }
 
     private Map<String,Object> certificate() {
-        try(var input=Files.newInputStream(Path.of(app.getServer().getCertDir(),"server.crt"))) {
-            var cert=(X509Certificate)CertificateFactory.getInstance("X.509").generateCertificate(input);
-            cert.checkValidity();long days=Duration.between(Instant.now(),cert.getNotAfter().toInstant()).toDays();
-            return state(days<30?"degraded":"healthy",days<30?"证书将在 30 天内过期":"证书在有效期内",
-                    Map.of("expiresAt",cert.getNotAfter().toInstant().toString(),"remainingDays",days));
+        try {
+            Path certDir = Path.of(app.getServer().getCertDir());
+            X509Certificate serverCert;
+            try(var input=Files.newInputStream(certDir.resolve("server.crt"))) {
+                serverCert=(X509Certificate)CertificateFactory.getInstance("X.509").generateCertificate(input);
+            }
+            serverCert.checkValidity();
+            long serverDays=Duration.between(Instant.now(),serverCert.getNotAfter().toInstant()).toDays();
+
+            long caDays = 3650;
+            String caExpiry = "";
+            if (Files.exists(certDir.resolve("ca.crt"))) {
+                try (var input = Files.newInputStream(certDir.resolve("ca.crt"))) {
+                    var caCert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(input);
+                    caCert.checkValidity();
+                    caDays = Duration.between(Instant.now(), caCert.getNotAfter().toInstant()).toDays();
+                    caExpiry = caCert.getNotAfter().toInstant().toString();
+                }
+            }
+            long minDays = Math.min(serverDays, caDays);
+            boolean degraded = minDays < 30;
+            String msg = degraded ? "证书将在 30 天内过期 (服务端: " + serverDays + " 天, CA: " + caDays + " 天)" : "服务端与平台 CA 证书在有效期内";
+            Map<String, Object> details = new HashMap<>();
+            details.put("expiresAt", serverCert.getNotAfter().toInstant().toString());
+            details.put("remainingDays", serverDays);
+            if (!caExpiry.isEmpty()) {
+                details.put("caExpiresAt", caExpiry);
+                details.put("caRemainingDays", caDays);
+            }
+            return state(degraded ? "degraded" : "healthy", msg, details);
         } catch(Exception e) { return state("down","证书不可读取、尚未生效或已过期",Map.of()); }
     }
 

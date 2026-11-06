@@ -178,4 +178,34 @@ public class ResponseAutomationIntegrationTest {
         int execCount = jdbc.queryForObject("SELECT count(*) FROM t_response_execution WHERE target='127.0.0.1'", Integer.class);
         assertEquals(0, execCount, "Loopback 管理 IP 绝对禁止自动封禁");
     }
+
+    @Test
+    void testHostTagExactMatching() {
+        // 创建要求标签为 'dmz' 的规则 (agent-auto-01 的 tags 为 ["web","dmz"])
+        responseService.createRule(Map.of(
+            "name", "DMZ主机封禁",
+            "alertType", "login_crack",
+            "hostTag", "dmz",
+            "action", "block_ip"
+        ), 1L, "admin");
+
+        // 创建要求标签为 'dm' (子串而非全词) 的规则
+        responseService.createRule(Map.of(
+            "name", "部分匹配标签封禁",
+            "alertType", "login_crack",
+            "hostTag", "dm",
+            "action", "block_ip"
+        ), 1L, "admin");
+
+        eventService.onEvent("agent-auto-01", RptSecurityEvent.newBuilder()
+            .setRuleId("PR-0003")
+            .setType("login_crack")
+            .setSeverity(Severity.SEV_HIGH)
+            .setDetail("{\"source_ip\":\"198.51.100.88\"}")
+            .build());
+
+        // 验证仅精确匹配的 'DMZ主机封禁' 派发了执行，'dm' 模糊标签未派发
+        var list = jdbc.queryForList("SELECT * FROM t_response_execution WHERE target='198.51.100.88'");
+        assertEquals(1, list.size(), "仅精确标签规则应触发");
+    }
 }

@@ -72,48 +72,84 @@ public class KernelTelemetryService {
             // 映射 Falco 优先级至 ALinkSec severity: 1(low), 2(medium), 3(high), 4(critical)
             int severity = mapFalcoPriority(priority);
 
-            // 提取关键字段
-            String agentId = "falco-node";
-            if (fields.has("k8s.pod.name")) {
-                agentId = fields.path("k8s.pod.name").asText();
-            } else if (fields.has("container.name")) {
-                agentId = fields.path("container.name").asText();
+            // 提取关键字段并解析主机归属 (R71)
+            String candidateHost = null;
+            if (fields.hasNonNull("nodename") && !fields.path("nodename").asText().isBlank()) {
+                candidateHost = fields.path("nodename").asText();
+            } else if (fields.hasNonNull("evt.hostname") && !fields.path("evt.hostname").asText().isBlank()) {
+                candidateHost = fields.path("evt.hostname").asText();
+            } else if (root.hasNonNull("hostname") && !root.path("hostname").asText().isBlank()) {
+                candidateHost = root.path("hostname").asText();
             }
 
-            // 关联主机 agent_id（如果有 hostname）
-            if (fields.has("nodename")) {
-                String nodename = fields.path("nodename").asText();
-                String hostAgent = resolveAgentIdByHost(nodename);
-                if (hostAgent != null) {
-                    agentId = hostAgent;
-                }
+            String agentId;
+            boolean hostBound = false;
+            String hostAgent = resolveAgentIdByHost(candidateHost);
+            if (hostAgent != null) {
+                agentId = hostAgent;
+                hostBound = true;
+            } else {
+                // 未绑定平台登记主机：使用未绑定标识，严禁直接使用 Pod 或容器名称冒充 agentId
+                agentId = "unbound-" + (candidateHost != null ? candidateHost : "unknown");
             }
 
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("telemetry_source", "falco_ebpf");
             detail.put("falco_rule", ruleName);
             detail.put("falco_priority", priority);
-            detail.put("raw_output", output);
+            detail.put("raw_output", redactSensitive(output));
+            detail.put("host_bound", hostBound);
+            if (candidateHost != null) {
+                detail.put("nodename", candidateHost);
+            }
+            if (!hostBound) {
+                detail.put("unbound_host", candidateHost != null ? candidateHost : "unknown");
+                detail.put("response_skipped", true); // 禁止对未绑定主机触发处置响应
+            }
 
-            // 提取容器上下文
-            if (fields.has("container.id") || fields.has("container.name")) {
+            // 提取容器上下文（R74: host / container / unknown 三态处理）
+            String containerId = fields.path("container.id").asText("");
+            String containerName = fields.path("container.name").asText("");
+            String containerStatus;
+            boolean inContainer;
+
+            if ("host".equalsIgnoreCase(containerId) || "host".equalsIgnoreCase(containerName)) {
+                containerStatus = "host";
+                inContainer = false;
+            } else if (!containerId.isBlank() && !"none".equalsIgnoreCase(containerId)) {
+                containerStatus = "container";
+                inContainer = true;
+            } else if (!containerName.isBlank() && !"none".equalsIgnoreCase(containerName)) {
+                containerStatus = "container";
+                inContainer = true;
+            } else if (!fields.has("container.id") && !fields.has("container.name")) {
+                containerStatus = "unknown";
+                inContainer = false;
+            } else {
+                containerStatus = "host";
+                inContainer = false;
+            }
+
+            detail.put("container_status", containerStatus);
+            detail.put("in_container", inContainer);
+            if (inContainer) {
                 Map<String, Object> containerCtx = new LinkedHashMap<>();
-                containerCtx.put("id", fields.path("container.id").asText(""));
-                containerCtx.put("name", fields.path("container.name").asText(""));
+                containerCtx.put("id", containerId);
+                containerCtx.put("name", containerName);
                 containerCtx.put("image", fields.path("container.image.repository").asText(""));
                 detail.put("container", containerCtx);
-                detail.put("in_container", true);
-                detail.put("container_id", fields.path("container.id").asText(""));
-            } else {
-                detail.put("in_container", false);
+                detail.put("container_id", containerId);
             }
 
             // 提取进程与 PID
             if (fields.has("proc.pid")) {
-                detail.put("proc_pid", fields.path("proc.pid").asInt());
+                int pid = fields.path("proc.pid").asInt();
+                detail.put("proc_pid", pid);
+                String pName = fields.path("proc.name").asText("proc");
+                detail.put("process_key", agentId + ":" + pid + ":" + pName);
             }
             if (fields.has("proc.cmdline")) {
-                detail.put("proc_cmdline", fields.path("proc.cmdline").asText());
+                detail.put("proc_cmdline", redactSensitive(fields.path("proc.cmdline").asText()));
             }
             if (fields.has("proc.name")) {
                 detail.put("proc_name", fields.path("proc.name").asText());
@@ -161,9 +197,14 @@ public class KernelTelemetryService {
             recordHeartbeat("elkeid", "type_" + dataType);
 
             String nodename = root.path("nodename").asText("elkeid-node");
-            String agentId = resolveAgentIdByHost(nodename);
-            if (agentId == null) {
-                agentId = nodename;
+            String hostAgent = resolveAgentIdByHost(nodename);
+            String agentId;
+            boolean hostBound = false;
+            if (hostAgent != null) {
+                agentId = hostAgent;
+                hostBound = true;
+            } else {
+                agentId = "unbound-" + nodename;
             }
 
             String exe = root.path("exe").asText("");
@@ -174,48 +215,124 @@ public class KernelTelemetryService {
             String ruleId = "elkeid-hook-" + dataType;
             String ruleName = "Elkeid Driver Event " + dataType;
             int severity = 2; // medium default
-
-            // 针对核心 hook 分类处理
-            switch (dataType) {
-                case 59 -> { // execve
-                    ruleName = "Elkeid: Process Execve";
-                    severity = 1; // low baseline telemetry
-                }
-                case 604 -> { // update_cred 提权 (uid 0)
-                    ruleName = "Elkeid: Privilege Escalation (update_cred)";
-                    severity = 4; // critical
-                }
-                case 611 -> { // privilege_escalation
-                    ruleName = "Elkeid: Privilege Escalation Detected";
-                    severity = 4; // critical
-                }
-                case 356 -> { // memfd_create (无文件攻击)
-                    ruleName = "Elkeid: Memory File Created (memfd_create)";
-                    severity = 3; // high
-                }
-                case 603 -> { // load_module (内核模块加载)
-                    ruleName = "Elkeid: Kernel Module Loaded";
-                    severity = 3; // high
-                }
-                case 700, 701, 702, 703 -> { // Rootkit 检测 (proc/syscall/module hook)
-                    ruleName = "Elkeid: Kernel Rootkit Tampering Detected";
-                    severity = 4; // critical
-                }
-            }
+            String actionTaken = "alert_only";
 
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("telemetry_source", "elkeid_driver");
             detail.put("data_type", dataType);
+            detail.put("nodename", nodename);
+            detail.put("host_bound", hostBound);
+            if (!hostBound) {
+                detail.put("unbound_host", nodename);
+                detail.put("response_skipped", true);
+            }
+
+            // 提取容器上下文（R74）
+            String containerId = root.path("container_id").asText("");
+            if (containerId.isBlank()) containerId = root.path("docker_id").asText("");
+            String podName = root.path("pod_name").asText("");
+            boolean inContainer = false;
+            String containerStatus = "unknown";
+            if (!containerId.isBlank() || !podName.isBlank()) {
+                containerStatus = "container";
+                inContainer = true;
+                detail.put("container_id", containerId);
+                if (!podName.isBlank()) detail.put("pod_name", podName);
+            } else if (root.has("container_id") || root.has("pod_name")) {
+                containerStatus = "host";
+            }
+            detail.put("container_status", containerStatus);
+            detail.put("in_container", inContainer);
+
+            // 针对核心 hook 分类处理与字段保全 (R72 / R75)
+            switch (dataType) {
+                case 42 -> { // connect
+                    type = "network";
+                    ruleId = "elkeid-hook-connect";
+                    ruleName = "Elkeid: Network Connect (Telemetry)";
+                    severity = 1; // info (日常遥测，不盲目作为高危告警)
+                    actionTaken = "telemetry_only";
+                    detail.put("telemetry_only", true);
+                    detail.put("response_skipped", true);
+                    detail.put("sip", root.path("sip").asText(""));
+                    detail.put("sport", root.path("sport").asInt(0));
+                    detail.put("dip", root.path("dip").asText(""));
+                    detail.put("dport", root.path("dport").asInt(0));
+                    detail.put("sa_family", root.path("sa_family").asInt(0));
+                    detail.put("socket_type", root.path("socket_type").asInt(0));
+                    detail.put("res", root.path("res").asInt(0));
+                    detail.put("source_ip", root.path("dip").asText(""));
+                }
+                case 59 -> { // execve
+                    type = "process";
+                    ruleId = "elkeid-hook-execve";
+                    ruleName = "Elkeid: Process Execve (Telemetry)";
+                    severity = 1; // info (日常遥测，不盲目作为高危告警)
+                    actionTaken = "telemetry_only";
+                    detail.put("telemetry_only", true);
+                    detail.put("response_skipped", true);
+                }
+                case 601 -> { // dns_query
+                    type = "dns";
+                    ruleId = "elkeid-hook-dns";
+                    ruleName = "Elkeid: DNS Query";
+                    severity = 2; // low
+                    detail.put("query", root.path("query").asText(""));
+                    detail.put("dns_ip", root.path("dns_ip").asText(""));
+                    detail.put("res", root.path("res").asInt(0));
+                }
+                case 602 -> { // file
+                    type = "file";
+                    ruleId = "elkeid-hook-file";
+                    ruleName = "Elkeid: File Operation";
+                    severity = 2; // low
+                    detail.put("file_path", root.path("file_path").asText(""));
+                    detail.put("flags", root.path("flags").asInt(0));
+                    detail.put("mode", root.path("mode").asInt(0));
+                    detail.put("res", root.path("res").asInt(0));
+                }
+                case 604 -> { // update_cred 提权 (uid 0)
+                    ruleName = "Elkeid: Privilege Escalation (update_cred)";
+                    severity = 5; // critical
+                    detail.put("old_uid", root.path("old_uid").asInt(-1));
+                    detail.put("new_uid", root.path("new_uid").asInt(-1));
+                    detail.put("res", root.path("res").asInt(0));
+                }
+                case 611 -> { // privilege_escalation
+                    ruleName = "Elkeid: Privilege Escalation Detected";
+                    severity = 5; // critical
+                }
+                case 356 -> { // memfd_create (无文件攻击)
+                    ruleName = "Elkeid: Memory File Created (memfd_create)";
+                    severity = 4; // high
+                    detail.put("fd_name", root.path("name").asText(""));
+                    detail.put("flags", root.path("flags").asInt(0));
+                    detail.put("res", root.path("res").asInt(0));
+                }
+                case 603 -> { // load_module (内核模块加载)
+                    ruleName = "Elkeid: Kernel Module Loaded";
+                    severity = 4; // high
+                    detail.put("ko_file", root.path("ko_file").asText(""));
+                    detail.put("res", root.path("res").asInt(0));
+                }
+                case 700, 701, 702, 703 -> { // Rootkit 检测 (proc/syscall/module hook)
+                    ruleName = "Elkeid: Kernel Rootkit Tampering Detected (" + dataType + ")";
+                    severity = 5; // critical
+                }
+            }
+
             detail.put("exe", exe);
             detail.put("pid", pid);
+            if (pid > 0) {
+                detail.put("process_key", agentId + ":" + pid + ":" + (exe.isBlank() ? "proc" : exe));
+            }
             detail.put("ppid", root.path("ppid").asInt(0));
             detail.put("uid", root.path("uid").asInt(-1));
-            detail.put("nodename", nodename);
             if (!pidTree.isBlank()) {
                 detail.put("pid_tree", pidTree);
             }
             if (root.has("argv")) {
-                detail.put("argv", root.path("argv").asText());
+                detail.put("argv", redactSensitive(root.path("argv").asText()));
             }
 
             RptSecurityEvent event = RptSecurityEvent.newBuilder()
@@ -223,7 +340,7 @@ public class KernelTelemetryService {
                     .setRuleId(ruleId)
                     .setRuleName(ruleName)
                     .setSeverityValue(severity)
-                    .setActionTaken("alert_only")
+                    .setActionTaken(actionTaken)
                     .setDetail(JsonUtils.write(detail))
                     .build();
 
@@ -291,12 +408,19 @@ public class KernelTelemetryService {
         }
     }
 
+    public static String redactSensitive(String text) {
+        if (text == null || text.isBlank()) return text;
+        return text.replaceAll("(?i)(--?(?:password|passwd|pwd|token|secret|api[-_]?key|access[-_]?key|client[-_]?secret|auth|private[-_]?key|credentials?)\\s*[=:]\\s*)[^\\s,;\"']+", "$1***")
+                   .replaceAll("(?i)(Bearer\\s+)[A-Za-z0-9._~+/-]+", "$1***");
+    }
+
     private int mapFalcoPriority(String priority) {
         return switch (priority.toUpperCase()) {
-            case "EMERGENCY", "ALERT", "CRITICAL" -> 4; // critical
-            case "ERROR", "WARNING" -> 3; // high
-            case "NOTICE" -> 2; // medium
-            default -> 1; // low / info
+            case "EMERGENCY", "ALERT", "CRITICAL" -> 5; // critical (Severity.SEV_CRITICAL = 5)
+            case "ERROR", "WARNING" -> 4; // high (Severity.SEV_HIGH = 4)
+            case "NOTICE" -> 3; // medium (Severity.SEV_MEDIUM = 3)
+            case "INFORMATIONAL", "INFO" -> 2; // low (Severity.SEV_LOW = 2)
+            default -> 1; // info (Severity.SEV_INFO = 1)
         };
     }
 }

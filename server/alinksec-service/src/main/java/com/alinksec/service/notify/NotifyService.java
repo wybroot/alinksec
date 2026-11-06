@@ -48,6 +48,11 @@ public class NotifyService {
         var alerts = jdbc.queryForList("SELECT * FROM v_alert_severity WHERE alert_no=?", alertNo);
         if (alerts.isEmpty()) return;
         var alert = alerts.getFirst();
+        int status = ((Number) alert.get("status")).intValue();
+        if (status > 1) {
+            jdbc.update("UPDATE t_alert_notify_delivery SET last_error = 'alert_closed_before_delivery', lease_until = 0 WHERE alert_no = ? AND delivered_at IS NULL", alertNo);
+            return;
+        }
         int severity = ((Number) alert.get("severity_level")).intValue();
         // Snapshot eligible channels before delivery. A later channel change only
         // affects future alerts, rather than unexpectedly replaying old alerts.
@@ -110,7 +115,8 @@ public class NotifyService {
                 FROM v_alert_severity a WHERE severity_level >= 1 AND status IN (0, 1) AND notified = false
                   AND (NOT EXISTS(SELECT 1 FROM t_alert_notify_delivery d WHERE d.alert_no=a.alert_no)
                     OR EXISTS(SELECT 1 FROM t_alert_notify_delivery d JOIN t_notify_channel c ON c.id=d.channel_id
-                      WHERE d.alert_no=a.alert_no AND d.delivered_at IS NULL AND d.attempts<5 AND c.enabled=true))
+                      WHERE d.alert_no=a.alert_no AND d.delivered_at IS NULL AND d.attempts<5 AND c.enabled=true
+                        AND (d.last_error IS NULL OR d.last_error != 'alert_closed_before_delivery')))
                 ORDER BY first_time LIMIT 20
                 """);
         for (Map<String, Object> a : missed) {
@@ -124,6 +130,7 @@ public class NotifyService {
                     SELECT 1 FROM t_alert_notify_delivery d
                     JOIN t_notify_channel c ON c.id = d.channel_id
                     WHERE d.alert_no = ? AND c.enabled = true AND d.delivered_at IS NULL
+                      AND (d.last_error IS NULL OR d.last_error != 'alert_closed_before_delivery')
                 ) WHERE alert_no = ?
                 """, alertNo, alertNo);
     }
@@ -137,10 +144,18 @@ public class NotifyService {
                     .header("Idempotency-Key",idempotency)
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
-            HttpResponse<Void> resp = http.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 log.warn("通知发送非 2xx: channel={} status={}", name, resp.statusCode());
                 return "HTTP " + resp.statusCode();
+            }
+            String body = resp.body();
+            if (body != null && !body.isBlank()) {
+                String botErr = inspectBotResponse(body);
+                if (botErr != null) {
+                    log.warn("通知发送业务拒绝: channel={} err={}", name, botErr);
+                    return botErr;
+                }
             }
             return null;
         } catch (Exception e) {
@@ -148,5 +163,41 @@ public class NotifyService {
             log.warn("通知发送失败: channel={} type={}", name, e.getClass().getSimpleName());
             return e instanceof java.net.http.HttpTimeoutException ? "webhook_timeout" : "webhook_unavailable";
         }
+    }
+
+    /** 检查钉钉、企业微信、飞书等主流机器人的 HTTP 200 业务拒绝状态码 (R17) */
+    static String inspectBotResponse(String body) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = JsonUtils.read(body);
+            if (node == null || !node.isObject()) {
+                return null;
+            }
+            // 钉钉 & 企业微信机器人: {"errcode": 0, "errmsg": "ok"}
+            if (node.has("errcode")) {
+                int errcode = node.path("errcode").asInt(0);
+                if (errcode != 0) {
+                    String errmsg = node.path("errmsg").asText("errcode=" + errcode);
+                    return "bot_rejected: " + errmsg;
+                }
+            }
+            // 飞书自定义机器人: {"code": 0, "msg": "success"} 或 {"StatusCode": 0, "StatusMessage": "success"}
+            if (node.has("code") && !node.path("code").isNull()) {
+                int code = node.path("code").asInt(0);
+                if (code != 0) {
+                    String msg = node.path("msg").asText("code=" + code);
+                    return "bot_rejected: " + msg;
+                }
+            }
+            if (node.has("StatusCode") && !node.path("StatusCode").isNull()) {
+                int code = node.path("StatusCode").asInt(0);
+                if (code != 0) {
+                    String msg = node.path("StatusMessage").asText("StatusCode=" + code);
+                    return "bot_rejected: " + msg;
+                }
+            }
+        } catch (Exception ignored) {
+            // 非 JSON 格式普通 Webhook 响应，以 HTTP 2xx 视为成功
+        }
+        return null;
     }
 }

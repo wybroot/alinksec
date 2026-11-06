@@ -87,14 +87,16 @@ public class DashboardQueryService {
                 "SELECT count(*) FROM t_vuln_finding WHERE status IN (0,1) AND severity >= 3", Long.class));
         result.put("vuln", vuln);
 
-        // 基线最近一次任务
+        // 基线最近一次任务 (R38: 按每主机最新检查汇总全部主机结果，消除单一全局最大时间戳截断)
         Map<String, Object> baseline = new HashMap<>();
         List<Map<String, Object>> blRows = jdbc.queryForList("""
                 SELECT ROUND(AVG(score), 2) AS avg_score, count(*) AS agents
-                FROM t_baseline_summary
-                WHERE (task_id, checked_at) IN (
-                    SELECT task_id, max(checked_at) FROM t_baseline_summary GROUP BY task_id
-                ) AND task_id = (SELECT max(id) FROM t_baseline_task)
+                FROM t_baseline_summary s
+                WHERE s.task_id = (SELECT max(id) FROM t_baseline_task)
+                  AND s.checked_at = (
+                      SELECT max(s2.checked_at) FROM t_baseline_summary s2
+                      WHERE s2.task_id = s.task_id AND s2.agent_id = s.agent_id
+                  )
                 """);
         if (!blRows.isEmpty() && blRows.get(0).get("avg_score") != null) {
             baseline.put("avgScore", ((Number) blRows.get(0).get("avg_score")).doubleValue());

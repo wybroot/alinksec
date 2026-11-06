@@ -37,9 +37,24 @@ public class TelemetryController {
             @RequestBody String payload,
             HttpServletRequest request) {
 
+        if (!properties.getTelemetry().isEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResult.error(403, "内核遥测接入未启用"));
+        }
+
         String secret = properties.getTelemetry().getFalcoSecret();
         if (secret != null && !secret.isBlank()) {
             String token = request.getHeader("X-Falco-Token");
+            if (token == null || token.isBlank()) {
+                String auth = request.getHeader("Authorization");
+                if (auth != null && auth.startsWith("Bearer ")) {
+                    token = auth.substring(7).trim();
+                }
+            }
+            // R73: 兼顾 Falco 原生 http_output 不支持自定义请求头的问题，支持 URL query parameter token 鉴权
+            if (token == null || token.isBlank()) {
+                token = request.getParameter("token");
+            }
             if (token == null || !token.equals(secret)) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(ApiResult.error(401, "Falco 鉴权密钥无效"));
@@ -58,7 +73,28 @@ public class TelemetryController {
      */
     @PostMapping("/elkeid/events")
     public ResponseEntity<ApiResult<Map<String, Object>>> ingestElkeid(
-            @RequestBody String payload) {
+            @RequestBody String payload,
+            HttpServletRequest request) {
+
+        if (!properties.getTelemetry().isEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResult.error(403, "内核遥测接入未启用"));
+        }
+
+        String secret = properties.getTelemetry().getElkeidSecret();
+        if (secret != null && !secret.isBlank()) {
+            String token = request.getHeader("X-Elkeid-Token");
+            if (token == null || token.isBlank()) {
+                String auth = request.getHeader("Authorization");
+                if (auth != null && auth.startsWith("Bearer ")) {
+                    token = auth.substring(7).trim();
+                }
+            }
+            if (token == null || !token.equals(secret)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResult.error(401, "Elkeid 鉴权密钥无效"));
+            }
+        }
 
         boolean ok = telemetryService.ingestElkeidEvent(payload);
         if (!ok) {

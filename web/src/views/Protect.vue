@@ -86,6 +86,122 @@
       </el-table>
       <el-empty v-else description="暂无进程匹配规则" :image-size="48" />
     </div>
+
+    <div class="panel" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h4 style="margin:0">自动化响应规则（告警联动处置）</h4>
+        <div style="display:flex;gap:8px">
+          <el-button v-if="canEditResponse" type="primary" size="small" @click="openResponseRuleDlg()">新建响应规则</el-button>
+          <el-button size="small" @click="loadResponseRules">刷新</el-button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:#94a3b8">
+        当产生匹配告警时自动触发处置动作（如隔离主机、阻断IP、查杀进程）。为防止越权与误处置，高危处置规则需经管理员审批 (Approved) 后方可生效执行。
+      </p>
+      <el-table v-if="responseRules.length" :data="responseRules" size="small" v-loading="loadingResponse">
+        <el-table-column prop="name" label="规则名称" min-width="150" />
+        <el-table-column label="触发事件" width="130">
+          <template #default="{ row }"><el-tag size="small">{{ eventTypeName(row.alert_type) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="最低等级" width="110">
+          <template #default="{ row }">{{ sevNumLabel(row.min_severity) }}</template>
+        </el-table-column>
+        <el-table-column label="处置动作" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" :type="actionType(row.action)">{{ actionName(row.action) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="超时自动撤销" width="120">
+          <template #default="{ row }">{{ row.timeout_sec ? `${row.timeout_sec} 秒` : '无' }}</template>
+        </el-table-column>
+        <el-table-column label="审批状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.approved_at ? 'success' : 'warning'">
+              {{ row.approved_at ? '已审批' : '待管理员审批' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="80">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" :disabled="!canEditResponse" @change="toggleResponseRule(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160">
+          <template #default="{ row }">
+            <el-button v-if="isAdmin && !row.approved_at" link type="success" size="small" @click="approveRule(row)">批准</el-button>
+            <el-button v-if="canEditResponse" link type="primary" size="small" @click="openResponseRuleDlg(row)">编辑</el-button>
+            <el-button v-if="isAdmin" link type="danger" size="small" @click="delResponseRule(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="暂无自动化响应规则" :image-size="48" />
+    </div>
+
+    <!-- 响应规则编辑弹窗 -->
+    <el-dialog v-model="responseRuleDlg" :title="responseForm.id ? '编辑自动化响应规则' : '新建自动化响应规则'" width="560px">
+      <el-form label-width="120px">
+        <el-form-item label="规则名称" required>
+          <el-input v-model="responseForm.name" placeholder="例如：反弹Shell主机网络自动隔离" />
+        </el-form-item>
+        <el-form-item label="触发事件类型" required>
+          <el-select v-model="responseForm.alertType" style="width:100%">
+            <el-option value="all" label="全部告警类型 (all)" />
+            <el-option value="reverse_shell" label="反弹 Shell (reverse_shell)" />
+            <el-option value="virus" label="恶意文件 / 木马病毒 (virus)" />
+            <el-option value="brute_force" label="登录暴力破解 (brute_force)" />
+            <el-option value="web_attack" label="Web 攻击检测 (web_attack)" />
+            <el-option value="priv_esc" label="特权提升 (priv_esc)" />
+            <el-option value="file_tamper" label="关键文件篡改 (file_tamper)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="最低触发等级">
+          <el-select v-model="responseForm.minSeverity" style="width:100%">
+            <el-option :value="1" label="1 - 低危及以上 (Low+)" />
+            <el-option :value="2" label="2 - 中危及以上 (Medium+)" />
+            <el-option :value="3" label="3 - 高危及以上 (High+)" />
+            <el-option :value="4" label="4 - 严重 (Critical)" />
+            <el-option :value="5" label="5 - 致命 (Critical Level 5)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="响应处置动作" required>
+          <el-select v-model="responseForm.action" style="width:100%">
+            <el-option value="isolate_host" label="隔离主机网络 (isolate_host)" />
+            <el-option value="restore_isolation" label="解除主机网络隔离 (restore_isolation)" />
+            <el-option value="block_ip" label="Linux 防火墙封禁源 IP (block_ip)" />
+            <el-option value="kill_process" label="查杀目标进程树 (kill_process)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="执行位置">
+          <el-radio-group v-model="responseForm.location">
+            <el-radio value="local">告警所在主机 Agent (local)</el-radio>
+            <el-radio value="agent">指定目标主机 Agent (agent)</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="responseForm.location === 'agent'" label="目标主机 ID">
+          <el-input v-model="responseForm.targetAgentId" placeholder="例如：agt-xxxx" />
+        </el-form-item>
+        <el-form-item label="匹配主机标签">
+          <el-input v-model="responseForm.hostTag" placeholder="可选，留空则匹配全部主机" />
+        </el-form-item>
+        <el-form-item label="超时自动撤销">
+          <el-input-number v-model="responseForm.timeoutSec" :min="0" :max="86400" controls-position="right" />
+          <span style="margin-left:8px;font-size:12px;color:#94a3b8">秒（0 表示不撤销，仅封禁/隔离支持）</span>
+        </el-form-item>
+        <el-form-item label="启用规则">
+          <el-switch v-model="responseForm.enabled" />
+        </el-form-item>
+        <el-form-item label="管理员授权">
+          <el-checkbox v-model="responseForm.requireAdminAuth">需要管理员审批后方可生效执行</el-checkbox>
+        </el-form-item>
+        <el-form-item label="规则说明">
+          <el-input v-model="responseForm.description" type="textarea" :rows="2" placeholder="规则用途描述" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="responseRuleDlg = false">取消</el-button>
+        <el-button type="primary" :loading="responseBusy" @click="saveResponseRule">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -95,7 +211,7 @@ import WindowsLoginProtection from '../components/WindowsLoginProtection.vue'
 import FileWatchStatus from '../components/FileWatchStatus.vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
-import { fetchProtect, fetchProtectRules, updateProtectRule } from '../api'
+import { fetchProtect, fetchProtectRules, updateProtectRule, fetchResponseRules, createResponseRule, updateResponseRule, deleteResponseRule, approveResponseRule, getUser } from '../api'
 import { sevType, sevLabel, actionLabel } from '../utils/format'
 import { fileProtectionPayload, loginProtectionPayload } from '../utils/protection'
 
@@ -153,6 +269,7 @@ onMounted(async () => {
       decoyExcludes.value = (decoy.match?.exclude_exes || []).join(', ')
       ruleLoaded.value = true
     }
+    loadResponseRules()
   } catch (e) {
     msg(e.message || '防护配置加载失败', 'error')
   } finally {
@@ -210,6 +327,138 @@ const saveLoginRule = async () => {
     msg('SSH 登录防护配置已保存')
   } catch (e) { msg(e.message || '保存失败', 'error') }
   finally { loginSaving.value = false }
+}
+
+/* ---- 自动化响应规则管理 ---- */
+const isAdmin = getUser()?.role === 'admin'
+const canEditResponse = ['admin', 'operator'].includes(getUser()?.role)
+const responseRules = ref([])
+const loadingResponse = ref(false)
+const responseRuleDlg = ref(false)
+const responseBusy = ref(false)
+const responseForm = ref({
+  id: null,
+  name: '',
+  alertType: 'all',
+  minSeverity: 3,
+  action: 'isolate_host',
+  location: 'local',
+  targetAgentId: '',
+  hostTag: '',
+  timeoutSec: 0,
+  enabled: true,
+  requireAdminAuth: false,
+  description: ''
+})
+
+const sevNumLabel = s => ({ 1: '低危及以上', 2: '中危及以上', 3: '高危及以上', 4: '高危+', 5: '严重' }[s] || `${s} 级及以上`)
+const actionName = a => ({ isolate_host: '隔离主机网络', restore_isolation: '解除主机网络隔离', block_ip: 'Linux 防火墙封禁 IP', kill_process: '查杀进程树' }[a] || a)
+const actionType = a => ({ isolate_host: 'danger', kill_process: 'danger', block_ip: 'warning', restore_isolation: 'success' }[a] || 'info')
+const eventTypeName = t => ({
+  all: '全部告警',
+  reverse_shell: '反弹 Shell',
+  virus: '恶意样本/病毒',
+  brute_force: '登录暴力破解',
+  web_attack: 'Web 攻击',
+  priv_esc: '特权提升',
+  file_tamper: '文件篡改'
+}[t] || t || '全部告警')
+
+async function loadResponseRules() {
+  loadingResponse.value = true
+  try {
+    responseRules.value = (await fetchResponseRules()) || []
+  } catch (e) {
+    msg(e?.message || '自动响应规则加载失败', 'error')
+  } finally {
+    loadingResponse.value = false
+  }
+}
+
+function openResponseRuleDlg(row) {
+  if (row) {
+    responseForm.value = {
+      id: row.id,
+      name: row.name,
+      alertType: row.alert_type || 'all',
+      minSeverity: row.min_severity || 3,
+      action: row.action || 'isolate_host',
+      location: row.location || 'local',
+      targetAgentId: row.target_agent_id || '',
+      hostTag: row.host_tag || '',
+      timeoutSec: row.timeout_sec || 0,
+      enabled: row.enabled !== false,
+      requireAdminAuth: !!row.require_admin_auth,
+      description: row.description || ''
+    }
+  } else {
+    responseForm.value = {
+      id: null,
+      name: '',
+      alertType: 'all',
+      minSeverity: 3,
+      action: 'isolate_host',
+      location: 'local',
+      targetAgentId: '',
+      hostTag: '',
+      timeoutSec: 0,
+      enabled: true,
+      requireAdminAuth: false,
+      description: ''
+    }
+  }
+  responseRuleDlg.value = true
+}
+
+async function saveResponseRule() {
+  if (!responseForm.value.name?.trim()) return msg('请填写规则名称', 'warning')
+  responseBusy.value = true
+  try {
+    const payload = { ...responseForm.value }
+    if (payload.id) {
+      await updateResponseRule(payload.id, payload)
+      msg('响应规则已更新')
+    } else {
+      await createResponseRule(payload)
+      msg('响应规则已创建')
+    }
+    responseRuleDlg.value = false
+    await loadResponseRules()
+  } catch (e) {
+    msg(e?.message || '保存失败', 'error')
+  } finally {
+    responseBusy.value = false
+  }
+}
+
+async function toggleResponseRule(row) {
+  try {
+    await updateResponseRule(row.id, { enabled: row.enabled })
+    msg(`规则已${row.enabled ? '启用' : '停用'}`)
+  } catch (e) {
+    row.enabled = !row.enabled
+    msg(e?.message || '状态切换失败', 'error')
+  }
+}
+
+async function approveRule(row) {
+  try {
+    await approveResponseRule(row.id)
+    msg('规则已批准生效')
+    await loadResponseRules()
+  } catch (e) {
+    msg(e?.message || '审批失败', 'error')
+  }
+}
+
+async function delResponseRule(row) {
+  try {
+    await deleteResponseRule(row.id)
+    msg('规则已删除')
+    await loadResponseRules()
+  } catch (e) {
+    msg(e?.message || '删除失败', 'error')
+  }
 }
 </script>
 

@@ -56,6 +56,13 @@ func rpmInstalledVersion(out string) string {
 // installPatch Linux 安装：单包文件直装（依赖走客户现有源，不污染 repo 配置）：
 // rpm: yum/dnf install -y ./file.rpm；deb: apt-get install -y ./file.deb（自动解依赖）
 func installPatch(p *PkgPayload, tmpFile string, addLog func(string, ...any)) (reboot bool, err error) {
+	pkgNameLower := strings.ToLower(p.PkgName)
+	isCorePackage := strings.Contains(pkgNameLower, "kernel") ||
+		strings.Contains(pkgNameLower, "linux-image") ||
+		strings.Contains(pkgNameLower, "glibc") ||
+		strings.Contains(pkgNameLower, "libc6") ||
+		strings.Contains(pkgNameLower, "systemd")
+
 	switch p.RepoType {
 	case "rpm":
 		installer := "yum"
@@ -67,14 +74,36 @@ func installPatch(p *PkgPayload, tmpFile string, addLog func(string, ...any)) (r
 		if e != nil {
 			return false, fmt.Errorf("%s: %s", e, tailOutput(out))
 		}
-		return false, nil
+		reboot = isCorePackage
+		if !reboot {
+			if _, e := os.Stat("/run/reboot-required"); e == nil {
+				reboot = true
+			} else if needsRestartCmd, err := exec.LookPath("needs-restarting"); err == nil {
+				if rOut, _ := exec.Command(needsRestartCmd, "-r").Output(); len(rOut) > 0 {
+					reboot = strings.Contains(string(rOut), "Reboot is required")
+				}
+			}
+		}
+		if reboot {
+			addLog("核心系统组件更新或存在重启标志，需重启生效")
+		}
+		return reboot, nil
 	case "deb":
 		addLog("执行: apt-get install -y %s", filepathBase(tmpFile))
 		out, e := packageCommand(false, 15*time.Minute, "apt-get", "install", "-y", tmpFile)
 		if e != nil {
 			return false, fmt.Errorf("apt-get: %s", tailOutput(out))
 		}
-		return false, nil
+		reboot = isCorePackage
+		if !reboot {
+			if _, e := os.Stat("/var/run/reboot-required"); e == nil {
+				reboot = true
+			}
+		}
+		if reboot {
+			addLog("核心系统组件更新或存在重启标志，需重启生效")
+		}
+		return reboot, nil
 	default:
 		return false, fmt.Errorf("Linux 不支持补丁类型 %s", p.RepoType)
 	}

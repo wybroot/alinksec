@@ -164,12 +164,17 @@ func collectProcesses(snap *pb.RptAssetSnapshot) {
 			recordAttempt(snap, "processes", pb.AssetCollectionAttempt_PARTIAL, "process_details_unavailable")
 			continue
 		}
-		exe, _ := p.Exe()
-		args, _ := p.CmdlineSlice()
-		user, _ := p.Username()
+		exe, exeErr := p.Exe()
+		args, cmdErr := p.CmdlineSlice()
+		user, userErr := p.Username()
+		if exeErr != nil || cmdErr != nil || userErr != nil {
+			recordAttempt(snap, "processes", pb.AssetCollectionAttempt_PARTIAL, "process_fields_partial")
+		}
 		var rss uint64
 		if mem, err := p.MemoryInfo(); err == nil && mem != nil {
 			rss = mem.RSS
+		} else {
+			recordAttempt(snap, "processes", pb.AssetCollectionAttempt_PARTIAL, "process_memory_unavailable")
 		}
 		snap.Processes = append(snap.Processes, &pb.ProcessInfo{Pid: p.Pid, Name: name, Exe: exe, Cmdline: redactCommandLine(args), User: user, RssBytes: rss})
 	}

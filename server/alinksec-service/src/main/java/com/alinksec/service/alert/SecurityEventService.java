@@ -26,6 +26,10 @@ public class SecurityEventService {
     private final DatabaseDialect database;
     private final org.springframework.beans.factory.ObjectProvider<com.alinksec.service.response.ResponseAutomationService> responseAutomation;
 
+    public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService, DatabaseDialect database) {
+        this(jdbc, notifyService, database, null);
+    }
+
     public SecurityEventService(JdbcTemplate jdbc, NotifyService notifyService, DatabaseDialect database,
                                 org.springframework.beans.factory.ObjectProvider<com.alinksec.service.response.ResponseAutomationService> responseAutomation) {
         this.jdbc = jdbc;
@@ -38,7 +42,9 @@ public class SecurityEventService {
         String detailJson = event.getDetail().isBlank() ? "{}" : event.getDetail();
         String fingerprint = fingerprint(event, detailJson);
 
-        // 聚合：未关闭的同源告警 count+1（uq_alert_dedup 兜底并发重复）
+        // R35: 5 分钟滑动窗口聚合（超过 5 分钟的后续独立事件创建新告警，保证响应与通知重新触发）
+        java.sql.Timestamp fiveMinutesAgo = java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(300));
+
         String mergeSql = """
                 UPDATE t_alert
                 SET count = count + 1, last_time = CURRENT_TIMESTAMP,
@@ -47,8 +53,9 @@ public class SecurityEventService {
                   AND (%s) = ?
                   AND severity_source = 'agent_proto_v1' AND severity = ?
                   AND status IN (0, 1)
+                  AND last_time >= ?
                 """.formatted(database.jsonTextValue("detail", "fingerprint"));
-        int merged = jdbc.update(mergeSql, withFingerprint(detailJson, fingerprint), event.getActionTaken(), agentId, event.getRuleId(), fingerprint, event.getSeverityValue());
+        int merged = jdbc.update(mergeSql, withFingerprint(detailJson, fingerprint, event.getEventTs()), event.getActionTaken(), agentId, event.getRuleId(), fingerprint, event.getSeverityValue(), fiveMinutesAgo);
         if (merged > 0) {
             log.debug("告警聚合: agent={} rule={} type={}", agentId, event.getRuleId(), event.getType());
             return;
@@ -62,13 +69,23 @@ public class SecurityEventService {
                 """,
                 alertNo, agentId, event.getRuleId(), event.getType(),
                 event.getSeverityValue(),
-                buildTitle(event), withFingerprint(detailJson, fingerprint),
+                buildTitle(event), withFingerprint(detailJson, fingerprint, event.getEventTs()),
                 event.getActionTaken());
         log.info("新告警: agent={} type={} severity={} rule={}",
                 agentId, event.getType(), event.getSeverity(), event.getRuleId());
-        notifyService.onAlert(alertNo);
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            notifyService.onAlert(alertNo);
+                        }
+                    });
+        } else {
+            notifyService.onAlert(alertNo);
+        }
         Long insertedId = jdbc.queryForObject("SELECT id FROM t_alert WHERE alert_no=?", Long.class, alertNo);
-        if (insertedId != null) {
+        if (insertedId != null && responseAutomation != null) {
             responseAutomation.ifAvailable(svc -> {
                 try {
                     svc.evaluateAndDispatch(insertedId, alertNo);
@@ -119,6 +136,13 @@ public class SecurityEventService {
                 var detail=JsonUtils.read(detailJson);
                 return base+":"+detail.path("id").asText()+":"+detail.path("phase").asText();
             }
+            if (event.getType().equals("virus")) {
+                var d = JsonUtils.read(detailJson);
+                String p = d.path("path").asText("");
+                if (p.isBlank()) p = d.path("file_path").asText("");
+                if (p.isBlank()) p = d.path("sha256").asText("");
+                return p.isBlank() ? base : base + ":" + p;
+            }
             String key = switch (event.getType()) {
                 case "process" -> "process_key";
                 case "file_tamper" -> "path";
@@ -133,12 +157,23 @@ public class SecurityEventService {
     }
 
     private String withFingerprint(String detailJson, String fingerprint) {
+        return withFingerprint(detailJson, fingerprint, 0);
+    }
+
+    private String withFingerprint(String detailJson, String fingerprint, long eventTs) {
         var node = JsonUtils.read(detailJson);
         if (!node.isObject()) {
-            return JsonUtils.write(java.util.Map.of("fingerprint", fingerprint, "raw", detailJson));
+            java.util.Map<String, Object> map = new java.util.LinkedHashMap<>();
+            map.put("fingerprint", fingerprint);
+            map.put("raw", detailJson);
+            if (eventTs > 0) map.put("event_ts", eventTs);
+            return JsonUtils.write(map);
         }
         var obj = (com.fasterxml.jackson.databind.node.ObjectNode) node;
         obj.put("fingerprint", fingerprint);
+        if (eventTs > 0 && !obj.has("event_ts")) {
+            obj.put("event_ts", eventTs);
+        }
         return obj.toString();
     }
 

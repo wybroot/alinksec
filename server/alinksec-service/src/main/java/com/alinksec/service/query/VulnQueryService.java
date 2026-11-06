@@ -102,6 +102,10 @@ public class VulnQueryService {
         return result;
     }
 
+    public int updateWeakpwdStatus(Long id, int status) {
+        return jdbc.update("UPDATE t_weakpwd_finding SET status=? WHERE id=?", status, id);
+    }
+
     /** Historical findings and coverage are separate: no findings is not a pass. */
     public Map<String,Object> scanCoverage(String agentId,int page,int size) {
         String condition=agentId==null || agentId.isBlank()?"":" WHERE m.agent_id=?";

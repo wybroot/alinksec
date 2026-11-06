@@ -19,6 +19,25 @@ public class BulkTaskCommandLifecycle implements CommandLifecycleListener {
         if(command.hasVulnScan() && command.getVulnScan().getExecutionContract()==1 && command.getVulnScan().getIncludeWeakPassword()
             && jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE agent_id=? AND os_type=1 AND weak_password_contract=1 AND deleted=false AND status NOT IN (3,4)",Integer.class,agent)!=1)
             throw new IllegalStateException("目标不再支持 Linux 本地弱口令字典检测，请更新 Agent 后重试");
+        // R50: 离线重连交付前复核扫描任务与基线任务状态，防止执行已超时/已结束的旧命令
+        if (command.hasVulnScan()) {
+            try {
+                long taskId = Long.parseLong(command.getVulnScan().getTaskId());
+                var tasks = jdbc.queryForList("SELECT status FROM t_scan_task WHERE id = ?", taskId);
+                if (tasks.isEmpty() || !Integer.valueOf(1).equals(tasks.get(0).get("status"))) {
+                    throw new IllegalStateException("扫描任务已结束或超时，停止派发旧指令: task=" + taskId);
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+        if (command.hasBaselineCheck()) {
+            try {
+                long taskId = Long.parseLong(command.getBaselineCheck().getTaskId());
+                var tasks = jdbc.queryForList("SELECT status FROM t_baseline_task WHERE id = ?", taskId);
+                if (tasks.isEmpty() || !Integer.valueOf(1).equals(tasks.get(0).get("status"))) {
+                    throw new IllegalStateException("基线任务已结束或超时，停止派发旧指令: task=" + taskId);
+                }
+            } catch (NumberFormatException ignored) {}
+        }
         return command;
     }
 

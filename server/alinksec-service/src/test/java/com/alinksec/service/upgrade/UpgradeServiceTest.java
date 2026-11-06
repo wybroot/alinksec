@@ -123,4 +123,13 @@ class UpgradeServiceTest {
         assertEquals("original bytes",java.nio.file.Files.readString(original));
         try(var files=java.nio.file.Files.list(root)) { assertEquals(1,files.count()); }
     }
+
+    @Test void cleanOrphanPackageDeletesUnindexedFile(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root) throws Exception {
+        var props=new AlinkSecProperties();props.getUpgrade().setStorageDir(root.toString());
+        var orphan=root.resolve("1.1-linux-amd64.bin");java.nio.file.Files.writeString(orphan,"orphan bytes");
+        when(jdbc.queryForObject(anyString(),eq(Integer.class),eq("1.1-linux-amd64.bin"))).thenReturn(0);
+        var service=new UpgradeService(jdbc,commands,props,tokens);
+        org.junit.jupiter.api.Assertions.assertTrue(service.cleanOrphanPackage("1.1","linux-amd64"));
+        org.junit.jupiter.api.Assertions.assertFalse(java.nio.file.Files.exists(orphan));
+    }
 }

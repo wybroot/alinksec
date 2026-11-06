@@ -61,7 +61,11 @@
       </el-table-column>
       <el-table-column prop="hb" label="最近心跳" width="90" />
       <el-table-column label="风险值" width="130">
-        <template #default="{ row }"><el-progress :percentage="row.risk" :stroke-width="8" :color="row.risk > 80 ? '#dc2626' : row.risk > 60 ? '#f59e0b' : '#16a34a'" /></template>
+        <template #default="{ row }">
+          <el-tooltip :content="'风险分: ' + (row.risk || 0) + ' (告警: ' + (row.alertCount || 0) + ')'">
+            <el-progress :percentage="Math.min(100, Math.max(0, row.risk || 0))" :stroke-width="8" :color="row.risk > 80 ? '#dc2626' : row.risk > 60 ? '#f59e0b' : '#16a34a'" />
+          </el-tooltip>
+        </template>
       </el-table-column>
       <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
@@ -181,7 +185,13 @@
           <el-table-column label="来源" width="86"><template #default="{ row }"><el-tag size="small" effect="plain">{{ row.orchestrator === 'kubernetes' ? 'K8s' : 'Docker' }}</el-tag></template></el-table-column>
           <el-table-column prop="image" label="镜像" min-width="145" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" min-width="110" show-overflow-tooltip />
-          <el-table-column label="风险" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-tag v-if="row.risky" size="small" type="danger">{{ riskReasons(row) }}</el-tag><span v-else>—</span></template></el-table-column>
+          <el-table-column label="风险" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag v-if="row.risky" size="small" type="danger">{{ riskReasons(row) }}</el-tag>
+              <el-tag v-else-if="row.risk_reasons" size="small" type="success">安全</el-tag>
+              <span v-else>未评估</span>
+            </template>
+          </el-table-column>
           <el-table-column label="端口" min-width="110" show-overflow-tooltip>
             <template #default="{ row }">{{ (row.ports || []).join(', ') || '—' }}</template>
           </el-table-column>

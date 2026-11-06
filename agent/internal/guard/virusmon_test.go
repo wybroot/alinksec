@@ -156,20 +156,23 @@ func TestPeriodicSnapshotBoundsDirectoriesAndUsesNanosecondTime(t *testing.T) {
 		os.Mkdir(filepath.Join(root, string(rune('a'+i))), 0700)
 	}
 	left := 3
-	virusSnapshot(root, &left, time.Now().Add(time.Second))
+	_, meta := virusSnapshot(root, &left, time.Now().Add(time.Second))
 	if left != 0 {
 		t.Fatal("directory entries not bounded", left)
+	}
+	if !meta.Truncated || meta.Reason != "budget_exhausted" {
+		t.Fatal("expected truncated snapshot due to budget exhaustion", meta)
 	}
 	left = 100
 	path := filepath.Join(root, "same.sh")
 	os.WriteFile(path, []byte("old"), 0600)
 	stamp := time.Unix(100, 100)
 	os.Chtimes(path, stamp, stamp)
-	first := virusSnapshot(root, &left, time.Now().Add(time.Second))
+	first, _ := virusSnapshot(root, &left, time.Now().Add(time.Second))
 	stamp = time.Unix(100, 500000)
 	os.Chtimes(path, stamp, stamp)
 	left = 100
-	next := virusSnapshot(root, &left, time.Now().Add(time.Second))
+	next, _ := virusSnapshot(root, &left, time.Now().Add(time.Second))
 	if len(diffSnapshot(first, next).Modified) != 1 {
 		t.Fatal("sub-second modification missed")
 	}

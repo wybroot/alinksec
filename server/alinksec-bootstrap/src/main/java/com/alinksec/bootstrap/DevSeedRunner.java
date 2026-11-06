@@ -26,6 +26,9 @@ public class DevSeedRunner implements CommandLineRunner {
     @Value("${ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD:}")
     private String bootstrapAdminPassword;
 
+    @Value("${ALINKSEC_RESET_ADMIN_PASSWORD:}")
+    private String resetAdminPassword;
+
     @Value("${ALINKSEC_BOOTSTRAP_ENROLL_TOKEN:}")
     private String bootstrapEnrollToken;
     @Value("${alinksec.cluster.enabled:false}")
@@ -42,10 +45,26 @@ public class DevSeedRunner implements CommandLineRunner {
         if(clusterEnabled) {
             if(jdbc.queryForObject("SELECT count(*) FROM t_user WHERE status=1 AND role_id=1",Long.class)==0)
                 throw new IllegalStateException("cluster_requires_initialized_administrator");
+            emergencyResetAdmin();
             return;
         }
         seedAdmin();
+        emergencyResetAdmin();
         seedEnrollToken();
+    }
+
+    /** G10: 失去管理员访问后的受控紧急恢复通道 */
+    private void emergencyResetAdmin() {
+        if (resetAdminPassword != null && resetAdminPassword.length() >= 12) {
+            String hash = new BCryptPasswordEncoder().encode(resetAdminPassword);
+            int updated = jdbc.update("""
+                    UPDATE t_user SET password_hash = ?, status = 1, role_id = 1
+                    WHERE username = 'admin'
+                    """, hash);
+            if (updated > 0) {
+                log.warn("EMERGENCY RECOVERY: Administrator password reset from ALINKSEC_RESET_ADMIN_PASSWORD");
+            }
+        }
     }
 
     private void seedAdmin() {

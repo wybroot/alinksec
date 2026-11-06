@@ -1,5 +1,7 @@
 # 90. 内核与 eBPF 遥测接入规范 (Falco / Elkeid Driver)
 
+> **2026-10-29 复核提示：** 当前实现主要为外部事件接收与展示，存在鉴权／启停、严重度映射、探针健康和事件身份缺口，见 [91 · R01、R14、R15](91-安全组件缺陷与补全清单.md)。本文的“100% 捕获”不成立，接口存在也不代表真实探针部署与可靠传输已完成；下列接入说明须补齐认证和目标环境验收后使用。
+
 > **修订日期：** 2026-10-29  
 > **适用版本：** v0.0.4+ (Phase 6 / F01-kernel ~ F04-kernel)  
 > **基准参考：** CNCF Falco (eBPF probe/Plugin) · ByteDance Elkeid Driver (Kprobe LKM)
@@ -78,18 +80,36 @@ ALinkSec 的 Agent 原生设计为跨平台纯用户态轻量化监控（进程�
 
 ## 3. Falco 部署与对接指南
 
-### 3.1 Falco 配置文件 (`falco.yaml`)
-在 Falco 部署主机的配置中添加 HTTP 输出：
+### 3.1 Falco 原生配置 (`falco.yaml`)
+由于 Falco 原生 `http_output` 模块不直接支持自由添加 `custom_headers` 请求头（R73），ALinkSec 服务端全面兼容 **URL 参数 Token**、**Falcosidekick 转发** 与 **标准请求头** 三种接入机制：
+
+**方案一：原生 HTTP 直连（推荐，通过 URL 携带 Token）**
 ```yaml
 http_output:
   enabled: true
-  url: "https://<alinksec-server>:8443/api/telemetry/falco/events"
+  url: "https://<alinksec-server>:8443/api/telemetry/falco/events?token=<your-secure-token>"
   user_agent: "falco/0.45"
   insecure: false
   ca_cert: "/etc/falco/certs/alinksec-ca.crt"
   mtls: false
-  # 自定义 Header 传递 Token
-  custom_headers: "X-Falco-Token: <your-secure-token>"
+```
+
+**方案二：配合官方 Falcosidekick 中继转发（标准请求头）**
+Falco 将事件输出给本地 `falcosidekick`，由 sidekick 添加 Header 投递：
+```yaml
+# falcosidekick 配置
+webhook:
+  address: "https://<alinksec-server>:8443/api/telemetry/falco/events"
+  customheaders: "X-Falco-Token:<your-secure-token>"
+  checkcert: true
+```
+
+**方案三：Falco 原生 Program Output + curl**
+```yaml
+program_output:
+  enabled: true
+  keep_alive: false
+  program: "curl -s -X POST -H 'Content-Type: application/json' -H 'X-Falco-Token: <your-secure-token>' --cacert /etc/falco/certs/alinksec-ca.crt -d @- https://<alinksec-server>:8443/api/telemetry/falco/events"
 ```
 
 ### 3.2 联调验证步骤

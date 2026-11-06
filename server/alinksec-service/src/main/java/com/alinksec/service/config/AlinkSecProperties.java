@@ -128,11 +128,14 @@ public class AlinkSecProperties {
     public static class Telemetry {
         private boolean enabled = false;
         private String falcoSecret = "";
+        private String elkeidSecret = "";
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public String getFalcoSecret() { return falcoSecret; }
         public void setFalcoSecret(String falcoSecret) { this.falcoSecret = falcoSecret; }
+        public String getElkeidSecret() { return elkeidSecret; }
+        public void setElkeidSecret(String elkeidSecret) { this.elkeidSecret = elkeidSecret; }
     }
 
     private Telemetry telemetry = new Telemetry();

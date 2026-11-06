@@ -92,38 +92,50 @@ public class ScanTaskService {
         jdbc.update("UPDATE t_scan_task SET started_at = CURRENT_TIMESTAMP WHERE id = ?", taskId);
 
         // 漏洞比对：服务端即时完成（用最新软件快照）
+        int vulnFailures = 0;
         if (includeVuln) {
             for (String agentId : agentIds) {
                 try {
                     vulnMatchService.matchAgent(agentId, taskId);
                 } catch (Exception e) {
+                    vulnFailures++;
                     log.warn("漏洞比对失败: agent={} err={}", agentId, e.getMessage());
                 }
             }
         }
         if (includeWeakPassword || includePortService) {
             for (String agentId : agentIds) {
-                boolean capable = !includeWeakPassword || jdbc.queryForObject(
-                    "SELECT count(*) FROM t_agent WHERE agent_id=? AND os_type=1 AND weak_password_contract=1", Integer.class, agentId)==1;
+                // R47: 细化子项适用性，避免因弱口令不支持而连带跳过端口扫描
+                boolean weakCapable = jdbc.queryForObject(
+                    "SELECT count(*) FROM t_agent WHERE agent_id=? AND os_type=1 AND weak_password_contract=1", Integer.class, agentId) == 1;
+                boolean runWeak = includeWeakPassword && weakCapable;
+                boolean runPort = includePortService;
+
+                boolean agentCapable = runWeak || runPort;
+                String memberState = agentCapable ? "pending" : "unsupported";
+                String weakStatus = includeWeakPassword ? (weakCapable ? "pending" : "unsupported") : "not_requested";
+
                 jdbc.update("INSERT INTO t_scan_task_agent(task_id,agent_id,state,weak_status) VALUES(?,?,?,?)",
-                    taskId,agentId,capable?"pending":"unsupported",includeWeakPassword?(capable?"pending":"unsupported"):"not_requested");
-                if (!capable) continue;
+                    taskId, agentId, memberState, weakStatus);
+                if (!agentCapable) continue;
+
                 String command = commandService.dispatchAfterCommit(agentId, Command.newBuilder()
                     .setVulnScan(CmdVulnScan.newBuilder().setTaskId(String.valueOf(taskId))
-                        .setIncludeWeakPassword(includeWeakPassword).setIncludePortService(includePortService)
-                        .setExecutionContract(1).setWeakDictionaryVersion(includeWeakPassword?ScanResultService.DICTIONARY_VERSION:"")),createdBy);
-                jdbc.update("UPDATE t_scan_task_agent SET command_id=? WHERE task_id=? AND agent_id=?",command,taskId,agentId);
+                        .setIncludeWeakPassword(runWeak).setIncludePortService(runPort)
+                        .setExecutionContract(1).setWeakDictionaryVersion(runWeak ? ScanResultService.DICTIONARY_VERSION : "")), createdBy);
+                jdbc.update("UPDATE t_scan_task_agent SET command_id=? WHERE task_id=? AND agent_id=?", command, taskId, agentId);
             }
             ScanResultService.advanceProgress(jdbc,taskId);
         } else {
-            jdbc.update("UPDATE t_scan_task SET status=2,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=?",taskId);
+            jdbc.update("UPDATE t_scan_task SET status=?,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    vulnFailures == 0 ? 2 : 3, taskId);
         }
         log.info("安全扫描任务已下发: task_id={} task_no={} agents={} type={}",
                 taskId, taskNo, agentIds.size(), type);
         return taskId;
     }
 
-    /** 任务超时兜底：执行中超 30 分钟 → 部分失败（已收结果保留） */
+    /** 任务超时兜底：执行中超 30 分钟 → 部分失败（已收结果保留，R68: 级联取消待发命令） */
     @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
     @Transactional
     public void sweepTimeout() {
@@ -134,6 +146,11 @@ public class ScanTaskService {
             jdbc.update("UPDATE t_scan_task_agent SET state='timeout',weak_status=CASE WHEN weak_status='pending' THEN 'failed' ELSE weak_status END WHERE task_id=? AND state='pending'",task);
             if(jdbc.queryForObject("SELECT count(*) FROM t_scan_task_agent WHERE task_id=?",Integer.class,task)>0)
                 jdbc.update("UPDATE t_scan_task SET progress=100 WHERE id=?",task);
+            // R68: 级联将该扫描任务下的待发/已发未接收指令置为超时(ST_TIMEOUT=6)
+            jdbc.update("""
+                UPDATE t_command SET status=6,finished_at=CURRENT_TIMESTAMP,result=?
+                WHERE status IN (0,1) AND cmd_id IN (SELECT command_id FROM t_scan_task_agent WHERE task_id=?)
+                """, JsonUtils.write(Map.of("reason", "task-timeout")), task);
         }
     }
 }

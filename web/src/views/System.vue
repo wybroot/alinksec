@@ -74,6 +74,46 @@
       <el-tab-pane v-if="isAdmin" label="集中取证" name="evidence" lazy><EvidencePanel /></el-tab-pane>
       <el-tab-pane v-if="isAdmin" label="服务集群" name="cluster" lazy><ClusterPanel /></el-tab-pane>
 
+      <!-- ============ WAF 防护 ============ -->
+      <el-tab-pane v-if="isAdmin" label="WAF 防护" name="waf">
+        <div style="max-width:680px;padding:12px 0">
+          <el-descriptions title="WAF 引擎状态与规格" :column="2" border size="small">
+            <el-descriptions-item label="引擎名称">{{ wafStatus.engine || 'ALinkSec WAF Engine' }}</el-descriptions-item>
+            <el-descriptions-item label="规则集版本">{{ wafStatus.version || 'v4.1.0-crs-compat' }}</el-descriptions-item>
+            <el-descriptions-item label="已加载规则">{{ wafStatus.ruleCount || 0 }} 条</el-descriptions-item>
+            <el-descriptions-item label="当前异常阈值">{{ wafStatus.threshold || 5 }} 分</el-descriptions-item>
+          </el-descriptions>
+          <h4 style="margin:20px 0 12px">WAF 运行模式与异常规则集配置</h4>
+          <el-form label-width="120px" :disabled="wafSaving">
+            <el-form-item label="启用 WAF">
+              <el-switch v-model="wafForm.enabled" />
+            </el-form-item>
+            <el-form-item label="防护模式">
+              <el-radio-group v-model="wafForm.mode">
+                <el-radio value="DetectionOnly">仅检测并记录 (DetectionOnly)</el-radio>
+                <el-radio value="On">阻断攻击请求 (On / HTTP 403)</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="异常评分阈值">
+              <el-input-number v-model="wafForm.threshold" :min="1" :max="100" controls-position="right" />
+              <span class="hint" style="margin-left:10px">单请求累计异常分值超出阈值时判定攻击</span>
+            </el-form-item>
+            <el-form-item label="Paranoia Level">
+              <el-select v-model="wafForm.paranoiaLevel" style="width:220px">
+                <el-option :value="1" label="PL 1 - 基础防护规则" />
+                <el-option :value="2" label="PL 2 - 进阶防护规则" />
+                <el-option :value="3" label="PL 3 - 高安全敏感规则" />
+                <el-option :value="4" label="PL 4 - 极严格防御规则" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="wafSaving" @click="saveWafConfig">保存 WAF 配置</el-button>
+              <el-button @click="loadWafStatus">刷新状态</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane v-if="isAdmin" label="告警通道" name="notify">
         <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
           <el-button type="primary" size="small" @click="openChannel()">新增 Webhook</el-button>
@@ -92,6 +132,41 @@
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="openChannel(row)">编辑</el-button>
               <el-button link type="danger" size="small" @click="deleteChannel(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <!-- ============ 账号管理 (G10) ============ -->
+      <el-tab-pane v-if="isAdmin" label="账号管理" name="users">
+        <div class="row" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+          <el-button type="primary" size="small" @click="openCreateUser">新增账号</el-button>
+          <span class="hint">管理端本地账号生命周期治理。至少保留一个启用的系统管理员。</span>
+        </div>
+        <el-table :data="userList" stripe size="small" :loading="userLoading">
+          <el-table-column prop="id" label="UID" width="70" />
+          <el-table-column prop="username" label="用户名" width="130" />
+          <el-table-column prop="real_name" label="姓名/昵称" min-width="120" />
+          <el-table-column label="角色" width="120">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.role_name === 'admin' ? 'danger' : (row.role_name === 'operator' ? 'warning' : 'info')">
+                {{ row.role_name === 'admin' ? '系统管理员' : (row.role_name === 'operator' ? '安全运维员' : '只读审计员') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="Number(row.status) === 1 ? 'success' : 'danger'">
+                {{ Number(row.status) === 1 ? '正常' : '已停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="last_login_at" label="最后登录时间" width="160" />
+          <el-table-column prop="created_at" label="创建时间" width="160" />
+          <el-table-column label="操作" width="180">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEditUser(row)">编辑</el-button>
+              <el-button link type="warning" size="small" @click="openResetPassword(row)">重置密码</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -131,6 +206,74 @@
         <el-button type="primary" :loading="channelBusy" @click="saveChannel">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 新增用户弹窗 -->
+    <el-dialog v-model="userCreateDlg" title="新增管理端账号" width="460px">
+      <el-form label-width="80px">
+        <el-form-item label="用户名" required>
+          <el-input v-model="userCreateForm.username" placeholder="3-32 位字母/数字/下划线" maxlength="32" />
+        </el-form-item>
+        <el-form-item label="初始密码" required>
+          <el-input v-model="userCreateForm.password" type="password" show-password placeholder="不少于 8 位" />
+        </el-form-item>
+        <el-form-item label="真实姓名">
+          <el-input v-model="userCreateForm.realName" placeholder="姓名或昵称" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="分配角色" required>
+          <el-select v-model="userCreateForm.roleName" style="width:100%">
+            <el-option label="系统管理员 (admin)" value="admin" />
+            <el-option label="安全运维员 (operator)" value="operator" />
+            <el-option label="只读审计员 (viewer)" value="viewer" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userCreateDlg = false">取消</el-button>
+        <el-button type="primary" :loading="userBusy" @click="saveCreateUser">确认创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑用户弹窗 -->
+    <el-dialog v-model="userEditDlg" title="编辑账号" width="460px">
+      <el-form label-width="80px">
+        <el-form-item label="用户名">
+          <el-input :value="userEditForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="真实姓名">
+          <el-input v-model="userEditForm.realName" placeholder="姓名或昵称" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="分配角色" required>
+          <el-select v-model="userEditForm.roleName" style="width:100%">
+            <el-option label="系统管理员 (admin)" value="admin" />
+            <el-option label="安全运维员 (operator)" value="operator" />
+            <el-option label="只读审计员 (viewer)" value="viewer" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用状态">
+          <el-switch v-model="userEditForm.enabled" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userEditDlg = false">取消</el-button>
+        <el-button type="primary" :loading="userBusy" @click="saveEditUser">保存修改</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 重置密码弹窗 -->
+    <el-dialog v-model="userResetPwdDlg" title="重置用户密码" width="460px">
+      <el-form label-width="80px">
+        <el-form-item label="用户名">
+          <el-input :value="userResetPwdForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="新密码" required>
+          <el-input v-model="userResetPwdForm.password" type="password" show-password placeholder="不少于 8 位" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userResetPwdDlg = false">取消</el-button>
+        <el-button type="primary" :loading="userBusy" @click="saveResetPassword">重置密码</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -141,7 +284,7 @@ import EvidencePanel from '../components/EvidencePanel.vue'
 import ClusterPanel from '../components/ClusterPanel.vue'
 import ComponentHealthPanel from '../components/ComponentHealthPanel.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchUpgradeTargets, fetchUpgradeBatches, fetchUpgradeBatch, getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel } from '../api'
+import { fetchUpgradeTargets, fetchUpgradeBatches, fetchUpgradeBatch, getUser, fetchUpgradePackages, uploadUpgradePackage, dispatchUpgrade, fetchAgentVersions, fetchAuditLogs, fetchNotifyChannels, createNotifyChannel, updateNotifyChannel, removeNotifyChannel, fetchWafStatus, updateWafConfig, fetchUsers, createUser, updateUser, resetUserPassword } from '../api'
 
 const busy = ref(false)
 const canUpgrade = ['admin', 'operator'].includes(getUser()?.role)
@@ -248,6 +391,41 @@ const channelBusy = ref(false)
 const channelForm = ref({ id: null, name: '', webhookUrl: '', minSeverity: 3, enabled: true })
 const severityName = (value) => ({ 1: '低危及以上', 2: '中危及以上', 3: '高危及以上', 4: '严重' }[Number(value)] || '高危及以上')
 
+/* ---- WAF ---- */
+const wafStatus = ref({})
+const wafForm = ref({ enabled: true, mode: 'DetectionOnly', threshold: 5, paranoiaLevel: 1 })
+const wafSaving = ref(false)
+
+async function loadWafStatus() {
+  if (isAdmin) {
+    try {
+      const data = await fetchWafStatus()
+      wafStatus.value = data || {}
+      wafForm.value = {
+        enabled: data?.enabled !== false,
+        mode: data?.mode || 'DetectionOnly',
+        threshold: data?.threshold || 5,
+        paranoiaLevel: data?.paranoiaLevel || 1,
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function saveWafConfig() {
+  wafSaving.value = true
+  try {
+    await updateWafConfig(wafForm.value)
+    msg('WAF 配置已保存')
+    await loadWafStatus()
+  } catch (e) {
+    msg(e?.message || 'WAF 配置保存失败', 'error')
+  } finally {
+    wafSaving.value = false
+  }
+}
+
 async function loadChannels() {
   if (isAdmin) channels.value = await fetchNotifyChannels()
 }
@@ -287,7 +465,95 @@ async function deleteChannel(row) {
   }
 }
 
-onMounted(() => { loadUpgrade(); if (isAdmin) loadAudit(); loadChannels() })
+/* ---- 账号管理 (G10) ---- */
+const userList = ref([])
+const userLoading = ref(false)
+const userBusy = ref(false)
+const userCreateDlg = ref(false)
+const userCreateForm = ref({ username: '', password: '', realName: '', roleName: 'operator' })
+const userEditDlg = ref(false)
+const userEditForm = ref({ id: null, username: '', realName: '', roleName: 'operator', enabled: true })
+const userResetPwdDlg = ref(false)
+const userResetPwdForm = ref({ id: null, username: '', password: '' })
+
+async function loadUsers() {
+  if (!isAdmin) return
+  userLoading.value = true
+  try {
+    userList.value = await fetchUsers()
+  } catch (e) {
+    msg(e?.message || '加载用户列表失败', 'error')
+  } finally {
+    userLoading.value = false
+  }
+}
+
+function openCreateUser() {
+  userCreateForm.value = { username: '', password: '', realName: '', roleName: 'operator' }
+  userCreateDlg.value = true
+}
+
+async function saveCreateUser() {
+  if (!userCreateForm.value.username.trim()) return msg('请输入用户名', 'warning')
+  if (!userCreateForm.value.password || userCreateForm.value.password.length < 8) return msg('密码长度不能少于8位', 'warning')
+  userBusy.value = true
+  try {
+    await createUser(userCreateForm.value)
+    userCreateDlg.value = false
+    await loadUsers()
+    msg('账号创建成功')
+  } catch (e) {
+    msg(e?.message || '创建账号失败', 'error')
+  } finally {
+    userBusy.value = false
+  }
+}
+
+function openEditUser(row) {
+  userEditForm.value = {
+    id: row.id,
+    username: row.username,
+    realName: row.real_name || '',
+    roleName: row.role_name,
+    enabled: Number(row.status) === 1
+  }
+  userEditDlg.value = true
+}
+
+async function saveEditUser() {
+  userBusy.value = true
+  try {
+    await updateUser(userEditForm.value.id, userEditForm.value)
+    userEditDlg.value = false
+    await loadUsers()
+    msg('账号修改成功')
+  } catch (e) {
+    msg(e?.message || '修改账号失败', 'error')
+  } finally {
+    userBusy.value = false
+  }
+}
+
+function openResetPassword(row) {
+  userResetPwdForm.value = { id: row.id, username: row.username, password: '' }
+  userResetPwdDlg.value = true
+}
+
+async function saveResetPassword() {
+  if (!userResetPwdForm.value.password || userResetPwdForm.value.password.length < 8) return msg('新密码不能少于8位', 'warning')
+  userBusy.value = true
+  try {
+    await resetUserPassword(userResetPwdForm.value.id, { password: userResetPwdForm.value.password })
+    userResetPwdDlg.value = false
+    msg('密码已重置，该用户现有会话已被强制注销')
+  } catch (e) {
+    msg(e?.message || '重置密码失败', 'error')
+  } finally {
+    userBusy.value = false
+  }
+}
+
+onMounted(() => { loadUpgrade(); if (isAdmin) { loadAudit(); loadChannels(); loadWafStatus(); loadUsers() } })
 </script>
 
 <style scoped>

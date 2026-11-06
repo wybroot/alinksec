@@ -168,11 +168,13 @@ public class FixTaskService {
         }
 
         for (var e : byAgent.entrySet()) {
-            commandService.dispatchAfterCommit(e.getKey(), Command.newBuilder()
+            String cmdId = commandService.dispatchAfterCommit(e.getKey(), Command.newBuilder()
                     .setVulnFix(CmdVulnFix.newBuilder()
                             .setTaskId(String.valueOf(taskId))
                             .addAllFixes(e.getValue())),
                     createdBy);
+            jdbc.update("UPDATE t_fix_record SET command_id = ? WHERE task_id = ? AND agent_id = ? AND status = 0",
+                    cmdId, taskId, e.getKey());
         }
         log.info("配置修复任务已下发: task_id={} task_no={} agents={} items={}",
                 taskId, taskNo, agentIds.size(), targets.size());

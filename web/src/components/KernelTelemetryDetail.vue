@@ -13,14 +13,34 @@
       <el-descriptions-item v-if="detail.nodename" label="上报节点">
         <span>{{ detail.nodename }}</span>
       </el-descriptions-item>
+      <el-descriptions-item v-if="detail.host_bound === false" label="主机归属" :span="2">
+        <el-tag size="small" type="danger">未绑定平台登记主机 ({{ detail.unbound_host || '未知' }}) - 自动处置已安全阻断</el-tag>
+      </el-descriptions-item>
       <el-descriptions-item label="容器状态">
-        <el-tag size="small" :type="detail.in_container ? 'warning' : 'info'">{{ detail.in_container ? '容器内部 (Containerized)' : '宿主机 (Host)' }}</el-tag>
+        <el-tag size="small" :type="(detail.container_status === 'container' || detail.in_container) ? 'warning' : (detail.container_status === 'unknown' ? 'info' : 'success')">
+          {{ (detail.container_status === 'container' || detail.in_container) ? '容器内部 (Containerized)' : (detail.container_status === 'unknown' ? '未知/未标注 (Unknown)' : '宿主机 (Host)') }}
+        </el-tag>
       </el-descriptions-item>
       <el-descriptions-item v-if="detail.container_id" label="容器 ID">
         <span class="mono">{{ detail.container_id }}</span>
       </el-descriptions-item>
       <el-descriptions-item v-if="detail.container?.image" label="容器镜像" :span="2">
         <span class="mono">{{ detail.container.image }}</span>
+      </el-descriptions-item>
+      <el-descriptions-item v-if="detail.dip || detail.sip" label="网络连接 (Connect)" :span="2">
+        <span class="mono">{{ detail.sip ? (detail.sip + ':' + detail.sport) : 'local' }} &rarr; {{ detail.dip }}:{{ detail.dport }} (返回值: {{ detail.res }})</span>
+      </el-descriptions-item>
+      <el-descriptions-item v-if="detail.query" label="DNS 查询 (Query)" :span="2">
+        <span class="mono">{{ detail.query }} (解析地址: {{ detail.dns_ip || '—' }}, res: {{ detail.res }})</span>
+      </el-descriptions-item>
+      <el-descriptions-item v-if="detail.file_path || detail.ko_file" label="文件/模块路径" :span="2">
+        <span class="mono">{{ detail.file_path || detail.ko_file }}</span>
+      </el-descriptions-item>
+      <el-descriptions-item v-if="detail.old_uid !== undefined && detail.new_uid !== undefined && detail.old_uid >= 0" label="凭据提权变更" :span="2">
+        <el-tag size="small" type="danger">UID: {{ detail.old_uid }} &rarr; {{ detail.new_uid }} (res: {{ detail.res }})</el-tag>
+      </el-descriptions-item>
+      <el-descriptions-item v-if="detail.fd_name" label="匿名内存文件 (memfd)" :span="2">
+        <span class="mono">{{ detail.fd_name }} (flags: {{ detail.flags }})</span>
       </el-descriptions-item>
       <el-descriptions-item v-if="detail.proc_pid || detail.pid" label="进程 PID">
         <span class="mono">{{ detail.proc_pid || detail.pid }}</span>

@@ -8,7 +8,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Limits unauthenticated login failures per trusted client address. */
+/**
+ * Limits unauthenticated login failures per trusted client address and username.
+ * R25: 解决单机限流容量耗尽导致攻击逃逸漏洞，引入双维度防护(IP+账号)与有界过期/LRU驱逐机制。
+ */
 @Service
 public class LoginAttemptLimiter {
 
@@ -31,8 +34,22 @@ public class LoginAttemptLimiter {
     }
 
     public boolean isAllowed(String clientIp) {
-        if(clustered!=null && clustered.enabled())return clustered.apply(clientIp,"check");
-        Attempt attempt = attempts.get(key(clientIp));
+        return isAllowed(clientIp, null);
+    }
+
+    public boolean isAllowed(String clientIp, String username) {
+        if (clustered != null && clustered.enabled()) return clustered.apply(clientIp, "check");
+        if (!checkAllowedForKey(keyIp(clientIp))) {
+            return false;
+        }
+        if (username != null && !username.isBlank()) {
+            return checkAllowedForKey(keyUser(username));
+        }
+        return true;
+    }
+
+    private boolean checkAllowedForKey(String k) {
+        Attempt attempt = attempts.get(k);
         if (attempt == null) {
             return true;
         }
@@ -52,16 +69,32 @@ public class LoginAttemptLimiter {
     }
 
     public void recordFailure(String clientIp) {
-        if(clustered!=null && clustered.enabled()) {clustered.apply(clientIp,"failure");return;}
+        recordFailure(clientIp, null);
+    }
+
+    public void recordFailure(String clientIp, String username) {
+        if (clustered != null && clustered.enabled()) {
+            clustered.apply(clientIp, "failure");
+            return;
+        }
+        recordFailureForKey(keyIp(clientIp));
+        if (username != null && !username.isBlank()) {
+            recordFailureForKey(keyUser(username));
+        }
+    }
+
+    private void recordFailureForKey(String k) {
         Instant now = clock.instant();
-        String key = key(clientIp);
-        Attempt attempt = attempts.get(key);
+        Attempt attempt = attempts.get(k);
         if (attempt == null) {
             if (attempts.size() >= MAX_TRACKED_CLIENTS) {
-                return;
+                purgeExpired();
+                if (attempts.size() >= MAX_TRACKED_CLIENTS) {
+                    evictOldestEntry();
+                }
             }
             Attempt created = new Attempt(now);
-            Attempt existing = attempts.putIfAbsent(key, created);
+            Attempt existing = attempts.putIfAbsent(k, created);
             attempt = existing == null ? created : existing;
         }
         synchronized (attempt) {
@@ -77,8 +110,38 @@ public class LoginAttemptLimiter {
     }
 
     public void recordSuccess(String clientIp) {
-        if(clustered!=null && clustered.enabled()) {clustered.apply(clientIp,"success");return;}
-        attempts.remove(key(clientIp));
+        recordSuccess(clientIp, null);
+    }
+
+    public void recordSuccess(String clientIp, String username) {
+        if (clustered != null && clustered.enabled()) {
+            clustered.apply(clientIp, "success");
+            return;
+        }
+        attempts.remove(keyIp(clientIp));
+        if (username != null && !username.isBlank()) {
+            attempts.remove(keyUser(username));
+        }
+    }
+
+    private void evictOldestEntry() {
+        String oldestKey = null;
+        Instant oldestSeen = Instant.MAX;
+        Instant now = clock.instant();
+        for (var entry : attempts.entrySet()) {
+            Attempt a = entry.getValue();
+            boolean isLocked = a.lockedUntil != null && now.isBefore(a.lockedUntil);
+            if (!isLocked && a.lastSeen.isBefore(oldestSeen)) {
+                oldestSeen = a.lastSeen;
+                oldestKey = entry.getKey();
+            }
+        }
+        if (oldestKey == null && !attempts.isEmpty()) {
+            oldestKey = attempts.keySet().iterator().next();
+        }
+        if (oldestKey != null) {
+            attempts.remove(oldestKey);
+        }
     }
 
     @Scheduled(fixedDelay = 600_000, initialDelay = 600_000)
@@ -97,8 +160,12 @@ public class LoginAttemptLimiter {
         attempt.lockedUntil = null;
     }
 
-    private static String key(String clientIp) {
-        return clientIp == null || clientIp.isBlank() ? "unknown" : clientIp;
+    private static String keyIp(String clientIp) {
+        return "ip:" + (clientIp == null || clientIp.isBlank() ? "unknown" : clientIp);
+    }
+
+    private static String keyUser(String username) {
+        return "user:" + (username == null || username.isBlank() ? "unknown" : username.trim().toLowerCase());
     }
 
     private static final class Attempt {

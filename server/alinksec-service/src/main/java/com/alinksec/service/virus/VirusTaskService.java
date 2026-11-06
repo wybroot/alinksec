@@ -107,6 +107,11 @@ public class VirusTaskService {
                 var cutoff=database.timestampBefore(Duration.ofSeconds(seconds).plusMinutes(5));
                 jdbc.update("UPDATE t_virus_task_agent SET state='timeout' WHERE state='pending' AND task_id=? AND EXISTS (SELECT 1 FROM t_virus_scan_task WHERE id=? AND status=1 AND created_at<?)",id,id,cutoff);
                 jdbc.update("UPDATE t_virus_scan_task SET status=3,progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=? AND status=1 AND created_at<?",id,cutoff);
+                // R68: 级联将该病毒扫描任务下未完成的指令置为超时(ST_TIMEOUT=6)
+                jdbc.update("""
+                    UPDATE t_command SET status=6,finished_at=CURRENT_TIMESTAMP,result=?
+                    WHERE status IN (0,1) AND cmd_id IN (SELECT command_id FROM t_virus_task_agent WHERE task_id=? AND state='timeout')
+                    """, JsonUtils.write(Map.of("reason", "task-timeout")), id);
             }
         }
     }

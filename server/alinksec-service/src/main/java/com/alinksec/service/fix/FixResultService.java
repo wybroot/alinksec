@@ -54,6 +54,19 @@ public class FixResultService {
                     truncate("未确认安装后身份及完整版本，不标记漏洞已修复。\n" + item.getLog()), truncate(item.getLog()),
                     taskId, agentId, item.getRefId(), taskId);
             if (updated == 0) {
+                int lateUpdated = jdbc.update("""
+                        UPDATE t_fix_record SET reboot_required=?, verified=?,
+                          log = CASE WHEN ref_type='vuln_finding' AND ? THEN ? ELSE ? END
+                        WHERE task_id = ? AND agent_id = ? AND ref_id = ? AND status = 5
+                        """, item.getRebootRequired()?1:0, item.getVerified()?1:0,
+                        unverifiedSuccess,
+                        truncate("晚到证据：未确认安装后身份及完整版本。\n" + item.getLog()),
+                        truncate("晚到证据（原超时）：执行状态=" + (status == 1 ? "成功" : "失败") + "\n" + item.getLog()),
+                        taskId, agentId, item.getRefId());
+                if (lateUpdated > 0) {
+                    log.info("接收晚到修复执行证据: task={} agent={} ref={}", taskId, agentId, item.getRefId());
+                    continue;
+                }
                 log.warn("忽略未下发、越权或重复的修复结果: task={} agent={} ref={}",
                         taskId, agentId, item.getRefId());
                 continue;

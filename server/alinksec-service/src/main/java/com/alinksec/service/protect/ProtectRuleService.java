@@ -26,11 +26,18 @@ public class ProtectRuleService {
     private final JdbcTemplate jdbc;
     private final CommandService commandService;
     private final PolicyStoreService policyStore;
+    private final org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     public ProtectRuleService(JdbcTemplate jdbc, CommandService commandService, PolicyStoreService policyStore) {
+        this(jdbc, commandService, policyStore, null);
+    }
+
+    public ProtectRuleService(JdbcTemplate jdbc, CommandService commandService, PolicyStoreService policyStore,
+                              org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.commandService = commandService;
         this.policyStore = policyStore;
+        this.transactionManager = transactionManager;
     }
 
     /** 规则清单（按类型分组展示：诱饵/加密行为在前） */
@@ -50,8 +57,16 @@ public class ProtectRuleService {
         });
     }
 
-    /** 编辑规则（match/actions/enabled；内置规则不可删只可调），version 递增 */
+    /** 编辑规则（match/actions/enabled；内置规则不可删只可调），version 递增，事务化发布快照 */
     public synchronized void updateRule(String ruleId, Map<String, Object> body) {
+        if (transactionManager != null) {
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> doUpdateRule(ruleId, body));
+        } else {
+            doUpdateRule(ruleId, body);
+        }
+    }
+
+    private void doUpdateRule(String ruleId, Map<String, Object> body) {
         var existing = jdbc.queryForList("SELECT type, CAST(match AS TEXT) AS match, CAST(actions AS TEXT) AS actions FROM t_protect_rule WHERE rule_id = ?", ruleId);
         if (existing.isEmpty()) throw new IllegalArgumentException("规则不存在: " + ruleId);
         var rule = existing.getFirst();

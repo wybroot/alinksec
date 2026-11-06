@@ -111,6 +111,15 @@ public class CommandRepository {
                 """, ST_SENT, database.timestampBefore(Duration.ofSeconds(ACK_TIMEOUT_SECONDS)));
     }
 
+    /** 待超时判定的执行中指令：处于 RECEIVED 或 RUNNING 态超过 30 分钟仍未有终态 ACK (R36) */
+    public List<Map<String, Object>> findExecutionTimedout() {
+        return jdbc.queryForList("""
+                SELECT id, cmd_id, agent_id
+                FROM t_command
+                WHERE status IN (?, ?) AND COALESCE(acked_at, sent_at, created_at) < ?
+                """, ST_RECEIVED, ST_RUNNING, database.timestampBefore(Duration.ofMinutes(30)));
+    }
+
     public Optional<Map<String, Object>> findByCmdId(String cmdId) {
         return jdbc.queryForList("SELECT * FROM t_command WHERE cmd_id = ?", cmdId).stream().findFirst();
     }

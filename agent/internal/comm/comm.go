@@ -876,13 +876,37 @@ func (c *Client) executeProtectAction(pa *pb.CmdProtectAction, received *pb.RptA
 		target := pa.GetTarget()
 		var done bool
 		var msg string
-		if pid, err := strconv.ParseInt(target, 10, 32); err == nil {
-			done = guard.KillProcess(int32(pid))
-			msg = fmt.Sprintf("kill pid %s: %v", target, done)
-		} else {
-			n := guard.KillByPath(target)
+		// R59: 支持复合 process_key（如 agentId:pid:exe 或 pid:created）目标解析与 PID 提取
+		var targetPid int32
+		var hasPid bool
+		if pid, err := strconv.ParseInt(target, 10, 32); err == nil && pid > 0 {
+			targetPid = int32(pid)
+			hasPid = true
+		} else if strings.Contains(target, ":") {
+			parts := strings.Split(target, ":")
+			for _, part := range parts {
+				if pid, err := strconv.ParseInt(part, 10, 32); err == nil && pid > 1 {
+					targetPid = int32(pid)
+					hasPid = true
+					break
+				}
+			}
+		}
+
+		if hasPid {
+			done = guard.KillProcess(targetPid)
+			msg = fmt.Sprintf("kill pid %d (target: %s): %v", targetPid, target, done)
+		}
+		if !done {
+			// 若按 PID 未能查杀，尝试按路径/进程名查杀
+			path := target
+			if strings.Contains(target, ":") {
+				parts := strings.Split(target, ":")
+				path = parts[len(parts)-1]
+			}
+			n := guard.KillByPath(path)
 			done = n > 0
-			msg = fmt.Sprintf("kill by path %s: %d killed", target, n)
+			msg = fmt.Sprintf("kill by path %s: %d killed", path, n)
 		}
 		stage := pb.RptAck_DONE
 		if !done {
@@ -910,6 +934,30 @@ func (c *Client) executeProtectAction(pa *pb.CmdProtectAction, received *pb.RptA
 			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
 		}
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Message: "isolation withdrawn"}}
+	case pb.CmdProtectAction_BLOCK_IP:
+		target := pa.GetTarget()
+		if target == "" {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "target IP is empty"}}
+		}
+		if c.grd == nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "guard is not initialized"}}
+		}
+		if err := c.grd.BlockIP(target, nil); err != nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		}
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Message: fmt.Sprintf("blocked IP %s", target)}}
+	case pb.CmdProtectAction_UNBLOCK_IP:
+		target := pa.GetTarget()
+		if target == "" {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "target IP is empty"}}
+		}
+		if c.grd == nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "guard is not initialized"}}
+		}
+		if err := c.grd.UnblockIP(target, nil); err != nil {
+			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: err.Error()}}
+		}
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_DONE, Message: fmt.Sprintf("unblocked IP %s", target)}}
 	default:
 		return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1,
 			Message: fmt.Sprintf("protect action %v not implemented", pa.GetAction())}}
@@ -1370,14 +1418,22 @@ func (c *Client) logLoop(ctx context.Context) {
 		if source == "audit-exec" {
 			return c.grd.ObserveProcessAudit(lines)
 		}
+		if source == "modsec_audit" {
+			c.grd.ObserveModsecAudit(lines)
+			if !c.queueLogBatch(source, lines) {
+				return false
+			}
+			return true
+		}
+		// R54: 始终执行本地实时防护观测，不得因远端日志离线暂存队列满或网络背压而阻断本机防暴破
+		guardSource := source
+		if guardSource == "auth.log" {
+			guardSource = "secure"
+		}
+		c.grd.ObserveLoginLogs(guardSource, lines)
 		if !c.queueLogBatch(source, lines) {
 			return false
 		}
-		// Both fixed Linux authentication sources retain the existing guard input.
-		if source == "auth.log" {
-			source = "secure"
-		}
-		c.grd.ObserveLoginLogs(source, lines)
 		return true
 	})
 	if c.cfg.ProcessAuditLog {
@@ -1406,6 +1462,15 @@ func (c *Client) mtlsConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("加载客户端证书: %w", err)
 	}
+	if len(cert.Certificate) > 0 {
+		if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
+			if time.Now().After(leaf.NotAfter) {
+				c.log.Error("客户端证书已过期，请重新申请证书或重新注册", "expired_at", leaf.NotAfter)
+			} else if time.Until(leaf.NotAfter) < 30*24*time.Hour {
+				c.log.Warn("客户端证书即将过期", "expires_at", leaf.NotAfter, "remaining_days", int(time.Until(leaf.NotAfter).Hours()/24))
+			}
+		}
+	}
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
 		return nil, fmt.Errorf("加载平台 CA: %w", err)
@@ -1424,10 +1489,15 @@ func (c *Client) mtlsConfig() (*tls.Config, error) {
 
 /* ==================== 工具 ==================== */
 
-// isTransient 心跳与 ACK 不入离线队列（靠服务端重推/下一心跳补偿）
+// isTransient 心跳与过程态 ACK 不入离线队列；但终态 ACK (DONE/FAILED) 必须持久化防断网丢失 (R36)
 func isTransient(r *pb.Report) bool {
-	switch r.GetPayload().(type) {
-	case *pb.Report_Heartbeat, *pb.Report_Ack, *pb.Report_IsolationState:
+	switch p := r.GetPayload().(type) {
+	case *pb.Report_Heartbeat, *pb.Report_IsolationState:
+		return true
+	case *pb.Report_Ack:
+		if p.Ack != nil && (p.Ack.Stage == pb.RptAck_DONE || p.Ack.Stage == pb.RptAck_FAILED) {
+			return false
+		}
 		return true
 	}
 	return false

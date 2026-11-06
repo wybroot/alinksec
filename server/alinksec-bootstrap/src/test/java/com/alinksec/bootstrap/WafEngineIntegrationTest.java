@@ -85,4 +85,56 @@ public class WafEngineIntegrationTest {
         assertFalse(exemptResult.blocked());
         assertEquals(0, exemptResult.anomalyScore());
     }
+
+    @Test
+    void testRequestBodyAndDoubleEncodingDetection() {
+        wafService.updateConfig(true, "On", 5, 1);
+
+        // R60: Body 中包含 SQL 注入
+        var bodyResult = wafService.inspect("POST", "/api/login", "", "Mozilla/5.0",
+                "{\"username\":\"admin' or 1=1-- \",\"password\":\"123456\"}", "198.51.100.33");
+        assertTrue(bodyResult.blocked(), "Body 中的 SQL 注入必须被识别并阻断");
+        assertEquals("sql_injection", bodyResult.matchedCategory());
+
+        // R60: 双重 URL 编码绕过测试 (%252e%252e%252f -> %2e%2e%2f -> ../)
+        var doubleEncodedResult = wafService.inspect("GET", "/api/files/download", "path=%252e%252e%252f%252e%252e%252fetc/passwd",
+                "Mozilla/5.0", "", "198.51.100.34");
+        assertTrue(doubleEncodedResult.blocked(), "双重 URL 编码的路径穿越必须被递归规范化后阻断");
+        assertEquals("path_traversal", doubleEncodedResult.matchedCategory());
+    }
+
+    @Test
+    void testCookieAndHeaderInspection() {
+        wafService.updateConfig(true, "On", 5, 1);
+
+        // Cookie 注入检测
+        var cookieResult = wafService.inspect("GET", "/api/profile", "", "Mozilla/5.0", "", "198.51.100.40",
+                java.util.Map.of(), java.util.Map.of("session_id", "admin' OR 1=1--"));
+        assertTrue(cookieResult.blocked(), "Cookie 中的 SQL 注入必须被识别并阻断");
+        assertEquals("sql_injection", cookieResult.matchedCategory());
+        assertTrue(cookieResult.reason().contains("Cookie session_id"));
+
+        // Header (Referer) 恶意注入
+        var headerResult = wafService.inspect("GET", "/api/search", "q=test", "Mozilla/5.0", "", "198.51.100.41",
+                java.util.Map.of("Referer", "http://evil.com/<script>alert(1)</script>"), java.util.Map.of());
+        assertTrue(headerResult.blocked(), "Referer 中的 XSS 攻击必须被检测并阻断");
+        assertEquals("xss", headerResult.matchedCategory());
+        assertTrue(headerResult.reason().contains("Header Referer"));
+    }
+
+    @Test
+    void testParanoiaLevels() {
+        // PL1 模式下，PL2 盲注规则 (benchmark/sleep) 评分不足触发阻断 (阈值 5，PL1 规则不含 942200)
+        wafService.updateConfig(true, "On", 5, 1);
+        var pl1Result = wafService.inspect("GET", "/api/users", "name=test&delay=sleep(5)", "Mozilla/5.0", "", "198.51.100.42");
+        // sleep 在 PL1 规则 942120 存在，但我们测试纯 PL2 规则如 benchmark(5000000) 或复杂组合
+        var pl2OnlyResult = wafService.inspect("GET", "/api/users", "cmd=powershell.exe -enc AAAA", "Mozilla/5.0", "", "198.51.100.43");
+        assertFalse(pl2OnlyResult.blocked(), "PL1 模式下不应触发 PL2 专属规则");
+
+        // 提升至 PL2 模式，PL2 规则生效
+        wafService.updateConfig(true, "On", 4, 2);
+        var pl2ActiveResult = wafService.inspect("GET", "/api/users", "cmd=powershell.exe -enc AAAA", "Mozilla/5.0", "", "198.51.100.43");
+        assertTrue(pl2ActiveResult.blocked(), "PL2 模式下必须触发 PL2 专属规则");
+        assertEquals("rce", pl2ActiveResult.matchedCategory());
+    }
 }

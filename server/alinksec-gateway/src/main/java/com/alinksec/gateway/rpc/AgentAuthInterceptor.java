@@ -27,6 +27,9 @@ public class AgentAuthInterceptor implements ServerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(AgentAuthInterceptor.class);
 
     public static final Context.Key<String> AGENT_ID_KEY = Context.key("alinksec-agent-id");
+    public static final Context.Key<String> CERT_SERIAL_KEY = Context.key("alinksec-cert-serial");
+
+    public record ClientCertIdentity(String cn, String serial) {}
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
@@ -36,12 +39,14 @@ public class AgentAuthInterceptor implements ServerInterceptor {
         if (EnrollServiceGrpc.getEnrollMethod().getFullMethodName().equals(fullMethod)) {
             return next.startCall(call, headers);
         }
-        Optional<String> cn = clientCertCn(call);
-        if (cn.isEmpty()) {
+        Optional<ClientCertIdentity> identity = clientCertIdentity(call);
+        if (identity.isEmpty() || identity.get().cn() == null || identity.get().cn().isBlank()) {
             call.close(Status.UNAUTHENTICATED.withDescription("缺少客户端证书"), new Metadata());
             return new ServerCall.Listener<>() {};
         }
-        Context ctx = Context.current().withValue(AGENT_ID_KEY, cn.get());
+        Context ctx = Context.current()
+                .withValue(AGENT_ID_KEY, identity.get().cn())
+                .withValue(CERT_SERIAL_KEY, identity.get().serial());
         return Contexts.interceptCall(ctx, call, headers, next);
     }
 
@@ -50,8 +55,13 @@ public class AgentAuthInterceptor implements ServerInterceptor {
         return AGENT_ID_KEY.get();
     }
 
-    /** 从 TLS 会话提取对端（客户端）证书 CN */
-    private static Optional<String> clientCertCn(ServerCall<?, ?> call) {
+    /** 当前请求的客户端证书序列号（仅在 gRPC 服务端线程内有效） */
+    public static String certSerial() {
+        return CERT_SERIAL_KEY.get();
+    }
+
+    /** 从 TLS 会话提取对端（客户端）证书 CN 及序列号 */
+    private static Optional<ClientCertIdentity> clientCertIdentity(ServerCall<?, ?> call) {
         try {
             javax.net.ssl.SSLSession sslSession =
                     call.getAttributes().get(io.grpc.Grpc.TRANSPORT_ATTR_SSL_SESSION);
@@ -60,7 +70,9 @@ public class AgentAuthInterceptor implements ServerInterceptor {
             }
             java.security.cert.Certificate[] certs = sslSession.getPeerCertificates();
             if (certs != null && certs.length > 0 && certs[0] instanceof X509Certificate x509) {
-                return extractCn(x509);
+                String cn = extractCn(x509).orElse(null);
+                String serial = x509.getSerialNumber() != null ? x509.getSerialNumber().toString(16) : null;
+                return Optional.of(new ClientCertIdentity(cn, serial));
             }
         } catch (Exception e) {
             log.debug("证书提取失败: {}", e.getMessage());

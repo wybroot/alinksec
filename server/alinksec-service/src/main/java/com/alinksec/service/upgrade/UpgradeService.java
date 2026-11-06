@@ -241,6 +241,25 @@ public class UpgradeService {
         return Path.of(props.getUpgrade().getStorageDir()).resolve(name);
     }
 
+    /**
+     * R58: 管理员对账/清理未入库的孤立升级包（如因上传后数据库异常或中断滞留在磁盘中的 .bin 文件）
+     */
+    public boolean cleanOrphanPackage(String version, String platform) throws IOException {
+        String packageKey = version + "-" + platform + ".bin";
+        Integer count = jdbc.queryForObject(
+                "SELECT count(*) FROM t_agent_upgrade_package WHERE package_key = ?",
+                Integer.class, packageKey);
+        if (count == null || count == 0) {
+            Path dir = Path.of(props.getUpgrade().getStorageDir());
+            Path target = dir.resolve(packageKey);
+            if (Files.exists(target)) {
+                log.info("清理未入库的孤立升级包文件: key={}", packageKey);
+                return Files.deleteIfExists(target);
+            }
+        }
+        return false;
+    }
+
     private String downloadUrl(String agentId, String packageKey) {
         String base = props.getUpgrade().getDownloadBaseUrl().replaceAll("/+$", "");
         return base + "/api/upgrade/download?packageKey=" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8)

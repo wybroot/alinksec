@@ -72,6 +72,17 @@ public class ScanResultService {
         jdbc.update("UPDATE t_scan_task_agent SET state=?,weak_status=?,evidence=?,evidence_sha256=?,received_at=?,late=? WHERE task_id=? AND agent_id=?",complete?"complete":"partial",c.getStatus(),json,digest,Instant.now().toString(),late?1:0,task,agent);
         for(var f:result.getWeakPasswordsList())jdbc.update("INSERT INTO t_weakpwd_finding(task_id,agent_id,account,type,remark,status) VALUES(?,?,?,?,?,0)",task,agent,f.getAccount(),f.getType(),REMARKS.get(f.getType()));
         for(var p:result.getPortServicesList())jdbc.update("INSERT INTO t_port_finding(task_id,agent_id,port,protocol,process,service,risky,risky_reason) VALUES(?,?,?,?,?,?,?,?)",task,agent,p.getPort(),p.getProtocol(),p.getProcess(),p.getService(),p.getRisky(),p.getRiskyReason());
+        if(c.getStatus().equals("complete") && seen>0 && failed==0 && unsupported==0 && c.getIssuesCount()==0) {
+            Set<String> foundAccounts = new HashSet<>();
+            for(var f:result.getWeakPasswordsList()) foundAccounts.add(f.getAccount());
+            var priorOpen = jdbc.queryForList("SELECT id, account FROM t_weakpwd_finding WHERE agent_id=? AND task_id<>? AND status IN (0, 1)", agent, task);
+            for(var p:priorOpen) {
+                String acc = (String) p.get("account");
+                if(!foundAccounts.contains(acc)) {
+                    jdbc.update("UPDATE t_weakpwd_finding SET status=3, remark=CASE WHEN remark IS NULL OR remark='' THEN '最新完整扫描已复核通过' ELSE remark || ' (最新完整扫描已复核通过)' END WHERE id=?", p.get("id"));
+                }
+            }
+        }
         advanceProgress(jdbc,task);
     }
     private static int maxFindings(){return 3*4096;}

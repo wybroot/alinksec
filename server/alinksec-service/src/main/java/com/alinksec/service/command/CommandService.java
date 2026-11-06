@@ -70,6 +70,11 @@ public class CommandService {
      * 下发指令。Agent 不在线 → 保持 PENDING（M2 接入 Redis 待推队列后由 gateway 消费补推）。
      */
     @Transactional
+    public String dispatch(String agentId, Command command, Long issuedBy) {
+        return dispatch(agentId, command.toBuilder(), issuedBy);
+    }
+
+    @Transactional
     public String dispatch(String agentId, Command.Builder command, Long issuedBy) {
         if(sender.deferredDelivery()) return dispatchAfterCommit(agentId,command,issuedBy);
         Command cmd = persist(agentId, command, issuedBy);
@@ -228,6 +233,17 @@ public class CommandService {
                 }
                 Command ready=command;
                 deliverInIdentity(agentId,()->deliveryTransaction.execute(status -> send(agentId,ready,retry)));
+            });
+        }
+        List<Map<String, Object>> executionTimedOut = repository.findExecutionTimedout();
+        for (Map<String, Object> row : executionTimedOut) {
+            String cmdId = (String) row.get("cmd_id");
+            String agentId = (String) row.get("agent_id");
+            deliveryTransaction.executeWithoutResult(status -> {
+                lifecycleListeners.forEach(listener -> listener.beforeAck(agentId, cmdId));
+                if (repository.markTimeout(cmdId) > 0) {
+                    notifyTerminal(agentId, cmdId, CommandLifecycleListener.TerminalState.TIMEOUT, "指令执行超时未收到终态ACK");
+                }
             });
         }
     }

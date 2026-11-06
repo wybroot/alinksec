@@ -1,8 +1,11 @@
 package com.alinksec.gateway.rest;
 
 import com.alinksec.common.util.JwtUtil;
+import com.alinksec.service.user.TokenRevocationService;
+import com.alinksec.service.user.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -25,23 +28,34 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     /** 写方法集合 */
     private static final Set<String> WRITE_METHODS = Set.of("POST", "PUT", "DELETE", "PATCH");
 
-    /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成） */
+    /** 平台管理类写前缀：仅 admin（升级包上传 / 注册码生成 / 用户管理） */
     private static final List<String> ADMIN_WRITE_PREFIXES = List.of(
-            "/api/reports/schedules", "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
+            "/api/reports/schedules", "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages", "/api/users");
 
-    /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
-    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit", "/api/evidence", "/api/cluster", "/api/logs", "/api/system");
+    /** Sensitive configuration, including webhook URLs that may carry bot tokens, and user accounts. */
+    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit", "/api/evidence", "/api/cluster", "/api/logs", "/api/system", "/api/users");
 
-    /** 自服务写操作：任何已认证角色可执行（登出需落审计，不应被写拦截误伤） */
-    private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout");
+    /** 自服务写操作：任何已认证角色可执行（登出需落审计，不应被写拦截误伤；用户改密） */
+    private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout", "/api/auth/change-password");
 
     /** 平台管理类写后缀：仅 admin（卸载口令布防） */
     private static final List<String> ADMIN_WRITE_SUFFIXES = List.of("/uninstall-token", "/compliance/review");
 
     private final JwtSecretHolder secretHolder;
+    private final TokenRevocationService tokenRevocationService;
+    private final UserService userService;
 
     public JwtAuthInterceptor(JwtSecretHolder secretHolder) {
+        this(secretHolder, null, null);
+    }
+
+    @Autowired
+    public JwtAuthInterceptor(JwtSecretHolder secretHolder,
+                              @Autowired(required = false) TokenRevocationService tokenRevocationService,
+                              @Autowired(required = false) UserService userService) {
         this.secretHolder = secretHolder;
+        this.tokenRevocationService = tokenRevocationService;
+        this.userService = userService;
     }
 
     @Override
@@ -55,14 +69,35 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             reject(response, HttpStatus.UNAUTHORIZED, 40100, "未登录");
             return false;
         }
+        String rawToken = auth.substring(7);
+        if (tokenRevocationService != null && tokenRevocationService.isTokenRevoked(rawToken)) {
+            reject(response, HttpStatus.UNAUTHORIZED, 40100, "会话已注销，请重新登录");
+            return false;
+        }
         try {
-            Map<String, Object> claims = JwtUtil.verify(secretHolder.secret(), auth.substring(7));
+            Map<String, Object> claims = JwtUtil.verify(secretHolder.secret(), rawToken);
+            long uid = ((Number) claims.get("uid")).longValue();
+            Object iatObj = claims.get("iat");
+            long iat = iatObj instanceof Number n ? n.longValue() : 0L;
+            if (tokenRevocationService != null && tokenRevocationService.isUserRevoked(uid, iat)) {
+                reject(response, HttpStatus.UNAUTHORIZED, 40100, "用户会话已重置，请重新登录");
+                return false;
+            }
             String role = String.valueOf(claims.get("role"));
+            if (userService != null) {
+                var userStateOpt = userService.getUserState(uid);
+                if (userStateOpt.isEmpty() || !userStateOpt.get().enabled()) {
+                    reject(response, HttpStatus.UNAUTHORIZED, 40101, "账号已禁用或不存在");
+                    return false;
+                }
+                // R16: 以数据库最新有效角色为准，防范降权后旧 Token 权限残留
+                role = userStateOpt.get().roleName();
+            }
             // Static URI segments can be encoded or carry matrix parameters.
             // Authorize the controller pattern that Spring actually matched.
             Object matched = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
             String path = matched == null ? request.getRequestURI() : matched.toString();
-            request.setAttribute("uid", ((Number) claims.get("uid")).longValue());
+            request.setAttribute("uid", uid);
             request.setAttribute("username", claims.get("username"));
             request.setAttribute("role", role);
             if (ADMIN_ONLY_PREFIXES.stream().anyMatch(path::startsWith)

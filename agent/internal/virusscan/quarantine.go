@@ -288,6 +288,10 @@ func (q *quarantine) QuarantineExpected(ctx context.Context, path, expected stri
 	return id, nil
 }
 func (q *quarantine) loadMeta(dir *os.File, path, id, expected string) (*quarantineMeta, error) {
+	return q.loadMetaWithStates(dir, path, id, expected, "active", "prepared")
+}
+
+func (q *quarantine) loadMetaWithStates(dir *os.File, path, id, expected string, allowedStates ...string) (*quarantineMeta, error) {
 	if !objectID.MatchString(id) || !digestID.MatchString(strings.ToLower(expected)) || !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("missing object identity")
 	}
@@ -301,7 +305,17 @@ func (q *quarantine) loadMeta(dir *os.File, path, id, expected string) (*quarant
 		return nil, fmt.Errorf("invalid metadata")
 	}
 	var m quarantineMeta
-	if json.Unmarshal(data, &m) != nil || m.ID != id || pathKey(m.OrigPath) != pathKey(path) || m.Sha256 != strings.ToLower(expected) || m.QuarFile != filepath.Join(q.dir, id+".payload") || m.ParentID == "" || m.Size < 0 || m.Size > maxFileSize || (m.State != "active" && m.State != "prepared") {
+	if json.Unmarshal(data, &m) != nil || m.ID != id || pathKey(m.OrigPath) != pathKey(path) || m.Sha256 != strings.ToLower(expected) || m.QuarFile != filepath.Join(q.dir, id+".payload") || m.ParentID == "" || m.Size < 0 || m.Size > maxFileSize {
+		return nil, fmt.Errorf("quarantine identity mismatch")
+	}
+	stateMatch := false
+	for _, s := range allowedStates {
+		if m.State == s {
+			stateMatch = true
+			break
+		}
+	}
+	if !stateMatch {
 		return nil, fmt.Errorf("quarantine identity mismatch")
 	}
 	return &m, nil
@@ -316,12 +330,30 @@ func (q *quarantine) RestoreExpected(ctx context.Context, path, id, expected str
 		return err
 	}
 	defer dir.Close()
-	m, err := q.loadMeta(dir, path, id, expected)
+	m, err := q.loadMetaWithStates(dir, path, id, expected, "active", "prepared", "restored")
 	if err != nil {
 		return err
 	}
+	if m.State == "restored" {
+		_ = removeAt(dir, id+".payload")
+		return nil
+	}
 	f, err := openAt(dir, id+".payload", false)
 	if err != nil {
+		if os.IsNotExist(err) {
+			parent, perr := openDirectory(filepath.Dir(m.OrigPath))
+			if perr == nil {
+				defer parent.Close()
+				if tf, terr := openAt(parent, filepath.Base(m.OrigPath), false); terr == nil {
+					defer tf.Close()
+					if digest, derr := openedDigest(ctx, tf); derr == nil && digest == m.Sha256 {
+						m.State = "restored"
+						_ = writeMeta(dir, m, false)
+						return nil
+					}
+				}
+			}
+		}
 		return err
 	}
 	defer f.Close()
@@ -338,14 +370,22 @@ func (q *quarantine) RestoreExpected(ctx context.Context, path, id, expected str
 		return fmt.Errorf("original parent changed; recovery requires manual review")
 	}
 	if err := restoreCopy(ctx, f, parent, filepath.Base(m.OrigPath), os.FileMode(m.Mode), m.UID, m.GID, m.Security); err != nil {
-		return err
+		if tf, terr := openAt(parent, filepath.Base(m.OrigPath), false); terr == nil {
+			defer tf.Close()
+			if digest, derr := openedDigest(ctx, tf); derr == nil && digest == m.Sha256 {
+				err = nil
+			}
+		}
+		if err != nil {
+			return err
+		}
 	}
 	// Successful copy leaves evidence until metadata records the real outcome.
 	m.State = "restored"
 	if err := writeMeta(dir, m, false); err != nil {
 		return err
 	}
-	if err := removeAt(dir, id+".payload"); err != nil {
+	if err := removeAt(dir, id+".payload"); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -416,12 +456,20 @@ func (q *quarantine) DeleteExpectedWithID(ctx context.Context, path, id, expecte
 		return id, err
 	}
 	defer dir.Close()
-	m, err := q.loadMeta(dir, path, id, expected)
+	m, err := q.loadMetaWithStates(dir, path, id, expected, "active", "prepared", "deleted")
 	if err != nil {
 		return id, err
 	}
+	if m.State == "deleted" {
+		_ = removeAt(dir, id+".payload")
+		return id, nil
+	}
 	f, err := openAt(dir, id+".payload", false)
 	if err != nil {
+		if os.IsNotExist(err) {
+			m.State = "deleted"
+			return id, writeMeta(dir, m, false)
+		}
 		return id, err
 	}
 	got, err := openedDigest(ctx, f)
@@ -429,7 +477,7 @@ func (q *quarantine) DeleteExpectedWithID(ctx context.Context, path, id, expecte
 	if err != nil || got != m.Sha256 {
 		return id, fmt.Errorf("quarantine bytes changed")
 	}
-	if err := removeAt(dir, id+".payload"); err != nil {
+	if err := removeAt(dir, id+".payload"); err != nil && !os.IsNotExist(err) {
 		return id, err
 	}
 	m.State = "deleted"

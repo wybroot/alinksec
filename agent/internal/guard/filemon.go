@@ -74,8 +74,7 @@ func (m *fileMonitor) update(rules []config.FileRule) {
 			sum := sha256.Sum256([]byte(rule.ID + "\x00" + path))
 			key := hex.EncodeToString(sum[:])
 			if !rule.Enabled {
-				_ = os.Remove(filepath.Join(m.dir, key+".json"))
-				_ = os.Remove(filepath.Join(m.dir, key+".bin"))
+				// R66: 规则禁用时保留既有受信任基准文件与内容快照，防止重新启用时将已被篡改的文件误作新基线
 				continue
 			}
 			watch := m.files[key]
@@ -84,12 +83,6 @@ func (m *fileMonitor) update(rules []config.FileRule) {
 			}
 			watch.rule = rule
 			next[key] = watch
-		}
-	}
-	for key := range m.files {
-		if next[key] == nil {
-			_ = os.Remove(filepath.Join(m.dir, key+".json"))
-			_ = os.Remove(filepath.Join(m.dir, key+".bin"))
 		}
 	}
 	m.files = next

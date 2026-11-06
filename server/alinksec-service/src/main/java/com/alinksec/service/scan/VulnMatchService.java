@@ -176,16 +176,22 @@ public class VulnMatchService {
         log.info("漏洞比对完成: agent={} task={} software={} findings={}", agentId, taskId, software.size(), inserted[0]);
     }
 
-    /** 全量比对（CVE 库导入后手动刷新）。返回比对主机数。 */
+    /** 全量比对（CVE 库导入后刷新）。返回比对成功主机数；若有单机比对失败抛出异常向外传播 */
     public int matchAll(long taskId) {
         List<String> agents = jdbc.queryForList(
                 "SELECT agent_id FROM t_agent WHERE deleted=false ORDER BY agent_id", String.class);
+        List<String> failedAgents = new java.util.ArrayList<>();
         for (String agentId : agents) {
             try {
                 matchAgent(agentId, taskId);
             } catch (Exception e) {
                 log.warn("漏洞比对失败: agent={} err={}", agentId, e.getMessage());
+                failedAgents.add(agentId);
             }
+        }
+        if (!failedAgents.isEmpty()) {
+            throw new IllegalStateException("部分主机漏洞比对失败 (" + failedAgents.size() + "/" + agents.size() + "): "
+                    + String.join(", ", failedAgents.subList(0, Math.min(3, failedAgents.size()))));
         }
         return agents.size();
     }

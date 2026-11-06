@@ -33,4 +33,23 @@ class AuditFilterTest {
         verify(audit).record(eq(7L), eq("admin"), eq("POST"), eq("/api/notify/channels"),
                 eq("192.0.2.10"), eq(200), anyInt());
     }
+
+    @Test
+    void recordsBusinessFailureCodeWhenHttp200() throws Exception {
+        AuditService audit = mock(AuditService.class);
+        AuditFilter filter = new AuditFilter(audit);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/alerts/handle");
+        request.setRemoteAddr("192.0.2.20");
+        request.setAttribute("uid", 8L);
+        request.setAttribute("username", "operator");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            res.setStatus(200);
+            res.getOutputStream().write("{\"code\":40401,\"message\":\"告警不存在\"}".getBytes(StandardCharsets.UTF_8));
+        });
+
+        verify(audit).record(eq(8L), eq("operator"), eq("POST"), eq("/api/alerts/handle"),
+                eq("192.0.2.20"), eq(40401), anyInt());
+    }
 }

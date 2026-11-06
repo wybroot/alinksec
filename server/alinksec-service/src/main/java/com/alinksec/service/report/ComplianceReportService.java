@@ -207,7 +207,13 @@ public class ComplianceReportService {
                     var row=rows.get(0);if(((Number)row.get("owner_id")).longValue()!=owner)return;
                     long due=((Number)row.get("next_run")).longValue();LocalDate end=Instant.ofEpochMilli(due).atZone(ReportQuery.ZONE).toLocalDate().minusDays(1);
                     var q=new ReportQuery(end.minusDays(((Number)row.get("days")).intValue()-1).toString(),end.toString(),row.get("group_id")==null?null:((Number)row.get("group_id")).longValue(),row.get("os_type")==null?null:((Number)row.get("os_type")).intValue()).checked(now);
-                    var saved=store(capture(q,now),(String)row.get("title"),owner,id,due,now);
+                    var rep=capture(q,now);
+                    Instant nextSlot=next((String)row.get("cadence"),Instant.ofEpochMilli(due));
+                    if(nextSlot.isBefore(now)) {
+                        rep.put("scheduleCoalesced",true);
+                        rep.put("coalescedNote","服务停机或离线期间漏跑周期已合并，已按策略优先生成最早到期周期快照，后续周期对齐至最新计划");
+                    }
+                    var saved=store(rep,(String)row.get("title"),owner,id,due,now);
                     jdbc.update("UPDATE t_report_schedule SET next_run=?,retry_at=0,failures=0,last_error='',last_snapshot=?,last_run=? WHERE id=?",next((String)row.get("cadence"),now).toEpochMilli(),saved.get("id"),now.toEpochMilli(),id);
                 });
             }catch(RuntimeException failure) {

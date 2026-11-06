@@ -26,8 +26,22 @@ public class PackageRepairCommandGuard implements CommandLifecycleListener {
     @Override public Command prepareDelivery(String agentId,Command command) {
         if (!command.hasVulnFix()) return command;
         if(command.getVulnFix().getFixesList().stream().noneMatch(f -> f.getType()==FixItem.FixType.PACKAGE || f.getType()==FixItem.FixType.WINDOWS_UPDATE)) {
-            Integer packages=jdbc.queryForObject("SELECT count(*) FROM t_fix_task WHERE CAST(id AS TEXT)=? AND type=2",Integer.class,command.getVulnFix().getTaskId());
-            if(packages!=null && packages>0) throw new IllegalArgumentException("软件包任务不能混入或替换为配置修复");
+            // R37: 配置修复分支（CONFIG）同样需要任务存在、有效状态与期限校验，禁止派发已超时/已停止任务的旧命令
+            long taskId;
+            try { taskId = Long.parseLong(command.getVulnFix().getTaskId()); }
+            catch (NumberFormatException e) { throw new IllegalArgumentException("配置修复指令缺少有效任务身份"); }
+            var taskRows = jdbc.queryForList("SELECT status, started_at FROM t_fix_task WHERE id = ?", taskId);
+            if (taskRows.isEmpty()) throw new IllegalArgumentException("配置修复任务不存在: " + taskId);
+            var task = taskRows.get(0);
+            if (!Integer.valueOf(1).equals(asInt(task.get("status")))) {
+                throw new IllegalArgumentException("配置修复任务未处于有效执行中状态(status=" + task.get("status") + ")，停止派发和重推");
+            }
+            if (task.get("started_at") != null) {
+                Instant deadline = database.readOffsetDateTime(task.get("started_at")).toInstant().plus(Duration.ofMinutes(30));
+                if (!Instant.now().isBefore(deadline)) {
+                    throw new IllegalArgumentException("配置修复任务已超过 30 分钟期限，停止派发和重推");
+                }
+            }
             return command;
         }
         long taskId;

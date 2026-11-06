@@ -6,12 +6,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+)
+
+const (
+	maxContainerOutputBytes = 4 * 1024 * 1024 // 4 MiB output protection limit (G17)
+	maxContainersPerSource  = 200             // Max container count budget per source
+	dockerTotalBudget       = 30 * time.Second
+	kubernetesTotalBudget   = 30 * time.Second
 )
 
 // collectContainers retains the default local-node behavior for callers outside
@@ -28,15 +36,26 @@ func collectContainersForNode(snap *pb.RptAssetSnapshot, kubernetesNodeName stri
 }
 
 func collectDockerContainers(snap *pb.RptAssetSnapshot) {
+	deadline := time.Now().Add(dockerTotalBudget)
 	out, err := containerCommand("docker", "ps", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
 	if err != nil {
 		recordAttempt(snap, "docker", pb.AssetCollectionAttempt_FAILED, "docker_list_failed")
 		return
 	}
 	recordAttempt(snap, "docker", pb.AssetCollectionAttempt_COMPLETE, "")
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\r\n"), "\n") {
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+	budgetExhausted := false
+	if len(lines) > maxContainersPerSource {
+		lines = lines[:maxContainersPerSource]
+		budgetExhausted = true
+	}
+	for _, line := range lines {
 		if line == "" {
 			continue
+		}
+		if time.Now().After(deadline) {
+			recordAttempt(snap, "docker", pb.AssetCollectionAttempt_PARTIAL, "container_time_budget_exhausted")
+			break
 		}
 		parts := strings.Split(line, "\t")
 		if len(parts) != 5 || parts[0] == "" {
@@ -52,6 +71,9 @@ func collectDockerContainers(snap *pb.RptAssetSnapshot) {
 		}
 		snap.Containers = append(snap.Containers, c)
 	}
+	if budgetExhausted && len(snap.Containers) >= maxContainersPerSource {
+		recordAttempt(snap, "docker", pb.AssetCollectionAttempt_PARTIAL, "container_count_budget_exhausted")
+	}
 }
 
 type podList struct {
@@ -62,6 +84,24 @@ type podList struct {
 			CreationTimestamp string            `json:"creationTimestamp"`
 			Labels            map[string]string `json:"labels"`
 		} `json:"metadata"`
+		Spec struct {
+			HostNetwork     bool `json:"hostNetwork"`
+			HostPID         bool `json:"hostPID"`
+			HostIPC         bool `json:"hostIPC"`
+			SecurityContext *struct {
+				RunAsUser    *int64 `json:"runAsUser"`
+				RunAsNonRoot *bool  `json:"runAsNonRoot"`
+			} `json:"securityContext"`
+			Containers []struct {
+				Name            string `json:"name"`
+				SecurityContext *struct {
+					Privileged               *bool  `json:"privileged"`
+					AllowPrivilegeEscalation *bool  `json:"allowPrivilegeEscalation"`
+					RunAsUser                *int64 `json:"runAsUser"`
+					RunAsNonRoot             *bool  `json:"runAsNonRoot"`
+				} `json:"securityContext"`
+			} `json:"containers"`
+		} `json:"spec"`
 		Status struct {
 			ContainerStatuses []struct {
 				Name        string `json:"name"`
@@ -100,8 +140,19 @@ func collectKubernetesContainers(snap *pb.RptAssetSnapshot, configuredNodeName s
 		return
 	}
 	recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_COMPLETE, "")
+	budgetExhausted := false
+	containerCount := 0
 	for _, pod := range pods.Items {
+		if time.Now().After(deadline) {
+			recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_PARTIAL, "container_time_budget_exhausted")
+			break
+		}
 		for _, status := range pod.Status.ContainerStatuses {
+			if containerCount >= maxContainersPerSource {
+				budgetExhausted = true
+				break
+			}
+			containerCount++
 			id := status.ContainerID
 			if id == "" {
 				id = pod.Metadata.Namespace + "/" + pod.Metadata.Name + "/" + status.Name
@@ -110,7 +161,66 @@ func collectKubernetesContainers(snap *pb.RptAssetSnapshot, configuredNodeName s
 			if status.Ready {
 				state = "running"
 			}
-			snap.Containers = append(snap.Containers, &pb.ContainerInfo{ContainerId: id, Name: pod.Metadata.Name + "/" + status.Name, Image: status.Image, ImageId: status.ImageID, Status: state, CreatedAt: dockerTime(pod.Metadata.CreationTimestamp), StartedAt: dockerTime(status.State.Running.StartedAt), Labels: pod.Metadata.Labels, Orchestrator: "kubernetes", Namespace: pod.Metadata.Namespace})
+			c := &pb.ContainerInfo{
+				ContainerId:  id,
+				Name:         pod.Metadata.Name + "/" + status.Name,
+				Image:        status.Image,
+				ImageId:      status.ImageID,
+				Status:       state,
+				CreatedAt:    dockerTime(pod.Metadata.CreationTimestamp),
+				StartedAt:    dockerTime(status.State.Running.StartedAt),
+				Labels:       pod.Metadata.Labels,
+				Orchestrator: "kubernetes",
+				Namespace:    pod.Metadata.Namespace,
+			}
+			// Kubernetes security evaluation
+			if pod.Spec.HostNetwork {
+				c.Risky = true
+				c.RiskReasons = append(c.RiskReasons, "host_network")
+			}
+			if pod.Spec.HostPID {
+				c.Risky = true
+				c.RiskReasons = append(c.RiskReasons, "host_pid")
+			}
+			if pod.Spec.HostIPC {
+				c.Risky = true
+				c.RiskReasons = append(c.RiskReasons, "host_ipc")
+			}
+			for _, sc := range pod.Spec.Containers {
+				if sc.Name == status.Name {
+					if sc.SecurityContext != nil {
+						if sc.SecurityContext.Privileged != nil && *sc.SecurityContext.Privileged {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "privileged")
+						}
+						if sc.SecurityContext.AllowPrivilegeEscalation != nil && *sc.SecurityContext.AllowPrivilegeEscalation {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "allow_privilege_escalation")
+						}
+						if sc.SecurityContext.RunAsUser != nil && *sc.SecurityContext.RunAsUser == 0 {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "runs_as_root")
+						} else if sc.SecurityContext.RunAsNonRoot != nil && !*sc.SecurityContext.RunAsNonRoot {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "runs_as_root")
+						}
+					} else if pod.Spec.SecurityContext != nil {
+						if pod.Spec.SecurityContext.RunAsUser != nil && *pod.Spec.SecurityContext.RunAsUser == 0 {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "runs_as_root")
+						} else if pod.Spec.SecurityContext.RunAsNonRoot != nil && !*pod.Spec.SecurityContext.RunAsNonRoot {
+							c.Risky = true
+							c.RiskReasons = append(c.RiskReasons, "runs_as_root")
+						}
+					}
+					break
+				}
+			}
+			snap.Containers = append(snap.Containers, c)
+		}
+		if budgetExhausted {
+			recordAttempt(snap, "kubernetes", pb.AssetCollectionAttempt_PARTIAL, "container_count_budget_exhausted")
+			break
 		}
 	}
 }
@@ -157,7 +267,27 @@ func fillContainerDetails(c *pb.ContainerInfo) error {
 var containerCommand = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	limited := io.LimitReader(stdout, maxContainerOutputBytes+1)
+	out, readErr := io.ReadAll(limited)
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if len(out) > maxContainerOutputBytes {
+		return nil, fmt.Errorf("command output exceeded %d bytes budget", maxContainerOutputBytes)
+	}
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	return out, nil
 }
 
 func dockerTime(value string) int64 {

@@ -89,57 +89,71 @@ public class ReportDispatcher {
 
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report,boolean queued) {
         // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
-        String key=report.getReportId();
-        if((report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
-            try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
-            catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+        // R70: 统一使用认证主机身份与 report_id 进行哈希隔离，防止跨主机碰撞或定向抑制
+        String rawKey = report.getReportId();
+        String key = rawKey;
+        if (!rawKey.isBlank()) {
+            try {
+                key = java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest((agentId + "\0" + rawKey).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            } catch (java.security.NoSuchAlgorithmException e) {
+                key = agentId + ":" + rawKey;
+            }
         }
         if (!queued && !key.isBlank() && !tryAcquire(key, Duration.ofMinutes(10))) {
             log.debug("重复上报丢弃: report_id={}", report.getReportId());
             return;
         }
-        switch (report.getPayloadCase()) {
-            case HEARTBEAT -> heartbeatService.onHeartbeat(agentId, report.getHeartbeat());
-            case ACK -> commandService.onAck(agentId, report.getAck());
-            case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
-            case SECURITY_EVENT -> {
-                if(com.alinksec.service.protect.WindowsLoginService.outcome(report) && !com.alinksec.service.protect.WindowsLoginService.accept(jdbc,agentId,report)) return;
-                if(configOutcome(report)) {
-                    var event=report.getSecurityEvent();
-                    var detail=com.alinksec.common.util.JsonUtils.read(event.getDetail());
-                    String id=detail.path("id").asText();
-                    if(event.getDetail().length()>8192 || !id.matches("[0-9a-f]{32}")
-                            || !report.getReportId().equals(id+"-config-event")
-                            || !java.util.Set.of("agent.yml","policy.json","trusted_state","marker").contains(detail.path("file").asText())
-                            || !event.getActionTaken().equals("trusted_config_in_use")
-                            || !detail.path("action").asText().equals(event.getActionTaken())
-                            || !java.util.Set.of("restored","blocked","unapproved_file_ignored","memory_snapshot_retained").contains(detail.path("shadow").asText()))
-                        throw new IllegalArgumentException("invalid persistent configuration event identity");
-                    if(jdbc.update("INSERT INTO t_agent_config_event_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
-                            agentId,report.getReportId(),event.getDetail())==0) return;
+        try {
+            switch (report.getPayloadCase()) {
+                case HEARTBEAT -> heartbeatService.onHeartbeat(agentId, report.getHeartbeat());
+                case ACK -> commandService.onAck(agentId, report.getAck());
+                case ASSET -> assetService.replaceSnapshot(agentId, report.getAsset());
+                case SECURITY_EVENT -> {
+                    if(com.alinksec.service.protect.WindowsLoginService.outcome(report) && !com.alinksec.service.protect.WindowsLoginService.accept(jdbc,agentId,report)) return;
+                    if(configOutcome(report)) {
+                        var event=report.getSecurityEvent();
+                        var detail=com.alinksec.common.util.JsonUtils.read(event.getDetail());
+                        String id=detail.path("id").asText();
+                        if(event.getDetail().length()>8192 || !id.matches("[0-9a-f]{32}")
+                                || !report.getReportId().equals(id+"-config-event")
+                                || !java.util.Set.of("agent.yml","policy.json","trusted_state","marker").contains(detail.path("file").asText())
+                                || !event.getActionTaken().equals("trusted_config_in_use")
+                                || !detail.path("action").asText().equals(event.getActionTaken())
+                                || !java.util.Set.of("restored","blocked","unapproved_file_ignored","memory_snapshot_retained").contains(detail.path("shadow").asText()))
+                            throw new IllegalArgumentException("invalid persistent configuration event identity");
+                        if(jdbc.update("INSERT INTO t_agent_config_event_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
+                                agentId,report.getReportId(),event.getDetail())==0) return;
+                    }
+                    if(isolationOutcome(report)) {
+                        var detail=com.alinksec.common.util.JsonUtils.read(report.getSecurityEvent().getDetail());
+                        String id=detail.path("id").asText(),phase=detail.path("phase").asText();
+                        if(!id.matches("[0-9a-f]{32}") || !java.util.Set.of("finished","attention").contains(phase)
+                                || !report.getReportId().equals(id+"-"+phase+"-event"))
+                            throw new IllegalArgumentException("invalid persistent isolation outcome identity");
+                        if(jdbc.update("INSERT INTO t_isolation_outcome_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
+                                agentId,report.getReportId(),report.getSecurityEvent().getDetail())==0) return;
+                    }
+                    securityEventService.onEvent(agentId, report.getSecurityEvent());
+                    virusResultService.onRealtime(agentId,report.getSecurityEvent(),report.getReportId());
                 }
-                if(isolationOutcome(report)) {
-                    var detail=com.alinksec.common.util.JsonUtils.read(report.getSecurityEvent().getDetail());
-                    String id=detail.path("id").asText(),phase=detail.path("phase").asText();
-                    if(!id.matches("[0-9a-f]{32}") || !java.util.Set.of("finished","attention").contains(phase)
-                            || !report.getReportId().equals(id+"-"+phase+"-event"))
-                        throw new IllegalArgumentException("invalid persistent isolation outcome identity");
-                    if(jdbc.update("INSERT INTO t_isolation_outcome_receipt(agent_id,event_id,detail) VALUES (?,?,?) ON CONFLICT(agent_id,event_id) DO NOTHING",
-                            agentId,report.getReportId(),report.getSecurityEvent().getDetail())==0) return;
-                }
-                securityEventService.onEvent(agentId, report.getSecurityEvent());
-                virusResultService.onRealtime(agentId,report.getSecurityEvent(),report.getReportId());
+                case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
+                case BASELINE_RESULT -> baselineResultService.onResult(agentId, report.getBaselineResult());
+                case EVIDENCE -> evidence.accept(agentId,report);
+                case SCAP_RESULT -> com.alinksec.service.baseline.ScapResults.accept(jdbc,agentId,report.getScapResult());
+                case SCAN_RESULT -> scanResultService.onResult(agentId, report.getScanResult());
+                case VIRUS_RESULT -> virusResultService.onResult(agentId, report.getVirusResult());
+                case FIX_RESULT -> fixResultService.onResult(agentId, report.getFixResult());
+                case WINDOWS_UPDATE -> windowsUpdates.onSnapshot(agentId,report.getWindowsUpdate());
+                case LOG_BATCH -> logBatchService.onBatch(agentId, report.getReportId(), report.getLogBatch());
+                default -> log.warn("未知上报类型: {}", report.getPayloadCase());
             }
-            case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
-            case BASELINE_RESULT -> baselineResultService.onResult(agentId, report.getBaselineResult());
-            case EVIDENCE -> evidence.accept(agentId,report);
-            case SCAP_RESULT -> com.alinksec.service.baseline.ScapResults.accept(jdbc,agentId,report.getScapResult());
-            case SCAN_RESULT -> scanResultService.onResult(agentId, report.getScanResult());
-            case VIRUS_RESULT -> virusResultService.onResult(agentId, report.getVirusResult());
-            case FIX_RESULT -> fixResultService.onResult(agentId, report.getFixResult());
-            case WINDOWS_UPDATE -> windowsUpdates.onSnapshot(agentId,report.getWindowsUpdate());
-            case LOG_BATCH -> logBatchService.onBatch(agentId, report.getReportId(), report.getLogBatch());
-            default -> log.warn("未知上报类型: {}", report.getPayloadCase());
+        } catch (RuntimeException | Error e) {
+            // R24: 业务处理失败时回滚释放去重锁，避免本次失败导致后续离线补传/重放被误当重复丢弃
+            if (!queued && !key.isBlank()) {
+                releaseAcquired(key);
+            }
+            throw e;
         }
     }
 
@@ -165,9 +179,11 @@ public class ReportDispatcher {
                 && report.getSecurityEvent().getRuleId().equals("agent-config-integrity");
     }
 
-    /** 去重表 SETNX 语义：插入成功 = 首次见到 */
+    /** 去重表 SETNX 语义：插入成功 = 首次见到 (R69: 先清理目标 key 的过期行，避免到期重放被冲突误杀) */
     private boolean tryAcquire(String reportId, Duration ttl) {
         try {
+            // R69: 先清理该 reportId 已过期的行，避免历史过期行延迟未删导致首次重放被误拒
+            jdbc.update("DELETE FROM t_report_dedup WHERE report_id = ? AND expire_at < CURRENT_TIMESTAMP", reportId);
             int inserted = jdbc.update("""
                     INSERT INTO t_report_dedup (report_id, expire_at)
                     VALUES (?, ?)
@@ -180,6 +196,13 @@ public class ReportDispatcher {
             // 去重表异常不阻塞主链路（宁可重复处理，不可丢上报）
             log.warn("上报去重检查失败（放行）: {}", e.getMessage());
             return true;
+        }
+    }
+
+    private void releaseAcquired(String reportId) {
+        try {
+            jdbc.update("DELETE FROM t_report_dedup WHERE report_id = ?", reportId);
+        } catch (Exception ignored) {
         }
     }
 }

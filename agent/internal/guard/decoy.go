@@ -50,7 +50,13 @@ type decoyState struct {
 
 func (s *decoyState) load(workDir string) {
 	s.Decoys = map[string]string{}
-	if b, err := os.ReadFile(filepath.Join(workDir, decoyStateFile)); err == nil {
+	statePath := filepath.Join(workDir, decoyStateFile)
+	b, err := os.ReadFile(statePath)
+	if err != nil {
+		// R30: 尝试读取 tmp 备份，防止半写损坏
+		b, err = os.ReadFile(statePath + ".tmp")
+	}
+	if err == nil {
 		_ = json.Unmarshal(b, &s.Decoys)
 	}
 }
@@ -58,8 +64,7 @@ func (s *decoyState) load(workDir string) {
 func (s *decoyState) save(workDir string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, _ := json.MarshalIndent(s.Decoys, "", "  ")
-	_ = os.WriteFile(filepath.Join(workDir, decoyStateFile), b, 0600)
+	_ = atomicWriteJSON(filepath.Join(workDir, decoyStateFile), s.Decoys)
 }
 
 /* ---- decoyManager ---- */
@@ -134,32 +139,52 @@ func (m *decoyManager) ensureDeployed(dirs []string) int {
 }
 
 // createOne 在目录生成单个诱饵：随机名 + 魔数头 + 随机字节（8~64KB）
+// R29: 拒绝符号链接，使用 O_CREATE|O_EXCL 独占创建，防止提权或目录穿越覆写
 func (m *decoyManager) createOne(dir string) (path, sha string, err error) {
-	name := fmt.Sprintf("%s_%s%s", randPick(decoySubjects),
-		time.Now().Format("20060102"), randPick(decoyExts))
-	path = filepath.Join(dir, name)
-	// 同名碰撞：附加随机后缀
-	if _, err := os.Stat(path); err == nil {
-		path = filepath.Join(dir, fmt.Sprintf("%s_%d%s", randPick(decoySubjects),
-			time.Now().UnixNano()%1e6, randPick(decoyExts)))
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	if strings.HasSuffix(path, ".zip") { // .sql.zip 取复合扩展
-		ext = ".sql.zip"
-	}
-	magic := formatMagics[ext]
+	for attempt := 0; attempt < 3; attempt++ {
+		name := fmt.Sprintf("%s_%s_%d%s", randPick(decoySubjects),
+			time.Now().Format("20060102"), time.Now().UnixNano()%1e6, randPick(decoyExts))
+		path = filepath.Join(dir, name)
 
-	size, _ := rand.Int(rand.Reader, big.NewInt(56*1024))
-	body := make([]byte, 8*1024+size.Int64())
-	if _, err := rand.Read(body); err != nil {
-		return "", "", err
+		// 检查路径是否为符号链接
+		if lfi, lerr := os.Lstat(path); lerr == nil {
+			if lfi.Mode()&os.ModeSymlink != 0 {
+				continue // 严禁跟随符号链接
+			}
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		if strings.HasSuffix(path, ".zip") {
+			ext = ".sql.zip"
+		}
+		magic := formatMagics[ext]
+
+		size, _ := rand.Int(rand.Reader, big.NewInt(56*1024))
+		body := make([]byte, 8*1024+size.Int64())
+		if _, err := rand.Read(body); err != nil {
+			return "", "", err
+		}
+		content := append(append([]byte{}, magic...), body...)
+
+		// 独占创建，遇到同名或软连接拒绝覆盖
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", "", err
+		}
+		_, werr := f.Write(content)
+		_ = f.Sync()
+		_ = f.Close()
+		if werr != nil {
+			_ = os.Remove(path)
+			return "", "", werr
+		}
+		sum := sha256.Sum256(content)
+		return path, hex.EncodeToString(sum[:]), nil
 	}
-	content := append(append([]byte{}, magic...), body...)
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		return "", "", err
-	}
-	sum := sha256.Sum256(content)
-	return path, hex.EncodeToString(sum[:]), nil
+	return "", "", fmt.Errorf("failed to create decoy after 3 attempts")
 }
 
 // healthResult 一次健康检查结果
@@ -168,7 +193,7 @@ type healthResult struct {
 	Tampered []string // 内容/大小变化（高置信触发）
 }
 
-// healthCheck 校验全部登记诱饵：哈希变更即篡改；缺失即丢失
+// healthCheck 校验全部登记诱饵：哈希变更即篡改；缺失即丢失 (R62: 超限与读取错误一律视为篡改异常)
 func (m *decoyManager) healthCheck() healthResult {
 	m.state.mu.Lock()
 	defer m.state.mu.Unlock()
@@ -179,11 +204,12 @@ func (m *decoyManager) healthCheck() healthResult {
 			res.Missing = append(res.Missing, path)
 			continue
 		}
-		if !info.Mode().IsRegular() || info.Size() == 0 {
+		if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > (64<<20) {
 			res.Tampered = append(res.Tampered, path)
 			continue
 		}
-		if sum := fileSha256(path); sum != "" && sum != base {
+		sum, err := fileSha256(path)
+		if err != nil || sum != base {
 			res.Tampered = append(res.Tampered, path)
 		}
 	}
@@ -197,9 +223,55 @@ func (m *decoyManager) healthCheck() healthResult {
 	return res
 }
 
+// withdraw 清理登记的诱饵文件（在策略禁用或目录范围收缩时回收伪装文件，R62）
+func (m *decoyManager) withdraw(keepDirs []string) int {
+	m.state.mu.Lock()
+	defer m.state.mu.Unlock()
+	keepSet := map[string]bool{}
+	for _, d := range keepDirs {
+		keepSet[d] = true
+	}
+	removed := 0
+	for path := range m.state.Decoys {
+		dir := filepath.Dir(path)
+		if len(keepDirs) == 0 || !keepSet[dir] {
+			if err := os.Remove(path); err == nil || os.IsNotExist(err) {
+				delete(m.state.Decoys, path)
+				removed++
+			}
+		}
+	}
+	if removed > 0 {
+		m.persistLocked()
+	}
+	return removed
+}
+
 func (m *decoyManager) persistLocked() {
-	b, _ := json.MarshalIndent(m.state.Decoys, "", "  ")
-	_ = os.WriteFile(filepath.Join(m.workDir, decoyStateFile), b, 0600)
+	_ = atomicWriteJSON(filepath.Join(m.workDir, decoyStateFile), m.state.Decoys)
+}
+
+func atomicWriteJSON(filePath string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := filePath + ".tmp"
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = f.Sync()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, filePath)
 }
 
 func (m *decoyManager) knownDecoys() []string {
@@ -222,19 +294,22 @@ func randPick(list []string) string {
 	return list[n.Int64()]
 }
 
-func fileSha256(path string) string {
+func fileSha256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer f.Close()
 	const limit = 64 << 20
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(f, limit+1))
-	if err != nil || n > limit {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	if n > limit {
+		return "", fmt.Errorf("decoy file exceeded limit")
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func isWritableDir(path string) bool {

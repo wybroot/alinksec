@@ -136,6 +136,14 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                     log.warn("agent 已禁用，拒绝接入: {}", report.getAgentId());
                     return false;
                 }
+                String certSerial = AgentAuthInterceptor.certSerial();
+                if (agent.get().certSerial() != null && !agent.get().certSerial().isBlank()) {
+                    if (certSerial == null || !agent.get().certSerial().equalsIgnoreCase(certSerial)) {
+                        log.warn("证书序列号不匹配，拒绝接入: db_serial={} cert_serial={} agent={}",
+                                agent.get().certSerial(), certSerial, report.getAgentId());
+                        return false;
+                    }
+                }
                 registry.register(report.getAgentId(), responseObserver);
                 authenticatedAgentId = report.getAgentId();
                 authenticated = true;

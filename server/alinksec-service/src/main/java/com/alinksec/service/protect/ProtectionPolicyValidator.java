@@ -11,11 +11,62 @@ final class ProtectionPolicyValidator {
     private ProtectionPolicyValidator() {}
 
     static void validate(String type, Object match, Object actions) {
-        if (!Set.of("file_integrity", "login").contains(type)) return;
+        if (!Set.of("file_integrity", "login", "process", "decoy", "ransom_behavior").contains(type)) return;
         JsonNode config = JsonUtils.read(JsonUtils.write(match));
         JsonNode response = JsonUtils.read(JsonUtils.write(actions));
         require(config.isObject(), "match 必须为对象");
         require(response.isArray() && !response.isEmpty() && response.size() <= 2, "actions 必须为非空数组且不能超过上限");
+
+        if (type.equals("process")) {
+            Set<String> allowed = Set.of("alert", "kill", "block");
+            for (JsonNode action : response) require(action.isTextual() && allowed.contains(action.asText()), "不支持的防护动作");
+            for (String platform : strings(config, "platforms", 2)) require(Set.of("linux", "windows").contains(platform), "不支持的平台");
+            boolean hasExe = config.hasNonNull("exe_regex") && !config.get("exe_regex").asText().isBlank();
+            boolean hasCmd = config.hasNonNull("cmdline_regex") && !config.get("cmdline_regex").asText().isBlank();
+            require(hasExe || hasCmd, "进程规则必须包含可执行文件或命令行正则");
+            if (hasExe) {
+                String exeRegex = config.get("exe_regex").asText();
+                require(exeRegex.length() <= 1024, "可执行文件正则长度超出限制");
+                try {
+                    java.util.regex.Pattern.compile(exeRegex);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException("可执行文件正则语法无效: " + e.getMessage());
+                }
+            }
+            if (hasCmd) {
+                String cmdRegex = config.get("cmdline_regex").asText();
+                require(cmdRegex.length() <= 2048, "命令行正则长度超出限制");
+                try {
+                    java.util.regex.Pattern.compile(cmdRegex);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException("命令行正则语法无效: " + e.getMessage());
+                }
+            }
+            return;
+        }
+
+        if (type.equals("decoy")) {
+            Set<String> allowed = Set.of("alert", "kill", "isolate");
+            for (JsonNode action : response) require(action.isTextual() && allowed.contains(action.asText()), "不支持的防护动作");
+            var dirs = strings(config, "dirs", 32);
+            require(!dirs.isEmpty(), "至少需要一个诱饵布防目录");
+            for (String dir : dirs) {
+                require(dir.length() <= 4096 && dir.indexOf('\0') < 0
+                        && (dir.startsWith("/") || dir.matches("^[A-Za-z]:[\\\\/].*")), "诱饵目录必须使用绝对路径");
+            }
+            integer(config, "count_per_dir", 1, 20, 2);
+            strings(config, "exclude_exes", 64);
+            return;
+        }
+
+        if (type.equals("ransom_behavior")) {
+            Set<String> allowed = Set.of("alert", "kill", "isolate");
+            for (JsonNode action : response) require(action.isTextual() && allowed.contains(action.asText()), "不支持的防护动作");
+            integer(config, "churn_threshold", 5, 10000, 30);
+            integer(config, "window_sec", 1, 3600, 30);
+            return;
+        }
+
         Set<String> allowed = type.equals("login") ? Set.of("alert", "block_ip") : Set.of("alert", "restore");
         for (JsonNode action : response) require(action.isTextual() && allowed.contains(action.asText()), "不支持的防护动作");
         for (String platform : strings(config, "platforms", 2)) require(Set.of("linux", "windows").contains(platform), "不支持的平台");

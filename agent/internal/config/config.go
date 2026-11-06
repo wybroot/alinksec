@@ -62,6 +62,7 @@ type ProcessRule struct {
 }
 
 type ProcessMatch struct {
+	Platforms    []string `yaml:"platforms" json:"platforms,omitempty"`
 	ExeRegex     string   `yaml:"exe_regex" json:"exe_regex"`
 	CmdlineRegex string   `yaml:"cmdline_regex" json:"cmdline_regex"`
 	UserExclude  []string `yaml:"user_exclude" json:"user_exclude"`
@@ -79,6 +80,10 @@ type DecoyConfig struct {
 	CountPerDir int `yaml:"count_per_dir" json:"count_per_dir,omitempty"`
 	// 排除进程 exe 路径（备份/杀毒/索引类，误报防护）
 	ExcludeExes []string `yaml:"exclude_exes" json:"exclude_exes,omitempty"`
+	// 独立加密速率监测开关（空 = 继承 Enabled）
+	RateEnabled *bool `yaml:"rate_enabled" json:"rate_enabled,omitempty"`
+	// 独立加密速率响应级别
+	RateResponse string `yaml:"rate_response" json:"rate_response,omitempty"`
 	// 加密速率监测窗口秒（默认 10）
 	RateWindowSec int `yaml:"rate_window_sec" json:"rate_window_sec,omitempty"`
 	// 窗口内写入/重命名文件数阈值（默认 50）

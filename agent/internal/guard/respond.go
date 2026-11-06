@@ -294,15 +294,28 @@ func sensitiveArgument(name string) bool {
 
 // KillProcess terminates the complete descendant tree before the target so a
 // child cannot keep running or immediately recreate its parent.
+// R59: 自保护白名单防御，严禁终止 PID 1(init/systemd)、Agent 自身及系统关键守护进程。
 func KillProcess(pid int32) bool {
+	if pid <= 1 || pid == int32(os.Getpid()) {
+		return false
+	}
 	p, err := process.NewProcess(pid)
 	if err != nil {
 		return syscallKill(pid) == nil
+	}
+	if name, err := p.Name(); err == nil {
+		lowName := strings.ToLower(name)
+		if slices.Contains([]string{"systemd", "init", "alinksec-agent", "kthreadd"}, lowName) {
+			return false
+		}
 	}
 	return killProcessTree(p, map[int32]struct{}{})
 }
 
 func killProcessTree(p *process.Process, seen map[int32]struct{}) bool {
+	if p.Pid <= 1 || p.Pid == int32(os.Getpid()) {
+		return false
+	}
 	if _, ok := seen[p.Pid]; ok {
 		return false
 	}

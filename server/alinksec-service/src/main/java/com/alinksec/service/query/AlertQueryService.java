@@ -80,10 +80,18 @@ public class AlertQueryService {
         if (!"acknowledge".equals(resolution) && !"ignore".equals(resolution)) {
             throw new IllegalArgumentException("不支持的告警记录操作");
         }
-        return jdbc.update("""
+        boolean updated = jdbc.update("""
                 UPDATE t_alert
                 SET status = ?, handle_remark = ?, handled_by = ?, handled_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status IN (0,1)
                 """, "ignore".equals(resolution) ? 3 : 2, remark, userId, id) > 0;
+        if (updated) {
+            jdbc.update("""
+                    UPDATE t_alert_notify_delivery
+                    SET last_error = 'alert_closed_before_delivery', lease_until = 0, next_attempt_at = 9999999999999
+                    WHERE alert_no = (SELECT alert_no FROM t_alert WHERE id = ?) AND delivered_at IS NULL
+                    """, id);
+        }
+        return updated;
     }
 }

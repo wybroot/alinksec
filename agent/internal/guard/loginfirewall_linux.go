@@ -17,6 +17,11 @@ import (
 const loginChain = "ALINKSEC_LOGIN"
 
 func runLoginFirewall(ipv6 bool, args ...string) error {
+	_, err := runLoginFirewallOutput(ipv6, args...)
+	return err
+}
+
+func runLoginFirewallOutput(ipv6 bool, args ...string) (string, error) {
 	name := "iptables"
 	if ipv6 {
 		name = "ip6tables"
@@ -25,16 +30,16 @@ func runLoginFirewall(ipv6 bool, args ...string) error {
 	if err != nil {
 		executable, err = exec.LookPath(name + "-nft")
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, executable, append([]string{"-w", "2"}, args...)...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s: %s: %w", name, strings.TrimSpace(string(out)), err)
+		return string(out), fmt.Errorf("%s: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
-	return nil
+	return string(out), nil
 }
 
 func missingLoginRule(err error) bool {
@@ -83,9 +88,30 @@ func loginBlockPlatform(block loginBlock, enabled bool) error {
 				return err
 			}
 		}
-		if !enabled && exists {
-			if err := runLoginFirewall(ipv6, append([]string{"-D"}, rule...)...); err != nil {
-				return err
+		if !enabled {
+			if exists {
+				if err := runLoginFirewall(ipv6, append([]string{"-D"}, rule...)...); err != nil {
+					return err
+				}
+			} else {
+				// R63: 若规则 ID/注释不同（如中心下发或历史规则），通过 -S 检索匹配目标 IP 与端口的规则并精确清除
+				if out, err := runLoginFirewallOutput(ipv6, "-S", loginChain); err == nil {
+					targetIP := ip.String()
+					portStr := strconv.Itoa(port)
+					lines := strings.Split(out, "\n")
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if strings.HasPrefix(line, "-A "+loginChain) &&
+							(strings.Contains(line, "-s "+targetIP+"/32") || strings.Contains(line, "-s "+targetIP+"/128") || strings.Contains(line, "-s "+targetIP+" ")) &&
+							(strings.Contains(line, "--dport "+portStr+" ") || strings.HasSuffix(line, "--dport "+portStr)) {
+							fields := strings.Fields(line)
+							if len(fields) > 1 && fields[0] == "-A" {
+								fields[0] = "-D"
+								_ = runLoginFirewall(ipv6, fields[1:]...)
+							}
+						}
+					}
+				}
 			}
 		}
 	}

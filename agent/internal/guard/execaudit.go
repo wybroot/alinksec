@@ -270,12 +270,16 @@ func (g *Guard) ObserveProcessAudit(lines []*pb.LogLine) bool {
 	}
 	monitor := g.execAudit
 	rules := append([]config.ProcessRule(nil), g.processRules...)
+	reportFn := g.report
 	g.mu.Unlock()
 	events, ok := monitor.observe(lines, rules)
+	if !ok {
+		return false
+	}
 	for _, event := range events {
-		if g.report != nil {
-			g.report(event)
+		if reportFn != nil {
+			reportFn(event)
 		}
 	}
-	return ok
+	return true
 }

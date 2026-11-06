@@ -69,8 +69,22 @@
             <el-table-column label="类型" width="160">
               <template #default="{ row }"><el-tag size="small" :type="row.type === 'system_empty' ? 'danger' : row.type === 'uid0_nonroot' ? 'warning' : 'info'" effect="plain">{{ row.typeLabel }}</el-tag></template>
             </el-table-column>
+            <el-table-column label="处置状态" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.status === 1 ? 'warning' : row.status === 2 ? 'info' : row.status === 3 ? 'success' : 'danger'">
+                  {{ row.status === 1 ? '已确认' : row.status === 2 ? '已忽略' : row.status === 3 ? '已修复' : '新增' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="remark" label="说明" min-width="180" />
             <el-table-column prop="time" label="发现时间" width="170" />
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 0" link type="primary" size="small" @click="handleWeakpwdStatus(row, 1)">确认</el-button>
+                <el-button v-if="row.status !== 2" link type="info" size="small" @click="handleWeakpwdStatus(row, 2)">忽略</el-button>
+                <el-button v-if="row.status !== 3" link type="success" size="small" @click="handleWeakpwdStatus(row, 3)">标记修复</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
 
@@ -179,7 +193,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { fetchVulns, fetchVulnStats, fetchWeakpwds, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask, fetchFixApprovers } from '../api'
+import { fetchVulns, fetchVulnStats, fetchWeakpwds, updateWeakpwdStatus, fetchPortFindings, createScanTask, fetchAgentsForSelect, createPackageFixTask, fetchFixApprovers } from '../api'
 import { sevType, sevLabel } from '../utils/format'
 import VulnerabilityEvidence from '../components/VulnerabilityEvidence.vue'
 import VulnerabilityHistory from '../components/VulnerabilityHistory.vue'
@@ -331,14 +345,36 @@ const loadAll = async () => {
   vulns.value = v
   vulnStats.value = stats || vulnStats.value
   weakpwds.value = (w?.list || []).map(x => ({
+    id: x.id,
     host: x.hostname || x.agent_id,
     account: x.account,
     type: x.type,
     typeLabel: weakTypeLabel[x.type] || x.type,
     remark: x.remark || '',
+    status: x.status,
     time: x.created_at ? String(x.created_at).replace('T', ' ').slice(0, 19) : '—',
   }))
   loadPorts()
+}
+
+const handleWeakpwdStatus = async (row, status) => {
+  try {
+    await updateWeakpwdStatus(row.id, status)
+    ElMessage.success('弱口令处置状态已更新')
+    const w = await fetchWeakpwds()
+    weakpwds.value = (w?.list || []).map(x => ({
+      id: x.id,
+      host: x.hostname || x.agent_id,
+      account: x.account,
+      type: x.type,
+      typeLabel: weakTypeLabel[x.type] || x.type,
+      remark: x.remark || '',
+      status: x.status,
+      time: x.created_at ? String(x.created_at).replace('T', ' ').slice(0, 19) : '—',
+    }))
+  } catch (e) {
+    ElMessage.error(e.message || '更新失败')
+  }
 }
 
 onMounted(loadAll)

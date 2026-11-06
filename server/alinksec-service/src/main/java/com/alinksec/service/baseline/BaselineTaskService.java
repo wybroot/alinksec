@@ -174,15 +174,20 @@ public class BaselineTaskService {
     /**
      * 任务超时兜底：执行中超 30 分钟仍未收齐结果 → 部分失败（已收结果保留，
      * Agent 后续补传仍会更新汇总与进度）。
+     * R68: 级联取消该任务下未执行完毕的命令，防止 Agent 重连后继续执行已超时的冗余任务。
      */
     @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
     public void sweepTimeout() {
-        int rows = jdbc.update("""
-                UPDATE t_baseline_task SET status = 3, finished_at = CURRENT_TIMESTAMP
-                WHERE status = 1 AND created_at < ?
-                """, database.timestampBefore(Duration.ofMinutes(30)));
-        if (rows > 0) {
-            log.warn("基线任务超时置部分失败: count={}", rows);
+        var expired = jdbc.queryForList("SELECT id FROM t_baseline_task WHERE status = 1 AND created_at < ? ORDER BY id LIMIT 100",
+                Long.class, database.timestampBefore(Duration.ofMinutes(30)));
+        for (long taskId : expired) {
+            if (jdbc.update("UPDATE t_baseline_task SET status = 3, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 1", taskId) != 1) continue;
+            // 级联将该任务关联的待发/已发未接收基线核查指令置为超时(ST_TIMEOUT=6)
+            jdbc.update("""
+                UPDATE t_command SET status = 6, finished_at = CURRENT_TIMESTAMP, result = ?
+                WHERE type = 'baseline_check' AND status IN (0, 1) AND CAST(payload AS TEXT) LIKE ?
+                """, JsonUtils.write(Map.of("reason", "task-timeout")), "%\"taskId\":\"" + taskId + "\"%");
+            log.warn("基线任务超时置部分失败并级联取消待发命令: taskId={}", taskId);
         }
     }
 

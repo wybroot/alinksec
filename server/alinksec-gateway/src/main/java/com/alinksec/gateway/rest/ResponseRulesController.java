@@ -48,6 +48,14 @@ public class ResponseRulesController {
         return ApiResult.ok(null);
     }
 
+    @PostMapping("/{id}/approve")
+    public ApiResult<Void> approve(@PathVariable long id, HttpServletRequest request) {
+        Long uid = ((Number) request.getAttribute("uid")).longValue();
+        String role = (String) request.getAttribute("role");
+        responseService.approveRule(id, uid, role);
+        return ApiResult.ok(null);
+    }
+
     @GetMapping("/executions")
     public ApiResult<Map<String, Object>> executions(@RequestParam long alertId,
                                                      @RequestParam(defaultValue = "1") int page,

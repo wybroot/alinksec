@@ -45,7 +45,7 @@ type Guard struct {
 	mu             sync.Mutex
 	isolated       bool // 当前隔离状态（marker 持久化）
 	processRules   []config.ProcessRule
-	processSeen    map[int32]int64 // pid -> create time; prevents PID reuse from being missed
+	processSeen    map[int32]processIdentity // pid -> (create time, exe); 捕捉 PID 复用及同一 PID 下的 execve 映像变更
 	watchDirs      []string
 	serverAddrVal  string         // gRPC 连接地址（comm 注入，隔离放行解析用）
 	virusCheck     VirusCheckFunc // 实时防护检查回调（comm 注入，virusmon.go）
@@ -80,7 +80,7 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 		log:          log,
 		report:       report,
 		processRules: append([]config.ProcessRule(nil), processRules...),
-		processSeen:  map[int32]int64{},
+		processSeen:  map[int32]processIdentity{},
 		ratePrev:     map[string]treeSnapshot{},
 	}
 	g.files = newFileMonitor(workDir, log)
@@ -94,7 +94,34 @@ func New(cfg *config.DecoyConfig, processRules []config.ProcessRule, workDir str
 
 func (g *Guard) UpdateProtection(files []config.FileRule, logins []config.LoginRule) {
 	g.files.update(files)
-	g.login.update(logins)
+	events := g.login.update(logins)
+	for _, event := range events {
+		if g.report != nil {
+			g.report(event)
+		}
+	}
+}
+
+func (g *Guard) BlockIP(ip string, ports []int) error {
+	if len(ports) == 0 {
+		ports = []int{22}
+	}
+	return g.applyLoginBlock(loginBlock{
+		RuleID: "central_dispatch",
+		IP:     ip,
+		Ports:  ports,
+	}, true)
+}
+
+func (g *Guard) UnblockIP(ip string, ports []int) error {
+	if len(ports) == 0 {
+		ports = []int{22}
+	}
+	return g.applyLoginBlock(loginBlock{
+		RuleID: "central_dispatch",
+		IP:     ip,
+		Ports:  ports,
+	}, false)
 }
 
 func (g *Guard) ObserveLoginLogs(source string, lines []*proto.LogLine) {
@@ -103,6 +130,16 @@ func (g *Guard) ObserveLoginLogs(source string, lines []*proto.LogLine) {
 			g.report(event)
 		}
 	}
+}
+
+func (g *Guard) ObserveModsecAudit(lines []*proto.LogLine) []*proto.RptSecurityEvent {
+	events := parseModsecAuditLines(lines)
+	for _, event := range events {
+		if g.report != nil {
+			g.report(event)
+		}
+	}
+	return events
 }
 
 func (g *Guard) applyLoginBlock(block loginBlock, enabled bool) error {
@@ -116,17 +153,22 @@ func (g *Guard) applyLoginBlock(block loginBlock, enabled bool) error {
 		g.mu.Unlock()
 		host, _, err := net.SplitHostPort(address)
 		if err != nil {
-			return fmt.Errorf("无法核验管理服务器地址，拒绝封禁")
+			host = address
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		management, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if err != nil {
-			return fmt.Errorf("无法解析管理服务器地址，拒绝封禁")
-		}
-		for _, peer := range management {
-			if peer.Unmap() == ip.Unmap() {
+		// R65: 先进行直接 IP 比对，离线环境或域名解析超时不阻断对恶意外部 IP 的封禁执行
+		if srvIP, err := netip.ParseAddr(host); err == nil {
+			if srvIP.Unmap() == ip.Unmap() {
 				return fmt.Errorf("拒绝封禁管理服务器 IP")
+			}
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if management, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host); err == nil {
+				for _, peer := range management {
+					if peer.Unmap() == ip.Unmap() {
+						return fmt.Errorf("拒绝封禁管理服务器 IP")
+					}
+				}
 			}
 		}
 	}
@@ -151,7 +193,7 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 	g.processRules = append([]config.ProcessRule(nil), processRules...)
 	// Existing processes are checked in alert-only mode. Policy changes must
 	// not retroactively terminate already-running business processes.
-	g.processSeen = map[int32]int64{}
+	g.processSeen = map[int32]processIdentity{}
 	g.ratePrev = map[string]treeSnapshot{}
 	g.mu.Unlock()
 
@@ -160,11 +202,14 @@ func (g *Guard) UpdatePolicy(cfg *config.DecoyConfig, processRules []config.Proc
 		g.mu.Lock()
 		g.watchDirs = dirs
 		g.mu.Unlock()
-		created := newDecoyManager(cfg, g.workDir).ensureDeployed(dirs)
+		dm := newDecoyManager(cfg, g.workDir)
+		dm.withdraw(dirs)
+		created := dm.ensureDeployed(dirs)
 		g.log.Info("策略热更新生效", "dirs", len(dirs), "补投", created,
 			"response", cfg.Response, "window_sec", cfg.RateWindowSec)
 	} else {
-		g.log.Info("策略热更新生效：诱饵防护已关闭")
+		removed := newDecoyManager(cfg, g.workDir).withdraw(nil)
+		g.log.Info("策略热更新生效：诱饵防护已关闭，已回收诱饵文件", "removed", removed)
 	}
 	g.seedProcessBaseline()
 	g.configureAttribution()
@@ -257,14 +302,17 @@ func (g *Guard) loginLoop() {
 func (g *Guard) initialDeploy() {
 	c := g.cur()
 	if c.Enabled != nil && !*c.Enabled {
-		g.log.Info("诱饵防护未启用（本地配置关闭，等待平台策略开启）")
+		g.log.Info("诱饵防护未启用，回收已登记诱饵文件")
+		newDecoyManager(&c, g.workDir).withdraw(nil)
 		return
 	}
 	dirs := g.deployDirs()
 	g.mu.Lock()
 	g.watchDirs = dirs
 	g.mu.Unlock()
-	created := newDecoyManager(&c, g.workDir).ensureDeployed(dirs)
+	dm := newDecoyManager(&c, g.workDir)
+	dm.withdraw(dirs)
+	created := dm.ensureDeployed(dirs)
 	g.log.Info("诱饵投放完成", "dirs", len(dirs), "decoys", created)
 }
 
@@ -316,6 +364,10 @@ func (g *Guard) rateLoop() {
 	if c.Enabled != nil && !*c.Enabled {
 		return
 	}
+	// R27: 独立速率规则开关判断
+	if c.RateEnabled != nil && !*c.RateEnabled {
+		return
+	}
 	g.mu.Lock()
 	since := g.rateSince
 	g.rateSince = time.Now()
@@ -330,7 +382,11 @@ func (g *Guard) rateLoop() {
 		trigPaths []string
 	)
 	for _, t := range trees {
-		cur := snapshotTree(t)
+		cur, meta := snapshotTree(t)
+		if meta.Truncated {
+			g.log.Warn("速率快照被截断，跳过当前轮次比对避免误报", "tree", t, "reason", meta.Reason, "entries", meta.Entries, "duration", meta.Duration)
+			continue
+		}
 		g.mu.Lock()
 		prev, ok := g.ratePrev[t]
 		g.ratePrev[t] = cur

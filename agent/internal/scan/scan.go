@@ -6,6 +6,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -47,20 +48,29 @@ func RunWithPacer(taskID string, includeWeakPwd, includePortService bool, log *s
 	}
 	if includePortService {
 		start := time.Now()
-		var err error
-		result.PortServices, err = detectPortServices(log)
-		result.PortStatus = "complete"
-		if err != nil {
-			result.PortStatus = "failed"
-		}
-		risky := 0
-		for _, p := range result.GetPortServices() {
-			if p.GetRisky() {
-				risky++
+		if ctx.Err() != nil {
+			result.PortStatus = "timeout"
+			log.Warn("弱口令检测已耗尽预算，跳过端口扫描", "err", ctx.Err())
+		} else {
+			var err error
+			result.PortServices, err = detectPortServices(ctx, log)
+			result.PortStatus = "complete"
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					result.PortStatus = "timeout"
+				} else {
+					result.PortStatus = "failed"
+				}
 			}
+			risky := 0
+			for _, p := range result.GetPortServices() {
+				if p.GetRisky() {
+					risky++
+				}
+			}
+			log.Info("端口服务识别完成", "ports", len(result.GetPortServices()), "risky", risky,
+				"status", result.PortStatus, "duration", time.Since(start).Round(time.Millisecond))
 		}
-		log.Info("端口服务识别完成", "ports", len(result.GetPortServices()), "risky", risky,
-			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	return result
 }
@@ -98,7 +108,10 @@ var fingerprints = map[uint32]string{
 }
 
 // detectPortServices 监听端口 → 服务指纹 + 高危标记（与 collector 端口采集同源，被动识别）
-func detectPortServices(log *slog.Logger) ([]*pb.PortServiceFinding, error) {
+func detectPortServices(ctx context.Context, log *slog.Logger) ([]*pb.PortServiceFinding, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	conns, err := net.Connections("inet")
 	if err != nil {
 		log.Error("端口识别失败", "err", err)
@@ -108,6 +121,10 @@ func detectPortServices(log *slog.Logger) ([]*pb.PortServiceFinding, error) {
 	nameCache := map[int32]string{}
 	var findings []*pb.PortServiceFinding
 	for _, c := range conns {
+		if ctx.Err() != nil {
+			log.Warn("端口扫描超时中断", "err", ctx.Err(), "findings", len(findings))
+			return findings, ctx.Err()
+		}
 		isUDP := c.Type == syscall.SOCK_DGRAM
 		if !isUDP && c.Status != "LISTEN" {
 			continue

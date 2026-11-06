@@ -1,19 +1,43 @@
 package guard
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
 
-	"github.com/alinksec/alinksec-agent/internal/config"
-	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"alinksec-agent/internal/config"
+	pb "alinksec-agent/proto"
 )
 
+var edrRegexCache sync.Map
+
+func getOrCompileRegex(pattern string) (*regexp.Regexp, error) {
+	if val, ok := edrRegexCache.Load(pattern); ok {
+		if re, ok := val.(*regexp.Regexp); ok {
+			return re, nil
+		}
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	edrRegexCache.Store(pattern, re)
+	return re, nil
+}
+
 const processScanInterval = 2 * time.Second
+
+type processIdentity struct {
+	created int64
+	exe     string
+}
 
 type processObservation struct {
 	pid     int32
@@ -37,18 +61,20 @@ func (g *Guard) scanProcesses(evaluate bool) {
 		g.log.Debug("进程规则枚举失败", "err", err)
 		return
 	}
-	current := make(map[int32]int64, len(procs))
+	current := make(map[int32]processIdentity, len(procs))
 	for _, proc := range procs {
 		created, err := proc.CreateTime()
 		if err != nil {
 			continue
 		}
-		current[proc.Pid] = created
+		exe, _ := proc.Exe()
+		ident := processIdentity{created: created, exe: exe}
+		current[proc.Pid] = ident
 		g.mu.Lock()
 		previous, seen := g.processSeen[proc.Pid]
-		g.processSeen[proc.Pid] = created
+		g.processSeen[proc.Pid] = ident
 		g.mu.Unlock()
-		if seen && previous == created {
+		if seen && previous.created == created && previous.exe == exe {
 			continue
 		}
 		g.evaluateProcessWithActions(proc, created, evaluate)
@@ -117,19 +143,37 @@ func processRuleMatches(rule config.ProcessRule, obs processObservation) bool {
 	if !rule.Enabled || rule.ID == "" || (rule.Match.ExeRegex == "" && rule.Match.CmdlineRegex == "") {
 		return false
 	}
+	// R40: 校验目标平台适用性
+	if len(rule.Match.Platforms) > 0 {
+		matchedPlatform := false
+		for _, p := range rule.Match.Platforms {
+			if strings.EqualFold(strings.TrimSpace(p), runtime.GOOS) {
+				matchedPlatform = true
+				break
+			}
+		}
+		if !matchedPlatform {
+			return false
+		}
+	}
 	for _, excluded := range rule.Match.UserExclude {
 		if strings.EqualFold(strings.TrimSpace(excluded), obs.user) {
 			return false
 		}
 	}
 	if rule.Match.ExeRegex != "" {
-		re, err := regexp.Compile(rule.Match.ExeRegex)
-		if err != nil || !re.MatchString(obs.exe) {
+		re, err := getOrCompileRegex(rule.Match.ExeRegex)
+		if err != nil {
+			return false
+		}
+		// R40: 路径分隔符归一化，支持 Windows 反斜杠与 Linux 正斜杠双向匹配
+		normalizedExe := filepath.ToSlash(obs.exe)
+		if !re.MatchString(obs.exe) && !re.MatchString(normalizedExe) {
 			return false
 		}
 	}
 	if rule.Match.CmdlineRegex != "" {
-		re, err := regexp.Compile(rule.Match.CmdlineRegex)
+		re, err := getOrCompileRegex(rule.Match.CmdlineRegex)
 		if err != nil || !re.MatchString(obs.cmdline) {
 			return false
 		}

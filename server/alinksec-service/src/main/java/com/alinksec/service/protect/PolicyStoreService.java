@@ -95,7 +95,7 @@ public class PolicyStoreService {
         jdbc.update("""
                 INSERT INTO t_protect_rule(rule_id, name, type, match, actions, severity, enabled, built_in)
                 VALUES ('PR-0007', '常见渗透与 C2 工具特征', 'process',
-                  '{"platforms":["linux","windows"],"exe_regex":"(?i)(^|/)(fscan|mimikatz|bloodhound|sliver-client|havoc)$"}',
+                  '{"platforms":["linux","windows"],"exe_regex":"(?i)(?:^|[/\\\\])(?:fscan|mimikatz|bloodhound|sliver-client|havoc)(?:\\\\.exe)?$"}',
                   '["alert"]', 4, true, true)
                 ON CONFLICT(rule_id) DO NOTHING
                 """);
@@ -176,15 +176,24 @@ public class PolicyStoreService {
                 copyTextArray(match, "exclude_exes", decoy.putArray("exclude_exes"));
                 decoy.put("response", responseOf((String) decoyRule.get("actions")));
             }
-            if (rateRule != null && DatabaseDialect.readBoolean(rateRule.get("enabled"))) {
-                JsonNode match = MAPPER.readTree((String) rateRule.get("match"));
-                if (match.hasNonNull("rate_window_sec")) decoy.put("rate_window_sec", match.get("rate_window_sec").asInt());
-                if (match.hasNonNull("rate_threshold")) decoy.put("rate_threshold", match.get("rate_threshold").asInt());
-                if (match.hasNonNull("ext_change_ratio")) decoy.put("ext_change_ratio", match.get("ext_change_ratio").asDouble());
+            // R27: 独立速率规则启停、参数与响应动作下发
+            if (rateRule != null) {
+                boolean rateEnabled = DatabaseDialect.readBoolean(rateRule.get("enabled"));
+                decoy.put("rate_enabled", rateEnabled);
+                if (rateEnabled) {
+                    JsonNode match = MAPPER.readTree((String) rateRule.get("match"));
+                    if (match.hasNonNull("rate_window_sec")) decoy.put("rate_window_sec", match.get("rate_window_sec").asInt());
+                    if (match.hasNonNull("rate_threshold")) decoy.put("rate_threshold", match.get("rate_threshold").asInt());
+                    if (match.hasNonNull("ext_change_ratio")) decoy.put("ext_change_ratio", match.get("ext_change_ratio").asDouble());
+                    copyTextArray(match, "watch_trees", decoy.putArray("watch_trees"));
+                    if (rateRule.get("actions") != null) {
+                        decoy.put("rate_response", responseOf((String) rateRule.get("actions")));
+                    }
+                }
             }
         } catch (Exception e) {
-            log.warn("策略快照聚合失败，使用空快照", e);
-            return "{}";
+            log.error("策略快照聚合失败，拒绝发布损坏空快照", e);
+            throw new IllegalStateException("策略快照聚合失败，拒绝发布损坏空快照: " + e.getMessage(), e);
         }
         root.set("decoy", decoy);
         ArrayNode process = root.putArray("process_rules");
@@ -233,8 +242,22 @@ public class PolicyStoreService {
         }
     }
 
-    /** 即时推送在线 Agent（status=1 在线；PENDING 兜底：上线心跳版本落后自动触发） */
+    /** 即时推送在线 Agent（status=1 在线；事务提交后执行，避免未提交状态提前泄露） */
     private void pushToOnlineAgents() {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            doPushToOnlineAgents();
+                        }
+                    });
+        } else {
+            doPushToOnlineAgents();
+        }
+    }
+
+    private void doPushToOnlineAgents() {
         var snapshot=jdbc.queryForMap("SELECT version,CAST(content AS TEXT) AS content FROM t_policy_state WHERE id=1");
         String version="v"+snapshot.get("version");
         String content=snapshot.get("content").toString();

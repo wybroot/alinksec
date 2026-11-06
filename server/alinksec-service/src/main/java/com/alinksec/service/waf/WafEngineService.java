@@ -43,7 +43,7 @@ public class WafEngineService {
     private volatile String mode = "DetectionOnly"; // DetectionOnly or On
     private volatile int anomalyThreshold = 5;
     private volatile int paranoiaLevel = 1; // PL 1-4
-    private volatile String crsVersion = "v4.1.0-coraza";
+    private volatile String crsVersion = "v4.1.0-crs-compat";
 
     // 规则条目
     public record CrsRule(int ruleId, String category, int pl, int severityScore, Pattern pattern, String description) {}
@@ -69,7 +69,7 @@ public class WafEngineService {
                 Pattern.compile("(\\bunion\\b.{1,40}\\bselect\\b|\\bselect\\b.{1,40}\\bfrom\\b|\\binsert\\b.{1,40}\\binto\\b|\\bdrop\\b.{1,40}\\btable\\b)", Pattern.CASE_INSENSITIVE),
                 "检测到典型 SQL 注入语法模式 (UNION/SELECT/DROP)"));
         rules.add(new CrsRule(942110, "sql_injection", 1, 5,
-                Pattern.compile("('\\s*or\\s*['\"\\d]=\\s*['\"\\d]|--\\s*$|/\\*.*\\*/)", Pattern.CASE_INSENSITIVE),
+                Pattern.compile("('\\s*or\\s*['\"\\d]=\\s*['\"\\d]|(?:--|#|/\\*).*?(?:$|\\r|\\n)|/\\*.*\\*/)", Pattern.CASE_INSENSITIVE),
                 "检测到 SQL 永真条件或注释闭合攻击 (OR 1=1 / Comment Truncation)"));
         rules.add(new CrsRule(942120, "sql_injection", 1, 5,
                 Pattern.compile("(\\bwaitfor\\b\\s+\\bdelay\\b|\\bsleep\\s*\\(\\s*\\d+\\s*\\)|\\bbenchmark\\s*\\()", Pattern.CASE_INSENSITIVE),
@@ -98,6 +98,48 @@ public class WafEngineService {
         rules.add(new CrsRule(930110, "path_traversal", 1, 5,
                 Pattern.compile("(/etc/(?:passwd|shadow|hosts|sudoers)|c:[\\\\/]windows[\\\\/]win\\.ini)", Pattern.CASE_INSENSITIVE),
                 "检测到系统敏感凭据文件读取特征"));
+
+        // === Paranoia Level 2 (PL 2) 规则 ===
+        // REQUEST-942 (SQLi PL2): 盲注函数与高级关键字探测
+        rules.add(new CrsRule(942200, "sql_injection", 2, 4,
+                Pattern.compile("(\\b(?:benchmark|sleep|pg_sleep|char|hex|unhex|load_file|extractvalue|updatexml)\\s*\\()", Pattern.CASE_INSENSITIVE),
+                "检测到高级 SQL 盲注与内建函数执行特征 (PL2)"));
+        // REQUEST-941 (XSS PL2): 危险 HTML 标签与无引号事件处理器
+        rules.add(new CrsRule(941200, "xss", 2, 4,
+                Pattern.compile("(<\\s*(?:iframe|object|embed|applet|meta|link|style|base)\\b|\\bon[a-z]{3,15}\\s*=\\s*[^\"'\\s>]+)", Pattern.CASE_INSENSITIVE),
+                "检测到高危内嵌标签与无引号事件处理器 (PL2)"));
+        // REQUEST-932 (RCE PL2): 编码命令与 Windows 执行特征
+        rules.add(new CrsRule(932200, "rce", 2, 4,
+                Pattern.compile("(\\bpowershell(?:\\.exe)?\\s+.*-(?:enc|encodedcommand|command|ec)\\b|\\bcmd(?:\\.exe)?\\s+/c\\b|/dev/tcp/\\d)", Pattern.CASE_INSENSITIVE),
+                "检测到高危命令解释器参数与反弹 Shell 管道 (PL2)"));
+        // REQUEST-930 (Path Traversal PL2): 双重与复合路径穿越
+        rules.add(new CrsRule(930200, "path_traversal", 2, 4,
+                Pattern.compile("(?:\\.\\.[\\\\/]{1,2}){2,}|%252e%252e|%c0%ae%c0%ae", Pattern.CASE_INSENSITIVE),
+                "检测到深层或多重编码目录穿越攻击 (PL2)"));
+
+        // === Paranoia Level 3 (PL 3) 规则 ===
+        // REQUEST-942 (SQLi PL3): 特殊系统变量与内联注释
+        rules.add(new CrsRule(942300, "sql_injection", 3, 3,
+                Pattern.compile("(/\\*!\\d+.*?\\*/|@@(?:version|datadir)|\\b(?:user|version|database|schema)\\s*\\(\\s*\\))", Pattern.CASE_INSENSITIVE),
+                "检测到数据库内联注释注入与元数据探测 (PL3)"));
+        // REQUEST-941 (XSS PL3): 动态样式与非标脚本属性
+        rules.add(new CrsRule(941300, "xss", 3, 3,
+                Pattern.compile("(\\bexpression\\s*\\(|vbscript:|behavior\\s*:|-moz-binding)", Pattern.CASE_INSENSITIVE),
+                "检测到特定浏览器动态样式表达式执行 (PL3)"));
+        // REQUEST-920 (Protocol PL3): 空字节截断攻击
+        rules.add(new CrsRule(920100, "protocol_violation", 3, 4,
+                Pattern.compile("(?:%00|\\\\x00|\\x00)", Pattern.CASE_INSENSITIVE),
+                "检测到空字节注入与文件名截断攻击 (PL3)"));
+
+        // === Paranoia Level 4 (PL 4) 规则 ===
+        // REQUEST-942 (SQLi PL4): 非闭合单双引号与重音符号探测
+        rules.add(new CrsRule(942400, "sql_injection", 4, 2,
+                Pattern.compile("([\"'`][^\"'`]*?(?:--|#|/\\*)|['\"][\\s]*[=><])", Pattern.CASE_INSENSITIVE),
+                "检测到严格模式下单引号探测与语法异常 (PL4)"));
+        // REQUEST-932 (RCE PL4): Unix 特殊环境变量混淆
+        rules.add(new CrsRule(932400, "rce", 4, 3,
+                Pattern.compile("(\\$(?:\\{IFS\\}|IFS)|\\$\\{[a-zA-Z_][a-zA-Z0-9_]*\\})", Pattern.CASE_INSENSITIVE),
+                "检测到 Shell 环境变量替换与字符规避特征 (PL4)"));
     }
 
     private void loadPersistedConfig() {
@@ -123,6 +165,14 @@ public class WafEngineService {
      * 核心检测入口：检查 HTTP 请求要素（URI、参数、Header、Body 摘要）
      */
     public InspectionResult inspect(String method, String uri, String query, String userAgent, String bodySnippet, String clientIp) {
+        return inspect(method, uri, query, userAgent, bodySnippet, clientIp, Collections.emptyMap(), Collections.emptyMap());
+    }
+
+    /**
+     * 核心检测入口（支持 Header 与 Cookie 深度检测）
+     */
+    public InspectionResult inspect(String method, String uri, String query, String userAgent, String bodySnippet, String clientIp,
+                                   Map<String, String> headers, Map<String, String> cookies) {
         if (!enabled) {
             return new InspectionResult(false, 0, "", "", "WAF disabled");
         }
@@ -136,6 +186,7 @@ public class WafEngineService {
         String triggeredCategory = "";
         String triggeredRule = "";
         String reason = "";
+        boolean bodyTruncated = bodySnippet != null && bodySnippet.length() >= 16384;
 
         // 解码与待检文本组装
         String decodedQuery = safeDecode(query);
@@ -174,30 +225,77 @@ public class WafEngineService {
             }
         }
 
+        // 3. Cookie 规则评估
+        if (cookies != null && !cookies.isEmpty()) {
+            for (var entry : cookies.entrySet()) {
+                String cName = entry.getKey();
+                String cVal = safeDecode(entry.getValue());
+                String cookieText = cName + "=" + cVal;
+                for (CrsRule r : rules) {
+                    if ("scanner".equals(r.category) || disabledRules.contains(r.ruleId) || r.pl > paranoiaLevel) {
+                        continue;
+                    }
+                    Matcher m = r.pattern.matcher(cookieText);
+                    if (m.find()) {
+                        score += r.severityScore;
+                        if (triggeredCategory.isEmpty()) {
+                            triggeredCategory = r.category;
+                            triggeredRule = "CRS-" + r.ruleId;
+                            reason = r.description + " [Cookie " + cName + " 匹配: " + m.group() + "]";
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Header 深度规则评估
+        if (headers != null && !headers.isEmpty()) {
+            for (var entry : headers.entrySet()) {
+                String hName = entry.getKey();
+                String hVal = safeDecode(entry.getValue());
+                for (CrsRule r : rules) {
+                    if ("scanner".equals(r.category) || disabledRules.contains(r.ruleId) || r.pl > paranoiaLevel) {
+                        continue;
+                    }
+                    Matcher m = r.pattern.matcher(hVal);
+                    if (m.find()) {
+                        score += r.severityScore;
+                        if (triggeredCategory.isEmpty()) {
+                            triggeredCategory = r.category;
+                            triggeredRule = "CRS-" + r.ruleId;
+                            reason = r.description + " [Header " + hName + " 匹配: " + m.group() + "]";
+                        }
+                    }
+                }
+            }
+        }
+
         boolean shouldBlock = "On".equalsIgnoreCase(mode) && (score >= anomalyThreshold);
 
         // 只要产生评分（命中规则），即上报平台安全告警（E01）
         if (score > 0 && !triggeredCategory.isEmpty()) {
-            reportWafAlert(clientIp, uri, method, triggeredCategory, triggeredRule, score, reason, shouldBlock ? "blocked" : "detected");
+            reportWafAlert(clientIp, uri, method, triggeredCategory, triggeredRule, score, reason, shouldBlock ? "blocked" : "detected", bodyTruncated);
         }
 
         return new InspectionResult(shouldBlock, score, triggeredCategory, triggeredRule, reason);
     }
 
-    private void reportWafAlert(String clientIp, String uri, String method, String category, String ruleId, int score, String reason, String action) {
+    private void reportWafAlert(String clientIp, String uri, String method, String category, String ruleId, int score, String reason, String action, boolean bodyTruncated) {
         try {
-            Map<String, Object> detail = Map.of(
-                    "source_ip", clientIp != null ? clientIp : "127.0.0.1",
-                    "request_uri", uri,
-                    "method", method,
-                    "category", category,
-                    "rule_id", ruleId,
-                    "anomaly_score", score,
-                    "threshold", anomalyThreshold,
-                    "mode", mode,
-                    "reason", reason,
-                    "crs_version", crsVersion
-            );
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("source_ip", clientIp != null ? clientIp : "127.0.0.1");
+            detail.put("request_uri", uri);
+            detail.put("method", method);
+            detail.put("category", category);
+            detail.put("rule_id", ruleId);
+            detail.put("anomaly_score", score);
+            detail.put("threshold", anomalyThreshold);
+            detail.put("mode", mode);
+            detail.put("reason", reason);
+            detail.put("crs_version", crsVersion);
+            if (bodyTruncated) {
+                detail.put("body_truncated", true);
+            }
             RptSecurityEvent event = RptSecurityEvent.newBuilder()
                     .setRuleId(ruleId)
                     .setRuleName("OWASP CRS " + category + " 检出")
@@ -237,11 +335,19 @@ public class WafEngineService {
 
     private String safeDecode(String input) {
         if (input == null || input.isBlank()) return "";
-        try {
-            return URLDecoder.decode(input, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return input;
+        String current = input;
+        // R60: 多重 URL 编码递归解包规范化 (最多 3 轮防止畸形死循环)
+        for (int i = 0; i < 3; i++) {
+            if (!current.contains("%")) break;
+            try {
+                String decoded = URLDecoder.decode(current, StandardCharsets.UTF_8);
+                if (decoded.equals(current)) break;
+                current = decoded;
+            } catch (Exception e) {
+                break;
+            }
         }
+        return current;
     }
 
     /* ==================== 管理接口与配置热切换 (E02, E04) ==================== */

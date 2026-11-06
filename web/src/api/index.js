@@ -347,12 +347,12 @@ export async function fetchScreen() {
   // 基线维度雷达（pass_rate 0~100）
   const radar = (categories || []).map((c) => ({ category: c.category, rate: Number(c.pass_rate) }))
 
-  // 风险主机 TOP（alert_count 归一化为 0~100 风险分）
-  const maxAlert = Math.max(1, ...(topHosts || []).map((h) => Number(h.alert_count || 0)))
+  // 风险主机 TOP（R20: 引入最小基数上限，防止单条告警被误归一化为 100% 极高风险）
+  const maxAlert = Math.max(10, ...(topHosts || []).map((h) => Number(h.alert_count || 0)))
   const riskHosts = (topHosts || []).map((h) => ({
     hostname: h.hostname || h.agent_id,
     alerts: Number(h.alert_count || 0),
-    risk: Math.round((Number(h.alert_count || 0) / maxAlert) * 100),
+    risk: Math.min(100, Math.round((Number(h.alert_count || 0) / maxAlert) * 100)),
   }))
 
   // 实时事件流
@@ -444,7 +444,7 @@ export async function fetchHosts({ keyword = '', status = '', groupId = '', page
       ...state,
       protect: !!h.protect_enabled,
       hb: fmtAgo(h.last_heartbeat),
-      risk: Number(h.alert_count || 0),
+      risk: Math.min(100, (Number(h.alert_count || 0) * 10) + (Number(h.risky_account_count || 0) * 20)),
       alertCount: Number(h.alert_count || 0),
       lastEvt: h.last_event || '',
       softwareCount: h.software_count,
@@ -698,6 +698,10 @@ export const fetchPackageAssessments = (agentId, page = 1, keyword = '') => get(
 
 export async function fetchWeakpwds() {
   return get('/api/vuln/weakpwds?page=1&size=100')
+}
+
+export async function updateWeakpwdStatus(id, status) {
+  return put(`/api/vuln/weakpwds/${encodeURIComponent(id)}/status`, { status })
 }
 
 export async function fetchVulnTasks() {
@@ -996,3 +1000,22 @@ export const fetchUpgradeBatch = (id, page = 1) => get(`/api/upgrade/batches/${e
 
 export const fetchAlertResponses = (id, page = 1) => get(`/api/alerts/${id}/responses?page=${page}`)
 export const createAlertResponse = (id, action) => post(`/api/alerts/${id}/responses`, { action })
+
+export const fetchWafStatus = () => get('/api/system/waf/status')
+export const updateWafConfig = data => post('/api/system/waf/config', data)
+
+export const fetchResponseRules = () => get('/api/protect/response-rules')
+export const createResponseRule = data => post('/api/protect/response-rules', data)
+export const updateResponseRule = (id, data) => put(`/api/protect/response-rules/${id}`, data)
+export const deleteResponseRule = id => del(`/api/protect/response-rules/${id}`)
+export const approveResponseRule = id => post(`/api/protect/response-rules/${id}/approve`, {})
+export const fetchResponseRuleExecutions = (alertId, page = 1, pageSize = 20) => get(`/api/protect/response-rules/executions?alertId=${alertId}&page=${page}&pageSize=${pageSize}`)
+
+export const fetchUsers = () => get('/api/users')
+export const fetchRoles = () => get('/api/users/roles')
+export const createUser = data => post('/api/users', data)
+export const updateUser = (uid, data) => put(`/api/users/${uid}`, data)
+export const resetUserPassword = (uid, data) => post(`/api/users/${uid}/reset-password`, data)
+export const changePassword = data => post('/api/auth/change-password', data)
+
+

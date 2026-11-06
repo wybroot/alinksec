@@ -5,6 +5,7 @@
     <p>{{ report.scope.group }} · {{ report.scope.os }} · 生成于 {{ report.generatedAt }}</p>
     <p v-if="report.snapshotId">快照 {{ report.snapshotId }} · 生成账号 ID {{ report.createdBy }}</p>
     <p v-if="digest" class="report-digest">快照 SHA256：{{ digest }}</p>
+    <p v-if="report.scheduleCoalesced" class="report-coalesced" style="color: #b45309; font-size: 13px; margin: 4px 0;">⚠️ {{ report.coalescedNote }}</p>
     <section><h2>主机资产 · 生成时快照</h2><div class="report-metrics">
       <div v-for="[key, label] in assets" :key="key"><span>{{ label }}</span><strong>{{ report.assets[key] }}</strong></div>
     </div></section>

@@ -266,3 +266,34 @@ func TestSSHParsesCanonicalIPv6AndSyslogTimestamp(t *testing.T) {
 		t.Fatal("invalid IP accepted")
 	}
 }
+
+func TestSSHDualWriteDeduplication(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	m := newLoginMonitor(dir, slog.Default(), func(b loginBlock, block bool) error { return nil })
+	m.now = func() time.Time { return now }
+	m.setRules([]config.LoginRule{{
+		ID: "PR-0003", Name: "SSH",
+		Match: config.LoginMatch{FailureThreshold: 2, WindowSec: 300, SSHPorts: []int{22}},
+		Actions: []string{"alert"},
+	}})
+
+	line := &pb.LogLine{Ts: now.UnixMilli(), Content: now.Format(time.RFC3339) + " host sshd[123]: Failed password for root from 198.51.100.99 port 5555 ssh2"}
+	// First arrival from secure
+	events1 := m.observe("secure", []*pb.LogLine{line})
+	if len(events1) != 0 {
+		t.Fatalf("first failure should not trigger alert, got %d", len(events1))
+	}
+	// Duplicate arrival from auth.log with exact same content within 10s
+	events2 := m.observe("secure", []*pb.LogLine{line})
+	if len(events2) != 0 {
+		t.Fatalf("duplicate dual-written line triggered premature alert: got %d", len(events2))
+	}
+
+	// Distinct second failure with different port
+	line2 := &pb.LogLine{Ts: now.UnixMilli(), Content: now.Format(time.RFC3339) + " host sshd[124]: Failed password for root from 198.51.100.99 port 5556 ssh2"}
+	events3 := m.observe("secure", []*pb.LogLine{line2})
+	if len(events3) != 1 {
+		t.Fatalf("second distinct failure should trigger alert threshold 2, got %d", len(events3))
+	}
+}

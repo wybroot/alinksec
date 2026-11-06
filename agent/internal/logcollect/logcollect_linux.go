@@ -17,6 +17,11 @@ func (c *Collector) pollOnce() {
 	if c.auditExec {
 		c.tailFile("/var/log/audit/audit.log", "audit-exec")
 	}
+	if _, err := os.Stat("/var/log/nginx/modsec_audit.log"); err == nil {
+		c.tailFile("/var/log/nginx/modsec_audit.log", "modsec_audit")
+	} else if _, err := os.Stat("/var/log/modsec_audit.log"); err == nil {
+		c.tailFile("/var/log/modsec_audit.log", "modsec_audit")
+	}
 }
 func openLog(path string) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)

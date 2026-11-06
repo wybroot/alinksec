@@ -35,11 +35,25 @@ func (g *Guard) SetVirusRoots(roots []string, enabled func() bool) {
 
 // Read directories in small chunks; budget includes directories and rejected
 // entries so a tree of empty directories cannot evade the work limit.
-func virusSnapshot(root string, remaining *int, deadline time.Time) treeSnapshot {
+func virusSnapshot(root string, remaining *int, deadline time.Time) (treeSnapshot, snapshotMeta) {
+	start := time.Now()
 	snap := treeSnapshot{}
+	meta := snapshotMeta{}
 	var walk func(string, int)
 	walk = func(path string, depth int) {
-		if depth > snapMaxDepth || *remaining <= 0 || time.Now().After(deadline) {
+		if depth > snapMaxDepth {
+			meta.Truncated = true
+			meta.Reason = "max_depth_exceeded"
+			return
+		}
+		if *remaining <= 0 {
+			meta.Truncated = true
+			meta.Reason = "budget_exhausted"
+			return
+		}
+		if time.Now().After(deadline) {
+			meta.Truncated = true
+			meta.Reason = "deadline_exceeded"
 			return
 		}
 		*remaining--
@@ -68,9 +82,18 @@ func virusSnapshot(root string, remaining *int, deadline time.Time) treeSnapshot
 				break
 			}
 		}
+		if *remaining <= 0 {
+			meta.Truncated = true
+			meta.Reason = "budget_exhausted"
+		} else if time.Now().After(deadline) {
+			meta.Truncated = true
+			meta.Reason = "deadline_exceeded"
+		}
 	}
 	walk(root, 0)
-	return snap
+	meta.Entries = len(snap)
+	meta.Duration = time.Since(start)
+	return snap, meta
 }
 
 // virusSweep 窗口 diff 文件批量检查：Modified + Created（改名为新路径的加密产物也覆盖）

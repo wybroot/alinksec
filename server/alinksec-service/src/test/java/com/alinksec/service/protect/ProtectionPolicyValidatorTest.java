@@ -34,6 +34,25 @@ class ProtectionPolicyValidatorTest {
     }
 
     @Test
+    void validatesProcessDecoyAndRansomBehaviorRules() {
+        assertDoesNotThrow(() -> ProtectionPolicyValidator.validate("process",
+                Map.of("platforms", List.of("linux"), "exe_regex", "^/bin/nc$"), List.of("alert", "kill")));
+        assertDoesNotThrow(() -> ProtectionPolicyValidator.validate("decoy",
+                Map.of("dirs", List.of("/data/shared"), "count_per_dir", 3), List.of("alert")));
+        assertDoesNotThrow(() -> ProtectionPolicyValidator.validate("ransom_behavior",
+                Map.of("churn_threshold", 50, "window_sec", 60), List.of("alert", "isolate")));
+
+        assertThrows(IllegalArgumentException.class, () -> ProtectionPolicyValidator.validate("process",
+                Map.of("exe_regex", "[unclosed"), List.of("alert")));
+        assertThrows(IllegalArgumentException.class, () -> ProtectionPolicyValidator.validate("process",
+                Map.of(), List.of("alert")));
+        assertThrows(IllegalArgumentException.class, () -> ProtectionPolicyValidator.validate("decoy",
+                Map.of("dirs", List.of("relative/path")), List.of("alert")));
+        assertThrows(IllegalArgumentException.class, () -> ProtectionPolicyValidator.validate("ransom_behavior",
+                Map.of("churn_threshold", 1), List.of("alert")));
+    }
+
+    @Test
     void invalidRuleUpdateDoesNotWriteOrRebuildThePolicy() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         PolicyStoreService policy = mock(PolicyStoreService.class);

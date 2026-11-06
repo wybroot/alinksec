@@ -124,7 +124,7 @@ public class AssetService {
                         """, agentId, c.getContainerId(), c.getName(), c.getImage(), c.getImageId(), c.getOrchestrator(),
                         c.getNamespace(), c.getStatus(), c.getCreatedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getCreatedAt())) : null,
                         c.getStartedAt() > 0 ? Timestamp.from(Instant.ofEpochMilli(c.getStartedAt())) : null,
-                        JsonUtils.write(c.getPortsList()), JsonUtils.write(c.getLabelsMap()), c.getRisky(), JsonUtils.write(c.getRiskReasonsList()));
+                        JsonUtils.write(c.getPortsList()), JsonUtils.write(redactLabels(c.getLabelsMap())), c.getRisky(), JsonUtils.write(c.getRiskReasonsList()));
                 for (String reason : c.getRiskReasonsList()) {
                     securityEventService.onEvent(agentId, RptSecurityEvent.newBuilder()
                             .setRuleId("CTR-" + reason.toUpperCase())
@@ -260,6 +260,30 @@ public class AssetService {
             }
         }
         return true;
+    }
+
+    public static Map<String, String> redactLabels(Map<String, String> labels) {
+        if (labels == null || labels.isEmpty()) return Map.of();
+        Map<String, String> clean = new java.util.LinkedHashMap<>();
+        for (var entry : labels.entrySet()) {
+            String k = entry.getKey();
+            String v = entry.getValue();
+            if (isSensitiveKey(k)) {
+                clean.put(k, "***");
+            } else {
+                clean.put(k, v);
+            }
+        }
+        return clean;
+    }
+
+    private static boolean isSensitiveKey(String key) {
+        if (key == null) return false;
+        String lower = key.toLowerCase().replace("-", "").replace("_", "");
+        for (String s : List.of("password", "passwd", "pwd", "token", "secret", "apikey", "accesskey", "clientsecret", "privatekey", "auth", "bearer", "credential")) {
+            if (lower.contains(s)) return true;
+        }
+        return false;
     }
 
     private static String bounded(String value, int limit) {

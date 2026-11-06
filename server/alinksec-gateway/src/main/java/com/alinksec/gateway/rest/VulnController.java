@@ -77,6 +77,19 @@ public class VulnController {
         return ApiResult.ok(query.weakpwdFindings(page, Math.min(size, 100)));
     }
 
+    @PutMapping("/weakpwds/{id}/status")
+    public ApiResult<?> updateWeakpwdStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        if (body == null || !body.containsKey("status")) {
+            return ApiResult.fail(40001, "状态参数缺失");
+        }
+        int status = ((Number) body.get("status")).intValue();
+        if (status < 0 || status > 3) {
+            return ApiResult.fail(40002, "状态值无效 (允许 0:新增, 1:已确认, 2:已忽略, 3:已修复)");
+        }
+        int updated = query.updateWeakpwdStatus(id, status);
+        return ApiResult.ok(Map.of("updated", updated));
+    }
+
     @GetMapping("/scan-coverage")
     public ApiResult<Map<String,Object>> scanCoverage(@RequestParam(required=false) String agentId,
         @RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int size) {

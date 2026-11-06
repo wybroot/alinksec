@@ -20,7 +20,9 @@ public final class JwtUtil {
 
     public static String sign(String secret, Map<String, Object> claims, long ttlSeconds) {
         Map<String, Object> payload = new HashMap<>(claims);
-        payload.put("exp", System.currentTimeMillis() / 1000 + ttlSeconds);
+        long now = System.currentTimeMillis() / 1000;
+        payload.put("iat", now);
+        payload.put("exp", now + ttlSeconds);
         String encodedHeader = b64(HEADER.getBytes(StandardCharsets.UTF_8));
         String encodedPayload = b64(JsonUtils.write(payload).getBytes(StandardCharsets.UTF_8));
         String signingInput = encodedHeader + "." + encodedPayload;
