@@ -240,5 +240,13 @@ class ReviewDefectsIntegrationTest {
         var query=new AlertQueryService(jdbc);var page=query.list(0,4,agent,null,1,100);assertEquals(1L,page.get("total"));
         assertThrows(IllegalArgumentException.class,()->query.list(null,null,agent,null,1,-1));assertThrows(IllegalArgumentException.class,()->query.list(null,null,agent,null,Integer.MAX_VALUE,100));
         assertEquals(5,((List<?>)query.list(null,null,agent,null,2,100).get("list")).size());
+        // A burst may share one timestamp. Paging must still have a total order.
+        jdbc.update("UPDATE t_alert SET last_time=CURRENT_TIMESTAMP WHERE agent_id=?",agent);
+        var first=(List<?>)query.list(null,null,agent,null,1,100).get("list");
+        var second=(List<?>)query.list(null,null,agent,null,2,100).get("list");
+        var seen=java.util.stream.Stream.concat(first.stream(),second.stream())
+                .map(row->((Number)((Map<?,?>)row).get("id")).longValue()).toList();
+        assertEquals(jdbc.queryForList("SELECT id FROM t_alert WHERE agent_id=? ORDER BY id DESC",Long.class,agent),seen);
+        assertEquals(105,new HashSet<>(seen).size());
     }
 }

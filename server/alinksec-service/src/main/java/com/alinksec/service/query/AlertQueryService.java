@@ -51,7 +51,7 @@ public class AlertQueryService {
                        CAST(t.detail AS TEXT) AS detail, t.action_taken, t.status, t.count,
                        t.first_time, t.last_time, t.handle_remark, t.handled_at
                 FROM v_alert_severity t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond
-                + " ORDER BY t.last_time DESC LIMIT ? OFFSET ?", size, com.alinksec.common.web.PageBounds.offset(page,size));
+                + " ORDER BY t.last_time DESC, t.id DESC LIMIT ? OFFSET ?", size, com.alinksec.common.web.PageBounds.offset(page,size));
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
