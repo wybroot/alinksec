@@ -35,7 +35,7 @@ class ReviewDefectsIntegrationTest {
         config.setMaximumPoolSize(1);config.setMinimumIdle(1);pool=new HikariDataSource(config);
         if(!pg)new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor().postProcessAfterInitialization(pool,"dataSource");
         jdbc=new JdbcTemplate(pool);tx=new TransactionTemplate(new DataSourceTransactionManager(pool));
-        var props=new AlinkSecProperties();props.getDatabase().setType(pg?"postgres":"sqlite");dialect=new DatabaseDialect(props);users=new UserService(jdbc);
+        var props=new AlinkSecProperties();props.getDatabase().setType(pg?"postgres":"sqlite");dialect=new DatabaseDialect(props);users=new UserService(jdbc,tx.getTransactionManager());
         username="review-"+UUID.randomUUID().toString().substring(0,8);agent=username;
         jdbc.update("INSERT INTO t_agent(agent_id,hostname,ip,os_type,status) VALUES(?,?,?,1,1)",agent,agent,"192.0.2.40");
         String hash=new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode(PASSWORD);
@@ -53,9 +53,9 @@ class ReviewDefectsIntegrationTest {
     @Test void liveRoleLogoutDisableAndRestartRevokePrivileges()throws Exception {
         String view=token("viewer");assertEquals(403,access(view,"POST","/api/protect/rules",users).getStatus());
         assertEquals(403,access(view,"GET","/api/users",users).getStatus());
-        users.logout(sid(view),viewer);assertEquals(401,access(view,"GET","/api/hosts",new UserService(jdbc)).getStatus());
+        users.logout(sid(view),viewer);assertEquals(401,access(view,"GET","/api/hosts",new UserService(jdbc,tx.getTransactionManager())).getStatus());
         String old=token("admin");jdbc.update("UPDATE t_user SET role_id=(SELECT id FROM t_role WHERE name='viewer') WHERE id=?",admin);
-        assertEquals(401,access(old,"POST","/api/protect/rules",new UserService(jdbc)).getStatus());
+        assertEquals(401,access(old,"POST","/api/protect/rules",new UserService(jdbc,tx.getTransactionManager())).getStatus());
         String active=token("viewer");jdbc.update("UPDATE t_user SET status=0 WHERE id=?",viewer);assertEquals(401,access(active,"GET","/api/hosts",users).getStatus());
         assertEquals(401,access(JwtUtil.sign(SECRET,Map.of("uid",admin,"role","admin"),3600),"GET","/api/hosts",users).getStatus());
     }
@@ -63,9 +63,44 @@ class ReviewDefectsIntegrationTest {
         String first=token("viewer"),second=token("viewer");assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->users.changePassword(viewer,"wrong",PASSWORD+"new")));
         tx.executeWithoutResult(s->users.changePassword(viewer,PASSWORD,PASSWORD+"new"));
         assertTrue(users.login(username+"viewer",PASSWORD,"").isEmpty());assertTrue(users.login(username+"viewer",PASSWORD+"new","").isPresent());
-        assertEquals(401,access(first,"GET","/api/hosts",new UserService(jdbc)).getStatus());assertEquals(401,access(second,"GET","/api/hosts",users).getStatus());
+        assertEquals(401,access(first,"GET","/api/hosts",new UserService(jdbc,tx.getTransactionManager())).getStatus());assertEquals(401,access(second,"GET","/api/hosts",users).getStatus());
         assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->users.updateUser(admin,"viewer",0,null,admin)));
         tx.executeWithoutResult(s->users.updateUser(viewer,"operator",1,PASSWORD+"reset",admin));assertTrue(users.login(username+"viewer",PASSWORD+"reset","").isPresent());
+    }
+    @Test void auditWriteFailureDoesNotRollbackAccountChangesOrSessionRevocation(){
+        String first=token("viewer");
+        var failingSql=spy(jdbc);
+        // Execute a real constraint violation as the application role, without
+        // DDL permissions or mocks that conceal PostgreSQL's aborted transaction.
+        doAnswer(i->jdbc.update("INSERT INTO t_audit_log(method,path,status) VALUES(NULL,?,200)",username))
+                .when(failingSql).update(contains("INSERT INTO t_audit_log"),any(Object[].class));
+        var failingAudit=new UserService(failingSql,tx.getTransactionManager());
+        assertTrue(failingAudit.login(username+"viewer",PASSWORD,"127.0.0.1").isPresent());
+        assertTrue(failingAudit.login(username+"viewer","wrong-password","127.0.0.1").isEmpty());
+        String password=PASSWORD+"changed";
+        assertDoesNotThrow(()->tx.executeWithoutResult(s->failingAudit.changePassword(viewer,PASSWORD,password)));
+        boolean passwordChanged=new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().matches(password,jdbc.queryForObject("SELECT password_hash FROM t_user WHERE id=?",String.class,viewer));
+        boolean passwordSessionsRevoked=jdbc.queryForObject("SELECT count(*) FROM t_user_session WHERE session_id=?",Integer.class,sid(first))==0;
+        assertDoesNotThrow(()->tx.executeWithoutResult(s->failingAudit.createUser(username+"created","test",PASSWORD,"viewer",admin)));
+        long created=jdbc.queryForObject("SELECT count(*) FROM t_user WHERE username=?",Long.class,username+"created");
+        var profile=users.login(username+"viewer",passwordChanged?password:PASSWORD,"").orElseThrow();
+        String second=tx.execute(s->users.createSession(profile,3600));
+        assertDoesNotThrow(()->tx.executeWithoutResult(s->failingAudit.updateUser(viewer,"operator",0,null,admin)));
+        var account=jdbc.queryForMap("SELECT u.status,r.name AS role FROM t_user u JOIN t_role r ON r.id=u.role_id WHERE u.id=?",viewer);
+        assertAll(()->assertTrue(passwordChanged,"password change silently rolled back"),
+                ()->assertTrue(passwordSessionsRevoked,"old password sessions survived"),
+                ()->assertEquals(1L,created,"creation silently rolled back"),
+                ()->assertEquals(0,((Number)account.get("status")).intValue()),
+                ()->assertEquals("operator",account.get("role")),
+                ()->assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_user_session WHERE session_id=?",Integer.class,second)));
+    }
+    @Test void successfulAccountMutationsRetainAuditMetadata(){
+        tx.executeWithoutResult(s->users.createUser(username+"created","test",PASSWORD,"viewer",admin));
+        tx.executeWithoutResult(s->users.changePassword(viewer,PASSWORD,PASSWORD+"changed"));
+        tx.executeWithoutResult(s->users.updateUser(viewer,"operator",0,null,admin));
+        var actions=jdbc.queryForList("SELECT method FROM t_audit_log WHERE uid IN (?,?)",String.class,admin,viewer);
+        assertEquals(Set.of("user_created","password_changed","user_updated"),new HashSet<>(actions));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_audit_log WHERE uid=? AND method='password_changed' AND path='/api/auth/password' AND body_digest IS NULL",Integer.class,viewer));
     }
     RptAssetSnapshot ports(long sequence,AssetCollection.Status state,int port){
         var b=RptAssetSnapshot.newBuilder().setSequence(sequence).addCollected("ports").addCollections(AssetCollection.newBuilder().setCategory("ports").setStatus(state).setCollectedAt(1000-sequence));

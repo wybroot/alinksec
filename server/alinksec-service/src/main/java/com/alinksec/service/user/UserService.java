@@ -1,8 +1,12 @@
 package com.alinksec.service.user;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Map;
@@ -15,11 +19,18 @@ import java.util.Optional;
 @Service
 public class UserService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(UserService.class);
     private final JdbcTemplate jdbc;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+    private final TransactionTemplate auditTransaction;
 
-    public UserService(JdbcTemplate jdbc) {
+    public UserService(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
+        this.auditTransaction = new TransactionTemplate(transactions);
+        // A failed statement aborts a PostgreSQL transaction until rollback.
+        // A savepoint keeps best-effort audit failures out of account changes,
+        // without borrowing another connection or blocking a SQLite writer.
+        this.auditTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
 
     /** 账号不存在与密码错误统一返回 empty，避免用户名枚举 */
@@ -109,13 +120,15 @@ public class UserService {
 
     public void audit(Long userId, String username, String action, String sourceIp) {
         try {
-            jdbc.update("""
+            auditTransaction.executeWithoutResult(status -> jdbc.update("""
                     INSERT INTO t_audit_log (uid, username, method, path, source_ip, status, cost_ms)
                     VALUES (?, ?, ?, ?, ?, ?, 0)
                     """, userId, username, action, action.startsWith("login")?"/api/auth/login":action.equals("logout")?"/api/auth/logout":action.equals("password_changed")?"/api/auth/password":"/api/users", sourceIp,
-                    "login_failed".equals(action) ? 401 : 200);
-        } catch (Exception ignored) {
-            // 审计失败不阻断登录主链路
+                    "login_failed".equals(action) ? 401 : 200));
+        } catch (DataAccessException failure) {
+            // The failed audit has rolled back. Transaction/savepoint failures
+            // must propagate rather than report a successful account mutation.
+            log.warn("账号审计写入失败: action={} uid={}", action, userId);
         }
     }
 

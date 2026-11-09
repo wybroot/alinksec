@@ -373,7 +373,7 @@ class SqliteDatabaseIntegrationTest {
                 INSERT INTO t_user(username, password_hash, real_name, role_id, status)
                 VALUES ('sqlite-admin', ?, 'SQLite Admin', 1, 1)
                 """, hash);
-        UserService users = new UserService(jdbc);
+        UserService users = new UserService(jdbc,new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
         assertTrue(users.login("sqlite-admin", "sqlite-test-password", "127.0.0.1").isPresent());
         assertFalse(users.login("sqlite-admin", "wrong-password", "127.0.0.1").isPresent());
         assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM t_audit_log", Integer.class));
