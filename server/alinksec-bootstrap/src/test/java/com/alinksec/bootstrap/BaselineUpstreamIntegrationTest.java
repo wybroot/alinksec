@@ -83,7 +83,7 @@ class BaselineUpstreamIntegrationTest {
         service=new BaselineUpstreamService(jdbc,manager,props,downloader,baseline,scap);service.initialize();
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
         mvc=MockMvcBuilders.standaloneSetup(new BaselineUpstreamController(service),new BaselineController(null,null,baseline,null))
-                .setControllerAdvice(new RestExceptionHandler()).addInterceptors(new JwtAuthInterceptor(holder)).build();
+                .setControllerAdvice(new RestExceptionHandler()).addInterceptors(com.alinksec.bootstrap.TestJwt.interceptor(holder)).build();
     }
     @AfterEach void close()throws Exception{
         if(artifactContinue!=null)artifactContinue.countDown();
@@ -112,7 +112,7 @@ class BaselineUpstreamIntegrationTest {
     }
     Map<String,Object> await(String id)throws Exception{for(int n=0;n<3000;n++){var rows=jdbc.queryForList("SELECT * FROM t_baseline_upstream_attempt WHERE id=?",id);if(rows.size()==1&&!List.of("running","queued").contains(rows.get(0).get("outcome")))return rows.get(0);Thread.sleep(10);}fail("upstream worker did not finish");return null;}
     List<Map<String,Object>> releases(){return jdbc.queryForList("SELECT * FROM t_baseline_upstream_release WHERE source_id=? ORDER BY kind,version",sourceId);}
-    String token(String role){return JwtUtil.sign(SECRET,Map.of("uid",7,"username","fixture","role",role),3600);}
+    String token(String role){return com.alinksec.bootstrap.TestJwt.token(SECRET,Map.of("uid",7,"username","fixture","role",role),3600);}
     JsonNode response(MvcResult result)throws Exception{return JsonUtils.mapper().readTree(result.getResponse().getContentAsByteArray());}
     @Test void importsBothOperatingSystemsAndScapIdempotentlyWithRawEvidence()throws Exception{
         byte[] linux=baseline("1",1),windows=baseline("2",2),scapBytes=renameScap(new ScapIntegrationTest().content("1"));

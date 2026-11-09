@@ -98,7 +98,7 @@ public class WindowsUpdateService implements CommandLifecycleListener {
                 SELECT a.agent_id,a.hostname,a.ip,a.status AS agent_status,a.windows_update_contract,s.scan_id,s.status,s.error,s.created_at,s.received_at,s.snapshot
                 FROM t_agent a LEFT JOIN t_windows_update_scan s ON s.scan_id=a.windows_update_scan_id
                 WHERE a.os_type=2 AND a.deleted=false ORDER BY a.hostname,a.agent_id LIMIT ? OFFSET ?
-                """,size,(page-1)*size);
+                """,size,com.alinksec.common.web.PageBounds.offset(page,size));
         for(var item:items) {
             String state="unknown";
             if(((Number)item.get("windows_update_contract")).intValue()!=1) state="unsupported";

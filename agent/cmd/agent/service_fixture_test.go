@@ -166,6 +166,20 @@ func (s *scmFixture) Channel(stream pb.AgentChannel_ChannelServer) error {
 			case <-stream.Context().Done():
 				return
 			}
+			// This protocol fixture acknowledges captured reports; durable
+			// database commit/replay is exercised by the server integration suite.
+			if report.GetReliable() || report.GetHeartbeat().GetReportReceiptContract() == 1 {
+				id := report.ReportId
+				if report.GetHeartbeat() != nil {
+					id = ""
+				}
+				receipt := &pb.Command{Payload: &pb.Command_ReportReceipt{ReportReceipt: &pb.CmdReportReceipt{ReportId: id}}}
+				select {
+				case connection.commands <- receipt:
+				case <-stream.Context().Done():
+					return
+				}
+			}
 		}
 	}()
 	for {

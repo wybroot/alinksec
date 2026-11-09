@@ -15,6 +15,7 @@ public class IsolationLeaseService {
     public IsolationLeaseService(JdbcTemplate jdbc) { this.jdbc=jdbc; }
 
     /** The gateway holds the connection identity lock through reconciliation and echo. */
+    @org.springframework.transaction.annotation.Transactional
     public boolean observe(String agent,RptIsolationState pulse) {
         if (pulse.getPhase().equals("unknown")) {
             jdbc.update("""
@@ -68,7 +69,11 @@ public class IsolationLeaseService {
                         AND COALESCE(isolation_command_id,'')=? AND isolation_status=?
                     """,state,remaining,message,pulse.getLeaseId(),pulse.getGeneration(),pulse.getRevision(),pulse.getDeadline(),
                     pulse.getAutomatic(),System.currentTimeMillis(),agent,generation,revision,lease,pending,number(row,"isolation_status"));
-            if(updated==1) return pulse.getPhase().equals("active") && !pulse.getNonce().isEmpty();
+            if(updated==1) {
+                if(pulse.getPhase().equals("active") && pulse.getConfirmed() && pulse.getAutomatic())
+                    jdbc.update("INSERT INTO t_automatic_response(agent_id,report_id,action,received_at) VALUES(?,?,?,?) ON CONFLICT(agent_id,report_id) DO NOTHING",agent,"isolation-"+pulse.getLeaseId(),"isolated",System.currentTimeMillis());
+                return pulse.getPhase().equals("active") && !pulse.getNonce().isEmpty();
+            }
         }
         return false;
     }

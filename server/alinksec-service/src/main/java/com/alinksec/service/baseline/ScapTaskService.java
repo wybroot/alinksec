@@ -73,7 +73,7 @@ public class ScapTaskService {
 
     public Map<String,Object> list(int page,int size) {
         if (page<1||page>100000||size<1||size>100) throw new IllegalArgumentException("分页参数无效");
-        var rows=jdbc.queryForList("SELECT id,name,package_id,state,test_mode,created_by,created_at,finished_at FROM t_scap_task ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",size,(page-1)*size);
+        var rows=jdbc.queryForList("SELECT id,name,package_id,state,test_mode,created_by,created_at,finished_at FROM t_scap_task ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",size,com.alinksec.common.web.PageBounds.offset(page,size));
         for (var row:rows) row.put("hosts",jdbc.queryForList("SELECT agent_id,state,issue FROM t_scap_task_agent WHERE task_id=? ORDER BY agent_id",row.get("id")));
         return Map.of("items",rows,"total",jdbc.queryForObject("SELECT count(*) FROM t_scap_task",Long.class),"page",page,"page_size",size);
     }

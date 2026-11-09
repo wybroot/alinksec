@@ -146,6 +146,27 @@ class AgentChannelSecurityIntegrationTest {
         String id = commands.dispatch(agent, builder, null);
         assertEquals(id, stream.nextCommand().getCmdId()); return id;
     }
+    @Test void durableReceiptFollowsCommitAndLostReplyReplaysWithoutDuplicate()throws Exception{
+        var agent=enroll();var first=connect(agent);
+        first.requests.onNext(report(agent.getAgentId()).setHeartbeat(RptHeartbeat.newBuilder().setReportReceiptContract(1)).build());
+        Command capability=nextReceipt(first,"");assertTrue(capability.hasReportReceipt());assertEquals("",capability.getReportReceipt().getReportId());
+        var event=com.alinksec.proto.RptSecurityEvent.newBuilder().setRuleId("GENERIC-RELIABLE").setRuleName("reliable event").setType("process").setSeverity(com.alinksec.proto.Severity.SEV_HIGH).setActionTaken("alert_only");
+        var saved=report(agent.getAgentId()).setReliable(true).setSecurityEvent(event).build();
+        first.requests.onNext(saved);
+        await(()->jdbc.queryForObject("SELECT count(*) FROM t_alert WHERE agent_id=? AND rule_id='GENERIC-RELIABLE'",Integer.class,agent.getAgentId())==1);
+        // The client disconnects without consuming its already committed receipt.
+        first.requests.onCompleted();first.finished.get(5,TimeUnit.SECONDS);
+        var next=connect(agent);next.requests.onNext(report(agent.getAgentId()).setHeartbeat(RptHeartbeat.newBuilder().setReportReceiptContract(1)).build());assertTrue(nextReceipt(next,"").hasReportReceipt());
+        next.requests.onNext(saved);var receipt=nextReceipt(next,saved.getReportId());assertTrue(receipt.hasReportReceipt());assertEquals(saved.getReportId(),receipt.getReportReceipt().getReportId());
+        assertEquals(1,jdbc.queryForObject("SELECT count FROM t_alert WHERE agent_id=? AND rule_id='GENERIC-RELIABLE'",Integer.class,agent.getAgentId()));
+    }
+
+    private Command nextReceipt(Stream stream,String id)throws Exception{
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(System.nanoTime()<deadline){var response=stream.received.poll(Math.max(1,deadline-System.nanoTime()),TimeUnit.NANOSECONDS);assertNotNull(response,"Expected durable receipt");if(response.hasReportReceipt() && response.getReportReceipt().getReportId().equals(id))return response;}
+        throw new AssertionError("No matching durable receipt");
+    }
+
     private final List<String> agentIds = new ArrayList<>();
     private final List<String> enrollTokens = new ArrayList<>();
     private final List<String> reportIds = new ArrayList<>();

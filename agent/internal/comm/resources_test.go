@@ -61,7 +61,11 @@ func TestResourcePressureKeepsControlAndOfflineEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stream := &upgradeStream{}
+	stream := &upgradeStream{onSend: func(r *pb.Report) {
+		if r.GetHeartbeat() != nil {
+			c.receiptsSupported.Store(true)
+		}
+	}}
 	sctx, stop := context.WithTimeout(context.Background(), 160*time.Millisecond)
 	defer stop()
 	_ = c.sendLoop(sctx, stream, make(chan *pb.Report), 0)
@@ -74,8 +78,8 @@ func TestResourcePressureKeepsControlAndOfflineEvents(t *testing.T) {
 	if heartbeats < 2 {
 		t.Fatal("resource pressure stopped heartbeat")
 	}
-	if remaining, err := c.queue.PopAll(); err != nil || len(remaining) != 2 {
-		t.Fatalf("backlog was lost or drained without yielding: %d %v", len(remaining), err)
+	if remaining, err := c.queue.PopAll(); err != nil || len(remaining) != 3 {
+		t.Fatalf("unacknowledged backlog was removed: %d %v", len(remaining), err)
 	}
 	c.collectPaused.Store(true)
 	if c.buildHeartbeat().GetHeartbeat() == nil {
@@ -90,7 +94,11 @@ func TestQueueCompactionContentionDoesNotBlockHeartbeat(t *testing.T) {
 	c := reportTestClient(t)
 	c.state = &State{AgentID: "resource-test"}
 	c.cfg = &config.Config{HeartbeatInterval: 10 * time.Millisecond, DrainRatePerSec: 1}
-	stream := &upgradeStream{}
+	stream := &upgradeStream{onSend: func(r *pb.Report) {
+		if r.GetHeartbeat() != nil {
+			c.receiptsSupported.Store(true)
+		}
+	}}
 	c.queue.mu.Lock()
 	defer c.queue.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 130*time.Millisecond)

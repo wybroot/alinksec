@@ -55,6 +55,7 @@ public class DashboardQueryService {
 
         // 告警
         Map<String, Object> alerts = new HashMap<>();
+        alerts.put("automated30d",jdbc.queryForObject("SELECT count(*) FROM t_automatic_response WHERE received_at>=?",Long.class,System.currentTimeMillis()-java.time.Duration.ofDays(30).toMillis()));
         alerts.put("open", jdbc.queryForObject(
                 "SELECT count(*) FROM t_alert WHERE status IN (0,1)", Long.class));
         alerts.put("criticalOpen", jdbc.queryForObject(

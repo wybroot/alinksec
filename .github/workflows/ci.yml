@@ -635,6 +635,9 @@ jobs:
       - name: Capture native Linux missing-writer response evidence
         working-directory: agent
         run: go test -v -count=1 -timeout=3m -run '^TestNativeLinuxRansomAttribution$' ./internal/guard
+      - name: Check alert pagination, account management and password errors
+        working-directory: web
+        run: node test/review-defects-browser.mjs
       - name: Check Linux missing-writer evidence with the actual native Agent event
         working-directory: web
         run: node test/linux-ransom-browser.mjs
@@ -874,6 +877,7 @@ jobs:
             .tmp/weakpwd-browser
             .tmp/windows-login-browser
             .tmp/windows-ransom-browser
+            .tmp/review-defects-browser
             .tmp/linux-ransom-browser
             .tmp/linux-ransom-native
             .tmp/windows-update-browser
@@ -1448,8 +1452,8 @@ jobs:
           ALINKSEC_MIGRATIONS_DIR: deploy/migrations
       - name: Verify migration and least-privilege application role
         run: |
-          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "36"
-          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "102"
+          test "$(psql -Atc "SELECT count(*) FROM t_schema_migration")" = "37"
+          test "$(psql -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")" = "106"
           test "$(psql -Atc "SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='alinksec_app'")" = "t"
           test "$(psql -Atc "SELECT has_schema_privilege('alinksec_app', 'public', 'CREATE')")" = "f"
           test "$(psql -Atc "SELECT has_table_privilege('alinksec_app', 'public.t_agent', 'SELECT,INSERT,UPDATE,DELETE')")" = "t"
@@ -1484,7 +1488,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
+          -Dtest=ReviewDefectsIntegrationTest,AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:

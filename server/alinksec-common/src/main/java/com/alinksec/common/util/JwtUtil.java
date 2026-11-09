@@ -44,7 +44,7 @@ public final class JwtUtil {
         Map<String, Object> claims = JsonUtils.read(
                 new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8), Map.class);
         Object exp = claims.get("exp");
-        if (exp instanceof Number n && n.longValue() < System.currentTimeMillis() / 1000) {
+        if (!(exp instanceof Number n) || n.longValue() <= System.currentTimeMillis() / 1000) {
             throw new IllegalArgumentException("token 已过期");
         }
         return claims;

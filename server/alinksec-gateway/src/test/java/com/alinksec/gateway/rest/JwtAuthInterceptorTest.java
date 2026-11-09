@@ -154,15 +154,20 @@ class JwtAuthInterceptorTest {
         }
     }
 
+    @Test void invalidPaginationIsRejectedForReadonlyUsers()throws Exception{
+        for(String[] values:new String[][]{{"1","-1"},{"0","20"},{"1","0"},{"2147483647","100"},{"1","2147483648"}}){
+            var req=request("viewer");req.setRequestURI("/api/alerts");req.setParameter("page",values[0]);req.setParameter("size",values[1]);var response=new MockHttpServletResponse();assertFalse(interceptor().preHandle(req,response,new Object()));assertEquals(400,response.getStatus());
+        }
+    }
     private static JwtAuthInterceptor interceptor() {
         JwtSecretHolder secret = mock(JwtSecretHolder.class);
         when(secret.secret()).thenReturn("test-signing-secret");
-        return new JwtAuthInterceptor(secret);
+        return com.alinksec.gateway.rest.TestJwt.interceptor(secret);
     }
 
     private static MockHttpServletRequest request(String role) {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/audit/logs");
-        String token = JwtUtil.sign("test-signing-secret",
+        String token = com.alinksec.gateway.rest.TestJwt.token("test-signing-secret",
                 Map.of("uid", 7L, "username", role, "role", role), 3600);
         request.addHeader("Authorization", "Bearer " + token);
         return request;

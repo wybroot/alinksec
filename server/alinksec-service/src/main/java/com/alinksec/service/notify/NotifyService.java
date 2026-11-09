@@ -43,14 +43,8 @@ public class NotifyService {
     }
 
     /** Eligibility and payload come from the committed source-aware alert. */
-    @Async
-    public void onAlert(String alertNo) {
-        var alerts = jdbc.queryForList("SELECT * FROM v_alert_severity WHERE alert_no=?", alertNo);
-        if (alerts.isEmpty()) return;
-        var alert = alerts.getFirst();
-        int severity = ((Number) alert.get("severity_level")).intValue();
-        // Snapshot eligible channels before delivery. A later channel change only
-        // affects future alerts, rather than unexpectedly replaying old alerts.
+    /** Called in the alert transaction, so a crash after commit retains delivery work. */
+    public void enqueue(String alertNo,int severity) {
         jdbc.update("""
                 INSERT INTO t_alert_notify_delivery (alert_no, channel_id)
                 SELECT ?, id FROM t_notify_channel
@@ -60,6 +54,18 @@ public class NotifyService {
                   )
                 ON CONFLICT (alert_no, channel_id) DO NOTHING
                 """, alertNo, severity, alertNo);
+    }
+
+    @Async
+    public void onAlert(String alertNo) {
+        var alerts = jdbc.queryForList("SELECT * FROM v_alert_severity WHERE alert_no=?", alertNo);
+        if (alerts.isEmpty()) return;
+        var alert = alerts.getFirst();
+        if("host_offline".equals(alert.get("event_type")) && ((Number)alert.get("status")).intValue()>=2)return;
+        int severity = ((Number) alert.get("severity_level")).intValue();
+        // Snapshot eligible channels before delivery. A later channel change only
+        // affects future alerts, rather than unexpectedly replaying old alerts.
+        enqueue(alertNo,severity);
 
         Map<String, Object> details = new HashMap<>();
         details.put("alertNo", alertNo);

@@ -51,3 +51,7 @@
 CI 新增 Linux 双架构的具名原生回归、真实 Agent 告警回放浏览器检查及证据留存；既有 Windows 归因测试保留。新增 Java 测试保存未归因告警并生成 Linux API 响应 fixture，已有 Windows 浏览器用例同时核对 Linux 降级展示。
 
 后续须在精确提交上完成完整 CI：Linux amd64／arm64、Windows 安全响应、SQLite／PostgreSQL 持久化、生产前端构建及桌面／移动浏览器。通过后再按工作流 review、创建 PR、合并并验收精确 merged-main CI。本项保持 VERIFY，不能以本地绿灯直接关闭或称为生产可用。
+
+## 后续集中修复
+
+2026-11-09 用户随后授权补齐全部已确认 REV 缺陷，并统一留待远端验证。当前分支为 `fix/review-defects`，新增传输与页面改动、批次本地回归见 [87 号记录](87-复查缺陷集中修复.md)。本文原提交、测试计数与历史失败保留原范围；Linux 可信写入者能力仍由 BKL-055 跟踪。

@@ -11,9 +11,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class HealthController {
     private final com.alinksec.service.cluster.ClusterRuntime cluster;
     public HealthController(com.alinksec.service.cluster.ClusterRuntime cluster) {this.cluster=cluster;}
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.cluster.BusinessReadiness business;
     @GetMapping("/api/ready")
     public org.springframework.http.ResponseEntity<?> ready() {
-        boolean ready=cluster.ready();
+        boolean ready=cluster.ready() && business.ready();
         return org.springframework.http.ResponseEntity.status(ready?200:503)
                 .header("Cache-Control","no-store").body(java.util.Map.of("ready",ready));
     }

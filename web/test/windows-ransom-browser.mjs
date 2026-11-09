@@ -46,7 +46,7 @@ try{
  await expect(page.getByRole('button',{name:'查看归因证据'})).toHaveCount(6)
  await page.getByRole('tab',{name:'全部',exact:true}).click()
  checks.push('database-alert-read-failure-can-retry')
- await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(0)
+ await expect(page.getByRole('button',{name:'标记已处理',exact:true})).toHaveCount(0)
  await expect(page.getByRole('button',{name:'忽略',exact:true})).toHaveCount(0)
  const seen=new Set(),births=new Set()
  for(let i=0;i<6;i++){
@@ -85,7 +85,7 @@ try{
  await page.screenshot({path:root+'/evidence-mobile.png',animations:'disabled'})
  checks.push('viewer-evidence-readonly-and-mobile-dialog-fits')
  await context.close();await browser.close();({context,page}=await launch('operator'))
- await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(6)
+ await expect(page.getByRole('button',{name:'标记已处理',exact:true})).toHaveCount(6)
  await page.getByRole('button',{name:'查看归因证据'}).first().click();await expect(page.getByTestId('ransom-attribution')).toBeVisible()
  checks.push('operator-can-review-same-retained-evidence')
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])

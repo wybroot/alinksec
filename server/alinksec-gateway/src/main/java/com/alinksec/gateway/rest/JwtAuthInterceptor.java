@@ -30,17 +30,19 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             "/api/reports/schedules", "/api/upgrade/packages", "/api/hosts/enroll-token", "/api/notify", "/api/libraries/sources", "/api/libraries/selection", "/api/baseline/upstreams", "/api/baseline/packages", "/api/baseline/scap/packages");
 
     /** Sensitive configuration, including webhook URLs that may carry bot tokens. */
-    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/notify", "/api/audit", "/api/evidence", "/api/cluster", "/api/logs");
+    private static final List<String> ADMIN_ONLY_PREFIXES = List.of("/api/users", "/api/notify", "/api/audit", "/api/evidence", "/api/cluster", "/api/logs");
 
     /** 自服务写操作：任何已认证角色可执行（登出需落审计，不应被写拦截误伤） */
-    private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout");
+    private static final Set<String> SELF_WRITE_URIS = Set.of("/api/auth/logout","/api/auth/password");
 
     /** 平台管理类写后缀：仅 admin（卸载口令布防） */
-    private static final List<String> ADMIN_WRITE_SUFFIXES = List.of("/uninstall-token", "/compliance/review");
+    private static final List<String> ADMIN_WRITE_SUFFIXES = List.of("/uninstall-token", "/compliance/review", "/maintenance");
 
     private final JwtSecretHolder secretHolder;
+    private final com.alinksec.service.user.UserService users;
 
-    public JwtAuthInterceptor(JwtSecretHolder secretHolder) {
+    public JwtAuthInterceptor(JwtSecretHolder secretHolder,com.alinksec.service.user.UserService users) {
+        this.users=users;
         this.secretHolder = secretHolder;
     }
 
@@ -57,13 +59,16 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         }
         try {
             Map<String, Object> claims = JwtUtil.verify(secretHolder.secret(), auth.substring(7));
-            String role = String.valueOf(claims.get("role"));
+            if(!(claims.get("uid") instanceof Number uid) || !(claims.get("sid") instanceof String sid))throw new IllegalArgumentException("会话已失效，请重新登录");
+            var profile=users.authenticate(uid.longValue(),sid);
+            String role=profile.roleName();
+            request.setAttribute("sid",sid);
             // Static URI segments can be encoded or carry matrix parameters.
             // Authorize the controller pattern that Spring actually matched.
             Object matched = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
             String path = matched == null ? request.getRequestURI() : matched.toString();
             request.setAttribute("uid", ((Number) claims.get("uid")).longValue());
-            request.setAttribute("username", claims.get("username"));
+            request.setAttribute("username", profile.username());
             request.setAttribute("role", role);
             if (ADMIN_ONLY_PREFIXES.stream().anyMatch(path::startsWith)
                     && !"admin".equals(role)) {
@@ -78,6 +83,16 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
                         "viewer".equals(role) ? "只读角色无写权限" : "该操作需要管理员权限");
                 return false;
             }
+            try {
+                for(String parameter:List.of("page","size","pageSize","limit")) {
+                    String value=request.getParameter(parameter);
+                    if(value!=null && (Long.parseLong(value)<1 || Long.parseLong(value)>Integer.MAX_VALUE))throw new IllegalArgumentException("无效分页参数");
+                }
+                if(request.getParameter("page")!=null) {
+                    String size=request.getParameter("size");if(size==null)size=request.getParameter("pageSize");
+                    com.alinksec.common.web.PageBounds.offset(Integer.parseInt(request.getParameter("page")),size==null?1000:Math.min(1000,Integer.parseInt(size)));
+                }
+            }catch(IllegalArgumentException invalid){reject(response,HttpStatus.BAD_REQUEST,10001,"无效分页参数");return false;}
             return true;
         } catch (IllegalArgumentException e) {
             reject(response, HttpStatus.UNAUTHORIZED, 40100, e.getMessage());

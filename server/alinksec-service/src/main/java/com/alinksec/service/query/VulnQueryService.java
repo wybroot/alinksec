@@ -50,7 +50,7 @@ public class VulnQueryService {
                 "SELECT count(*) FROM t_vuln_finding f" + cond, Long.class, args.toArray());
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
-        pageArgs.add((page - 1) * size);
+        pageArgs.add(com.alinksec.common.web.PageBounds.offset(page,size));
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT f.id, f.task_id, f.agent_id, a.hostname, f.cve_id, c.title, f.software,
                        f.installed_version, f.fixed_version, f.severity, f.cvss,
@@ -95,7 +95,7 @@ public class VulnQueryService {
                 FROM t_weakpwd_finding w LEFT JOIN t_agent a ON a.agent_id = w.agent_id
                 WHERE w.status IN (0,1)
                 ORDER BY w.created_at DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                """, size, com.alinksec.common.web.PageBounds.offset(page,size));
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -107,7 +107,7 @@ public class VulnQueryService {
         String condition=agentId==null || agentId.isBlank()?"":" WHERE m.agent_id=?";
         var args=new ArrayList<Object>();if(!condition.isEmpty())args.add(agentId);
         long total=jdbc.queryForObject("SELECT count(*) FROM t_scan_task_agent m JOIN t_scan_task t ON t.id=m.task_id"+condition,Long.class,args.toArray());
-        args.add(size);args.add((page-1)*size);
+        args.add(size);args.add(com.alinksec.common.web.PageBounds.offset(page,size));
         var rows=jdbc.queryForList("SELECT m.*,a.hostname,t.task_no,t.created_at,t.type FROM t_scan_task_agent m JOIN t_scan_task t ON t.id=m.task_id LEFT JOIN t_agent a ON a.agent_id=m.agent_id"+condition+" ORDER BY t.id DESC,m.agent_id LIMIT ? OFFSET ?",args.toArray());
         for(var row:rows) {
             String evidence=String.valueOf(row.get("evidence"));
@@ -146,7 +146,7 @@ public class VulnQueryService {
                 "SELECT count(*) FROM t_port_finding p" + cond, Long.class, args.toArray());
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
-        pageArgs.add((page - 1) * size);
+        pageArgs.add(com.alinksec.common.web.PageBounds.offset(page,size));
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT p.id, p.task_id, p.agent_id, a.hostname, p.port, p.protocol, p.process,
                        p.service, p.risky, p.risky_reason, p.created_at
@@ -166,7 +166,7 @@ public class VulnQueryService {
                 SELECT id, task_no, name, type, CAST(scope AS TEXT) AS scope, status, progress,
                        started_at, finished_at, created_at
                 FROM t_scan_task ORDER BY created_at DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                """, size, com.alinksec.common.web.PageBounds.offset(page,size));
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -219,7 +219,7 @@ public class VulnQueryService {
         var args = new ArrayList<Object>();
         if (agentId != null && !agentId.isBlank()) { condition += " AND a.agent_id=?"; args.add(agentId.trim()); }
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_agent a" + condition,Long.class,args.toArray());
-        args.add(size); args.add((page-1)*size);
+        args.add(size); args.add(com.alinksec.common.web.PageBounds.offset(page,size));
         var rows = jdbc.queryForList("""
                 SELECT a.agent_id,a.hostname,a.distro_id,a.distro_version,a.os_type,a.os_version,
                   a.software_collection_status,a.software_collection_error,a.software_identity_error,
@@ -241,7 +241,7 @@ public class VulnQueryService {
         var args = new ArrayList<Object>(); args.add(agentId);
         if (keyword != null && !keyword.isBlank()) { condition += " AND LOWER(software) LIKE LOWER(?)"; args.add("%"+keyword.trim()+"%"); }
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_vuln_package_assessment"+condition,Long.class,args.toArray());
-        args.add(size); args.add((page-1)*size);
+        args.add(size); args.add(com.alinksec.common.web.PageBounds.offset(page,size));
         var rows = jdbc.queryForList("SELECT software,installed_version,source,architecture,status,affected_cves,not_affected_cves,unknown_cves,evidence FROM t_vuln_package_assessment"
                 +condition+" ORDER BY software,source,architecture,installed_version LIMIT ? OFFSET ?",args.toArray());
         return Map.of("host",hosts.get(0),"list",rows,"total",total == null ? 0 : total,"limitation",host.get("limitation"));

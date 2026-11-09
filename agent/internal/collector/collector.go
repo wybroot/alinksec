@@ -47,10 +47,12 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 	snap := &pb.RptAssetSnapshot{}
 	for _, t := range selectedTasks(names) {
 		snap.Collected = append(snap.Collected, t.name)
+		collectionStatus(snap, t.name, pb.AssetCollection_COMPLETE, "")
 		start := time.Now()
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					collectionStatus(snap, t.name, pb.AssetCollection_FAILED, "collector_panic")
 					if t.name == "software" {
 						snap.Software = nil
 						snap.SoftwareInventory = &pb.SoftwareInventory{Status: pb.SoftwareInventory_FAILED, Error: "collector_panic"}
@@ -64,6 +66,16 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 				t.fn(snap)
 			}
 		}()
+		if t.name == "software" && snap.SoftwareInventory != nil {
+			status := pb.AssetCollection_COMPLETE
+			if snap.SoftwareInventory.Status == pb.SoftwareInventory_FAILED {
+				status = pb.AssetCollection_FAILED
+			}
+			if snap.SoftwareInventory.Status == pb.SoftwareInventory_UNSUPPORTED {
+				status = pb.AssetCollection_UNSUPPORTED
+			}
+			collectionStatus(snap, t.name, status, snap.SoftwareInventory.Error)
+		}
 		log.Info("采集完成",
 			"collector", t.name,
 			"software", len(snap.GetSoftware()),
@@ -74,6 +86,27 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	return snap
+}
+
+// ValidNames rejects an unsupported targeted request instead of emitting an
+// empty legacy-looking snapshot that could clear unrelated assets.
+func ValidNames(names []string) bool {
+	if len(names) > len(tasks) {
+		return false
+	}
+	for _, name := range names {
+		known := false
+		for _, task := range tasks {
+			if strings.TrimSpace(name) == task.name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return false
+		}
+	}
+	return true
 }
 
 func selectedTasks(names []string) []task {
@@ -96,8 +129,9 @@ func selectedTasks(names []string) []task {
 // collectPorts 采集监听端口：TCP 仅 LISTEN；UDP 为本地绑定（无状态语义）。
 // pid → 进程名做会话内缓存，避免对同一 pid 反复查询。
 func collectPorts(snap *pb.RptAssetSnapshot) {
-	conns, err := gnet.Connections("inet")
+	conns, err := listConnections("inet")
 	if err != nil {
+		collectionStatus(snap, "ports", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
 	nameCache := make(map[int32]string)
@@ -141,8 +175,9 @@ func procName(pid int32, cache map[int32]string) string {
 }
 
 func collectProcesses(snap *pb.RptAssetSnapshot) {
-	procs, err := process.Processes()
+	procs, err := listProcesses()
 	if err != nil {
+		collectionStatus(snap, "processes", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
 	for _, p := range procs {
@@ -192,13 +227,15 @@ func sensitiveArgumentKey(arg string) string {
 
 // collectDisks 采集物理文件系统容量（Linux 过滤 /proc /sys 等虚拟挂载）
 func collectDisks(snap *pb.RptAssetSnapshot) {
-	parts, err := disk.Partitions(false) // false = 仅物理文件系统
+	parts, err := listPartitions(false) // false = 仅物理文件系统
 	if err != nil {
+		collectionStatus(snap, "disks", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
 	for _, p := range parts {
 		u, err := disk.Usage(p.Mountpoint)
 		if err != nil || u.Total == 0 {
+			collectionStatus(snap, "disks", pb.AssetCollection_PARTIAL, "mount_unreadable")
 			continue
 		}
 		snap.Disks = append(snap.Disks, &pb.DiskInfo{
@@ -208,4 +245,20 @@ func collectDisks(snap *pb.RptAssetSnapshot) {
 			UsedBytes:  u.Used,
 		})
 	}
+}
+
+var listConnections = gnet.Connections
+var listProcesses = process.Processes
+var listPartitions = disk.Partitions
+
+func collectionStatus(snap *pb.RptAssetSnapshot, category string, status pb.AssetCollection_Status, reason string) {
+	for _, c := range snap.Collections {
+		if c.Category == category {
+			c.Status = status
+			c.Error = reason
+			c.CollectedAt = time.Now().UnixMilli()
+			return
+		}
+	}
+	snap.Collections = append(snap.Collections, &pb.AssetCollection{Category: category, Status: status, Error: reason, CollectedAt: time.Now().UnixMilli()})
 }

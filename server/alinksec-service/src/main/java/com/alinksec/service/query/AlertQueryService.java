@@ -21,8 +21,13 @@ public class AlertQueryService {
 
     public Map<String, Object> list(Integer status, Integer severity, String agentId,
                                     String eventType, int page, int size) {
+        return list(status,severity,agentId,eventType,page,size,null);
+    }
+    public Map<String,Object> list(Integer status,Integer severity,String agentId,String eventType,int page,int size,Integer maxSeverity) {
+        com.alinksec.common.web.PageBounds.offset(page,size);
         StringBuilder where = new StringBuilder(" WHERE 1=1");
-        if (status != null) {
+        if(status!=null && status==-1){where.append(" AND t.status IN (0,1)");}
+        else if (status != null) {
             where.append(" AND t.status = ").append(status);
         } else {
             where.append(" AND t.status <> 9"); // 默认排除已删除（如有）
@@ -30,6 +35,7 @@ public class AlertQueryService {
         if (severity != null) {
             where.append(" AND t.severity_level >= ").append(severity);
         }
+        if(maxSeverity!=null)where.append(" AND t.severity_level <= ").append(maxSeverity);
         if (agentId != null && !agentId.isBlank()) {
             where.append(" AND t.agent_id = '").append(agentId.replace("'", "''")).append("'");
         }
@@ -45,7 +51,7 @@ public class AlertQueryService {
                        CAST(t.detail AS TEXT) AS detail, t.action_taken, t.status, t.count,
                        t.first_time, t.last_time, t.handle_remark, t.handled_at
                 FROM v_alert_severity t LEFT JOIN t_agent a ON a.agent_id = t.agent_id""" + cond
-                + " ORDER BY t.last_time DESC LIMIT ? OFFSET ?", size, (page - 1) * size);
+                + " ORDER BY t.last_time DESC LIMIT ? OFFSET ?", size, com.alinksec.common.web.PageBounds.offset(page,size));
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);

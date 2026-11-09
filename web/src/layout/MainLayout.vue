@@ -35,7 +35,7 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item>个人设置</el-dropdown-item>
+                <el-dropdown-item @click="passwordOpen=true">修改密码</el-dropdown-item>
                 <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -48,12 +48,15 @@
       </main>
     </div>
   </div>
+  <PasswordDialog v-model="passwordOpen" />
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import PasswordDialog from '../components/PasswordDialog.vue'
+const passwordOpen=ref(false)
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { getUser, logout as apiLogout } from '../api'
 
 const route = useRoute()
@@ -67,7 +70,6 @@ const menus = router.getRoutes()
 
 const logout = async () => {
   try { await ElMessageBox.confirm('确定退出登录？', '提示', { type: 'warning' }) } catch { return }
-  await apiLogout()
-  router.push('/login')
+  try{await apiLogout();router.push('/login')}catch(e){ElMessage.error(e.message || '登出未完成，请重试')}
 }
 </script>

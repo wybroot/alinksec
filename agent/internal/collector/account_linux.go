@@ -25,9 +25,13 @@ var nologinShells = map[string]bool{
 func collectAccounts(snap *pb.RptAssetSnapshot) {
 	passwd, err := os.ReadFile("/etc/passwd")
 	if err != nil {
+		collectionStatus(snap, "accounts", pb.AssetCollection_FAILED, "account_read_failed")
 		return
 	}
-	shadow := loadShadow()
+	shadow, shadowErr := loadShadow()
+	if shadowErr != nil {
+		collectionStatus(snap, "accounts", pb.AssetCollection_PARTIAL, "shadow_unreadable")
+	}
 
 	for _, line := range strings.Split(string(passwd), "\n") {
 		f := strings.Split(line, ":")
@@ -49,23 +53,23 @@ func collectAccounts(snap *pb.RptAssetSnapshot) {
 		}
 
 		snap.Accounts = append(snap.Accounts, &pb.AccountInfo{
-			Name:        name,
-			Uid:         uint32(uid),
-			Gid:         uint32(gid),
-			Shell:       shell,
+			Name:         name,
+			Uid:          uint32(uid),
+			Gid:          uint32(gid),
+			Shell:        shell,
 			LoginEnabled: loginEnabled,
-			Risky:       risky,
-			RiskyReason: reason,
+			Risky:        risky,
+			RiskyReason:  reason,
 		})
 	}
 }
 
 // loadShadow 读取口令哈希字段：name → hash（"!" / "*" / "!!" 为锁定或无口令登录，非空口令风险）
-func loadShadow() map[string]string {
+func loadShadow() (map[string]string, error) {
 	m := map[string]string{}
 	data, err := os.ReadFile("/etc/shadow")
 	if err != nil {
-		return m
+		return m, err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		f := strings.Split(line, ":")
@@ -73,5 +77,5 @@ func loadShadow() map[string]string {
 			m[f[0]] = f[1]
 		}
 	}
-	return m
+	return m, nil
 }

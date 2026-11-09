@@ -46,20 +46,21 @@ import (
 
 // Client Agent 通信客户端：注册 + 主通道双向流
 type Client struct {
-	cfg           *config.Config
-	workDir       string
-	state         *State
-	queue         *OfflineQueue
-	dedup         *cmdDedup
-	log           *slog.Logger
-	configStore   *configguard.Store
-	resources     *resources.Governor
-	clamav        *clamav.Client
-	yara          *yara.Client
-	scap          *scap.Client
-	scapJournalMu sync.Mutex
-	evidenceMu    sync.Mutex
-	bulkBusy      atomic.Bool
+	receiptsSupported atomic.Bool
+	cfg               *config.Config
+	workDir           string
+	state             *State
+	queue             *OfflineQueue
+	dedup             *cmdDedup
+	log               *slog.Logger
+	configStore       *configguard.Store
+	resources         *resources.Governor
+	clamav            *clamav.Client
+	yara              *yara.Client
+	scap              *scap.Client
+	scapJournalMu     sync.Mutex
+	evidenceMu        sync.Mutex
+	bulkBusy          atomic.Bool
 
 	// 资产采集：collectTrigger 收集采集请求（空切片 = 全部），
 	// pendingReports 承接在线采集产物；断线期间业务上报直接落盘。
@@ -428,6 +429,13 @@ func (c *Client) runChannelOnce(ctx context.Context) error {
 				return
 			}
 			c.noteChannelActivity(generation, false)
+			if receipt := cmd.GetReportReceipt(); receipt != nil {
+				c.receiptsSupported.Store(true)
+				if receipt.GetReportId() != "" {
+					c.queue.Receipt(receipt.GetReportId())
+				}
+				continue
+			}
 			if receipt := cmd.GetWindowsUpdateReceipt(); receipt != nil {
 				windowsupdate.Receipt(c.workDir, receipt.GetRecords())
 				continue
@@ -490,6 +498,7 @@ func (c *Client) startReportSender(ctx context.Context, stream pb.AgentChannel_C
 
 // sendLoop 发送协程：心跳定时、离线队列补传、sendCh 消费
 func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelClient, sendCh <-chan *pb.Report, generation uint64) error {
+	receiptDeadline := time.Now().Add(10 * time.Second)
 	// The authenticated first report establishes this connection's capabilities
 	// before the server delivers queued upgrades. Backlog and result replay must
 	// never win a select race against this heartbeat.
@@ -513,6 +522,9 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-upgradeTick.C:
+			if !c.receiptsSupported.Load() && time.Now().After(receiptDeadline) {
+				return fmt.Errorf("server lacks durable report receipt contract; business backlog retained, upgrade server first")
+			}
 			if time.Since(lastEvidenceReplay) >= 15*time.Second {
 				if err := c.sendEvidenceResults(stream, generation, evidenceResults); err != nil {
 					return err
@@ -547,9 +559,17 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 			if !ok {
 				return nil
 			}
+			if !isTransient(r) && r.GetMetrics() == nil && !r.Reliable {
+				if !c.persistReport(r) {
+					continue
+				}
+				if r.GetAck() == nil {
+					continue
+				}
+			}
 			if err := c.sendReport(stream, r, generation); err != nil {
-				// 业务上报失败 → 进离线队列等待补传（心跳/ACK 丢弃，靠协议重推机制补偿）
-				if !isTransient(r) {
+				// Durable business reports remain on disk; transient reports can be rebuilt.
+				if !isTransient(r) && !r.Reliable {
 					if qerr := c.queue.Push(r); qerr != nil {
 						c.log.Error("离线队列写入失败", "err", qerr)
 					}
@@ -557,10 +577,20 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 				return fmt.Errorf("发送 Report: %w", err)
 			}
 		case r := <-c.pendingReports:
-			// 资产快照等采集产物：优先于离线队列补传直接发出，失败同样入离线队列
+			if !isTransient(r) && r.GetMetrics() == nil && !r.Reliable {
+				if !c.persistReport(r) {
+					continue
+				}
+				if r.GetAck() == nil {
+					continue
+				}
+			}
+			// Terminal ACKs keep priority; durable records are already on disk.
 			if err := c.sendReport(stream, r, generation); err != nil {
-				if qerr := c.queue.Push(r); qerr != nil {
-					c.log.Error("离线队列写入失败", "err", qerr)
+				if !r.Reliable && !isTransient(r) {
+					if qerr := c.queue.Push(r); qerr != nil {
+						c.log.Error("离线队列写入失败", "err", qerr)
+					}
 				}
 				return fmt.Errorf("发送 Report: %w", err)
 			}
@@ -587,7 +617,7 @@ func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report, 
 	err := stream.Send(r)
 	if err == nil {
 		c.noteChannelActivity(generation, true)
-		if r.GetHeartbeat() != nil {
+		if r.GetHeartbeat() != nil && c.receiptsSupported.Load() {
 			if readyErr := upgrade.MarkReady(c.workDir, identity.AgentVersion, generation); readyErr != nil {
 				c.log.Error("upgrade startup confirmation failed", "err", readyErr)
 			}
@@ -598,6 +628,9 @@ func (c *Client) sendReport(stream pb.AgentChannel_ChannelClient, r *pb.Report, 
 
 // drainQueue sends one record, retaining failed sends on disk.
 func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uint64) (bool, error) {
+	if !c.receiptsSupported.Load() {
+		return false, nil
+	}
 	r, err := c.queue.Peek()
 	if err != nil {
 		c.log.Error("读取离线队列失败", "err", err)
@@ -606,11 +639,20 @@ func (c *Client) drainQueue(stream pb.AgentChannel_ChannelClient, generation uin
 	if r == nil {
 		return false, nil
 	}
+	if !c.queue.ShouldSend(r.ReportId) {
+		return false, nil
+	}
+	if !isTransient(r) && r.GetMetrics() == nil {
+		r.Reliable = true
+	}
 	if err := c.sendReport(stream, r, generation); err != nil {
 		c.queue.Release()
 		return false, err
 	}
-	c.queue.TryAck()
+	if !r.Reliable {
+		c.queue.TryAck()
+	}
+
 	return true, nil
 }
 
@@ -633,6 +675,7 @@ func (c *Client) buildHeartbeat() *pb.Report {
 		ReportId: newUUID(),
 		Ts:       time.Now().UnixMilli(),
 		Payload: &pb.Report_Heartbeat{Heartbeat: &pb.RptHeartbeat{
+			ReportReceiptContract:   1,
 			AgentVersion:            identity.AgentVersion,
 			CpuUsage:                s.CpuUsage,
 			MemUsage:                s.MemUsage,
@@ -748,6 +791,9 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Code: 0,
 			Message: "policy version " + c.state.PolicyVersion}}
 	case *pb.Command_CollectNow:
+		if !collector.ValidNames(p.CollectNow.GetCollectorNames()) {
+			return []*pb.RptAck{received, {CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "unsupported collector names"}}
+		}
 		if !c.beginBulk() {
 			return c.resourceBusy(received)
 		}
@@ -755,7 +801,17 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 		go func() {
 			defer c.bulkBusy.Store(false)
 			start := time.Now()
+			sequence, err := reserveAssetSequence(c.workDir, c.state.AgentID)
+			if err != nil {
+				c.bulkBusy.Store(false)
+				c.log.Error("资产顺序持久化失败，跳过采集", "err", err)
+				ack := &pb.RptAck{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "asset sequence persistence failed"}
+				c.dedup.Put(cmd.GetCmdId(), ack)
+				c.pushReport(c.wrapAck(ack))
+				return
+			}
 			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
+			snap.Sequence = sequence
 			c.lastCollectAt.Store(start.UnixNano())
 			c.pushReport(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(), Payload: &pb.Report_Asset{Asset: snap}})
 			ack := &pb.RptAck{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_DONE, Message: fmt.Sprintf("collected sw=%d ports=%d accounts=%d disks=%d in %s", len(snap.GetSoftware()), len(snap.GetPorts()), len(snap.GetAccounts()), len(snap.GetDisks()), time.Since(start).Round(time.Millisecond))}
@@ -855,7 +911,7 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 
 /* ==================== 勒索诱饵防护 ==================== */
 
-// reportSecurityEvent guard 引擎事件上报回调：优先经活跃连接直发，断线期间入离线队列补传
+// reportSecurityEvent persists guard events before delivery and waits for durable receipts.
 func (c *Client) reportSecurityEvent(ev *pb.RptSecurityEvent) {
 	c.pushReport(&pb.Report{
 		AgentId:  c.state.AgentID,
@@ -1221,24 +1277,36 @@ func (c *Client) executeVulnFix(vf *pb.CmdVulnFix, received *pb.RptAck) []*pb.Rp
 }
 
 func (c *Client) pushReport(r *pb.Report) {
+	if r.GetMetrics() == nil && !isTransient(r) {
+		if !r.Reliable && !c.persistReport(r) {
+			return
+		}
+		// Terminal command ACKs keep their control-channel priority, but are
+		// also retained in the durable FIFO until a matching receipt arrives.
+		if r.GetAck() == nil {
+			return
+		}
+	}
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	if c.channelActive {
 		select {
 		case c.pendingReports <- r:
-			return
 		default:
 		}
 	}
-	c.persistReport(r)
 }
 
 // Disconnect after the sender stops, then persist anything it did not consume.
 func (c *Client) setChannelActive(active bool) {
+	if !active && c.queue != nil {
+		c.queue.Release()
+	}
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	c.channelActive = active
 	if active {
+		c.receiptsSupported.Store(false)
 		c.channelSession++
 		c.channelSend, c.channelReceive = time.Time{}, time.Time{}
 	}
@@ -1257,10 +1325,17 @@ func (c *Client) setChannelActive(active bool) {
 	}
 }
 
-func (c *Client) persistReport(r *pb.Report) {
-	if err := c.queue.Push(r); err != nil {
-		c.log.Error("业务上报入离线队列失败", "err", err)
+func (c *Client) persistReport(r *pb.Report) bool {
+	if r.Reliable {
+		return true
 	}
+	r.Reliable = true
+	if err := c.queue.Push(r); err != nil {
+		r.Reliable = false
+		c.log.Error("业务上报入离线队列失败", "err", err)
+		return false
+	}
+	return true
 }
 
 /* ==================== 资产采集 ==================== */
@@ -1297,7 +1372,14 @@ func (c *Client) collectLoop(ctx context.Context) {
 				continue
 			}
 			start := time.Now()
+			sequence, err := reserveAssetSequence(c.workDir, c.state.AgentID)
+			if err != nil {
+				c.bulkBusy.Store(false)
+				c.log.Error("资产顺序持久化失败，跳过采集", "err", err)
+				continue
+			}
 			snap := collector.SnapshotWithKubernetesNode(names, c.log, c.cfg.KubernetesNodeName)
+			snap.Sequence = sequence
 			c.bulkBusy.Store(false)
 			c.lastCollectAt.Store(start.UnixNano())
 			c.pushReport(&pb.Report{
@@ -1378,7 +1460,7 @@ func (c *Client) logLoop(ctx context.Context) {
 }
 
 // Log cursors advance only after successful local spool admission. Reports are
-// removed after stream Send, so this does not imply server durable receipt.
+// removed only after a durable server receipt; queue retention and capacity still apply.
 func (c *Client) queueLogBatch(source string, lines []*pb.LogLine) bool {
 	if err := c.queue.Push(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(),
 		Payload: &pb.Report_LogBatch{LogBatch: &pb.RptLogBatch{Source: source, Lines: lines}}}); err != nil {
@@ -1415,10 +1497,12 @@ func (c *Client) mtlsConfig() (*tls.Config, error) {
 
 /* ==================== 工具 ==================== */
 
-// isTransient 心跳与 ACK 不入离线队列（靠服务端重推/下一心跳补偿）
+// Only live state and intermediate ACKs are transient; terminal ACKs are durable.
 func isTransient(r *pb.Report) bool {
 	switch r.GetPayload().(type) {
-	case *pb.Report_Heartbeat, *pb.Report_Ack, *pb.Report_IsolationState:
+	case *pb.Report_Ack:
+		return r.GetAck().GetStage() != pb.RptAck_DONE && r.GetAck().GetStage() != pb.RptAck_FAILED
+	case *pb.Report_Heartbeat, *pb.Report_IsolationState:
 		return true
 	}
 	return false

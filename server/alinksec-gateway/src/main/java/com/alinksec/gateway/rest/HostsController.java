@@ -42,6 +42,18 @@ public class HostsController {
         this.enrollTokenService = enrollTokenService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate maintenanceSql;
+    @org.springframework.transaction.annotation.Transactional
+    @PostMapping("/{agentId}/maintenance")
+    public ApiResult<?> maintenance(@PathVariable String agentId,@org.springframework.web.bind.annotation.RequestBody java.util.Map<String,Long> body) {
+        long seconds=body.getOrDefault("seconds",0L);
+        if(seconds<0 || seconds>86400)throw new IllegalArgumentException("维护时长必须在0到86400秒之间");
+        if(maintenanceSql.update("UPDATE t_agent SET maintenance_until=?,offline_alerted=CASE WHEN ?>0 THEN FALSE ELSE offline_alerted END WHERE agent_id=? AND deleted=FALSE AND status IN (0,1,2)",seconds==0?0:System.currentTimeMillis()/1000+seconds,seconds,agentId)!=1)throw new IllegalArgumentException("主机不存在或已禁用");
+        if(seconds>0)maintenanceSql.update("UPDATE t_alert SET status=2,handle_remark='计划维护窗口内抑制离线通知',handled_at=CURRENT_TIMESTAMP WHERE agent_id=? AND event_type='host_offline' AND status IN(0,1)",agentId);
+        return ApiResult.ok();
+    }
+
     @GetMapping
     public ApiResult<Map<String, Object>> list(@RequestParam(required = false) String keyword,
                                                @RequestParam(required = false) Integer status,

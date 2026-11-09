@@ -40,10 +40,42 @@ public class AssetService {
 
     @Transactional
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
+        if(snapshot.getSequence()>0 && (snapshot.getCollectedCount()==0 || snapshot.getCollectionsCount()==0) || snapshot.getCollectedCount()>6 || snapshot.getCollectionsCount()>6 || snapshot.getContainerSourcesCount()>2)
+            throw new IllegalArgumentException("invalid asset collection metadata");
         Set<String> collected = new HashSet<>(snapshot.getCollectedList());
-        boolean legacyFullSnapshot = collected.isEmpty();
-        boolean replaceSoftware = (legacyFullSnapshot || collected.contains("software"))
-                && recordSoftwareAttempt(agentId, snapshot);
+        Set<String> accepted=new HashSet<>(),complete=new HashSet<>();
+        if(collected.isEmpty())collected.addAll(Set.of("software","ports","processes","accounts","disks","containers"));
+        if(collected.size()>6 || snapshot.getSequence()<0)throw new IllegalArgumentException("invalid asset collection sequence");
+        var states=new java.util.HashMap<String,com.alinksec.proto.AssetCollection>();
+        for(var state:snapshot.getCollectionsList())if(states.put(state.getCategory(),state)!=null)throw new IllegalArgumentException("duplicate collection status");
+        for(String category:collected) {
+            if(!Set.of("software","ports","processes","accounts","disks","containers").contains(category))throw new IllegalArgumentException("invalid asset category");
+            var state=states.get(category);
+            boolean legacy=state==null;
+            if(legacy && snapshot.getSequence()>0)throw new IllegalArgumentException("missing collection outcome");
+            String status=legacy?"legacy":state.getStatus().name().toLowerCase(java.util.Locale.ROOT);
+            if(category.equals("software") && snapshot.hasSoftwareInventory())status=switch(snapshot.getSoftwareInventory().getStatus()) {
+                case FAILED -> "failed";case UNSUPPORTED -> "unsupported";case UNKNOWN,UNRECOGNIZED -> "unknown";default -> status;
+            };
+            String error=legacy?"unknown_coverage":state.getError();
+            if(error.length()>128)throw new IllegalArgumentException("invalid collection error");
+            int changed=jdbc.update("INSERT INTO t_asset_collection_state(agent_id,category,sequence,status,error,collected_at) VALUES(?,?,?,?,?,?) ON CONFLICT(agent_id,category) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,error=excluded.error,collected_at=excluded.collected_at WHERE excluded.sequence>t_asset_collection_state.sequence OR (excluded.sequence=0 AND t_asset_collection_state.sequence=0)",agentId,category,snapshot.getSequence(),status,error,legacy?0:state.getCollectedAt());
+            if(changed==1) {
+                accepted.add(category);
+                if(status.equals("complete") || legacy && !status.equals("failed"))complete.add(category);
+            }
+        }
+        boolean softwareAttempt=accepted.contains("software");
+        boolean legacyFullSnapshot=false;
+        collected=complete;
+        var softwareSnapshot=snapshot;
+        if(softwareAttempt && !collected.contains("software") && (!snapshot.hasSoftwareInventory() || snapshot.getSoftwareInventory().getStatus()==SoftwareInventory.Status.COMPLETE))
+            softwareSnapshot=snapshot.toBuilder().setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.FAILED).setError("collection_incomplete")).build();
+        boolean replaceSoftware=softwareAttempt && recordSoftwareAttempt(agentId,softwareSnapshot) && collected.contains("software");
+        if(collected.contains("disks")) {
+            jdbc.update("DELETE FROM t_asset_disk WHERE agent_id=?",agentId);
+            for(var disk:snapshot.getDisksList())jdbc.update("INSERT INTO t_asset_disk(agent_id,mount,fs_type,total_bytes,used_bytes) VALUES(?,?,?,?,?)",agentId,disk.getMount(),disk.getFsType(),disk.getTotalBytes(),disk.getUsedBytes());
+        }
         if (replaceSoftware) {
             jdbc.update("DELETE FROM t_asset_software WHERE agent_id = ?", agentId);
         }
@@ -56,6 +88,10 @@ public class AssetService {
         if (legacyFullSnapshot || collected.contains("accounts")) {
             jdbc.update("DELETE FROM t_asset_account WHERE agent_id = ?", agentId);
         }
+        Set<String> completedSources=new HashSet<>(snapshot.getContainerSourcesList());
+        if(!Set.of("docker","kubernetes").containsAll(completedSources))throw new IllegalArgumentException("invalid container source");
+        boolean partialContainers=accepted.contains("containers") && !collected.contains("containers") && !completedSources.isEmpty() && states.containsKey("containers") && states.get("containers").getStatus()==com.alinksec.proto.AssetCollection.Status.PARTIAL;
+        if(partialContainers)for(String source:completedSources)jdbc.update("DELETE FROM t_asset_container WHERE agent_id=? AND orchestrator=?",agentId,source);
         if (legacyFullSnapshot || collected.contains("containers")) {
             jdbc.update("DELETE FROM t_asset_container WHERE agent_id = ?", agentId);
         }
@@ -94,8 +130,9 @@ public class AssetService {
                         agentId, p.getPid(), p.getName(), p.getExe(), p.getCmdline(), p.getUser(), p.getRssBytes());
             }
         }
-        if (legacyFullSnapshot || collected.contains("containers")) {
+        if (legacyFullSnapshot || collected.contains("containers") || partialContainers) {
             for (var c : snapshot.getContainersList()) {
+                if(partialContainers && !completedSources.contains(c.getOrchestrator()))continue;
                 jdbc.update("""
                         INSERT INTO t_asset_container (agent_id, container_id, name, image, image_id, orchestrator, namespace, status, created_at, started_at, ports, labels, risky, risk_reasons)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -122,7 +159,7 @@ public class AssetService {
         if (!replaceSoftware) {
             // A failed/unsupported attempt must invalidate apparent coverage even
             // while retaining the last successful software rows.
-            if (snapshot.hasSoftwareInventory()) vulnMatchService.matchAgent(agentId,0L);
+            if (softwareAttempt && snapshot.hasSoftwareInventory()) vulnMatchService.matchAgent(agentId,0L);
             return;
         }
         try {

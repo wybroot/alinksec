@@ -33,7 +33,7 @@ public class VirusQueryService {
                        (SELECT count(*) FROM t_virus_task_agent m WHERE m.task_id=t.id AND m.state='pending') AS pending_hosts,
                        (SELECT count(*) FROM t_virus_task_agent m WHERE m.task_id=t.id AND m.state='complete') AS complete_hosts
                 FROM t_virus_scan_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                """, size, com.alinksec.common.web.PageBounds.offset(page,size));
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);
@@ -62,7 +62,7 @@ public class VirusQueryService {
                        (SELECT count(*) FROM t_virus_whitelist w WHERE w.type='hash' AND lower(w.value)=lower(f.sha256)) AS hash_whitelisted,
                        a.virus_execution_contract
                 FROM t_virus_finding f LEFT JOIN t_agent a ON a.agent_id = f.agent_id""" + cond
-                + " ORDER BY f.created_at DESC LIMIT ? OFFSET ?", size, (page - 1) * size);
+                + " ORDER BY f.created_at DESC LIMIT ? OFFSET ?", size, com.alinksec.common.web.PageBounds.offset(page,size));
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);

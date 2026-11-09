@@ -91,9 +91,9 @@ func (g *Guard) respondWithAttributionFiles(trigger, ruleID, ruleName string, ta
 			detail["isolate_error"] = err.Error()
 		} else {
 			if actionTaken == "killed" {
-				actionTaken = "killed_and_isolated"
+				actionTaken = "killed_isolation_pending"
 			} else {
-				actionTaken = "isolated"
+				actionTaken = "isolation_pending"
 			}
 		}
 	}

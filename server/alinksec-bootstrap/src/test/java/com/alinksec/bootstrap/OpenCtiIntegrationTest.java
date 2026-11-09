@@ -77,7 +77,7 @@ class OpenCtiIntegrationTest {
         service=sync.nativeOpenCti(id);sync.validate();response=q->bytes(page(List.of(node(1,hash)),false,1,"cursor-1"));
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
         mvc=MockMvcBuilders.standaloneSetup(new LibraryController(sync,catalog,props,schedules)).setControllerAdvice(new RestExceptionHandler())
-                .addInterceptors(new JwtAuthInterceptor(holder)).build();
+                .addInterceptors(com.alinksec.bootstrap.TestJwt.interceptor(holder)).build();
     }
     @AfterEach void cleanup() throws Exception {
         if(sync!=null)sync.close();if(http!=null)http.stop(0);if(workers!=null)workers.shutdownNow();
@@ -116,7 +116,7 @@ class OpenCtiIntegrationTest {
     int ownHashes(){return jdbc.queryForObject("SELECT count(*) FROM t_security_hash WHERE source_id=?",Integer.class,id);}
     String snapshot(){return JsonUtils.write(jdbc.queryForList("SELECT * FROM t_opencti_indicator WHERE source_id=? ORDER BY indicator_id",id));}
     void otherSource() throws IOException {catalog.signatures(id+"-other",new SignaturePackage("",Map.of(otherHash,SignaturePackage.checkedHash(otherHash,"Fixture.Other",3)),List.of()),true,actor);}
-    String token(String role){return JwtUtil.sign(SECRET,Map.of("uid",actor,"username","fixture","role",role),3600);}
+    String token(String role){return com.alinksec.bootstrap.TestJwt.token(SECRET,Map.of("uid",actor,"username","fixture","role",role),3600);}
     JsonNode data(String path,String role) throws Exception {
         var result=mvc.perform(get(path).header("Authorization","Bearer "+token(role))).andReturn().getResponse();assertEquals(200,result.getStatus(),result.getContentAsString());
         return JsonUtils.mapper().readTree(result.getContentAsByteArray()).path("data");

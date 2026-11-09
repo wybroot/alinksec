@@ -35,7 +35,7 @@ public class AuthController {
                                                 HttpServletRequest request) {
         String username = body.getOrDefault("username", "");
         String password = body.getOrDefault("password", "");
-        if (username.isBlank() || password.isBlank()) {
+        if (username==null || password==null || username.isBlank() || username.length()>64 || password.isBlank() || password.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>72) {
             return ApiResult.error(10001, "用户名或密码不能为空");
         }
         String sourceIp = clientIp(request);
@@ -50,7 +50,7 @@ public class AuthController {
         loginAttempts.recordSuccess(sourceIp);
         var p = profile.get();
         String token = JwtUtil.sign(secretHolder.secret(), Map.of(
-                "uid", p.id(), "username", p.username(), "role", p.roleName()),
+                "uid", p.id(), "username", p.username(), "role", p.roleName(), "sid", userService.createSession(p,TOKEN_TTL_SECONDS)),
                 TOKEN_TTL_SECONDS);
         return ApiResult.ok(Map.of(
                 "token", token,
@@ -63,9 +63,15 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ApiResult<Void> logout(HttpServletRequest request) {
+        userService.logout(String.valueOf(request.getAttribute("sid")),((Number)request.getAttribute("uid")).longValue());
         userService.audit(null, String.valueOf(request.getAttribute("username")), "logout",
                 clientIp(request));
         return ApiResult.ok();
+    }
+
+    @PostMapping("/password")
+    public ApiResult<Void> password(@RequestBody Map<String,String> body,HttpServletRequest request){
+        userService.changePassword(((Number)request.getAttribute("uid")).longValue(),body.get("oldPassword"),body.get("password"));return ApiResult.ok();
     }
 
     private static String clientIp(HttpServletRequest request) {

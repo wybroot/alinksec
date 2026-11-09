@@ -19,6 +19,7 @@ type winUserAccount struct {
 func collectAccounts(snap *pb.RptAssetSnapshot) {
 	var dst []winUserAccount
 	if err := wmi.Query("SELECT Name, Disabled FROM Win32_UserAccount WHERE LocalAccount = TRUE", &dst); err != nil {
+		collectionStatus(snap, "accounts", pb.AssetCollection_FAILED, "account_read_failed")
 		return
 	}
 	for _, u := range dst {

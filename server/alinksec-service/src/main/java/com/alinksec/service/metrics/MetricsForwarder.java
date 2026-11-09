@@ -3,148 +3,86 @@ package com.alinksec.service.metrics;
 import com.alinksec.proto.MetricSample;
 import com.alinksec.proto.RptMetricsBatch;
 import com.alinksec.service.config.AlinkSecProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
 import jakarta.annotation.PreDestroy;
+import java.net.URI;
+import java.net.http.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.regex.Pattern;
 
-/**
- * 指标出口（docs/03 §3.2）：RptMetricsBatch → Prometheus 文本格式 →
- * POST {vm}/api/v1/import/prometheus。批量刷写：500 条或 100ms。
- *
- * 统一注入 label：agent_id（必需）+ hostname（冗余，便于直查）。
- * 指标为可再生数据：VM 不可达时整批丢弃并告警日志，不重试不落盘。
- */
+/** Bounded, lossy metrics export. Business reports never wait for the downstream. */
 @Service
 public class MetricsForwarder {
-
-    private static final Logger log = LoggerFactory.getLogger(MetricsForwarder.class);
-    private static final int FLUSH_BATCH = 500;
-
+    static final int MAX_RECORDS=4096, MAX_BYTES=8*1024*1024, MAX_LINE=8192, MAX_BODY=256*1024;
+    private static final Pattern NAME=Pattern.compile("[a-zA-Z_:][a-zA-Z0-9_:]{0,199}"), LABEL=Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]{0,99}");
     private final AlinkSecProperties props;
     private final JdbcTemplate jdbc;
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(3)).build();
-    private final ConcurrentLinkedQueue<String> buffer = new ConcurrentLinkedQueue<>();
-    private final Map<String, String> hostnameCache = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService flusher = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "vm-metrics-flusher");
-        t.setDaemon(true);
-        return t;
-    });
-
-    public MetricsForwarder(AlinkSecProperties props, JdbcTemplate jdbc) {
-        this.props = props;
-        this.jdbc = jdbc;
-        flusher.scheduleWithFixedDelay(this::flush, 100, 100, TimeUnit.MILLISECONDS);
+    private final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+    private final ArrayDeque<byte[]> buffer=new ArrayDeque<>();
+    private record Hostname(String value,long expires){}
+    private final LinkedHashMap<String,Hostname> hostnames=new LinkedHashMap<>(16,.75f,true);
+    private int bytes;
+    private long dropped, rejected, failed;
+    private final ScheduledExecutorService flusher=Executors.newSingleThreadScheduledExecutor(r->{var t=new Thread(r,"vm-metrics-flusher");t.setDaemon(true);return t;});
+    @org.springframework.beans.factory.annotation.Autowired
+    public MetricsForwarder(AlinkSecProperties props,JdbcTemplate jdbc) {this(props,jdbc,true);}
+    MetricsForwarder(AlinkSecProperties props,JdbcTemplate jdbc,boolean start) {
+        this.props=props;this.jdbc=jdbc;
+        if(start)flusher.scheduleWithFixedDelay(this::flush,100,100,TimeUnit.MILLISECONDS);
     }
-
-    public void onBatch(String agentId, RptMetricsBatch batch) {
-        if (!props.getMetrics().isEnabled()) {
-            return;
-        }
-        String hostname = hostnameOf(agentId);
-        StringBuilder sb = new StringBuilder();
-        for (MetricSample s : batch.getSamplesList()) {
-            formatLine(sb, s, agentId, hostname);
-            sb.append('\n');
-            if (sb.length() > 64 * 1024) { // 单次入缓冲上限 64KB，防大包堆积
-                buffer.offer(sb.toString());
-                sb.setLength(0);
+    public void onBatch(String agentId,RptMetricsBatch batch) {
+        if(!props.getMetrics().isEnabled())return;
+        String hostname=hostnameOf(agentId);
+        for(var sample:batch.getSamplesList()) {
+            byte[] line=formatLine(sample,agentId,hostname);
+            synchronized(buffer) {
+                if(line==null){rejected++;continue;}
+                while(buffer.size()>=MAX_RECORDS || bytes+line.length>MAX_BYTES){bytes-=buffer.removeFirst().length;dropped++;}
+                buffer.addLast(line);bytes+=line.length;
             }
         }
-        if (!sb.isEmpty()) {
-            buffer.offer(sb.toString());
-        }
-        if (buffer.size() > 1000) { // 积压上限（VM 长期不可达）：丢最旧
-            buffer.poll();
-        }
     }
-
-    private void flush() {
-        if (buffer.isEmpty()) {
-            return;
+    private String hostnameOf(String agentId) {
+        long now=System.nanoTime();
+        synchronized(hostnames){var cached=hostnames.get(agentId);if(cached!=null && cached.expires()>now)return cached.value();}
+        String hostname=agentId;
+        try {var names=jdbc.query("SELECT hostname FROM t_agent WHERE agent_id=? LIMIT 1",(rs,i)->rs.getString(1),agentId);if(!names.isEmpty())hostname=names.get(0);}catch(RuntimeException ignored){}
+        if(hostname==null || hostname.length()>256)hostname=agentId;
+        synchronized(hostnames){while(hostnames.size()>=4096)hostnames.remove(hostnames.keySet().iterator().next());hostnames.put(agentId,new Hostname(hostname,now+TimeUnit.MINUTES.toNanos(1)));}
+        return hostname;
+    }
+    static byte[] formatLine(MetricSample s,String agentId,String hostname) {
+        if(!NAME.matcher(s.getName()).matches() || s.getLabelsCount()>32 || !Double.isFinite(s.getValue()) || s.getTs()<0 || agentId==null || agentId.length()>256 || hostname==null || hostname.length()>256 || invalidControl(agentId) || invalidControl(hostname))return null;
+        StringBuilder b=new StringBuilder(s.getName()).append("{agent_id=\"").append(escape(agentId)).append("\",hostname=\"").append(escape(hostname)).append('"');
+        for(var e:s.getLabelsMap().entrySet()) {
+            if(!LABEL.matcher(e.getKey()).matches() || e.getKey().startsWith("__") || Set.of("agent_id","hostname").contains(e.getKey()) || e.getValue().length()>1024 || invalidControl(e.getValue()))return null;
+            b.append(',').append(e.getKey()).append("=\"").append(escape(e.getValue())).append('"');
+            if(b.length()>MAX_LINE)return null;
         }
-        StringBuilder body = new StringBuilder();
-        int n = 0;
-        while (n < FLUSH_BATCH) {
-            String chunk = buffer.poll();
-            if (chunk == null) {
-                break;
-            }
-            body.append(chunk);
-            n++;
-        }
-        if (body.isEmpty()) {
-            return;
+        b.append("} ").append(s.getValue()).append(' ').append(s.getTs()).append('\n');
+        byte[] line=b.toString().getBytes(StandardCharsets.UTF_8);
+        return line.length>MAX_LINE?null:line;
+    }
+    private static boolean invalidControl(String value){return value.chars().anyMatch(c->Character.isISOControl(c) && c!='\n');}
+    private static String escape(String s){return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n");}
+    public Map<String,Long> statistics(){synchronized(buffer){return Map.of("records",(long)buffer.size(),"bytes",(long)bytes,"dropped",dropped,"rejected",rejected,"failed",failed);}}
+    void flush() {
+        byte[] body;
+        synchronized(buffer) {
+            var out=new java.io.ByteArrayOutputStream(MAX_BODY);
+            while(!buffer.isEmpty() && out.size()+buffer.peekFirst().length<=MAX_BODY){var line=buffer.removeFirst();bytes-=line.length;out.writeBytes(line);}
+            if(out.size()==0)return;
+            body=out.toByteArray();
         }
         try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(props.getMetrics().getVmBaseUrl() + "/api/v1/import/prometheus"))
-                    .timeout(Duration.ofSeconds(5))
-                    .header("Content-Type", "text/plain")
-                    .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-                    .build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 204 && resp.statusCode() != 200) {
-                log.warn("VM 写入非预期状态: {} body={}", resp.statusCode(),
-                        resp.body() == null ? "" : resp.body().substring(0, Math.min(200, resp.body().length())));
-            }
-        } catch (IOException e) {
-            log.warn("VM 写入失败（本批丢弃）: {}", e.getMessage());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+            var request=HttpRequest.newBuilder(URI.create(props.getMetrics().getVmBaseUrl()+"/api/v1/import/prometheus")).timeout(Duration.ofSeconds(5)).header("Content-Type","text/plain; charset=utf-8").POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
+            int status=http.send(request,HttpResponse.BodyHandlers.discarding()).statusCode();
+            if(status!=200 && status!=204){synchronized(buffer){failed++;}}
+        }catch(Exception e){synchronized(buffer){failed++;}if(e instanceof InterruptedException)Thread.currentThread().interrupt();}
     }
-
-    /** Prometheus 文本格式的时间戳为整数毫秒，直接保留 Agent 的 UnixMilli。 */
-    private void formatLine(StringBuilder sb, MetricSample s, String agentId, String hostname) {
-        sb.append(s.getName()).append("{agent_id=\"").append(escape(agentId))
-                .append("\",hostname=\"").append(escape(hostname)).append('"');
-        for (Map.Entry<String, String> e : s.getLabelsMap().entrySet()) {
-            sb.append(',').append(e.getKey()).append("=\"").append(escape(e.getValue())).append('"');
-        }
-        sb.append("} ").append(s.getValue())
-                .append(' ').append(s.getTs());
-    }
-
-    private static String escape(String v) {
-        return v == null ? "" : v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
-    }
-
-    /** hostname 查询缓存（t_agent 快照；缺失返回 agent_id 兜底） */
-    private String hostnameOf(String agentId) {
-        return hostnameCache.computeIfAbsent(agentId, id -> {
-            try {
-                List<String> names = jdbc.query(
-                        "SELECT hostname FROM t_agent WHERE agent_id = ? LIMIT 1",
-                        (rs, i) -> rs.getString(1), id);
-                return names.isEmpty() ? id : names.get(0);
-            } catch (Exception e) {
-                return id;
-            }
-        });
-    }
-
-    @PreDestroy
-    public void stop() {
-        flusher.shutdownNow();
-    }
+    @PreDestroy public void stop(){flusher.shutdownNow();}
 }

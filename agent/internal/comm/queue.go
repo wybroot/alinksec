@@ -23,6 +23,7 @@ type OfflineQueue struct {
 	offset         int64
 	peekEnd        int64
 	peeked         *pb.Report
+	sentAt         time.Time
 }
 
 const (
@@ -60,7 +61,7 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 	}
 	// A blocked stream can hold a peek while raw collection continues. Retain
 	// the source cursor instead of growing the spool while compaction is fenced.
-	if r.GetLogBatch() != nil && q.peeked != nil {
+	if q.peeked != nil {
 		st, statErr := f.Stat()
 		if statErr != nil || st.Size()+int64(len(line)+1) > maxQueueBytes {
 			_ = f.Close()
@@ -74,6 +75,10 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 	}
 	if err := w.Flush(); err != nil {
 		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -91,7 +96,7 @@ func (q *OfflineQueue) compactLocked() error {
 	}
 	now := time.Now()
 	needsAgeSweep := q.lastCompaction.IsZero() || now.Sub(q.lastCompaction) >= compactEvery
-	if st.Size() <= maxQueueBytes && !needsAgeSweep {
+	if st.Size() <= maxQueueBytes && !needsAgeSweep && q.offset < maxQueueBytes/4 {
 		return nil
 	}
 	// A peeked record's byte position remains stable until Ack/Release.
@@ -180,7 +185,7 @@ func queueScanner(r io.Reader) *bufio.Scanner {
 	return sc
 }
 
-// Peek loads one bounded record. Ack advances only after successful Send. A
+// Peek loads one bounded record. Durable receipts advance the queue. A
 // restart may replay acknowledged records before the last compaction; stable
 // report IDs provide at-least-once delivery without holding the backlog in RAM.
 func (q *OfflineQueue) Peek() (*pb.Report, error) {
@@ -188,6 +193,11 @@ func (q *OfflineQueue) Peek() (*pb.Report, error) {
 		return nil, nil
 	}
 	defer q.mu.Unlock()
+	if q.peeked != nil && q.peeked.Ts > 0 && q.peeked.Ts < time.Now().Add(-maxEntryAge).UnixMilli() {
+		q.offset = q.peekEnd
+		q.peeked = nil
+		q.sentAt = time.Time{}
+	}
 	if q.peeked != nil {
 		return q.peeked, nil
 	}
@@ -213,6 +223,7 @@ func (q *OfflineQueue) Peek() (*pb.Report, error) {
 			continue
 		}
 		q.peeked, q.peekEnd = r, end
+		q.sentAt = time.Time{}
 		f.Close()
 		return r, nil
 	}
@@ -263,6 +274,7 @@ func (q *OfflineQueue) Release() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.peeked = nil
+	q.sentAt = time.Time{}
 }
 
 // Len 待补传条数（诊断用）
@@ -288,4 +300,29 @@ func (q *OfflineQueue) Len() int {
 	}
 	_ = st
 	return n
+}
+
+// Receipt advances only the exact in-flight report. Lost receipts safely replay.
+func (q *OfflineQueue) Receipt(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.peeked == nil || q.peeked.ReportId != id {
+		return false
+	}
+	q.offset = q.peekEnd
+	q.peeked = nil
+	q.sentAt = time.Time{}
+	if err := q.compactLocked(); err != nil {
+		return false
+	}
+	return true
+}
+func (q *OfflineQueue) ShouldSend(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.peeked == nil || q.peeked.ReportId != id || !q.sentAt.IsZero() && time.Since(q.sentAt) < 5*time.Second {
+		return false
+	}
+	q.sentAt = time.Now()
+	return true
 }

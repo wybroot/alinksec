@@ -21,6 +21,7 @@ func collectContainers(snap *pb.RptAssetSnapshot) {
 // collectContainersForNode reads only local runtime and host-local Kubernetes
 // context. Neither source can block the other when unavailable.
 func collectContainersForNode(snap *pb.RptAssetSnapshot, kubernetesNodeName string) {
+	collectionStatus(snap, "containers", pb.AssetCollection_COMPLETE, "")
 	collectDockerContainers(snap)
 	collectKubernetesContainers(snap, kubernetesNodeName)
 }
@@ -28,8 +29,10 @@ func collectContainersForNode(snap *pb.RptAssetSnapshot, kubernetesNodeName stri
 func collectDockerContainers(snap *pb.RptAssetSnapshot) {
 	out, err := exec.Command("docker", "ps", "--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}").Output()
 	if err != nil {
+		collectionStatus(snap, "containers", pb.AssetCollection_PARTIAL, "runtime_unavailable")
 		return
 	}
+	snap.ContainerSources = append(snap.ContainerSources, "docker")
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		parts := strings.Split(line, "\t")
 		if len(parts) < 5 || parts[0] == "" {
@@ -80,12 +83,15 @@ func collectKubernetesContainers(snap *pb.RptAssetSnapshot, configuredNodeName s
 	}
 	out, err := exec.Command("kubectl", kubernetesPodArgs(nodeName)...).Output()
 	if err != nil {
+		collectionStatus(snap, "containers", pb.AssetCollection_PARTIAL, "orchestrator_unavailable")
 		return
 	}
 	var pods podList
 	if json.Unmarshal(out, &pods) != nil {
+		collectionStatus(snap, "containers", pb.AssetCollection_PARTIAL, "invalid_orchestrator_output")
 		return
 	}
+	snap.ContainerSources = append(snap.ContainerSources, "kubernetes")
 	for _, pod := range pods.Items {
 		for _, status := range pod.Status.ContainerStatuses {
 			id := status.ContainerID

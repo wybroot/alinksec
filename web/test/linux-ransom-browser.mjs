@@ -39,7 +39,7 @@ try {
   })
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message))
   await page.goto(`http://127.0.0.1:${server.address().port}/alerts`)
-  await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(role==='viewer'?0:1)
+  await expect(page.getByRole('button',{name:'标记已处理',exact:true})).toHaveCount(role==='viewer'?0:1)
   await page.getByRole('button',{name:'查看归因证据',exact:true}).click()
   const panel=page.getByTestId('ransom-attribution')
   await expect(panel).toContainText('Linux 尚无可信写入者证据')

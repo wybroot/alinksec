@@ -30,7 +30,7 @@ public class FixQueryService {
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id = t.id AND r.status IN (2,3,5,8)) AS failed_records,
                        (SELECT count(*) FROM t_fix_record r WHERE r.task_id=t.id AND r.status IN (6,7)) AS pending_verification
                 FROM t_fix_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                """, size, com.alinksec.common.web.PageBounds.offset(page,size));
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("total", total == null ? 0 : total);

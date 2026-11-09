@@ -46,10 +46,10 @@ public class HostQueryService {
 
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
-        pageArgs.add((page - 1) * size);
+        pageArgs.add(com.alinksec.common.web.PageBounds.offset(page,size));
         List<Map<String, Object>> list = jdbc.queryForList("""
                 SELECT a.agent_id, a.hostname, a.ip, a.os_type, a.os_version, a.kernel, a.arch,
-                       a.agent_version, a.status, a.protect_enabled, a.last_heartbeat,a.virus_execution_contract,a.virus_db_version,
+                       a.agent_version, a.maintenance_until, a.status, a.protect_enabled, a.last_heartbeat,a.virus_execution_contract,a.virus_db_version,
                        a.isolation_status, a.isolation_command_id, a.isolation_error, a.isolation_updated_at, a.isolation_contract, a.isolation_automatic, a.isolation_lease_deadline,
                        (SELECT count(*) FROM t_asset_software s WHERE s.agent_id = a.agent_id) AS software_count,
                        (SELECT count(*) FROM t_asset_port p WHERE p.agent_id = a.agent_id) AS port_count,
@@ -75,7 +75,7 @@ public class HostQueryService {
     public Map<String, Object> detail(String agentId) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT agent_id, hostname, ip, os_type, os_version, kernel, arch, agent_version,
-                       machine_id, status, protect_enabled, policy_version, last_heartbeat, created_at,
+                       machine_id, status, maintenance_until, protect_enabled, policy_version, last_heartbeat, created_at,
                        isolation_status, isolation_command_id, isolation_error, isolation_updated_at, isolation_contract, isolation_automatic, isolation_lease_deadline,
                        distro_id, distro_version, software_inventory_source, software_identity_error, package_repair_contract,virus_execution_contract,virus_db_version,
                        software_collection_status, software_collection_error, software_attempted_at, software_succeeded_at
@@ -84,7 +84,9 @@ public class HostQueryService {
         if (rows.isEmpty()) {
             return null;
         }
-        return rows.get(0);
+        var result=rows.get(0);
+        result.put("collections",jdbc.queryForList("SELECT category,sequence,status,error,collected_at FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agentId));
+        return result;
     }
 
     public List<Map<String, Object>> groups() {
@@ -103,7 +105,7 @@ public class HostQueryService {
                 FROM t_asset_software WHERE agent_id = ?
                   AND (CAST(? AS TEXT) IS NULL OR LOWER(name) LIKE LOWER('%' || ? || '%'))
                 ORDER BY name, source, architecture, version LIMIT ? OFFSET ?
-                """, agentId, normalizedKeyword, normalizedKeyword, size, (page - 1) * size);
+                """, agentId, normalizedKeyword, normalizedKeyword, size, com.alinksec.common.web.PageBounds.offset(page,size));
     }
 
     public List<Map<String, Object>> ports(String agentId) {

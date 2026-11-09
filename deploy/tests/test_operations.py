@@ -392,6 +392,17 @@ class OperationsTest(unittest.TestCase):
             ops.run([sys.executable, '-c', f'import sys; print({secret!r}, file=sys.stderr); sys.exit(7)'])
         self.assertNotIn(secret, str(caught.exception))
 
+class ReadinessEndpointTests(unittest.TestCase):
+    def test_restore_waits_for_business_readiness_not_just_liveness(self):
+        responses=iter([{'code':0},{'ready':True}]);calls=[]
+        def docker(*args):
+            calls.append(args)
+            return json.dumps(next(responses))
+        deployment=argparse.Namespace(args=argparse.Namespace(timeout=3),containers={'web':{'Id':'fixture'}},docker=docker)
+        ops.Deployment.health(deployment)
+        self.assertEqual(len(calls),2)
+        self.assertTrue(all('/api/ready' in call[-1] for call in calls))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -159,7 +159,7 @@ public class ComplianceReportService {
     }
     public Map<String,Object> history(int page,int size) {
         page(page,size);long now=Instant.now().toEpochMilli();return tx.execute(s->Map.of("total",jdbc.queryForObject("SELECT COUNT(*) FROM t_report_snapshot WHERE expires_at>?",Long.class,now),
-                "list",jdbc.queryForList("SELECT id,title,created_by,generated_at,expires_at,schedule_id,scheduled_at,sha256 FROM t_report_snapshot WHERE expires_at>? ORDER BY generated_at DESC,id LIMIT ? OFFSET ?",now,size,(page-1)*size),"retentionDays",30,"capacity",MAX_SNAPSHOTS));
+                "list",jdbc.queryForList("SELECT id,title,created_by,generated_at,expires_at,schedule_id,scheduled_at,sha256 FROM t_report_snapshot WHERE expires_at>? ORDER BY generated_at DESC,id LIMIT ? OFFSET ?",now,size,com.alinksec.common.web.PageBounds.offset(page,size)),"retentionDays",30,"capacity",MAX_SNAPSHOTS));
     }
     private static void page(int page,int size){if(page<1 || page>10000 || size<1 || size>50)throw new IllegalArgumentException("分页范围无效");}
     private static void id(String id){try{if(!UUID.fromString(id).toString().equals(id))throw new IllegalArgumentException();}catch(RuntimeException e){throw new IllegalArgumentException("报表标识无效");}}

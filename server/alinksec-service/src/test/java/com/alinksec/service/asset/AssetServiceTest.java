@@ -18,6 +18,8 @@ class AssetServiceTest {
     @Test
     void targetedProcessSnapshotDoesNotReplaceOtherAssetCategories() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        // The database accepts this category; stale/rejected sequences are covered by real DB tests.
+        org.mockito.Mockito.when(jdbc.update(contains("INSERT INTO t_asset_collection_state"), any(Object[].class))).thenReturn(1);
         VulnMatchService vulnMatchService = mock(VulnMatchService.class);
         AssetService service = new AssetService(jdbc, vulnMatchService, mock(SecurityEventService.class));
 

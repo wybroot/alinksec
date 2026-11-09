@@ -43,7 +43,7 @@ public class ClusterReportIngress {
         if(!agent.equals(report.getAgentId()) || !report.getReportId().matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
                 || report.getSerializedSize()>properties.getMaxReportBytes())
             throw new IllegalArgumentException("invalid_queued_report_identity_or_size");
-        byte[] bytes=report.toByteArray();String digest=digest(bytes);
+        byte[] bytes=report.toBuilder().clearReliable().build().toByteArray();String digest=digest(bytes);
         transaction.executeWithoutResult(status-> {
             runtime.requireActive(jdbc);
             requireAgent(agent,false);
@@ -123,10 +123,10 @@ public class ClusterReportIngress {
                 requireAgent(agent,true);
                 Report report=decode(row);
                 // A manually replayed failed snapshot must not replace facts from a newer snapshot.
-                if(report.hasAsset() && jdbc.queryForObject("SELECT cluster_asset_sequence FROM t_agent WHERE agent_id=?",
+                if(report.hasAsset() && report.getAsset().getSequence()==0 && jdbc.queryForObject("SELECT cluster_asset_sequence FROM t_agent WHERE agent_id=?",
                         Long.class,agent)>number(row,"sequence_id"))throw new SupersededAsset();
                 dispatcher.dispatchQueued(agent,report);
-                if(report.hasAsset())jdbc.update("UPDATE t_agent SET cluster_asset_sequence=? WHERE agent_id=?",row.get("sequence_id"),agent);
+                if(report.hasAsset())jdbc.update("UPDATE t_agent SET cluster_asset_sequence=? WHERE agent_id=? AND cluster_asset_sequence<?",row.get("sequence_id"),agent,row.get("sequence_id"));
                 jdbc.update("""
                         UPDATE t_cluster_ingress SET state='applied',content_b64='',finished_at=?,error_code=''
                         WHERE id=? AND state IN ('pending','retry')

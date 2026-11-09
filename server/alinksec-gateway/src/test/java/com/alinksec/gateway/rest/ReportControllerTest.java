@@ -17,9 +17,9 @@ class ReportControllerTest {
     private final String secret="report-test-secret-".repeat(4);
     private MockMvc mvc() {
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(secret);
-        return MockMvcBuilders.standaloneSetup(new ReportController(reports)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(new JwtAuthInterceptor(holder)).build();
+        return MockMvcBuilders.standaloneSetup(new ReportController(reports)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(com.alinksec.gateway.rest.TestJwt.interceptor(holder)).build();
     }
-    private String auth(String role){return "Bearer "+JwtUtil.sign(secret,Map.of("uid",7L,"username","fixture","role",role),3600);}
+    private String auth(String role){return "Bearer "+com.alinksec.gateway.rest.TestJwt.token(secret,Map.of("uid",7L,"username","fixture","role",role),3600);}
     @Test void previewAndExportRequireAuthenticationAndNeverExposeCacheableOrPublicDownloads()throws Exception {
         var mvc=mvc();mvc.perform(get("/api/reports/preview")).andExpect(status().isUnauthorized());
         when(reports.preview(any())).thenReturn(Map.of("contract",1,"dataDigest","a".repeat(64)));

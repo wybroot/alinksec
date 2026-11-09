@@ -77,6 +77,7 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+      <el-tab-pane v-if="isAdmin" label="用户管理" name="users" lazy><UserPanel /></el-tab-pane>
     </el-tabs>
 
     <!-- 灰度下发弹窗 -->
@@ -113,6 +114,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import UserPanel from '../components/UserPanel.vue'
 import ReportPanel from '../components/ReportPanel.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
 import ClusterPanel from '../components/ClusterPanel.vue'

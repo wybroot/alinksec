@@ -74,7 +74,7 @@ class VendorAdvisoryIntegrationTest {
         service=sync.nativeAdvisories(id);sync.validate();
         var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
         mvc=MockMvcBuilders.standaloneSetup(new LibraryController(sync,catalog,props,schedules)).setControllerAdvice(new RestExceptionHandler())
-                .addInterceptors(new JwtAuthInterceptor(holder)).build();
+                .addInterceptors(com.alinksec.bootstrap.TestJwt.interceptor(holder)).build();
     }
     @AfterEach void close() throws Exception {
         if (sync!=null) sync.close();if (http!=null) http.stop(0);if (workers!=null) workers.shutdownNow();
@@ -96,7 +96,7 @@ class VendorAdvisoryIntegrationTest {
     }
     List<Map<String,Object>> archives() { return jdbc.queryForList("SELECT * FROM t_vendor_document WHERE source_id=? ORDER BY imported_at DESC,id DESC",id); }
     JsonNode declaration() { return JsonUtils.read(jdbc.queryForObject("SELECT document FROM t_security_cve WHERE source_id=? AND cve_id=?",String.class,id,cve)); }
-    String token(String role) { return JwtUtil.sign(SECRET,Map.of("uid",actor,"username","fixture","role",role),3600); }
+    String token(String role) { return com.alinksec.bootstrap.TestJwt.token(SECRET,Map.of("uid",actor,"username","fixture","role",role),3600); }
     JsonNode getData(String path,String role) throws Exception {
         var result=mvc.perform(get(path).header("Authorization","Bearer "+token(role))).andReturn();assertEquals(200,result.getResponse().getStatus());
         return JsonUtils.mapper().readTree(result.getResponse().getContentAsByteArray()).path("data");

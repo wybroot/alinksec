@@ -24,7 +24,8 @@ class AuthControllerTest {
         when(request.getRemoteAddr()).thenReturn("192.0.2.10");
         when(secret.secret()).thenReturn("test-signing-secret");
         when(users.login("admin", "correct", "192.0.2.10"))
-                .thenReturn(Optional.of(new UserService.UserProfile(7L, "admin", null, "admin", "{}")));
+                .thenReturn(Optional.of(new UserService.UserProfile(7L, "admin", null, "admin", "{}",0)));
+        when(users.createSession(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyLong())).thenReturn("test-session");
         AuthController controller = new AuthController(users, secret, new LoginAttemptLimiter());
 
         var result = controller.login(Map.of("username", "admin", "password", "correct"), request);
@@ -35,6 +36,7 @@ class AuthControllerTest {
         Map<String, Object> claims = JwtUtil.verify("test-signing-secret", token);
         assertEquals("admin", claims.get("username"));
         assertEquals("admin", claims.get("role"));
+        assertEquals("test-session",claims.get("sid"));
         assertTrue(((Number) claims.get("exp")).longValue() > System.currentTimeMillis() / 1000);
     }
 

@@ -49,7 +49,7 @@ agent/
 
 - 维护单条 gRPC 双向流，发送通道容量 256；接收循环按 Command 类型分发。
 - 重连：指数退避 1s→30s（±20% 抖动）；重连成功先发心跳并触发策略版本比对。
-- 业务报告先持久化到 `queue/pending.jsonl`，发送失败保留、重连后补传；默认限速 100 msg/s。心跳等实时状态按当前连接采样。
+- 业务报告先持久化到 `queue/pending.jsonl`，发送后仍保留，收到持久回执才推进、重连后可重放；补传上限 100 msg/s（实际受回执往返约束）。心跳等实时状态按当前连接采样。
 
 ### 2.2 scheduler（采集调度）
 
@@ -251,7 +251,7 @@ rules:
 - **诱饵文件由 Agent 本地生成**（文件名模板池随机组合，随机字节 + 合理文件头，不依赖平台下载），投放目录与数量由防护策略下发（默认用户文档/共享目录，每目录 4 个）。
 - **双触发**：诱饵被写入/篡改（高置信）+ 受监听目录写速率异常（10s 窗口 >50 文件重命名且扩展变化率 >80%，典型加密拖尾特征）。
 - **归因**：Linux 暂无可信写入者证据，跳过进程终止（`kill_and_isolate` 仍按配置隔离）；Windows amd64 通过内核文件 ETW 的成功操作与原生进程实例关联，无法核实时跳过终止，见 [归因与安全响应](61-Windows勒索进程归因与安全响应.md)。
-- **本地响应链**（不依赖服务端在线）：Linux 递归结束涉事进程及后代；Windows 只终止已核实的写入进程（均保留进程链取证）→ 主机隔离（复用 §5.5 的 10 秒认证租约；离线不续租自动解除）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
+- **本地响应链**（不依赖服务端在线）：Linux 当前没有可信写入者证据时保留告警／取证并拒绝终止；Windows 只终止已核实的写入进程（保留进程链取证）→ 主机隔离（复用 §5.5 的 10 秒认证租约；离线不续租自动解除）→ 证据快照 → `RptSecurityEvent(type=decoy_tamper/ransom_behavior, severity=critical)`。
 - **误报防护**：备份/杀毒/索引类进程按 exe 路径排除（策略可配）；诱饵目录避开业务工作区；响应级别可配（alert_only / kill / kill_and_isolate，默认 kill_and_isolate）。
 
 ## 6. 本地自治与策略缓存（policystore / offlineq）
@@ -263,12 +263,12 @@ policy-store（SQLite 表）
 ├─ protect_rules(json)               -- 防护规则缓存
 └─ config(采集频率/限流参数)
 
-offline-queue（SQLite 表：id, report_id, payload blob, ts, status）
+offline-queue（queue/pending.jsonl，稳定 report_id 与 protobuf JSON）
 ```
 
 - 策略同步：心跳发现版本不一致 → 收 `CmdPolicySync` → 全量写入 → 原子替换（事务）。
-- **断网语义**：guard 读 policystore 启动，断网期间规则持续生效；事件写 offlineq；重连后按序补传，服务端按 report_id 幂等。
-- 环形清理：offlineq 超过 500MB 或 24h 数据自动淘汰最旧（监控数据优先丢弃，安全事件最后淘汰）。
+- **断网语义**：guard 读 policystore 启动，断网期间规则持续生效；事件写 offlineq；重连协商持久回执后按序补传，服务端按 Agent 与 report_id 幂等；发送成功不等于出队，须收到持久回执。
+- 环形清理：offlineq 超过 500MiB 或 24h 数据自动淘汰最旧；指标直接使用可丢弃通道，不进入业务持久队列。
 
 ## 7. 自升级与自我保护
 

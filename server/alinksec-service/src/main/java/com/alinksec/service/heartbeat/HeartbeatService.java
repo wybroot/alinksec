@@ -39,6 +39,8 @@ public class HeartbeatService {
     private final com.alinksec.service.virus.ClamavService clamav;
     private final com.alinksec.service.virus.YaraService yara;
     private final JdbcTemplate jdbc;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.alert.SecurityEventService securityEvents;
 
     public HeartbeatService(AgentRepository agentRepository, CommandService commandService,
                             AlinkSecProperties props, PolicyStoreService policyStore,
@@ -56,9 +58,13 @@ public class HeartbeatService {
         this.jdbc = jdbc;
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public void onHeartbeat(String agentId, RptHeartbeat hb) {
+        var previous=agentRepository.findByAgentId(agentId);
         if(agentRepository.heartbeat(agentId, hb.getAgentVersion(), hb.getPolicyVersion())!=1)
             throw new SecurityException("agent_disabled_or_deleted");
+        if(previous.isPresent() && previous.get().status()==2)
+            jdbc.update("UPDATE t_alert SET status=2,handle_remark='主机已恢复在线',handled_at=CURRENT_TIMESTAMP WHERE agent_id=? AND event_type='host_offline' AND status IN (0,1)",agentId);
         agentRepository.virusContract(agentId,hb.getVirusExecutionContract(),hb.getDbVersion());
         agentRepository.signatureUpdateContract(agentId,hb.getSignatureUpdateContract());
         agentRepository.upgradeContract(agentId,hb.getUpgradeContract());
@@ -84,13 +90,17 @@ public class HeartbeatService {
     }
 
     /** 离线扫描：在线但心跳超时的主机置离线（M2 补平台级 offline 告警） */
+    @org.springframework.transaction.annotation.Transactional
     @Scheduled(fixedDelay = 30_000, initialDelay = 60_000)
     public void markOfflineAgents() {
+        jdbc.update("UPDATE t_agent SET status=2 WHERE deleted=FALSE AND status=1 AND maintenance_until>? AND last_heartbeat<?",System.currentTimeMillis()/1000,new com.alinksec.service.config.DatabaseDialect(props).timestampBefore(java.time.Duration.ofSeconds(OFFLINE_SECONDS)));
         List<AgentEntity> stale = agentRepository.findStaleOnline(OFFLINE_SECONDS);
         for (AgentEntity agent : stale) {
-            if(agentRepository.markOfflineIfStale(agent.agentId(),OFFLINE_SECONDS)==1)
+            if(agentRepository.markOfflineIfStale(agent.agentId(),OFFLINE_SECONDS)==1) {
+                securityEvents.onEvent(agent.agentId(),com.alinksec.proto.RptSecurityEvent.newBuilder().setRuleId("PLATFORM-HOST-OFFLINE").setRuleName("主机心跳超时").setType("host_offline").setSeverity(com.alinksec.proto.Severity.SEV_HIGH).setActionTaken("alert_only").setDetail(com.alinksec.common.util.JsonUtils.write(java.util.Map.of("lastHeartbeat",String.valueOf(agent.lastHeartbeat()),"thresholdSeconds",OFFLINE_SECONDS))).build());
                 log.warn("主机离线: agent={} hostname={} last_heartbeat={}",
                     agent.agentId(), agent.hostname(), agent.lastHeartbeat());
+            }
         }
     }
 }

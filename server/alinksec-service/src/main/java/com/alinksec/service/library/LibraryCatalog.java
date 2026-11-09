@@ -450,7 +450,7 @@ public class LibraryCatalog {
     }
     public Map<String,Object> governanceHistory(String source,int page,int size) {
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_security_governance_event WHERE source_id=?",Long.class,source);
-        var rows=jdbc.queryForList("SELECT * FROM t_security_governance_event WHERE source_id=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",source,size,(long)(page-1)*size);
+        var rows=jdbc.queryForList("SELECT * FROM t_security_governance_event WHERE source_id=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",source,size,(long)com.alinksec.common.web.PageBounds.offset(page,size));
         for (var row:rows) row.put("snapshot",JsonUtils.read((String)row.get("snapshot")));
         return Map.of("list",rows,"total",total==null?0:total);
     }
@@ -577,7 +577,7 @@ public class LibraryCatalog {
         if("source".equals(kind))LibrarySelection.sourceId(key);else LibrarySelection.validate(kind,key);
         if(page<1 || size<1 || size>50)throw new IllegalArgumentException("分页范围非法");
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_security_selection_event WHERE kind=? AND item_key=?",Long.class,kind,key);
-        var rows=jdbc.queryForList("SELECT * FROM t_security_selection_event WHERE kind=? AND item_key=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",kind,key,size,(long)(page-1)*size);
+        var rows=jdbc.queryForList("SELECT * FROM t_security_selection_event WHERE kind=? AND item_key=? ORDER BY recorded_at DESC,id DESC LIMIT ? OFFSET ?",kind,key,size,(long)com.alinksec.common.web.PageBounds.offset(page,size));
         for(var row:rows)row.put("snapshot",JsonUtils.read(row.get("snapshot").toString()));
         return Map.of("list",rows,"total",total==null?0:total);
     }
@@ -704,7 +704,7 @@ public class LibraryCatalog {
         var args = new ArrayList<Object>();
         if (!where.isEmpty()) { args.add("%" + keyword.trim() + "%"); args.add(args.get(0)); }
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_cve_db" + where, Long.class, args.toArray());
-        var pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add((page - 1) * size);
+        var pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add(com.alinksec.common.web.PageBounds.offset(page,size));
         var rows = jdbc.queryForList("SELECT cve_id,title,rule_source_id,rule_digest,rule_status,provenance,CAST(affected AS TEXT) AS affected FROM t_cve_db"
                 + where + " ORDER BY cve_id LIMIT ? OFFSET ?", pageArgs.toArray());
         for (var row : rows) {
