@@ -35,6 +35,15 @@
 - Java／SQLite `WindowsRansomIntegrationTest`：3 项测试通过，0 失败／错误／跳过。使用现有 Maven 3.9.9／Java 21 Alpine 镜像，单个一次性容器限制 640 MiB／单 CPU；Maven 堆 256 MiB，测试堆 192 MiB。首轮缺少 gRPC 生成器所需 glibc 兼容层，第二轮仅在容器安装 gcompat 后成功；容器已自动清理。命令：`mvn -B -q -pl alinksec-bootstrap -am -Dtest=WindowsRansomIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -DargLine=-Xmx192m test`。
 - 原始 Surefire XML 与本地结果汇总保留在 `.tmp/rev011-validation/`，Java 数据库取回 fixture 在 `.tmp/windows-ransom-fixtures/`。这些本地证据不替代远端 CI。
 
+### PostgreSQL 补充验证（2026-11-09）
+
+- 源码提交 `414804b9abd643b99b78f4009a0927c4835b7c41` 上的 Java 用例未改动。临时 PostgreSQL 17 先启动，完成生产迁移脚本并配置 `alinksec_app`；核对 superuser／createdb／createrole／inherit／replication／bypassrls 标志均为 false，再启动 Maven 容器执行测试。
+- 启动前约 2.3 GiB 内存可用、full PSI 为 0。仅同时运行两个必需容器，数据库限制 256 MiB／0.5 CPU／128 MiB tmpfs 数据目录，Maven 限制 640 MiB／1 CPU／256 MiB 堆、测试堆 192 MiB；单工作线程和宿主机内存看护保持。无宿主端口、无持久数据卷，已有用户服务不变。结束后两个验证容器均已停止并删除。
+- 首次准备运行时依赖时容器内 Alpine 软件源下载长时间等待，主动停止，未计为测试。第二次将官方 Alpine 的 gcompat／libucontext／musl-obstack 包预下载并随测试目录挂载，在容器内由 apk 校验安装，Maven 使用缓存离线运行。
+- 命令：`mvn -o -B -q -T1 -pl alinksec-bootstrap -am -Dtest=WindowsRansomIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dalinksec.integration.database=postgres "-DargLine=-Xmx192m -XX:ActiveProcessorCount=1" test`。结果：**3 项测试通过，0 失败／错误／跳过**，包括 Linux 无写入证据告警持久化、不同进程实例／文件证据保留及报告事务回滚重试。
+- 使用此次 PostgreSQL 查询 fixture 串行执行 `windows-ransom-browser.mjs`，单页面预览的 4 组检查通过。新增 `ALINKSEC_RANSOM_BROWSER_ARTIFACTS` 指定输出目录，结果附带 fixture 目录；SQLite 与 PostgreSQL 证据分别保留，不相互覆盖。
+- PostgreSQL 迁移日志、Surefire XML、容器镜像 digest、fixture 及浏览器结果／截图保留在 `.tmp/rev011-validation/postgres/`；临时编排脚本与看护脚本分别保留为 `.tmp/rev011-validation/postgres-runner.py`、`resource-watch.py`。这些证据仅代表本地 amd64 的限定集成用例及单页面展示，不代替整个平台、生产 bundle、跨平台或远端 CI 验收。
+
 ## 待远端验收
 
 用户已选择本轮先完成本地修复与验证，保留远端验收。当前主机没有 GitHub 认证，未创建 PR、推送、合并、发布或部署。

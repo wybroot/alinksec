@@ -6,9 +6,10 @@ import {fileURLToPath} from 'node:url'
 import {chromium,expect} from '@playwright/test'
 const web=resolve(dirname(fileURLToPath(import.meta.url)),'..')
 const dist=resolve(process.env.ALINKSEC_RANSOM_PREVIEW_DIST || resolve(web,'dist'))
-const root=resolve(web,'../.tmp/windows-ransom-browser')
-const fixture=JSON.parse(readFileSync(resolve(process.env.ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES || resolve(web,'../.tmp/windows-ransom-fixtures'),'alerts.json')))
-const linuxFixture=JSON.parse(readFileSync(resolve(process.env.ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES || resolve(web,'../.tmp/windows-ransom-fixtures'),'linux-alerts.json')))
+const root=resolve(process.env.ALINKSEC_RANSOM_BROWSER_ARTIFACTS || resolve(web,'../.tmp/windows-ransom-browser'))
+const fixtureDirectory=resolve(process.env.ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES || resolve(web,'../.tmp/windows-ransom-fixtures'))
+const fixture=JSON.parse(readFileSync(resolve(fixtureDirectory,'alerts.json')))
+const linuxFixture=JSON.parse(readFileSync(resolve(fixtureDirectory,'linux-alerts.json')))
 fixture.list.push(...linuxFixture.list);fixture.total=fixture.list.length
 mkdirSync(root,{recursive:true});assert.ok(existsSync(resolve(dist,'index.html')))
 const server=createServer((req,res)=>{
@@ -88,6 +89,6 @@ try{
  await page.getByRole('button',{name:'查看归因证据'}).first().click();await expect(page.getByTestId('ransom-attribution')).toBeVisible()
  checks.push('operator-can-review-same-retained-evidence')
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
- writeFileSync(root+'/result.json',JSON.stringify({passed:true,scope:process.env.ALINKSEC_RANSOM_PREVIEW_DIST?'page-scoped-current-source-preview':'production-bundle',checks,errors,unexpected,mobileDialog:bounds},null,2)+'\n')
+ writeFileSync(root+'/result.json',JSON.stringify({passed:true,scope:process.env.ALINKSEC_RANSOM_PREVIEW_DIST?'page-scoped-current-source-preview':'production-bundle',fixtureDirectory,checks,errors,unexpected,mobileDialog:bounds},null,2)+'\n')
  console.log('Passed Windows ransomware evidence browser checks:',checks)
 }finally{await browser?.close();await new Promise(done=>server.close(done))}
