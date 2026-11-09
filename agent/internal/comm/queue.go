@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alinksec/alinksec-agent/internal/securestate"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
@@ -17,13 +18,14 @@ import (
 // OfflineQueue 断线期间的上报离线队列（JSONL 文件持久化，逐行追加）。
 // 环形语义（docs/01 §6.2）：总大小超 500MB 或单条超 24h 时丢最旧数据。
 type OfflineQueue struct {
-	mu             sync.Mutex
-	path           string
-	lastCompaction time.Time
-	offset         int64
-	peekEnd        int64
-	peeked         *pb.Report
-	sentAt         time.Time
+	mu              sync.Mutex
+	path            string
+	lastCompaction  time.Time
+	offset          int64
+	peekEnd         int64
+	peeked          *pb.Report
+	sentAt          time.Time
+	directorySynced bool
 }
 
 const (
@@ -39,6 +41,9 @@ func NewOfflineQueue(workDir string) (*OfflineQueue, error) {
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return nil, err
 	}
+	if err := securestate.SyncDirectory(filepath.Dir(dir)); err != nil {
+		return nil, err
+	}
 	return &OfflineQueue{path: filepath.Join(dir, "pending.jsonl")}, nil
 }
 
@@ -46,7 +51,7 @@ func NewOfflineQueue(workDir string) (*OfflineQueue, error) {
 func (q *OfflineQueue) Push(r *pb.Report) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	f, err := os.OpenFile(q.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(q.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		return err
 	}
@@ -59,16 +64,41 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 		_ = f.Close()
 		return fmt.Errorf("report exceeds 4MiB queue limit")
 	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	// A failed write may leave an incomplete final JSON object. Delimit it
+	// before accepting another record, so recovery cannot discard both together.
+	separator := false
+	if st.Size() > 0 {
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], st.Size()-1); err != nil {
+			_ = f.Close()
+			return err
+		}
+		separator = last[0] != '\n'
+	}
+	appendBytes := int64(len(line) + 1)
+	if separator {
+		appendBytes++
+	}
 	// A blocked stream can hold a peek while raw collection continues. Retain
 	// the source cursor instead of growing the spool while compaction is fenced.
 	if q.peeked != nil {
-		st, statErr := f.Stat()
-		if statErr != nil || st.Size()+int64(len(line)+1) > maxQueueBytes {
+		if st.Size()+appendBytes > maxQueueBytes {
 			_ = f.Close()
 			return fmt.Errorf("raw log spool capacity unavailable")
 		}
 	}
 	w := bufio.NewWriter(f)
+	if separator {
+		if err := w.WriteByte('\n'); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
 	if _, err := w.Write(append(line, '\n')); err != nil {
 		_ = f.Close()
 		return err
@@ -83,6 +113,12 @@ func (q *OfflineQueue) Push(r *pb.Report) error {
 	}
 	if err := f.Close(); err != nil {
 		return err
+	}
+	if !q.directorySynced {
+		if err := securestate.SyncDirectory(filepath.Dir(q.path)); err != nil {
+			return err
+		}
+		q.directorySynced = true
 	}
 	return q.compactLocked()
 }
@@ -176,6 +212,13 @@ func (q *OfflineQueue) compactLocked() error {
 	}
 	q.offset = 0
 	q.lastCompaction = now
+	// Rename has already changed the byte positions even if directory sync
+	// fails. Keep the live cursor consistent and retry durability on next Push.
+	q.directorySynced = false
+	if err := securestate.SyncDirectory(filepath.Dir(q.path)); err != nil {
+		return err
+	}
+	q.directorySynced = true
 	return nil
 }
 
