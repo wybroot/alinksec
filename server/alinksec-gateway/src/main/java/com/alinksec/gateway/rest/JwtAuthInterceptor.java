@@ -62,6 +62,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             if(!(claims.get("uid") instanceof Number uid) || !(claims.get("sid") instanceof String sid))throw new IllegalArgumentException("会话已失效，请重新登录");
             var profile=users.authenticate(uid.longValue(),sid);
             String role=profile.roleName();
+            if(!com.alinksec.service.user.UserService.isSupportedRole(role))throw new IllegalArgumentException("会话角色无效，请重新登录");
             request.setAttribute("sid",sid);
             // Static URI segments can be encoded or carry matrix parameters.
             // Authorize the controller pattern that Spring actually matched.

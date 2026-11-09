@@ -154,6 +154,16 @@ class JwtAuthInterceptorTest {
         }
     }
 
+    @Test void unknownRolesCannotInheritReadsOrSelfServiceWrites()throws Exception{
+        for(String role:new String[]{"unknown","","ADMIN"," operator"}) {
+            for(String[] route:new String[][]{{"GET","/api/hosts"},{"POST","/api/protect/rules"},{"POST","/api/auth/password"}}) {
+                var req=request(role);req.setMethod(route[0]);req.setRequestURI(route[1]);
+                var response=new MockHttpServletResponse();
+                assertFalse(interceptor().preHandle(req,response,new Object()));
+                assertEquals(401,response.getStatus());
+            }
+        }
+    }
     @Test void invalidPaginationIsRejectedForReadonlyUsers()throws Exception{
         for(String[] values:new String[][]{{"1","-1"},{"0","20"},{"1","0"},{"2147483647","100"},{"1","2147483648"}}){
             var req=request("viewer");req.setRequestURI("/api/alerts");req.setParameter("page",values[0]);req.setParameter("size",values[1]);var response=new MockHttpServletResponse();assertFalse(interceptor().preHandle(req,response,new Object()));assertEquals(400,response.getStatus());

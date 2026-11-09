@@ -11,6 +11,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 管理端用户（t_user / t_role）：登录校验 + 登录审计。
@@ -20,6 +21,7 @@ import java.util.Optional;
 public class UserService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(UserService.class);
+    private static final Set<String> SUPPORTED_ROLES = Set.of("admin", "operator", "viewer");
     private final JdbcTemplate jdbc;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
     private final TransactionTemplate auditTransaction;
@@ -47,7 +49,8 @@ public class UserService {
         }
         var row = rows.get(0);
         boolean ok = encoder.matches(rawPassword, (String) row.get("password_hash"));
-        boolean enabled = ((Number) row.get("status")).intValue() == 1;
+        boolean enabled = ((Number) row.get("status")).intValue() == 1
+                && isSupportedRole((String) row.get("role_name"));
         if (!ok || !enabled) {
             audit(((Number) row.get("id")).longValue(), username, "login_failed", sourceIp);
             return Optional.empty();
@@ -62,6 +65,7 @@ public class UserService {
 
     @org.springframework.transaction.annotation.Transactional
     public String createSession(UserProfile profile,long ttlSeconds) {
+        requireRole(profile.roleName());
         jdbc.update("UPDATE t_user SET auth_version=auth_version WHERE id=?",profile.id());
         String sid=java.util.UUID.randomUUID().toString();
         jdbc.update("DELETE FROM t_user_session WHERE expires_at<=?",System.currentTimeMillis()/1000);
@@ -74,7 +78,8 @@ public class UserService {
     public UserProfile authenticate(long uid,String sid) {
         var rows=jdbc.queryForList("SELECT u.id,u.username,u.real_name,u.auth_version,r.name AS role_name FROM t_user u JOIN t_role r ON r.id=u.role_id JOIN t_user_session s ON s.user_id=u.id WHERE u.id=? AND u.status=1 AND s.session_id=? AND s.expires_at>? AND s.auth_version=u.auth_version AND s.role_name=r.name",uid,sid,System.currentTimeMillis()/1000);
         if(rows.isEmpty())throw new IllegalArgumentException("会话已失效，请重新登录");
-        var r=rows.get(0);return new UserProfile(uid,(String)r.get("username"),(String)r.get("real_name"),(String)r.get("role_name"),"",((Number)r.get("auth_version")).longValue());
+        var r=rows.get(0);String role=(String)r.get("role_name");requireRole(role);
+        return new UserProfile(uid,(String)r.get("username"),(String)r.get("real_name"),role,"",((Number)r.get("auth_version")).longValue());
     }
     public void logout(String sid,long uid){jdbc.update("DELETE FROM t_user_session WHERE session_id=? AND user_id=?",sid,uid);}
     @org.springframework.transaction.annotation.Transactional
@@ -115,7 +120,8 @@ public class UserService {
         audit(actor,"","user_updated","");
     }
     private void requireAdmin(long uid){if(jdbc.queryForObject("SELECT count(*) FROM t_user u JOIN t_role r ON r.id=u.role_id WHERE u.id=? AND u.status=1 AND r.name='admin'",Long.class,uid)!=1)throw new IllegalArgumentException("需要有效管理员账号");}
-    private static void requireRole(String role){if(role==null || !java.util.Set.of("admin","operator","viewer").contains(role))throw new IllegalArgumentException("无效角色");}
+    public static boolean isSupportedRole(String role){return role!=null && SUPPORTED_ROLES.contains(role);}
+    private static void requireRole(String role){if(!isSupportedRole(role))throw new IllegalArgumentException("无效角色");}
     private static void requirePassword(String password){if(password==null || password.codePointCount(0,password.length())<12 || password.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>72)throw new IllegalArgumentException("密码至少12字符且不超过72个UTF-8字节");}
 
     public void audit(Long userId, String username, String action, String sourceIp) {

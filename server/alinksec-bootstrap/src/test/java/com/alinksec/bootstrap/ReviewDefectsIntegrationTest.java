@@ -59,6 +59,24 @@ class ReviewDefectsIntegrationTest {
         String active=token("viewer");jdbc.update("UPDATE t_user SET status=0 WHERE id=?",viewer);assertEquals(401,access(active,"GET","/api/hosts",users).getStatus());
         assertEquals(401,access(JwtUtil.sign(SECRET,Map.of("uid",admin,"role","admin"),3600),"GET","/api/hosts",users).getStatus());
     }
+    @Test void unsupportedDatabaseRoleCannotLoginCreateOrReuseASession()throws Exception{
+        long role=jdbc.queryForObject("SELECT COALESCE(MAX(id),0)+1 FROM t_role",Long.class);
+        String name="custom-"+UUID.randomUUID().toString().substring(0,8),session=UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO t_role(id,name,permissions) VALUES(?,?,'[]')",role,name);
+        try {
+            jdbc.update("UPDATE t_user SET role_id=? WHERE id=?",role,viewer);
+            jdbc.update("INSERT INTO t_user_session(session_id,user_id,auth_version,role_name,expires_at) VALUES(?,?,0,?,?)",session,viewer,name,System.currentTimeMillis()/1000+3600);
+            var profile=new UserService.UserProfile(viewer,username+"viewer",null,name,"[]",0);
+            String token=JwtUtil.sign(SECRET,Map.of("uid",viewer,"sid",session,"role","admin"),3600);
+            assertAll(()->assertTrue(users.login(username+"viewer",PASSWORD,"").isEmpty()),
+                    ()->assertThrows(IllegalArgumentException.class,()->tx.execute(s->users.createSession(profile,3600))),
+                    ()->assertThrows(IllegalArgumentException.class,()->users.authenticate(viewer,session)),
+                    ()->assertEquals(401,access(token,"GET","/api/hosts",users).getStatus()));
+        }finally{
+            jdbc.update("UPDATE t_user SET role_id=(SELECT id FROM t_role WHERE name='viewer') WHERE id=?",viewer);
+            jdbc.update("DELETE FROM t_role WHERE id=?",role);
+        }
+    }
     @Test void changePasswordRequiresOldPasswordAndRevokesAllSessions()throws Exception{
         String first=token("viewer"),second=token("viewer");assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->users.changePassword(viewer,"wrong",PASSWORD+"new")));
         tx.executeWithoutResult(s->users.changePassword(viewer,PASSWORD,PASSWORD+"new"));
