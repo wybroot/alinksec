@@ -137,7 +137,37 @@ class ReviewDefectsIntegrationTest {
         tx.executeWithoutResult(s->assets.replaceSnapshot(agent,ports(0,AssetCollection.Status.COMPLETE,80)));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
     }
     ReportDispatcher dispatcher(SecurityEventService events){
-        return new ReportDispatcher(mock(com.alinksec.service.heartbeat.HeartbeatService.class),mock(AssetService.class),events,mock(com.alinksec.service.command.CommandService.class),mock(com.alinksec.service.baseline.BaselineResultService.class),mock(com.alinksec.service.scan.ScanResultService.class),mock(com.alinksec.service.virus.VirusResultService.class),mock(com.alinksec.service.fix.FixResultService.class),mock(com.alinksec.service.metrics.MetricsForwarder.class),mock(com.alinksec.service.log.LogBatchService.class),jdbc,dialect,new DataSourceTransactionManager(pool),mock(com.alinksec.service.fix.WindowsUpdateService.class),mock(com.alinksec.service.evidence.EvidenceService.class));
+        return dispatcher(events,mock(AssetService.class));
+    }
+    ReportDispatcher dispatcher(SecurityEventService events,AssetService assets){
+        return new ReportDispatcher(mock(com.alinksec.service.heartbeat.HeartbeatService.class),assets,events,mock(com.alinksec.service.command.CommandService.class),mock(com.alinksec.service.baseline.BaselineResultService.class),mock(com.alinksec.service.scan.ScanResultService.class),mock(com.alinksec.service.virus.VirusResultService.class),mock(com.alinksec.service.fix.FixResultService.class),mock(com.alinksec.service.metrics.MetricsForwarder.class),mock(com.alinksec.service.log.LogBatchService.class),jdbc,dialect,new DataSourceTransactionManager(pool),mock(com.alinksec.service.fix.WindowsUpdateService.class),mock(com.alinksec.service.evidence.EvidenceService.class));
+    }
+    @Test void matchingSqlFailureRollsBackAssetAndDedupBeforeSuccessfulReplay(){
+        var failingSql=spy(jdbc);
+        var fail=new java.util.concurrent.atomic.AtomicBoolean(true);
+        doAnswer(i->{
+            if(fail.getAndSet(false))return jdbc.update("INSERT INTO t_audit_log(method,path,status) VALUES(NULL,?,200)",agent);
+            return jdbc.update("UPDATE t_vuln_finding SET current_match=false WHERE agent_id=?",agent);
+        }).when(failingSql).update("UPDATE t_vuln_finding SET current_match=false WHERE agent_id=?",agent);
+        var matches=new com.alinksec.service.scan.VulnMatchService(failingSql,tx.getTransactionManager());
+        var events=new SecurityEventService(jdbc,mock(NotifyService.class),dialect);
+        var assets=new AssetService(jdbc,matches,events);
+        jdbc.update("INSERT INTO t_asset_software(agent_id,name,version,source,architecture) VALUES(?,'openssl','1.0','dpkg','amd64')",agent);
+        var snapshot=RptAssetSnapshot.newBuilder().setSequence(1).addCollected("software")
+                .addCollections(AssetCollection.newBuilder().setCategory("software").setStatus(AssetCollection.Status.COMPLETE))
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE).setSource("dpkg").setDistroId("debian").setDistroVersion("12"))
+                .addSoftware(SoftwareInfo.newBuilder().setName("openssl").setVersion("3.0.1-1").setSource("dpkg").setArchitecture("amd64")).build();
+        var report=Report.newBuilder().setAgentId(agent).setReportId(UUID.randomUUID().toString()).setReliable(true).setAsset(snapshot).build();
+        var dispatcher=dispatcher(events,assets);
+        assertThrows(org.springframework.transaction.UnexpectedRollbackException.class,()->dispatcher.dispatch(agent,report));
+        assertEquals("1.0",jdbc.queryForObject("SELECT version FROM t_asset_software WHERE agent_id=?",String.class,agent));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_collection_state WHERE agent_id=?",Integer.class,agent));
+        assertEquals(0L,jdbc.queryForObject("SELECT software_revision FROM t_agent WHERE agent_id=?",Long.class,agent));
+        dispatcher.dispatch(agent,report);dispatcher.dispatch(agent,report);
+        assertEquals("3.0.1-1",jdbc.queryForObject("SELECT version FROM t_asset_software WHERE agent_id=?",String.class,agent));
+        assertEquals(1L,jdbc.queryForObject("SELECT software_revision FROM t_agent WHERE agent_id=?",Long.class,agent));
+        assertEquals(1L,jdbc.queryForObject("SELECT sequence FROM t_asset_collection_state WHERE agent_id=? AND category='software'",Long.class,agent));
+        verify(failingSql,times(2)).update("UPDATE t_vuln_finding SET current_match=false WHERE agent_id=?",agent);
     }
     @Test void failedReportAndDedupRollbackTogetherAndRetryExactlyOnce(){
         var events=spy(new SecurityEventService(jdbc,mock(NotifyService.class),dialect));
