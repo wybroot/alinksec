@@ -5,8 +5,8 @@ import {resolve,dirname,extname,sep} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {chromium,expect} from '@playwright/test'
 const web=resolve(dirname(fileURLToPath(import.meta.url)),'..')
-const dist=resolve(process.env.ALINKSEC_REVIEW_PREVIEW_DIST || resolve(web,'dist'))
-const root=resolve(web,'../.tmp/review-defects-browser');mkdirSync(root,{recursive:true})
+const dist=resolve(process.env.ALINKSEC_REVIEW_PREVIEW_DIST || process.env.ALINKSEC_REVIEW_ROUTED_PREVIEW_DIST || resolve(web,'dist'))
+const root=resolve(process.env.ALINKSEC_REVIEW_BROWSER_ARTIFACTS || resolve(web,'../.tmp/review-defects-browser'));mkdirSync(root,{recursive:true})
 const server=createServer((req,res)=>{
  let path=resolve(dist,'.'+new URL(req.url,'http://localhost').pathname)
  if(path!==dist&&!path.startsWith(dist+sep)){res.writeHead(403);res.end();return}
@@ -77,7 +77,8 @@ try{
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:root+'/password-mobile.png',animations:'disabled'})
  assert.deepEqual(errors,[])
  // Never retain submitted credentials in browser artifacts.
- writeFileSync(root+'/result.json',JSON.stringify({passed:true,scope:process.env.ALINKSEC_REVIEW_PREVIEW_DIST?'current-source-page-preview':'production-bundle',checks,errors},null,2)+'\n')
+ const scope=process.env.ALINKSEC_REVIEW_PREVIEW_DIST?'current-source-page-preview':process.env.ALINKSEC_REVIEW_ROUTED_PREVIEW_DIST?'current-source-routed-preview':'production-bundle'
+ writeFileSync(root+'/result.json',JSON.stringify({passed:true,scope,checks,errors},null,2)+'\n')
  console.log('Passed defect browser checks:',checks)
  await context.close()
 }finally{await browser?.close();await new Promise(done=>server.close(done))}

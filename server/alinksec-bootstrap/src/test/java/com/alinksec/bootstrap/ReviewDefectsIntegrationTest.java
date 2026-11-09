@@ -138,6 +138,32 @@ class ReviewDefectsIntegrationTest {
         assertThrows(IllegalArgumentException.class,()->tx.executeWithoutResult(s->users.updateUser(id,"viewer",0,null,admin,0L)));
         assertFalse(users.users(1,100).toString().contains("password_hash"));
     }
+    @Test void invalidSoftwareMetadataCannotClaimCompleteOrEraseRetainedInventory(){
+        var matches=mock(com.alinksec.service.scan.VulnMatchService.class);
+        var assets=new AssetService(jdbc,matches,mock(SecurityEventService.class));
+        var metadata=SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE)
+                .setSource("dpkg").setDistroId("debian").setDistroVersion("12").setPackageRepairContract(2);
+        var complete=RptAssetSnapshot.newBuilder().setSequence(1).addCollected("software")
+                .addCollections(AssetCollection.newBuilder().setCategory("software").setStatus(AssetCollection.Status.COMPLETE))
+                .setSoftwareInventory(metadata).addSoftware(SoftwareInfo.newBuilder().setName("openssl")
+                        .setVersion("3.0.1-1").setSource("dpkg").setArchitecture("amd64")).build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete));
+        long revision=jdbc.queryForObject("SELECT software_revision FROM t_agent WHERE agent_id=?",Long.class,agent);
+        var invalid=complete.toBuilder().setSequence(2).setSoftwareInventory(metadata.clone().setSource("invalid-source")).build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,invalid));
+        assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_asset_collection_state WHERE agent_id=? AND category='software'",String.class,agent));
+        assertEquals("invalid_software_inventory",jdbc.queryForObject("SELECT error FROM t_asset_collection_state WHERE agent_id=? AND category='software'",String.class,agent));
+        var missing=complete.toBuilder().setSequence(3).clearSoftwareInventory().clearSoftware().build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,missing));
+        assertEquals("failed",jdbc.queryForObject("SELECT software_collection_status FROM t_agent WHERE agent_id=?",String.class,agent));
+        assertEquals("software_inventory_missing",jdbc.queryForObject("SELECT error FROM t_asset_collection_state WHERE agent_id=? AND category='software'",String.class,agent));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_asset_software WHERE agent_id=?",Integer.class,agent));
+        assertEquals(revision,jdbc.queryForObject("SELECT software_revision FROM t_agent WHERE agent_id=?",Long.class,agent));
+        verify(matches,times(3)).matchAgent(agent,0L);
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete.toBuilder().setSequence(4).clearSoftware().build()));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_software WHERE agent_id=?",Integer.class,agent));
+        assertEquals("complete",jdbc.queryForObject("SELECT status FROM t_asset_collection_state WHERE agent_id=? AND category='software'",String.class,agent));
+    }
     @Test void partialContainerSourcesPreserveUnavailableSource(){
         var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
         var complete=RptAssetSnapshot.newBuilder().setSequence(1).addCollected("containers").addCollections(AssetCollection.newBuilder().setCategory("containers").setStatus(AssetCollection.Status.COMPLETE)).addContainerSources("docker").addContainerSources("kubernetes").addContainers(ContainerInfo.newBuilder().setContainerId("d-old").setName("docker-old").setOrchestrator("docker")).addContainers(ContainerInfo.newBuilder().setContainerId("k-old").setName("kubernetes-old").setOrchestrator("kubernetes")).build();

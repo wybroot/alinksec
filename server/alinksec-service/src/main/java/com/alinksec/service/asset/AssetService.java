@@ -62,16 +62,28 @@ public class AssetService {
             int changed=jdbc.update("INSERT INTO t_asset_collection_state(agent_id,category,sequence,status,error,collected_at) VALUES(?,?,?,?,?,?) ON CONFLICT(agent_id,category) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,error=excluded.error,collected_at=excluded.collected_at WHERE excluded.sequence>t_asset_collection_state.sequence OR (excluded.sequence=0 AND t_asset_collection_state.sequence=0)",agentId,category,snapshot.getSequence(),status,error,legacy?0:state.getCollectedAt());
             if(changed==1) {
                 accepted.add(category);
-                if(status.equals("complete") || legacy && !status.equals("failed"))complete.add(category);
+                if(status.equals("complete") || status.equals("legacy"))complete.add(category);
             }
         }
         boolean softwareAttempt=accepted.contains("software");
         boolean legacyFullSnapshot=false;
         collected=complete;
         var softwareSnapshot=snapshot;
-        if(softwareAttempt && !collected.contains("software") && (!snapshot.hasSoftwareInventory() || snapshot.getSoftwareInventory().getStatus()==SoftwareInventory.Status.COMPLETE))
-            softwareSnapshot=snapshot.toBuilder().setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.FAILED).setError("collection_incomplete")).build();
+        boolean missingSoftwareMetadata=snapshot.getSequence()>0 && !snapshot.hasSoftwareInventory();
+        if(softwareAttempt && (missingSoftwareMetadata || !collected.contains("software") && (!snapshot.hasSoftwareInventory() || snapshot.getSoftwareInventory().getStatus()==SoftwareInventory.Status.COMPLETE)))
+            softwareSnapshot=snapshot.toBuilder().setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.FAILED).setError(missingSoftwareMetadata?"software_inventory_missing":"collection_incomplete")).build();
         boolean replaceSoftware=softwareAttempt && recordSoftwareAttempt(agentId,softwareSnapshot) && collected.contains("software");
+        if(softwareAttempt && collected.contains("software") && !replaceSoftware) {
+            // Detail validation is authoritative. Never advertise a complete
+            // category while retaining the previous inventory after a failure.
+            collected.remove("software");
+            jdbc.update("""
+                    UPDATE t_asset_collection_state SET
+                      status=(SELECT software_collection_status FROM t_agent WHERE agent_id=?),
+                      error=(SELECT software_collection_error FROM t_agent WHERE agent_id=?)
+                    WHERE agent_id=? AND category='software' AND sequence=?
+                    """,agentId,agentId,agentId,snapshot.getSequence());
+        }
         if(collected.contains("disks")) {
             jdbc.update("DELETE FROM t_asset_disk WHERE agent_id=?",agentId);
             for(var disk:snapshot.getDisksList())jdbc.update("INSERT INTO t_asset_disk(agent_id,mount,fs_type,total_bytes,used_bytes) VALUES(?,?,?,?,?)",agentId,disk.getMount(),disk.getFsType(),disk.getTotalBytes(),disk.getUsedBytes());
@@ -159,7 +171,7 @@ public class AssetService {
         if (!replaceSoftware) {
             // A failed/unsupported attempt must invalidate apparent coverage even
             // while retaining the last successful software rows.
-            if (softwareAttempt && snapshot.hasSoftwareInventory()) vulnMatchService.matchAgent(agentId,0L);
+            if (softwareAttempt && softwareSnapshot.hasSoftwareInventory()) vulnMatchService.matchAgent(agentId,0L);
             return;
         }
         try {
