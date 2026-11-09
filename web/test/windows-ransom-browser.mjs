@@ -88,6 +88,6 @@ try{
  await page.getByRole('button',{name:'查看归因证据'}).first().click();await expect(page.getByTestId('ransom-attribution')).toBeVisible()
  checks.push('operator-can-review-same-retained-evidence')
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])
- writeFileSync(root+'/result.json',JSON.stringify({passed:true,checks,errors,unexpected,mobileDialog:bounds},null,2)+'\n')
+ writeFileSync(root+'/result.json',JSON.stringify({passed:true,scope:process.env.ALINKSEC_RANSOM_PREVIEW_DIST?'page-scoped-current-source-preview':'production-bundle',checks,errors,unexpected,mobileDialog:bounds},null,2)+'\n')
  console.log('Passed Windows ransomware evidence browser checks:',checks)
 }finally{await browser?.close();await new Promise(done=>server.close(done))}

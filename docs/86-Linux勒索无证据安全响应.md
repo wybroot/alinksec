@@ -28,7 +28,10 @@
 - 原生测试生成 `.tmp/linux-ransom-native/event.json`，供浏览器按 API 行格式回放；该方式验证展示，不冒充数据库取回证据。
 - `web` 现有 `node --test test/*.test.js`：5 个测试文件通过。
 - 全量前端构建在 256 MiB 堆上限失败，未增加限制或反复重建。当前源码 Alerts／RansomAttribution 的单页面预览构建通过。
-- 浏览器检查在启动 Chromium 时因主机缺少 `libatk-1.0.so.0` 失败；未计为通过，临时预览已退出。完整浏览器检查保留给支持环境的 CI。
+- 首轮浏览器因主机缺少 `libatk-1.0.so.0` 等库无法启动。续接时仅从系统软件源下载 12 个库包并解包至 `/tmp/alinksec-browser-libs`，不安装宿主机软件；用 `LD_LIBRARY_PATH` 为测试进程指定。补齐字体前截图没有实际绘制文本，早期 DOM 断言不计为视觉验收；随后临时解包 Noto CJK／DejaVu 字体，通过 `FONTCONFIG_FILE=/tmp/alinksec-fonts.conf` 指定后重跑。
+- `node test/linux-ransom-browser.mjs`：单页面预览通过，回放原生 Agent 事件，验证 viewer／operator、Linux 未归因说明、实际仅告警、无虚构进程证据及移动端布局。截图已人工复核文字可读、无横向溢出。
+- `node test/windows-ransom-browser.mjs`：单页面预览通过，回放 Java／SQLite 实际查询 fixture，覆盖读取失败重试、已归因／未知／多写入者／Linux 不可用、精确进程实例区分、viewer／operator 和移动端弹窗。字体补齐后的截图已复核。
+- 两组检查串行，每次一个 Chromium，沿用 640 MiB RSS、384 MiB 最低可用内存和 full PSI 10% 看护；临时浏览器及回环预览均已退出。结果／截图分别在 `.tmp/linux-ransom-browser/`、`.tmp/windows-ransom-browser/`，范围为当前源码单页面预览，**不替代完整生产 bundle 或原生 Windows 进程响应验收**。
 - Java／SQLite `WindowsRansomIntegrationTest`：3 项测试通过，0 失败／错误／跳过。使用现有 Maven 3.9.9／Java 21 Alpine 镜像，单个一次性容器限制 640 MiB／单 CPU；Maven 堆 256 MiB，测试堆 192 MiB。首轮缺少 gRPC 生成器所需 glibc 兼容层，第二轮仅在容器安装 gcompat 后成功；容器已自动清理。命令：`mvn -B -q -pl alinksec-bootstrap -am -Dtest=WindowsRansomIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -DargLine=-Xmx192m test`。
 - 原始 Surefire XML 与本地结果汇总保留在 `.tmp/rev011-validation/`，Java 数据库取回 fixture 在 `.tmp/windows-ransom-fixtures/`。这些本地证据不替代远端 CI。
 
