@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 )
 
 /* 触发响应链（docs/05 §2.3，本地立即执行，不依赖服务端在线）：
- * ① 归因（Linux /proc/<pid>/fd；Windows 内核文件 ETW 与进程实例）
+ * ① 归因（Linux 暂无可信写入证据，跳过终止；Windows 内核文件 ETW 与进程实例）
  * ② kill 涉事进程（含进程链取证）
  * ③ 主机隔离（response=kill_and_isolate 时）
  * ④ 证据快照（进程链 + 变更文件前 100）
@@ -224,45 +223,6 @@ func sensitiveArgument(name string) bool {
 		}
 	}
 	return false
-}
-
-// attributeByRecency 启发式：最近 10 分钟启动的非系统进程（Windows/归因失败回退）
-func attributeByRecency(excluded func(string) bool) *suspectProc {
-	pids, err := process.Pids()
-	if err != nil {
-		return nil
-	}
-	cutoff := time.Now().Add(-10 * time.Minute)
-	var candidates []*suspectProc
-	for _, pid := range pids {
-		p, err := process.NewProcess(pid)
-		if err != nil {
-			continue
-		}
-		ct, err := p.CreateTime()
-		if err != nil || time.UnixMilli(ct).Before(cutoff) {
-			continue
-		}
-		exe, err := p.Exe()
-		if err != nil || exe == "" || excluded(exe) {
-			continue
-		}
-		// 系统路径排除：Windows System32 / Linux /usr/lib 等
-		l := strings.ToLower(exe)
-		if strings.Contains(l, `:\windows\`) || strings.HasPrefix(l, "/usr/lib/") ||
-			strings.HasPrefix(l, "/sbin") || strings.HasPrefix(l, "/usr/sbin") {
-			continue
-		}
-		if sp := takeForensics(p); sp.Exe != "" {
-			candidates = append(candidates, sp)
-		}
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	// 取 pid 最大（通常最新）者
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Pid > candidates[j].Pid })
-	return candidates[0]
 }
 
 // KillProcess terminates the complete descendant tree before the target so a

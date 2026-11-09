@@ -64,6 +64,20 @@ class WindowsRansomIntegrationTest {
         String directory=System.getenv("ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES");
         if(directory!=null&&!directory.isBlank())try{var dst=Path.of(directory);Files.createDirectories(dst);Files.writeString(dst.resolve("alerts.json"),JsonUtils.write(Map.of("list",rows(a),"total",5)));}catch(Exception e){throw new IllegalStateException(e);}
     }
+    @Test void linuxMissingWriterEvidenceRemainsVisibleWithoutProcessOrKill() {
+        var original=event("unattributed","","/tmp/decoy");
+        var detail=Map.of("attribution",Map.of("source","linux_writer_evidence","status","unavailable","reason","writer_evidence_unavailable"),"files",List.of("/tmp/decoy"),"response","kill");
+        var report=original.toBuilder().setSecurityEvent(original.getSecurityEvent().toBuilder().setDetail(JsonUtils.write(detail))).build();
+        dispatcher.dispatch(a,report);
+        var alerts=rows(a);assertEquals(1,alerts.size());
+        assertEquals("alert_only",alerts.get(0).get("action_taken"));
+        var retained=JsonUtils.read((String)alerts.get(0).get("detail"));
+        assertEquals("writer_evidence_unavailable",retained.path("attribution").path("reason").asText());
+        assertEquals("unavailable",retained.path("attribution").path("status").asText());
+        assertFalse(retained.has("process"));
+        String directory=System.getenv("ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES");
+        if(directory!=null&&!directory.isBlank())try{var dst=Path.of(directory);Files.createDirectories(dst);Files.writeString(dst.resolve("linux-alerts.json"),JsonUtils.write(Map.of("list",alerts,"total",1)));}catch(Exception e){throw new IllegalStateException(e);}
+    }
     @Test void evidenceAndTransportReceiptRollbackTogether() {
         var report=event("attributed","134000000000000001","C:\\data\\rollback");
         doThrow(new IllegalStateException("controlled persistence failure")).when(notify).onAlert(anyString());

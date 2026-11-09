@@ -530,6 +530,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       GOARCH: ${{ matrix.arch }}
+      ALINKSEC_LINUX_ATTRIB_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/linux-ransom-native/event.json
       COMPOSE_PARALLEL_LIMIT: '1'
       HOST_IP: ci.alinksec.test
       ALINKSEC_BIND_ADDRESS: 127.0.0.1
@@ -631,6 +632,12 @@ jobs:
       - name: Check Windows ransomware attribution evidence with captured database responses
         working-directory: web
         run: node test/windows-ransom-browser.mjs
+      - name: Capture native Linux missing-writer response evidence
+        working-directory: agent
+        run: go test -v -count=1 -timeout=3m -run '^TestNativeLinuxRansomAttribution$' ./internal/guard
+      - name: Check Linux missing-writer evidence with the actual native Agent event
+        working-directory: web
+        run: node test/linux-ransom-browser.mjs
       - name: Check Windows login scope and coverage with captured database responses
         working-directory: web
         run: node test/windows-login-browser.mjs
@@ -867,6 +874,8 @@ jobs:
             .tmp/weakpwd-browser
             .tmp/windows-login-browser
             .tmp/windows-ransom-browser
+            .tmp/linux-ransom-browser
+            .tmp/linux-ransom-native
             .tmp/windows-update-browser
             .tmp/file-watch-browser
             .tmp/clamav-browser

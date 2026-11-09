@@ -8,6 +8,8 @@ const web=resolve(dirname(fileURLToPath(import.meta.url)),'..')
 const dist=resolve(process.env.ALINKSEC_RANSOM_PREVIEW_DIST || resolve(web,'dist'))
 const root=resolve(web,'../.tmp/windows-ransom-browser')
 const fixture=JSON.parse(readFileSync(resolve(process.env.ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES || resolve(web,'../.tmp/windows-ransom-fixtures'),'alerts.json')))
+const linuxFixture=JSON.parse(readFileSync(resolve(process.env.ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES || resolve(web,'../.tmp/windows-ransom-fixtures'),'linux-alerts.json')))
+fixture.list.push(...linuxFixture.list);fixture.total=fixture.list.length
 mkdirSync(root,{recursive:true});assert.ok(existsSync(resolve(dist,'index.html')))
 const server=createServer((req,res)=>{
  let file
@@ -37,16 +39,16 @@ try{
  let {context,page}=await launch('viewer')
  await expect(page.getByRole('alert').filter({hasText:'告警暂不可用'})).toBeVisible()
  fail=false;await page.getByRole('button',{name:'重试',exact:true}).click()
- await expect(page.getByRole('button',{name:'查看归因证据'})).toHaveCount(5)
- await expect(page.locator('.el-table__body .el-tag').filter({hasText:/^严重$/})).toHaveCount(5)
+ await expect(page.getByRole('button',{name:'查看归因证据'})).toHaveCount(6)
+ await expect(page.locator('.el-table__body .el-tag').filter({hasText:/^严重$/})).toHaveCount(6)
  await page.getByRole('tab',{name:'严重',exact:true}).click()
- await expect(page.getByRole('button',{name:'查看归因证据'})).toHaveCount(5)
+ await expect(page.getByRole('button',{name:'查看归因证据'})).toHaveCount(6)
  await page.getByRole('tab',{name:'全部',exact:true}).click()
  checks.push('database-alert-read-failure-can-retry')
  await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(0)
  await expect(page.getByRole('button',{name:'忽略',exact:true})).toHaveCount(0)
  const seen=new Set(),births=new Set()
- for(let i=0;i<5;i++){
+ for(let i=0;i<6;i++){
   await page.getByRole('button',{name:'查看归因证据'}).nth(i).click()
   const panel=page.getByTestId('ransom-attribution')
   await expect(panel).toBeVisible();const text=await panel.innerText()
@@ -57,10 +59,17 @@ try{
   }
   if(text.includes('未确认写入者'))seen.add('unattributed')
   if(text.includes('存在多个写入者'))seen.add('ambiguous')
+  if(text.includes('Linux 尚无可信写入者证据')){
+   seen.add('unavailable')
+   await expect(panel).toContainText('已跳过进程终止')
+   await expect(panel).toContainText('实际响应：仅告警')
+   await expect(panel.locator('dt')).toHaveCount(0)
+   await expect(panel.locator('summary')).toHaveCount(0)
+  }
   await expect(panel).toContainText('并非当前主机监测状态')
   await page.getByRole('dialog').getByRole('button',{name:'Close this dialog'}).click()
  }
- assert.deepEqual([...seen].sort(),['ambiguous','attributed','unattributed']);assert.equal(births.size,2)
+ assert.deepEqual([...seen].sort(),['ambiguous','attributed','unattributed','unavailable']);assert.equal(births.size,2)
  checks.push('confirmed-unknown-ambiguous-evidence-and-exact-instance-identity')
  await page.setViewportSize({width:390,height:844})
  await page.getByRole('button',{name:'查看归因证据'}).first().click()
@@ -75,7 +84,7 @@ try{
  await page.screenshot({path:root+'/evidence-mobile.png',animations:'disabled'})
  checks.push('viewer-evidence-readonly-and-mobile-dialog-fits')
  await context.close();await browser.close();({context,page}=await launch('operator'))
- await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(5)
+ await expect(page.getByRole('button',{name:'处置',exact:true})).toHaveCount(6)
  await page.getByRole('button',{name:'查看归因证据'}).first().click();await expect(page.getByTestId('ransom-attribution')).toBeVisible()
  checks.push('operator-can-review-same-retained-evidence')
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[])

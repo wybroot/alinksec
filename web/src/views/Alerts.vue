@@ -15,7 +15,7 @@
       <el-table-column label="内容" min-width="260"><template #default="{ row }">
         {{ row.text }}
         <el-tag v-if="row.legacySeverity" size="small" type="info">历史等级，沿用旧含义</el-tag>
-        <el-button v-if="row.detail?.attribution?.source === 'windows_kernel_file_etw'" link type="primary" size="small" @click="evidence = row">查看归因证据</el-button>
+        <el-button v-if="['windows_kernel_file_etw', 'linux_writer_evidence'].includes(row.detail?.attribution?.source)" link type="primary" size="small" @click="evidence = row">查看归因证据</el-button>
       </template></el-table-column>
       <el-table-column prop="host" label="主机" width="130" />
       <el-table-column prop="time" label="时间" width="150" />
@@ -30,7 +30,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-dialog :model-value="!!evidence" title="Windows 勒索进程归因证据" width="min(680px, 94vw)" top="5vh" style="max-height:90vh;overflow-y:auto" @close="evidence = null">
+    <el-dialog :model-value="!!evidence" title="勒索进程归因证据" width="min(680px, 94vw)" top="5vh" style="max-height:90vh;overflow-y:auto" @close="evidence = null">
       <RansomAttribution v-if="evidence" :detail="evidence.detail" :action="evidence.action" />
     </el-dialog>
   </div>
