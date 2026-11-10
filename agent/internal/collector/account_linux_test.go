@@ -79,6 +79,18 @@ func TestAccountPasswordFieldAndDefaultShell(t *testing.T) {
 	}
 }
 
+func TestAccountDirectPasswordDoesNotRequireOptionalShadow(t *testing.T) {
+	for _, passwd := range []string{"", "locked:!:1000:1000::/home/locked:/bin/sh\nempty::1001:1001::/home/empty:\n"} {
+		snap := accountSnapshot(t, passwd, "", nil, errors.New("optional shadow unavailable"))
+		if snap.Collections[0].Status != pb.AssetCollection_COMPLETE {
+			t.Fatalf("unreferenced optional shadow invalidated trusted passwd inventory: %v", snap.Collections)
+		}
+		if passwd != "" && (snap.Accounts[0].Risky || !snap.Accounts[1].Risky) {
+			t.Fatal("direct password semantics changed")
+		}
+	}
+}
+
 func TestAccountReadFailureAndTrueEmptyInventory(t *testing.T) {
 	snap := accountSnapshot(t, "", "", errors.New("denied"), nil)
 	if snap.Collections[0].Status != pb.AssetCollection_FAILED {

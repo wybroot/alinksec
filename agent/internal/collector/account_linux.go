@@ -32,9 +32,6 @@ func collectAccounts(snap *pb.RptAssetSnapshot) {
 		return
 	}
 	shadow, shadowErr := loadShadow()
-	if shadowErr != nil {
-		collectionStatus(snap, "accounts", pb.AssetCollection_PARTIAL, "shadow_unreadable")
-	}
 
 	accounts := make([]*pb.AccountInfo, 0)
 	seen := make(map[string]bool)
@@ -62,7 +59,9 @@ func collectAccounts(snap *pb.RptAssetSnapshot) {
 		password, known := f[1], true
 		if password == "x" {
 			password, known = shadow[name]
-			if !known && shadowErr == nil {
+			if shadowErr != nil {
+				collectionStatus(snap, "accounts", pb.AssetCollection_PARTIAL, "shadow_unreadable")
+			} else if !known {
 				collectionStatus(snap, "accounts", pb.AssetCollection_PARTIAL, "shadow_entry_missing")
 			}
 		}
