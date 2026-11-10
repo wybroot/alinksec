@@ -56,7 +56,7 @@ public class NotifyService {
                 """, alertNo, severity, alertNo);
     }
 
-    @Async
+    @Async("notificationExecutor")
     public void onAlert(String alertNo) {
         var alerts = jdbc.queryForList("SELECT * FROM v_alert_severity WHERE alert_no=?", alertNo);
         if (alerts.isEmpty()) return;

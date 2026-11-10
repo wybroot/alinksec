@@ -23,16 +23,38 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError("Publisher sample redirect rejected")
 
+def open_sample(opener, request, deadline):
+    """Retry transient publisher failures within the existing sample deadline."""
+    for attempt in range(3):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Publisher sample deadline")
+        try:
+            return opener.open(request, timeout=min(20, remaining))
+        except urllib.error.HTTPError as failure:
+            failure.close()
+            if failure.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                raise
+        except urllib.error.URLError:
+            if attempt == 2:
+                raise
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Publisher sample deadline")
+        time.sleep(min(2 ** attempt, remaining))
+
 def main():
     root = Path(sys.argv[1])
     root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").unlink(missing_ok=True)
     opener = urllib.request.build_opener(NoRedirect)
     manifest, total = [], 0
     for kind, url in SAMPLES.items():
+        print(f"Capturing original publisher sample: {kind} {url}", flush=True)
         target = root / (kind + ".json")
         start, size, digest = time.monotonic(), 0, hashlib.sha256()
         request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "ALinkSec-Native-Format-Validation/1", "Accept-Encoding": "gzip" if kind == "debian-tracker" else "identity"})
-        with opener.open(request, timeout=20) as response, target.open("wb") as output:
+        with open_sample(opener, request, start + 45) as response, target.open("wb") as output:
             assert response.status == 200 and response.geturl() == url
             while block := response.read(65536):
                 size += len(block)

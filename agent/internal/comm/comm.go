@@ -559,13 +559,9 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 			if !ok {
 				return nil
 			}
-			if !isTransient(r) && r.GetMetrics() == nil && !r.Reliable {
-				if !c.persistReport(r) {
-					continue
-				}
-				if r.GetAck() == nil {
-					continue
-				}
+			if !isTransient(r) && r.GetMetrics() == nil {
+				c.persistReport(r)
+				continue
 			}
 			if err := c.sendReport(stream, r, generation); err != nil {
 				// Durable business reports remain on disk; transient reports can be rebuilt.
@@ -577,15 +573,11 @@ func (c *Client) sendLoop(ctx context.Context, stream pb.AgentChannel_ChannelCli
 				return fmt.Errorf("发送 Report: %w", err)
 			}
 		case r := <-c.pendingReports:
-			if !isTransient(r) && r.GetMetrics() == nil && !r.Reliable {
-				if !c.persistReport(r) {
-					continue
-				}
-				if r.GetAck() == nil {
-					continue
-				}
+			if !isTransient(r) && r.GetMetrics() == nil {
+				c.persistReport(r)
+				continue
 			}
-			// Terminal ACKs keep priority; durable records are already on disk.
+			// Only transient control state bypasses the durable FIFO.
 			if err := c.sendReport(stream, r, generation); err != nil {
 				if !r.Reliable && !isTransient(r) {
 					if qerr := c.queue.Push(r); qerr != nil {
@@ -1281,11 +1273,9 @@ func (c *Client) pushReport(r *pb.Report) {
 		if !r.Reliable && !c.persistReport(r) {
 			return
 		}
-		// Terminal command ACKs keep their control-channel priority, but are
-		// also retained in the durable FIFO until a matching receipt arrives.
-		if r.GetAck() == nil {
-			return
-		}
+		// A terminal ACK must follow the result it completes. Sending it directly
+		// could mark a server task failed before its durable result is received.
+		return
 	}
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()

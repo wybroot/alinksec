@@ -102,7 +102,11 @@ func TestNativeSCAPAgent(t *testing.T) {
 		fixture.awaitReport(t, connection.number, func(r *pb.Report) bool { return r.GetAck().GetCmdId() == id && r.GetAck().GetStage() == stage })
 	}
 	send("scap-actual-command", scan)
-	report := fixture.awaitReport(t, connection.number, func(r *pb.Report) bool { return r.GetScapResult().GetTaskId() == scan.TaskId }).GetScapResult()
+	envelope := fixture.awaitReport(t, connection.number, func(r *pb.Report) bool { return r.GetScapResult().GetTaskId() == scan.TaskId })
+	if envelope.ReportId == "" {
+		t.Fatal("native result requires a stable report identity")
+	}
+	report := envelope.GetScapResult()
 	if report.State != "complete" || report.Issue != "" || report.EngineVersion != "5.15" || report.ContentSha256 != content.SHA256 || report.RuntimeSha256 != pin || len(report.Rules) != 5 || len(report.Scores) == 0 {
 		t.Fatal(report)
 	}
@@ -122,7 +126,8 @@ func TestNativeSCAPAgent(t *testing.T) {
 	send("scap-actual-command", scan)
 	ack("scap-actual-command", pb.RptAck_DONE)
 	for _, pending := range fixture.pending {
-		if pending.report.GetScapResult().GetCommandId() == "scap-actual-command" {
+		if pending.report.GetScapResult().GetCommandId() == "scap-actual-command" &&
+			(pending.report.ReportId != envelope.ReportId || !proto.Equal(pending.report.GetScapResult(), report)) {
 			t.Fatal("replayed completed command executed native probes again")
 		}
 	}
