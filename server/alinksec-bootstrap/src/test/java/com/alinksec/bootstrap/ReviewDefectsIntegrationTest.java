@@ -169,6 +169,30 @@ class ReviewDefectsIntegrationTest {
         assertEquals(1L,jdbc.queryForObject("SELECT sequence FROM t_asset_collection_state WHERE agent_id=? AND category='software'",Long.class,agent));
         verify(failingSql,times(2)).update("UPDATE t_vuln_finding SET current_match=false WHERE agent_id=?",agent);
     }
+    @Test void failedAndPartialAccountsPreserveLastInventoryWhileOtherCategoriesAdvance(){
+        var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
+        var complete=RptAssetSnapshot.newBuilder().setSequence(1).addCollected("accounts")
+                .addCollections(AssetCollection.newBuilder().setCategory("accounts").setStatus(AssetCollection.Status.COMPLETE))
+                .addAccounts(AccountInfo.newBuilder().setName("alice").setUid(1000).setGid(1000).setShell("/bin/sh").setLoginEnabled(true)).build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete));
+        int sequence=2;
+        for(var status:List.of(AssetCollection.Status.FAILED,AssetCollection.Status.PARTIAL)) {
+            var failed=complete.toBuilder().setSequence(sequence++).clearCollections().clearAccounts()
+                    .addCollections(AssetCollection.newBuilder().setCategory("accounts").setStatus(status).setError("account_fixture_failure"))
+                    .addAccounts(AccountInfo.newBuilder().setName("untrusted").setUid(0).setRisky(true))
+                    .addCollected("ports").addCollections(AssetCollection.newBuilder().setCategory("ports").setStatus(AssetCollection.Status.COMPLETE))
+                    .addPorts(PortInfo.newBuilder().setPort(443).setProtocol("tcp")).build();
+            tx.executeWithoutResult(s->assets.replaceSnapshot(agent,failed));
+            assertEquals(List.of("alice"),jdbc.queryForList("SELECT name FROM t_asset_account WHERE agent_id=?",String.class,agent));
+            assertEquals(1000,jdbc.queryForObject("SELECT uid FROM t_asset_account WHERE agent_id=?",Integer.class,agent));
+            assertEquals(status.name().toLowerCase(Locale.ROOT),jdbc.queryForObject("SELECT status FROM t_asset_collection_state WHERE agent_id=? AND category='accounts'",String.class,agent));
+            assertEquals(443,jdbc.queryForObject("SELECT port FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
+        }
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete.toBuilder().setSequence(4).clearAccounts().build()));
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_account WHERE agent_id=?",Integer.class,agent));
+        assertEquals("complete",jdbc.queryForObject("SELECT status FROM t_asset_collection_state WHERE agent_id=? AND category='accounts'",String.class,agent));
+    }
     @Test void failedReportAndDedupRollbackTogetherAndRetryExactlyOnce(){
         var events=spy(new SecurityEventService(jdbc,mock(NotifyService.class),dialect));
         doThrow(new IllegalStateException("injected write failure")).doCallRealMethod().when(events).onEvent(anyString(),any());
