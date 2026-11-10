@@ -6,11 +6,15 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 
 // The caller supplies one disposable Agent and its existing platform connection.
-export async function protectionWorkflow({ api, command, until, agent, alerts, restart, sourceIP = '198.51.100.23', probe, pass = console.log }) {
+export async function protectionWorkflow({ api, command, until, agent, alerts: allAlerts, restart, sourceIP = '198.51.100.23', probe, pass = console.log }) {
   const fixture = agent.fixtures
   const originals = (await api('/api/protect/rules')).filter(r => ['PR-0002','PR-0003'].includes(r.rule_id))
   assert.equal(originals.length,2)
   const containerPath = '/work/protected-test/config'
+  // The default policy can report missing host paths before this scoped policy
+  // arrives. Durable delivery may surface those alerts during the fixture run.
+  const alerts = async type => (await allAlerts(type)).filter(row =>
+    type !== 'file_tamper' || JSON.parse(row.detail).path === containerPath)
   const baselineKey = createHash('sha256').update('PR-0002\0'+containerPath).digest('hex')
   const baseline = '/work/file-protection/'+baselineKey+'.json'
   const dex = (...args) => command('docker',['exec',agent.container,...args])
