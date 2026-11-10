@@ -14,12 +14,16 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
   const baselineKey = createHash('sha256').update('PR-0002\0'+containerPath).digest('hex')
   const baseline = '/work/file-protection/'+baselineKey+'.json'
   const dex = (...args) => command('docker',['exec',agent.container,...args])
-  // The work directory belongs to the root Agent and is private to it. Docker
-  // copy also supports the mutation performed while the container is stopped.
+  // Publish one completed change while the observer runs. Docker copy can
+  // expose removal/truncation before the final bytes, which are separate states.
+  // A stopped Agent has no observer and Docker copy still supports that case.
   async function writeProtected(content, path=containerPath) {
     const input = join(fixture,'protected-input')
     writeFileSync(input,content,{mode:0o640})
-    await command('docker',['cp',input,`${agent.container}:${path}`])
+    const running=(await command('docker',['inspect','--format','{{.State.Running}}',agent.container]))==='true'
+    const destination=running?path+'.fixture-write':path
+    await command('docker',['cp',input,`${agent.container}:${destination}`])
+    if(running)await dex('mv','-Tf',destination,path)
   }
   const readProtected = (path=containerPath) => dex('base64','-w','0',path).then(value=>Buffer.from(value,'base64').toString('utf8'))
   await dex('mkdir','-p','/work/protected-test')
@@ -60,7 +64,8 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
     const alerted = await newEvent('file_tamper',before,'alert_only')
     assert.equal(await readProtected(),'ALERT ONLY\n')
     assert.ok(!alerted.detail.includes('ORIGINAL') && !alerted.detail.includes('ALERT ONLY'),'Event leaked file contents')
-    before = await count('file_tamper'); await delay(6000); assert.equal(await count('file_tamper'),before)
+    before = await count('file_tamper'); await delay(6000)
+    assert.equal(await count('file_tamper'),before,JSON.stringify(await alerts('file_tamper')))
     pass('file change alert, content privacy and repeated-change suppression')
 
     before = await count('file_tamper'); fileBody.actions=['alert','restore']; await rule('PR-0002',fileBody,'file_rules')
