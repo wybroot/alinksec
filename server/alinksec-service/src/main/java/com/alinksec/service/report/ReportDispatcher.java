@@ -70,10 +70,10 @@ public class ReportDispatcher {
     }
 
     public void dispatch(String agentId, com.alinksec.proto.Report report) {
-        if(report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) {
-            virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
-        } else dispatchAccepted(agentId,report);
+        if(report.hasMetrics()){metricsForwarder.onBatch(agentId,report.getMetrics());return;}
+        virusTransaction.executeWithoutResult(s->dispatchAccepted(agentId,report));
     }
+
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report) {
         dispatchAccepted(agentId,report,false);
     }
@@ -88,13 +88,14 @@ public class ReportDispatcher {
     }
 
     private void dispatchAccepted(String agentId,com.alinksec.proto.Report report,boolean queued) {
-        // 幂等：10min 窗口内重复 report_id 直接丢弃（离线补传场景）
+        // Deduplicate accepted business reports for seven days in this transaction.
         String key=report.getReportId();
-        if((report.hasEvidence() || report.hasScapResult() || report.hasWindowsUpdate() || report.hasFixResult() || report.hasVirusResult() || report.hasScanResult() || isolationOutcome(report) || configOutcome(report) || ransomOutcome(report) || com.alinksec.service.protect.WindowsLoginService.outcome(report) || report.hasSecurityEvent() && report.getSecurityEvent().getType().equals("virus")) && !key.isBlank()) {
+        if(report.hasHeartbeat() || report.hasAck() && report.getAck().getStage()!=com.alinksec.proto.RptAck.Stage.DONE && report.getAck().getStage()!=com.alinksec.proto.RptAck.Stage.FAILED)key="";
+        if(!key.isBlank()) {
             try { key=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((agentId+"\0"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
-            catch(java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+            catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}
         }
-        if (!queued && !key.isBlank() && !tryAcquire(key, Duration.ofMinutes(10))) {
+        if (!queued && !key.isBlank() && !tryAcquire(key, Duration.ofDays(7))) {
             log.debug("重复上报丢弃: report_id={}", report.getReportId());
             return;
         }
@@ -128,6 +129,8 @@ public class ReportDispatcher {
                             agentId,report.getReportId(),report.getSecurityEvent().getDetail())==0) return;
                 }
                 securityEventService.onEvent(agentId, report.getSecurityEvent());
+                if(java.util.Set.of("killed","killed_and_isolated","killed_isolation_pending","restored","blocked_ip","quarantined").contains(report.getSecurityEvent().getActionTaken()) && !report.getReportId().isBlank())
+                    jdbc.update("INSERT INTO t_automatic_response(agent_id,report_id,action,received_at) VALUES(?,?,?,?) ON CONFLICT(agent_id,report_id) DO NOTHING",agentId,report.getReportId(),report.getSecurityEvent().getActionTaken(),System.currentTimeMillis());
                 virusResultService.onRealtime(agentId,report.getSecurityEvent(),report.getReportId());
             }
             case METRICS -> metricsForwarder.onBatch(agentId, report.getMetrics());
@@ -167,19 +170,7 @@ public class ReportDispatcher {
 
     /** 去重表 SETNX 语义：插入成功 = 首次见到 */
     private boolean tryAcquire(String reportId, Duration ttl) {
-        try {
-            int inserted = jdbc.update("""
-                    INSERT INTO t_report_dedup (report_id, expire_at)
-                    VALUES (?, ?)
-                    ON CONFLICT (report_id) DO NOTHING
-                    """, reportId, database.timestampAfter(ttl));
-            // 顺手清理过期行（低频小表，代价可忽略）
-            jdbc.update("DELETE FROM t_report_dedup WHERE expire_at < CURRENT_TIMESTAMP");
-            return inserted == 1;
-        } catch (Exception e) {
-            // 去重表异常不阻塞主链路（宁可重复处理，不可丢上报）
-            log.warn("上报去重检查失败（放行）: {}", e.getMessage());
-            return true;
-        }
+        jdbc.update("DELETE FROM t_report_dedup WHERE expire_at < CURRENT_TIMESTAMP");
+        return jdbc.update("INSERT INTO t_report_dedup(report_id,expire_at) VALUES(?,?) ON CONFLICT(report_id) DO NOTHING",reportId,database.timestampAfter(ttl))==1;
     }
 }

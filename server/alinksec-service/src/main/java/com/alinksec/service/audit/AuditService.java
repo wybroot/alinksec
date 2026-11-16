@@ -47,7 +47,7 @@ public class AuditService {
             where.append(" AND path LIKE '%").append(path.replace("'", "''")).append("%'");
         }
         Long total = jdbc.queryForObject("SELECT count(*) FROM t_audit_log" + where, Long.class);
-        int offset = (page - 1) * size;
+        int offset = com.alinksec.common.web.PageBounds.offset(page,size);
         List<Map<String, Object>> list = jdbc.queryForList(
                 "SELECT id, uid, username, method, path, source_ip, status, cost_ms, created_at "
                         + "FROM t_audit_log" + where + " ORDER BY id DESC LIMIT " + size + " OFFSET " + offset);

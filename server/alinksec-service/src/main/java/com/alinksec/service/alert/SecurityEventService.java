@@ -52,7 +52,7 @@ public class SecurityEventService {
         }
 
         String alertNo = "ALT-" + java.util.UUID.randomUUID();
-        jdbc.update("""
+        int inserted=jdbc.update("""
                 INSERT INTO t_alert (alert_no, agent_id, rule_id, event_type, severity, severity_source, title, detail, action_taken)
                 VALUES (?, ?, ?, ?, ?, 'agent_proto_v1', ?, ?, ?)
                 ON CONFLICT DO NOTHING
@@ -61,9 +61,16 @@ public class SecurityEventService {
                 event.getSeverityValue(),
                 buildTitle(event), withFingerprint(detailJson, fingerprint),
                 event.getActionTaken());
+        if(inserted==0)return;
+        int severity=event.getSeverityValue();
+        notifyService.enqueue(alertNo,severity>=1 && severity<=5?severity-1:-1);
         log.info("新告警: agent={} type={} severity={} rule={}",
                 agentId, event.getType(), event.getSeverity(), event.getRuleId());
-        notifyService.onAlert(alertNo);
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive())
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){
+                @Override public void afterCommit(){try{notifyService.onAlert(alertNo);}catch(RuntimeException ignored){/* Durable delivery rows are retried by the notifier. */}}
+            });
+        else notifyService.onAlert(alertNo);
     }
 
     private String buildTitle(RptSecurityEvent e) {

@@ -1,14 +1,57 @@
 package comm
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/alinksec/alinksec-agent/internal/config"
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
 )
+
+func TestTerminalAckCannotOvertakeDurableResult(t *testing.T) {
+	for _, source := range []string{"pending", "command"} {
+		t.Run(source, func(t *testing.T) {
+			c := reportTestClient(t)
+			c.state = &State{AgentID: "ordered"}
+			c.cfg = &config.Config{HeartbeatInterval: time.Hour, DrainRatePerSec: 1000}
+			c.setChannelActive(true)
+			c.receiptsSupported.Store(true)
+			result := &pb.Report{ReportId: "result", Payload: &pb.Report_VirusResult{VirusResult: &pb.RptVirusResult{TaskId: "1"}}}
+			ack := &pb.Report{ReportId: "done", Payload: &pb.Report_Ack{Ack: &pb.RptAck{CmdId: "command", Stage: pb.RptAck_DONE}}}
+			c.pushReport(result)
+			commands := make(chan *pb.Report, 1)
+			if source == "pending" {
+				c.pushReport(ack)
+			} else {
+				commands <- ack
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var order []string
+			stream := &upgradeStream{onSend: func(r *pb.Report) {
+				if r.GetVirusResult() == nil && r.GetAck() == nil {
+					return
+				}
+				order = append(order, r.ReportId)
+				if !c.queue.Receipt(r.ReportId) {
+					t.Fatal("report was sent outside durable FIFO")
+				}
+				if r.GetAck() != nil {
+					cancel()
+				}
+			}}
+			_ = c.sendLoop(ctx, stream, commands, 0)
+			if fmt.Sprint(order) != "[result done]" {
+				t.Fatalf("terminal ACK overtook result: %v", order)
+			}
+		})
+	}
+}
 
 func reportTestClient(t *testing.T) *Client {
 	t.Helper()

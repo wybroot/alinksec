@@ -274,7 +274,7 @@ public final class VendorAdvisoryService {
     public Map<String,Object> documents(String source,int page,int size) {
         if (page<1 || page>100_000 || size<1 || size>100) throw VendorAdvisoryIndex.invalid();
         return Map.of("total",jdbc.queryForObject("SELECT count(*) FROM t_vendor_document WHERE source_id=?",Integer.class,source),
-                "items",jdbc.queryForList("SELECT "+META+" FROM t_vendor_document WHERE source_id=? ORDER BY imported_at DESC,id DESC LIMIT ? OFFSET ?",source,size,(page-1)*size),"state",state(source));
+                "items",jdbc.queryForList("SELECT "+META+" FROM t_vendor_document WHERE source_id=? ORDER BY imported_at DESC,id DESC LIMIT ? OFFSET ?",source,size,com.alinksec.common.web.PageBounds.offset(page,size)),"state",state(source));
     }
     public Map<String,Object> detail(String source,String id) {
         var rows=jdbc.queryForList("SELECT "+META+" FROM t_vendor_document WHERE source_id=? AND id=?",source,id);

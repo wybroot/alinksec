@@ -36,7 +36,7 @@ public class AgentRepository {
             rs.getString("arch"),
             rs.getString("agent_version"),
             rs.getString("machine_id"),
-            (Long) rs.getObject("group_id"),
+            rs.getObject("group_id") instanceof Number group ? group.longValue() : null,
             rs.getShort("status"),
             rs.getBoolean("protect_enabled"),
             rs.getString("policy_version"),
@@ -77,7 +77,7 @@ public class AgentRepository {
     public int heartbeat(String agentId, String agentVersion, String policyVersion) {
         return jdbc.update("""
                 UPDATE t_agent
-                SET status = 1, last_heartbeat = CURRENT_TIMESTAMP, agent_version = ?, policy_version = ?, updated_at = CURRENT_TIMESTAMP
+                SET status = 1, offline_alerted=FALSE, last_heartbeat = CURRENT_TIMESTAMP, agent_version = ?, policy_version = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE agent_id = ? AND status IN (0,1,2)
                 """, agentVersion, policyVersion, agentId);
     }
@@ -89,9 +89,9 @@ public class AgentRepository {
 
     public int markOfflineIfStale(String agentId,int staleSeconds) {
         return jdbc.update("""
-                UPDATE t_agent SET status=2,updated_at=CURRENT_TIMESTAMP
-                WHERE agent_id=? AND status=1 AND last_heartbeat<?
-                """,agentId,database.timestampBefore(Duration.ofSeconds(staleSeconds)));
+                UPDATE t_agent SET status=2,offline_alerted=TRUE,updated_at=CURRENT_TIMESTAMP
+                WHERE agent_id=? AND deleted=FALSE AND status IN (1,2) AND offline_alerted=FALSE AND maintenance_until<=? AND last_heartbeat<?
+                """,agentId,System.currentTimeMillis()/1000,database.timestampBefore(Duration.ofSeconds(staleSeconds)));
     }
 
     public void virusContract(String agentId,int contract,String version) {
@@ -130,7 +130,7 @@ public class AgentRepository {
     public List<AgentEntity> findStaleOnline(int staleSeconds) {
         return jdbc.query("""
                 SELECT * FROM t_agent
-                WHERE status = 1 AND last_heartbeat < ?
+                WHERE deleted=FALSE AND (status=1 OR (status=2 AND offline_alerted=FALSE)) AND last_heartbeat < ?
                 """, MAPPER, database.timestampBefore(Duration.ofSeconds(staleSeconds)));
     }
 }

@@ -6,20 +6,28 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 
 // The caller supplies one disposable Agent and its existing platform connection.
-export async function protectionWorkflow({ api, command, until, agent, alerts, restart, sourceIP = '198.51.100.23', probe, pass = console.log }) {
+export async function protectionWorkflow({ api, command, until, agent, alerts: allAlerts, restart, sourceIP = '198.51.100.23', probe, pass = console.log }) {
   const fixture = agent.fixtures
   const originals = (await api('/api/protect/rules')).filter(r => ['PR-0002','PR-0003'].includes(r.rule_id))
   assert.equal(originals.length,2)
   const containerPath = '/work/protected-test/config'
+  // The default policy can report missing host paths before this scoped policy
+  // arrives. Durable delivery may surface those alerts during the fixture run.
+  const alerts = async type => (await allAlerts(type)).filter(row =>
+    type !== 'file_tamper' || JSON.parse(row.detail).path === containerPath)
   const baselineKey = createHash('sha256').update('PR-0002\0'+containerPath).digest('hex')
   const baseline = '/work/file-protection/'+baselineKey+'.json'
   const dex = (...args) => command('docker',['exec',agent.container,...args])
-  // The work directory belongs to the root Agent and is private to it. Docker
-  // copy also supports the mutation performed while the container is stopped.
+  // Publish one completed change while the observer runs. Docker copy can
+  // expose removal/truncation before the final bytes, which are separate states.
+  // A stopped Agent has no observer and Docker copy still supports that case.
   async function writeProtected(content, path=containerPath) {
     const input = join(fixture,'protected-input')
     writeFileSync(input,content,{mode:0o640})
-    await command('docker',['cp',input,`${agent.container}:${path}`])
+    const running=(await command('docker',['inspect','--format','{{.State.Running}}',agent.container]))==='true'
+    const destination=running?path+'.fixture-write':path
+    await command('docker',['cp',input,`${agent.container}:${destination}`])
+    if(running)await dex('mv','-Tf',destination,path)
   }
   const readProtected = (path=containerPath) => dex('base64','-w','0',path).then(value=>Buffer.from(value,'base64').toString('utf8'))
   await dex('mkdir','-p','/work/protected-test')
@@ -60,7 +68,8 @@ export async function protectionWorkflow({ api, command, until, agent, alerts, r
     const alerted = await newEvent('file_tamper',before,'alert_only')
     assert.equal(await readProtected(),'ALERT ONLY\n')
     assert.ok(!alerted.detail.includes('ORIGINAL') && !alerted.detail.includes('ALERT ONLY'),'Event leaked file contents')
-    before = await count('file_tamper'); await delay(6000); assert.equal(await count('file_tamper'),before)
+    before = await count('file_tamper'); await delay(6000)
+    assert.equal(await count('file_tamper'),before,JSON.stringify(await alerts('file_tamper')))
     pass('file change alert, content privacy and repeated-change suppression')
 
     before = await count('file_tamper'); fileBody.actions=['alert','restore']; await rule('PR-0002',fileBody,'file_rules')

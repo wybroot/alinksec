@@ -41,13 +41,13 @@ public class ProtectController {
     public ApiResult<List<Map<String, Object>>> engines() {
         return ApiResult.ok(List.of(
                 Map.of("key", "process", "name", "恶意进程防护", "desc",
-                        "EDR 进程行为规则匹配与父链取证，可按规则结束进程树", "builtin", true),
+                        "EDR 进程行为规则匹配与父链取证，可按规则结束进程树", "builtin", true, "status", "unknown", "coverage", 0),
                 Map.of("key", "file_tamper", "name", "关键文件防篡改", "desc",
-                        "Linux 关键文件内容与权限监控，可按规则自动恢复", "builtin", true),
+                        "Linux 关键文件内容与权限监控，可按规则自动恢复", "builtin", true, "status", "unknown", "coverage", 0),
                 Map.of("key", "login", "name", "登录防护", "desc",
-                        "Linux SSH 与 Windows 远程登录检测，可按规则限时封禁来源", "builtin", true),
+                        "Linux SSH 与 Windows 远程登录检测，可按规则限时封禁来源", "builtin", true, "status", "unknown", "coverage", 0),
                 Map.of("key", "decoy", "name", "勒索诱饵防护", "desc",
-                        "诱饵文件触碰即阻断加密进程（本地响应）", "builtin", true)));
+                        "诱饵触发后本地响应；缺少可信写入证据时跳过进程终止", "builtin", true, "status", "unknown", "coverage", 0)));
     }
 
     /** 各主机防护开关状态 */

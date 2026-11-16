@@ -278,9 +278,9 @@ class Deployment:
         while True:
             try:
                 response = json.loads(self.docker('exec', self.containers['web']['Id'], 'wget',
-                    '--no-check-certificate', '-T', '2', '-qO-', 'https://127.0.0.1/api/health'))
-                require(isinstance(response, dict) and response.get('code') == 0,
-                        'Application health endpoint rejected the request')
+                    '--no-check-certificate', '-T', '2', '-qO-', 'https://127.0.0.1/api/ready'))
+                require(isinstance(response, dict) and response.get('ready') is True,
+                        'Application readiness endpoint rejected the request')
                 return
             except (MaintenanceError, ValueError):
                 require(time.monotonic() < deadline, 'Application did not become healthy before timeout')

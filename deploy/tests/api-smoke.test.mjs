@@ -49,7 +49,7 @@ function sql(statement) {
   }
   const args = mode === 'postgres'
     ? ['exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'alinksec', '-d', 'alinksec', '-Atc', statement]
-    : ['run', '--rm', '-T', '--no-deps', 'sqlite-maintenance', '/data/alinksec.db', statement]
+    : ['run', '--rm', '-T', '--no-deps', 'sqlite-maintenance', '-cmd', '.timeout 5000', '/data/alinksec.db', statement]
   if (mode === 'postgres' && process.env.ALINKSEC_SMOKE_PG_CONTAINER) {
     const container = process.env.ALINKSEC_SMOKE_PG_CONTAINER
     assert.match(container, /^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/)

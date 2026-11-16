@@ -58,7 +58,7 @@ public class BaselineQueryService {
                        (SELECT ROUND(AVG(s.score), 2) FROM t_baseline_summary s WHERE s.task_id = t.id) AS avg_score,
                        t.created_at, t.started_at, t.finished_at
                 FROM t_baseline_task t ORDER BY t.id DESC LIMIT ? OFFSET ?
-                """, size, (page - 1) * size);
+                """, size, com.alinksec.common.web.PageBounds.offset(page,size));
         list.forEach(this::normalizeTemplateIds);
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);

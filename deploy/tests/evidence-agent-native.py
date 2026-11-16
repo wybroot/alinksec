@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import sys
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+
 root = Path(__file__).resolve().parents[2]
 assert os.environ.get('ALINKSEC_SMOKE_ALLOW_FIXTURES') == 'true'
 binary = Path(os.environ['ALINKSEC_EVIDENCE_AGENT_BIN']).resolve(strict=True)

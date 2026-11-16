@@ -9,7 +9,107 @@ import (
 	"time"
 
 	pb "github.com/alinksec/alinksec-agent/internal/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func TestQueueAppendAfterInterruptedWritePreservesNewReports(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) {
+			dir := t.TempDir()
+			q, err := NewOfflineQueue(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := q.Push(securityReport("before")); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.OpenFile(q.path, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Model a failed write or process crash halfway through a JSONL record.
+			_, writeErr := f.WriteString(`{"reportId":"interrupted","securityEvent":`)
+			closeErr := f.Close()
+			if writeErr != nil || closeErr != nil {
+				t.Fatal(writeErr, closeErr)
+			}
+			if restart {
+				q, err = NewOfflineQueue(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := q.Push(securityReport("after")); err != nil {
+				t.Fatal(err)
+			}
+			reports, err := q.PopAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reports) != 2 || reports[0].ReportId != "before" || reports[1].ReportId != "after" {
+				t.Fatalf("newly accepted report lost behind damaged tail: %v", reports)
+			}
+		})
+	}
+}
+
+func TestQueueAppendDelimitsCompleteTailWhileAwaitingReceipt(t *testing.T) {
+	q, err := NewOfflineQueue(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := protojson.Marshal(securityReport("complete-tail"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(q.path, line, 0600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := q.Peek()
+	if err != nil || first == nil || first.ReportId != "complete-tail" {
+		t.Fatalf("tail: %v %v", first, err)
+	}
+	if err := q.Push(securityReport("next")); err != nil {
+		t.Fatal(err)
+	}
+	if !q.Receipt("complete-tail") {
+		t.Fatal("receipt rejected")
+	}
+	next, err := q.Peek()
+	if err != nil || next == nil || next.ReportId != "next" {
+		t.Fatalf("report after tail lost: %v %v", next, err)
+	}
+}
+
+func TestQueueTailSeparatorCannotExceedCapacity(t *testing.T) {
+	q, err := NewOfflineQueue(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Push(securityReport("held")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Peek(); err != nil {
+		t.Fatal(err)
+	}
+	next := securityReport("after")
+	line, err := protojson.Marshal(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A sparse tail leaves room for the new record, but not its repair separator.
+	size := maxQueueBytes - int64(len(line)+1)
+	if err := os.Truncate(q.path, size); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Push(next); err == nil {
+		t.Fatal("repair separator bypassed queue capacity")
+	}
+	st, err := os.Stat(q.path)
+	if err != nil || st.Size() != size {
+		t.Fatalf("rejected append changed queue: %v %v", st, err)
+	}
+}
 
 func TestQueuePeekFailureCompactionAndRestart(t *testing.T) {
 	q, err := NewOfflineQueue(t.TempDir())

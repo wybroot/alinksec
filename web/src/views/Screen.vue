@@ -30,7 +30,7 @@
           <h3>防护引擎运行状态<span class="tail">{{ kpi.hosts }}/{{ kpi.total }} 在线 · {{ kpi.protectOn }} 台防护开启</span></h3>
           <div class="engines" style="flex:1;padding-top:4px">
             <div class="eng" v-for="e in engines" :key="e.name">
-              <div class="row"><b>{{ e.name }}</b><span class="st" :class="{ off: !e.on }">{{ e.on ? '● 运行中' : '○ 已停用' }}</span></div>
+              <div class="row"><b>{{ e.name }}</b><span class="st" :class="{ off: !e.on }">{{ e.on ? '● 已确认就绪' : '○ 就绪未确认' }}</span></div>
               <div class="track"><div class="fill" :style="{ width: e.load + '%' }"></div></div>
             </div>
           </div>
@@ -46,7 +46,7 @@
         <div class="kpis">
           <div class="kpi"><div class="v">{{ kpi.hosts }}</div><div class="l">在线主机</div><div class="delta">接入率 {{ kpi.coverage }}%</div><div class="bar"></div></div>
           <div class="kpi"><div class="v red">{{ kpi.pending }}</div><div class="l">待处置威胁</div><div class="delta">严重 {{ kpi.crit }} · 高危 {{ kpi.high }}</div><div class="bar"></div></div>
-          <div class="kpi"><div class="v amber">{{ kpi.virus }}</div><div class="l">恶意样本检出</div><div class="delta">近 30 日 · 自动处置 {{ kpi.rtHit }} 起</div><div class="bar"></div></div>
+          <div class="kpi"><div class="v amber">{{ kpi.virus }}</div><div class="l">恶意样本检出</div><div class="delta">近 30 日 · 已确认自动响应 {{ kpi.rtHit }} 起</div><div class="bar"></div></div>
           <div class="kpi"><div class="v green">{{ kpi.compliance == null ? '—' : kpi.compliance + '%' }}</div><div class="l">基线合规率</div><div class="delta">最近任务已核查 {{ kpi.hostsChecked }} 台</div><div class="bar"></div></div>
         </div>
 
@@ -149,8 +149,7 @@ const applyScreen = (d) => {
   trendRows.value = d.trend
   riskHosts.value = d.riskHosts
   radarRows.value = d.radar
-  const cover = d.kpi.total ? Math.round((d.kpi.protectOn / d.kpi.total) * 100) : 0
-  engines.value = d.engines.map(e => ({ name: e.name, on: d.kpi.protectOn > 0, load: cover }))
+  engines.value = d.engines
   // 事件流：新出现的 id 高亮
   const freshIds = new Set(d.events.filter(ev => !knownEventIds.has(ev.id)).map(ev => ev.id))
   events.value = d.events.map(ev => ({ ...ev, fresh: freshIds.has(ev.id) }))

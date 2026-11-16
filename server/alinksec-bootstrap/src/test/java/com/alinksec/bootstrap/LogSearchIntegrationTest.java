@@ -111,8 +111,8 @@ class LogSearchIntegrationTest {
         batch("status","auth.log",line("Log collection status: rotation_gap_possible").toBuilder().putFields("record_kind","collection_status").build());
         batch("prefix","auth.log",line("retained raw prefix").toBuilder().putFields("truncated","true").putFields("original_bytes","90000").build());
         var holder=mock(JwtSecretHolder.class);String secret="raw-log-rest-capture-secret-".repeat(4);when(holder.secret()).thenReturn(secret);
-        MockMvc mvc=MockMvcBuilders.standaloneSetup(new LogController(search)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(new JwtAuthInterceptor(holder)).build();
-        String token="Bearer "+JwtUtil.sign(secret,Map.of("uid",f.actor,"username","fixture","role","admin"),3600);
+        MockMvc mvc=MockMvcBuilders.standaloneSetup(new LogController(search)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(com.alinksec.bootstrap.TestJwt.interceptor(holder)).build();
+        String token="Bearer "+com.alinksec.bootstrap.TestJwt.token(secret,Map.of("uid",f.actor,"username","fixture","role","admin"),3600);
         var response=mvc.perform(get("/api/logs").param("from",""+from).param("to",""+to).param("agent",agent).header("Authorization",token)).andReturn().getResponse();
         assertEquals(200,response.getStatus());assertEquals("no-store",response.getHeader("Cache-Control"));var body=JsonUtils.read(response.getContentAsString(StandardCharsets.UTF_8));assertEquals(4,body.path("data").path("items").size());
         String id="";var details=new LinkedHashMap<String,Object>();var exportIds=new ArrayList<String>();for(var row:body.path("data").path("items")){String key=row.path("id").asText();exportIds.add(key);details.put(key,search.detail(key,f.actor));if(row.path("preview").asText().contains("onerror"))id=key;}assertFalse(id.isEmpty());var detail=mvc.perform(get("/api/logs/"+id).header("Authorization",token)).andReturn().getResponse();assertEquals(200,detail.getStatus());
@@ -124,7 +124,7 @@ class LogSearchIntegrationTest {
         }
         var pageLines=new LogLine[60];for(int n=0;n<60;n++)pageLines[n]=line("paging "+n);batch("browser-pages","auth.log",pageLines);var page1=find("paging");var page2=search.search(query("paging",(String)page1.get("nextCursor")),f.actor);captured.put("paging",Map.of("first",page1,"second",page2));
         assertEquals(401,mvc.perform(get("/api/logs")).andReturn().getResponse().getStatus());
-        for(String role:List.of("viewer","operator")){String auth="Bearer "+JwtUtil.sign(secret,Map.of("uid",f.actor,"username","fixture","role",role),3600);assertEquals(403,mvc.perform(get("/api/logs").header("Authorization",auth)).andReturn().getResponse().getStatus());}
+        for(String role:List.of("viewer","operator")){String auth="Bearer "+com.alinksec.bootstrap.TestJwt.token(secret,Map.of("uid",f.actor,"username","fixture","role",role),3600);assertEquals(403,mvc.perform(get("/api/logs").header("Authorization",auth)).andReturn().getResponse().getStatus());}
         f.jdbc.update("UPDATE t_user SET status=0 WHERE id=?",f.actor);assertEquals(400,mvc.perform(get("/api/logs").param("from",""+from).param("to",""+to).header("Authorization",token)).andReturn().getResponse().getStatus());
         captured.put("authority",Map.of("unauthenticated",401,"viewer",403,"operator",403,"disabledCurrentAdmin",400));Files.writeString(target.resolve("console-"+db+".json"),JsonUtils.write(captured));
     }

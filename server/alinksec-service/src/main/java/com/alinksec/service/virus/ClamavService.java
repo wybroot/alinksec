@@ -59,7 +59,7 @@ public class ClamavService {
     }
     public Map<String,Object> status(int page,int size) {
         if(page<1||page>100000||size<1||size>100)throw new IllegalArgumentException("invalid pagination");
-        var rows=jdbc.queryForList("SELECT a.agent_id,a.hostname,a.ip,a.os_type,a.status,COALESCE(s.contract,0) AS contract,s.coverage,s.observed_at FROM t_agent a LEFT JOIN t_clamav_status s ON s.agent_id=a.agent_id WHERE a.deleted=false AND a.status<>4 ORDER BY a.hostname,a.agent_id LIMIT ? OFFSET ?",size,(page-1)*size);
+        var rows=jdbc.queryForList("SELECT a.agent_id,a.hostname,a.ip,a.os_type,a.status,COALESCE(s.contract,0) AS contract,s.coverage,s.observed_at FROM t_agent a LEFT JOIN t_clamav_status s ON s.agent_id=a.agent_id WHERE a.deleted=false AND a.status<>4 ORDER BY a.hostname,a.agent_id LIMIT ? OFFSET ?",size,com.alinksec.common.web.PageBounds.offset(page,size));
         long now=System.currentTimeMillis();
         for(var row:rows) { row.put("state",state(row,now));row.put("coverage",JsonUtils.read(row.get("coverage")==null?"{}":row.get("coverage").toString(),Object.class)); }
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE deleted=false AND status<>4",Long.class);

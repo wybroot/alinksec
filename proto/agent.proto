@@ -84,9 +84,12 @@ message Command {
     CmdWindowsUpdateReceipt windows_update_receipt = 24; // committed outcomes; no cmd_id/ACK
     CmdScapScan scap_scan = 25;
     CmdEvidenceCollect evidence_collect = 26;
+    CmdReportReceipt report_receipt = 28; // durable inbox/business commit; no cmd_id/ACK
     CmdEvidenceReceipt evidence_receipt = 27; // committed file receipt; no cmd_id/ACK
   }
 }
+
+message CmdReportReceipt { string report_id = 1; }
 
 message CmdBaselineCheck {
   string task_id = 1;
@@ -260,6 +263,7 @@ message Report {
   string agent_id  = 1;
   string report_id = 2;   // UUID，服务端去重（补传幂等）
   int64  ts        = 3;   // 事件产生时间（ms）
+  bool reliable = 4; // sender retains report until durable receipt
   oneof payload {
     RptHeartbeat      heartbeat       = 10;
     RptMetricsBatch   metrics         = 11;
@@ -304,6 +308,7 @@ message RptHeartbeat {
   uint32 scap_contract = 23; // 1: pinned offline native SCAP interpreter and exact XCCDF outcomes
   string scap_status = 24; // bounded readiness; not a compliance certificate
   uint32 evidence_contract = 25;
+  uint32 report_receipt_contract = 26; // 1: generic durable report receipts required
 }
 
 message RptIsolationState {
@@ -342,6 +347,16 @@ message RptAssetSnapshot {
   // in this report so that a targeted collection cannot remove other assets.
   repeated string collected = 7;
   SoftwareInventory software_inventory = 8;
+  uint64 sequence = 9; // persisted per Agent identity, reserved before collection
+  repeated AssetCollection collections = 10;
+  repeated string container_sources = 11; // sources with a successful enumeration, including empty results
+}
+message AssetCollection {
+  enum Status { UNKNOWN = 0; COMPLETE = 1; PARTIAL = 2; FAILED = 3; UNSUPPORTED = 4; }
+  string category = 1;
+  Status status = 2;
+  string error = 3;
+  int64 collected_at = 4;
 }
 
 // Describes this software collection attempt, independently of other assets.

@@ -28,8 +28,13 @@ try {
     context.setDefaultTimeout(10000)
     await context.addInitScript(()=>{localStorage.setItem('alinksec_token','fixture');localStorage.setItem('alinksec_user',JSON.stringify({username:'fixture',role:'viewer'}))})
     await context.route('**/api/**',route=>{
-      const path=new URL(route.request().url()).pathname
-      if(route.request().method()==='GET'&&path==='/api/alerts')return route.fulfill({json:{code:0,data:fixture.alerts}})
+      const url=new URL(route.request().url()),path=url.pathname
+      if(route.request().method()==='GET'&&path==='/api/alerts'){
+        const q=url.searchParams
+        const filtered=fixture.alerts.list.filter(a=>(!q.has('severity') || a.severity_level>=Number(q.get('severity')))&&(!q.has('maxSeverity') || a.severity_level<=Number(q.get('maxSeverity')))&&(!q.has('status') || q.get('status')!=='-1' || [0,1].includes(Number(a.status))))
+        const page=Number(q.get('page') || 1),size=Number(q.get('size') || 20)
+        return route.fulfill({json:{code:0,data:{list:filtered.slice((page-1)*size,page*size),total:filtered.length}}})
+      }
       unexpected.push(route.request().method()+' '+path);return route.fulfill({status:500,json:{code:50000,msg:'Unexpected request'}})
     })
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message))

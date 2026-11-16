@@ -87,6 +87,7 @@
       <div style="display:flex;gap:10px;margin-top:14px">
         <el-button size="small" :loading="busyAction === 'collect'" @click="doCollect">立即采集</el-button>
         <el-button size="small" :loading="busyAction === 'scan'" @click="doQuickScan">病毒快扫</el-button>
+        <el-button v-if="getUser()?.role==='admin'" size="small" @click="maintenance(curHost)">计划维护</el-button>
         <el-button size="small" type="danger" v-if="canIsolate(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, true)">隔离主机</el-button>
         <el-button size="small" type="success" v-if="canRestore(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, false)">解除隔离</el-button>
       </div>
@@ -124,6 +125,7 @@
         <el-empty v-else :image-size="48" description="未发现本机 Docker 容器或 K8s 工作负载" />
       </section>
       <section class="container-assets">
+        <el-alert v-for="state in (softwareInventory.collections || []).filter(s=>s.status!=='complete')" :key="state.category" type="warning" :closable="false" :title="({ports:'监听端口',processes:'进程',accounts:'账户',disks:'磁盘',containers:'容器',software:'软件'}[state.category] || '资产')+'：'+({failed:'采集失败，保留上次记录',partial:'采集不完整，保留上次记录',unsupported:'当前系统不支持',legacy:'采集版本或覆盖未知'}[state.status] || '采集状态未知')" :description="state.error || ''" />
         <h4>本机进程 <span>{{ processes.length }}</span></h4>
         <el-table v-if="processes.length" :data="processes" size="small" max-height="220">
           <el-table-column prop="pid" label="PID" width="76" />
@@ -170,7 +172,11 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } 
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+import { getUser, setHostMaintenance, fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
+async function maintenance(host){
+ try{const {value}=await ElMessageBox.prompt('维护期间抑制离线告警，最长86400秒；输入0结束维护。','计划维护',{inputValue:'3600',inputPattern:/^\d{1,5}$/,inputErrorMessage:'请输入0到86400秒'});await setHostMaintenance(host.agentId,Number(value));ElMessage.success('维护窗口已更新')}catch(e){if(e?.message)ElMessage.error(e.message)}
+}
+
 import { hostTagType, hostStatusLabel, AX } from '../utils/format'
 
 const router = useRouter()

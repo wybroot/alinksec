@@ -52,3 +52,7 @@ logs/
 # ---------- 本地工具链（pgsql/protoc 为 Windows 本地二进制，体积大，不建议入库；
 # 如需团队共享请改用各平台包管理器安装，或单独走制品库）----------
 tools/
+
+# Python validation bytecode
+__pycache__/
+*.py[cod]

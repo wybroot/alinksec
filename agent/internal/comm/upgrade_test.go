@@ -20,6 +20,7 @@ import (
 )
 
 type upgradeStream struct {
+	onSend   func(*pb.Report)
 	reports  []*pb.Report
 	failAt   int
 	attempts int
@@ -29,6 +30,9 @@ func (s *upgradeStream) Send(r *pb.Report) error {
 	s.attempts++
 	if s.failAt == s.attempts {
 		return errors.New("connection lost")
+	}
+	if s.onSend != nil {
+		s.onSend(r)
 	}
 	s.reports = append(s.reports, r)
 	return nil
@@ -61,7 +65,11 @@ func upgradeResultClient(t *testing.T, success bool) *Client {
 
 func TestUpgradeResultReplaysAfterPartialSendAndReconnect(t *testing.T) {
 	c := upgradeResultClient(t, false)
-	stream := &upgradeStream{failAt: 2}
+	stream := &upgradeStream{failAt: 2, onSend: func(r *pb.Report) {
+		if r.GetHeartbeat() != nil {
+			c.receiptsSupported.Store(true)
+		}
+	}}
 	seen := map[string]string{}
 	if err := c.sendUpgradeResults(stream, 0, seen); err == nil || len(seen) != 0 {
 		t.Fatal("partial send consumed durable result")
@@ -128,7 +136,11 @@ func TestReconnectAdvertisesUpgradeCapabilityBeforeBacklog(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Disconnect while draining, after the first report was accepted.
-			stream := &upgradeStream{failAt: 2}
+			stream := &upgradeStream{failAt: 2, onSend: func(r *pb.Report) {
+				if r.GetHeartbeat() != nil {
+					c.receiptsSupported.Store(true)
+				}
+			}}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := c.sendLoop(ctx, stream, make(chan *pb.Report), 0); err == nil {

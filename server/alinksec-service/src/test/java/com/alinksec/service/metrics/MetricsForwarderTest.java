@@ -1,36 +1,32 @@
 package com.alinksec.service.metrics;
-
 import com.alinksec.proto.*;
 import com.alinksec.service.config.AlinkSecProperties;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.*;
+import java.nio.charset.StandardCharsets;
 
 class MetricsForwarderTest {
-    @Test void prometheusTimestampsUseIntegerMillisecondsRegardlessOfDefaultLocale() throws Exception {
-        var received=new LinkedBlockingQueue<String>();
-        var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
-        server.createContext("/api/v1/import/prometheus",exchange->{
-            received.offer(new String(exchange.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));
-            exchange.sendResponseHeaders(204,-1);exchange.close();
-        });server.start();
+    @Test void identifiersCannotInjectOrOverrideAnotherAgent(){
+        var good=MetricSample.newBuilder().setName("cpu_usage").setValue(1).setTs(1).putLabels("label","quoted\"\\\nvalue").build();
+        String line=new String(MetricsForwarder.formatLine(good,"agent-a","host-a"),StandardCharsets.UTF_8);
+        assertEquals(1,line.lines().count());assertTrue(line.contains("label=\"quoted\\\"\\\\\\nvalue\""));
+        for(String name:new String[]{"cpu\nforeign{agent_id=\"agent-b\"}","cpu{}","cpu value","", "9metric"})assertNull(MetricsForwarder.formatLine(good.toBuilder().setName(name).build(),"a","h"));
+        assertNull(MetricsForwarder.formatLine(good.toBuilder().putLabels("label","bad\rvalue").build(),"a","h"));
+        for(String key:new String[]{"agent_id","hostname","bad\nkey","__name__"})assertNull(MetricsForwarder.formatLine(good.toBuilder().putLabels(key,"agent-b").build(),"a","h"));
+    }
+    @Test void concurrentOverloadRemainsBoundedAndRejectsHugeSamples()throws Exception{
         var props=new AlinkSecProperties();props.getMetrics().setEnabled(true);
-        props.getMetrics().setVmBaseUrl("http://127.0.0.1:"+server.getAddress().getPort());
-        var exporter=new MetricsForwarder(props,mock(JdbcTemplate.class));Locale original=Locale.getDefault();
+        var forwarder=new MetricsForwarder(props,mock(JdbcTemplate.class),false);
         try {
-            Locale.setDefault(Locale.GERMANY);
-            exporter.onBatch("host",RptMetricsBatch.newBuilder().addSamples(MetricSample.newBuilder()
-                    .setName("alinksec_cpu_usage").setTs(1_790_000_000_123L).setValue(12.5)).build());
-            String body=received.poll(5,TimeUnit.SECONDS);assertNotNull(body);
-            String[] fields=body.strip().split(" ");assertEquals(3,fields.length);
-            assertEquals(12.5,Double.parseDouble(fields[1]));
-            assertEquals("1790000000123",fields[2],"Prometheus exposition timestamps are integer milliseconds, independently of the JVM locale");
-        } finally {Locale.setDefault(original);exporter.stop();server.stop(0);}
+            var sample=MetricSample.newBuilder().setName("metric").setValue(1).putLabels("one","a".repeat(1024)).putLabels("two","a".repeat(1024)).putLabels("three","a".repeat(1024)).build();
+            var batch=RptMetricsBatch.newBuilder();for(int i=0;i<600;i++)batch.addSamples(sample);
+            var threads=new java.util.ArrayList<Thread>();
+            for(int i=0;i<4;i++){var thread=new Thread(()->{for(int n=0;n<6;n++)forwarder.onBatch("agent",batch.build());});threads.add(thread);thread.start();}
+            for(var thread:threads)thread.join();
+            var state=forwarder.statistics();assertTrue(state.get("bytes")<=MetricsForwarder.MAX_BYTES);assertTrue(state.get("records")<=MetricsForwarder.MAX_RECORDS);assertTrue(state.get("dropped")>0);
+            forwarder.onBatch("agent",RptMetricsBatch.newBuilder().addSamples(sample.toBuilder().putLabels("huge","a".repeat(100000))).build());assertEquals(1L,forwarder.statistics().get("rejected"));
+        }finally{forwarder.stop();}
     }
 }

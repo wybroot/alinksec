@@ -189,7 +189,7 @@ export async function login(username, password) {
 }
 
 export async function logout() {
-  try { await post('/api/auth/logout', {}) } catch { /* 忽略 */ }
+  await post('/api/auth/logout', {})
   clearSession()
 }
 
@@ -381,7 +381,7 @@ export async function fetchScreen() {
       crit: critical,
       high: sevMap[3] ?? 0,
       virus: Number(s.virus?.findings30d ?? 0),
-      rtHit: (alerts?.list || []).filter((a) => a.action_taken).length,
+      rtHit: Number(s.alerts?.automated30d ?? 0),
       compliance: s.baseline?.avgScore != null ? Math.round(Number(s.baseline.avgScore)) : null,
       hostsChecked: Number(s.baseline?.hostsChecked ?? 0),
     },
@@ -391,7 +391,7 @@ export async function fetchScreen() {
     radar,
     riskHosts,
     events,
-    engines: (engines || []).map((e) => ({ key: e.key, name: e.name, desc: e.desc })),
+    engines: (engines || []).map((e) => ({ key:e.key,name:e.name,desc:e.desc,on:e.status==='ready',load:Number(e.coverage || 0),status:e.status || 'unknown' })),
   }
 }
 
@@ -439,6 +439,7 @@ export async function fetchHosts({ keyword = '', status = '', page = 1, size = 2
       group: '—',
       ver: h.agent_version || '—',
       ...state,
+      maintenanceUntil:Number(h.maintenance_until || 0),
       protect: !!h.protect_enabled,
       hb: fmtAgo(h.last_heartbeat),
       risk: Number(h.alert_count || 0),
@@ -929,9 +930,13 @@ function parseAlertDetail(detail) {
   try { const value=JSON.parse(detail || '{}'); return value && typeof value==='object' ? value : {} } catch { return {} }
 }
 
-export async function fetchAlerts() {
-  const data = await get('/api/alerts?page=1&size=100')
-  return (data?.list || []).map((a) => ({
+export async function fetchAlertPage({page=1,size=100,tab='all'}={}) {
+  const params = new URLSearchParams({page:String(page),size:String(size)})
+  if(tab==='open')params.set('status','-1')
+  if(tab==='critical'){params.set('severity','4');params.set('maxSeverity','4')}
+  if(tab==='high'){params.set('severity','3');params.set('maxSeverity','3')}
+  const data=await get('/api/alerts?'+params)
+  const list = (data?.list || []).map((a) => ({
     id: a.id,
     sev: alertSev(a),
     legacySeverity: a.severity_source === 'legacy_unclassified',
@@ -944,7 +949,9 @@ export async function fetchAlerts() {
     action: a.action_taken || '',
     detail: parseAlertDetail(a.detail),
   }))
+  return {list,total:Number(data?.total ?? list.length)}
 }
+export async function fetchAlerts(options) {return (await fetchAlertPage(options)).list}
 
 export async function handleAlert(id, remark) {
   return post(`/api/alerts/${id}/handle`, { remark })
@@ -962,3 +969,10 @@ export const fetchWindowsLoginStatus = (page = 1) => get(`/api/protect/windows-l
 export async function fetchClamavStatus(page = 1, size = 20) { return get(`/api/virus/clamav-status?page=${page}&size=${size}`) }
 
 export async function fetchYaraStatus(page = 1, size = 20) { return get(`/api/virus/yara-status?page=${page}&size=${size}`) }
+
+export const changePassword=(oldPassword,password)=>post('/api/auth/password',{oldPassword,password})
+export const fetchUsers=(page=1)=>get('/api/users?page='+page+'&size=100')
+export const createUser=body=>post('/api/users',body)
+export const updateUser=(id,body)=>put('/api/users/'+id,body)
+
+export const setHostMaintenance=(id,seconds)=>post('/api/hosts/'+encodeURIComponent(id)+'/maintenance',{seconds})

@@ -153,7 +153,7 @@ public final class OpenCtiService {
         var rows=jdbc.queryForList("""
                 SELECT indicator_id,document,document_sha256,sha256,included,reason FROM t_opencti_indicator
                 WHERE source_id=? ORDER BY indicator_id LIMIT ? OFFSET ?
-                """,id,size,(page-1)*size);
+                """,id,size,com.alinksec.common.web.PageBounds.offset(page,size));
         var entries=new ArrayList<Map<String,Object>>();boolean retired=catalog.isRetired(id);
         for(var row:rows){
             var entry=new LinkedHashMap<String,Object>(row);var doc=verifiedDocument(entry);

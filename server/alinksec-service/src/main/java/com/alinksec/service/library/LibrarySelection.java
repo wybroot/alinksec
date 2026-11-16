@@ -104,7 +104,7 @@ public final class LibrarySelection {
         if(keyword!=null && !keyword.isBlank()) { if(keyword.length()>255)throw new IllegalArgumentException("查询过长"); where+=" AND LOWER(c."+key+") LIKE LOWER(?)";args.add("%"+keyword.trim()+"%"); }
         String groups="SELECT c."+key+" AS item_key FROM "+table(kind)+" c"+where+" GROUP BY c."+key+(multiple?" HAVING count(*)>1":"");
         Long total=jdbc.queryForObject("SELECT count(*) FROM ("+groups+") selection_keys",Long.class,args.toArray());
-        args.add(size);args.add((long)(page-1)*size);
+        args.add(size);args.add((long)com.alinksec.common.web.PageBounds.offset(page,size));
         var keys=jdbc.queryForList(groups+" ORDER BY item_key LIMIT ? OFFSET ?",String.class,args.toArray());
         return Map.of("list",keys.stream().map(k -> item(kind,k).summary()).toList(),"total",total==null?0:total);
     }

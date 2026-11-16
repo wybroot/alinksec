@@ -105,7 +105,11 @@ func TestNativeEvidenceAgent(t *testing.T) {
 	ready()
 	fixture.awaitReport(t, connection.number, func(report *pb.Report) bool { return report.GetAsset() != nil })
 	replayed := fixture.awaitReport(t, connection.number, func(report *pb.Report) bool { return report.GetEvidence().GetRequestId() == request.RequestId })
-	if !proto.Equal(report, replayed) {
+	// The durable queue and the dedicated evidence journal may use different
+	// transport receipt modes. All business identity, timestamps and bytes must match.
+	comparable := proto.Clone(replayed).(*pb.Report)
+	comparable.Reliable = report.Reliable
+	if !proto.Equal(report, comparable) {
 		t.Fatal("native restart recollected or changed pending evidence")
 	}
 	connection.commands <- command

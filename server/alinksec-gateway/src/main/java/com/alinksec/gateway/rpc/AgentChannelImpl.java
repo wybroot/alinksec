@@ -64,6 +64,7 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                                 .withDescription("agent_id 与证书不匹配").asRuntimeException());
                         return;
                     }
+                    if(report.getReliable() && !report.getReportId().matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"))throw new IllegalArgumentException("invalid durable report identity");
                     registry.withCurrent(authenticatedAgentId,responseObserver,()-> {
                         var current=agentRepository.findByAgentId(authenticatedAgentId);
                         if(current.isEmpty() || current.get().status()==AgentEntity.STATUS_DISABLED
@@ -84,7 +85,12 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                         } else {
                             if(reportIngress==null || !reportIngress.admit(authenticatedAgentId,report))
                                 dispatcher.dispatch(authenticatedAgentId, report);
-                            if(report.hasHeartbeat()) registry.heartbeatReady(authenticatedAgentId,responseObserver);
+                            if(report.getReliable() && !report.getReportId().isBlank())
+                                registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setReportReceipt(com.alinksec.proto.CmdReportReceipt.newBuilder().setReportId(report.getReportId())).build());
+                            if(report.hasHeartbeat()) {
+                                if(report.getHeartbeat().getReportReceiptContract()==1)registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setReportReceipt(com.alinksec.proto.CmdReportReceipt.newBuilder()).build());
+                                registry.heartbeatReady(authenticatedAgentId,responseObserver);
+                            }
                             if(report.hasEvidence()) dispatcher.evidenceReceipt(authenticatedAgentId,report).ifPresent(receipt->
                                     registry.sendCurrent(authenticatedAgentId,responseObserver,Command.newBuilder().setEvidenceReceipt(receipt).build()));
                             if(report.hasFixResult()) {
@@ -107,7 +113,11 @@ public class AgentChannelImpl extends AgentChannelGrpc.AgentChannelImplBase {
                     responseObserver.onError(status.withDescription("agent session is unavailable").asRuntimeException());
                 } catch (Exception e) {
                     log.error("Report 处理异常: agent={} err={}", report.getAgentId(), e.getMessage(), e);
-                    // 单条处理失败不拆流（Agent 无需重发：非关键路径靠下轮心跳/快照补偿）
+                    // No durable receipt on failure. Reconnect and replay the retained report.
+                    if(report.getReliable()) {
+                        closed=true;if(authenticatedAgentId!=null)registry.unregister(authenticatedAgentId,responseObserver);
+                        responseObserver.onError(Status.UNAVAILABLE.withDescription("report persistence failed").asRuntimeException());
+                    }
                 }
             }
 

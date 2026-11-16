@@ -26,6 +26,11 @@ public class MetricsController {
         this.props = props;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.alinksec.service.metrics.MetricsForwarder forwarder;
+    @GetMapping("/status")
+    public ApiResult<?> status(){return ApiResult.ok(forwarder.statistics());}
+
     /** 即时查询：query 例 alinksec_cpu_usage{agent_id="xxx"} */
     @GetMapping("/query")
     public ApiResult<Object> query(@RequestParam String query,

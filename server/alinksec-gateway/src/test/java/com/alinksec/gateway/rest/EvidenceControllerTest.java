@@ -13,8 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class EvidenceControllerTest {
     final EvidenceService service=mock(EvidenceService.class);
     final String secret="evidence-private-test-secret-".repeat(4),id="11111111-1111-4111-8111-111111111111";
-    MockMvc mvc(){var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(secret);return MockMvcBuilders.standaloneSetup(new EvidenceController(service)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(new JwtAuthInterceptor(holder)).build();}
-    String auth(String role){return "Bearer "+JwtUtil.sign(secret,Map.of("uid",7L,"username","fixture","role",role),3600);}
+    MockMvc mvc(){var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(secret);return MockMvcBuilders.standaloneSetup(new EvidenceController(service)).setControllerAdvice(new RestExceptionHandler()).addInterceptors(com.alinksec.gateway.rest.TestJwt.interceptor(holder)).build();}
+    String auth(String role){return "Bearer "+com.alinksec.gateway.rest.TestJwt.token(secret,Map.of("uid",7L,"username","fixture","role",role),3600);}
     @Test void allMetadataSamplesAndFileRoutesRequireCurrentAdministratorClaims()throws Exception {
         var mvc=mvc();for(String path:List.of("/api/evidence","/api/evidence/targets","/api/evidence/targets/a/samples","/api/evidence/"+id+"/download")) {
             mvc.perform(get(path)).andExpect(status().isUnauthorized());

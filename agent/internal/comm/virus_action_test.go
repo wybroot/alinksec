@@ -27,8 +27,26 @@ func TestVirusActionBatchReceiptsAndOfflinePersistence(t *testing.T) {
 	if len(acks) != 2 || acks[1].Stage != pb.RptAck_RUNNING {
 		t.Fatal(acks)
 	}
-	select {
-	case report := <-client.pendingReports:
+	var report *pb.Report
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		report, err = client.queue.Peek()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if report == nil {
+		t.Fatal("action never persisted receipt")
+	}
+	if len(client.pendingReports) != 0 {
+		t.Fatal("terminal receipt bypassed FIFO")
+	}
+	{
 		ack := report.GetAck()
 		if ack.Stage != pb.RptAck_FAILED {
 			t.Fatal(ack)
@@ -48,13 +66,10 @@ func TestVirusActionBatchReceiptsAndOfflinePersistence(t *testing.T) {
 			t.Fatal("terminal receipt not retained")
 		}
 		client.setChannelActive(false)
-		client.pushReport(report)
 		stored, err := client.queue.PopAll()
 		if err != nil || len(stored) != 1 || stored[0].GetAck().Message != ack.Message {
 			t.Fatal("offline receipt lost", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("action never returned receipt")
 	}
 }
 func TestOldVirusCommandsAreRejectedBeforeFileMutation(t *testing.T) {

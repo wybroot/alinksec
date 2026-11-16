@@ -77,8 +77,8 @@ class VendorAdvisoryLiveIntegrationTest {
                     assertEquals(expected.size(),jdbc.queryForObject("SELECT count(*) FROM t_vendor_contribution WHERE source_id=? AND raw_document_id=?",Integer.class,source.getId(),id));
                     var holder=mock(JwtSecretHolder.class);when(holder.secret()).thenReturn(SECRET);
                     MockMvc mvc=MockMvcBuilders.standaloneSetup(new LibraryController(sync,catalog,props,schedules))
-                            .setControllerAdvice(new RestExceptionHandler()).addInterceptors(new JwtAuthInterceptor(holder)).build();
-                    String token=JwtUtil.sign(SECRET,Map.of("uid",1,"username","isolated-public-test","role","admin"),3600);
+                            .setControllerAdvice(new RestExceptionHandler()).addInterceptors(com.alinksec.bootstrap.TestJwt.interceptor(holder)).build();
+                    String token=com.alinksec.bootstrap.TestJwt.token(SECRET,Map.of("uid",1,"username","isolated-public-test","role","admin"),3600);
                     String path="/api/libraries/sources/"+source.getId()+"/advisories/"+id;
                     assertEquals(401,mvc.perform(get(path+"/raw")).andReturn().getResponse().getStatus());
                     var response=mvc.perform(get(path+"/raw").header("Authorization","Bearer "+token)).andReturn().getResponse();

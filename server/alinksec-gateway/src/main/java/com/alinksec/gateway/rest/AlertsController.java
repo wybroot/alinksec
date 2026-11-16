@@ -31,9 +31,10 @@ public class AlertsController {
                                                @RequestParam(required = false) Integer severity,
                                                @RequestParam(required = false) String agentId,
                                                @RequestParam(required = false) String eventType,
+                                               @RequestParam(required = false) Integer maxSeverity,
                                                @RequestParam(defaultValue = "1") int page,
                                                @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(query.list(status, severity, agentId, eventType, page, Math.min(size, 100)));
+        return ApiResult.ok(query.list(status, severity, agentId, eventType, page, Math.min(size, 100), maxSeverity));
     }
 
     @GetMapping("/severity-distribution")

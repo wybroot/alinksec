@@ -29,7 +29,7 @@ const statusLabel=computed(()=>({attributed:'已关联文件操作进程',unattr
 const reasonLabel=computed(()=>{
  const reason=attribution.value.reason || ''
  if(attribution.value.status==='attributed')return '内核文件事件已关联到同一进程实例。终止前再次核对进程身份，并保护系统关键进程。'
- return ({no_observed_write:'未观察到全部受影响文件的成功写入或重命名操作。',multiple_writers:'检测窗口内存在不同写入进程，已跳过进程终止。',capture_gap:'检测窗口存在采集缺口或证据已过期。',writer_identity_unavailable:'文件操作的进程身份无法核实，可能已退出或无法访问。',writer_exited:'写入进程已退出或无法访问。',writer_identity_changed:'进程身份已变化。',capture_stopped:'采集已经停止，历史证据已失效。',window_exceeds_retention:'监测窗口超过归因证据保留范围，已跳过进程终止。',write_capacity_exceeded:'文件操作量超过采集容量，证据已失效。',file_object_capacity_exceeded:'打开文件数量超过采集容量，证据已失效。',pending_write_capacity_exceeded:'待确认文件操作超过采集容量，证据已失效。',etw_events_lost:'内核文件事件发生丢失，证据已失效。'}[reason] || (reason.startsWith('capture_start_failed') ? '无法启动内核文件采集，请检查 Agent 权限和系统支持。' : reason.startsWith('capture_health_failed') ? '内核文件采集已中断或出现事件丢失，已跳过进程终止。' : '当前没有足够的证据确认写入进程。'))
+ return ({writer_evidence_unavailable:'Linux 尚无可信写入者证据，已跳过进程终止；不会根据文件句柄或进程启动时间猜测写入者。',no_observed_write:'未观察到全部受影响文件的成功写入或重命名操作。',multiple_writers:'检测窗口内存在不同写入进程，已跳过进程终止。',capture_gap:'检测窗口存在采集缺口或证据已过期。',writer_identity_unavailable:'文件操作的进程身份无法核实，可能已退出或无法访问。',writer_exited:'写入进程已退出或无法访问。',writer_identity_changed:'进程身份已变化。',capture_stopped:'采集已经停止，历史证据已失效。',window_exceeds_retention:'监测窗口超过归因证据保留范围，已跳过进程终止。',write_capacity_exceeded:'文件操作量超过采集容量，证据已失效。',file_object_capacity_exceeded:'打开文件数量超过采集容量，证据已失效。',pending_write_capacity_exceeded:'待确认文件操作超过采集容量，证据已失效。',etw_events_lost:'内核文件事件发生丢失，证据已失效。'}[reason] || (reason.startsWith('capture_start_failed') ? '无法启动内核文件采集，请检查 Agent 权限和系统支持。' : reason.startsWith('capture_health_failed') ? '内核文件采集已中断或出现事件丢失，已跳过进程终止。' : '当前没有足够的证据确认写入进程。'))
 })
 </script>
 
