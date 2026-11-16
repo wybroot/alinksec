@@ -50,10 +50,14 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 	if !signature(profile, paths.profile) || !signature(rc, paths.bashrc) {
 		t.Fatalf("unrecognized isolated vendor prefixes: profile_bytes=%d bashrc_bytes=%d", len(profile), len(rc))
 	}
-	if err := os.Rename("/etc/profile.d", "/etc/alinksec-bash-original-profile.d"); err != nil {
-		t.Fatal(err)
+	// Overlayfs may reject renaming a directory from the image's lower layer
+	// with EXDEV. Copy the isolated fixture, preserving metadata and symlinks,
+	// instead of depending on the Docker storage driver's rename behavior.
+	backup := "/etc/alinksec-bash-original-profile.d"
+	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
+		t.Fatal("isolated Bash backup path must not already exist")
 	}
-	if err := os.Mkdir("/etc/profile.d", 0755); err != nil {
+	if err := exec.Command("/bin/cp", "-a", "--", "/etc/profile.d", backup).Run(); err != nil {
 		t.Fatal(err)
 	}
 	restored := false
@@ -70,7 +74,10 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 		if err := os.RemoveAll("/etc/profile.d"); err != nil {
 			return err
 		}
-		if err := os.Rename("/etc/alinksec-bash-original-profile.d", "/etc/profile.d"); err != nil {
+		if err := exec.Command("/bin/cp", "-a", "--", backup, "/etc/profile.d").Run(); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(backup); err != nil {
 			return err
 		}
 		restored = true
@@ -81,6 +88,12 @@ func TestNativeBashGlobalPolicy(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	if err := os.RemoveAll("/etc/profile.d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir("/etc/profile.d", 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, name := range []string{".bash_profile", ".bashrc", ".bash_logout"} {
 		file := filepath.Join("/root", name)
