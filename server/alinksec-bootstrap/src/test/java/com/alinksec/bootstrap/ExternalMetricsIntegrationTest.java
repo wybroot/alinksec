@@ -25,6 +25,75 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @EnabledIfEnvironmentVariable(named="ALINKSEC_EXTERNAL_EVIDENCE",matches=".+")
 class ExternalMetricsIntegrationTest {
     @TempDir Path root;
+    @Test @Timeout(60)
+    void maliciousAgentCannotChangeAnotherAgentsRealVictoriaMetricsSeries() throws Exception {
+        String base=System.getenv("ALINKSEC_EXTERNAL_VM_URL");assertNotNull(base);
+        URI uri=URI.create(base);assertEquals("http",uri.getScheme());assertEquals("127.0.0.1",uri.getHost());
+        String a="isolation-a-"+UUID.randomUUID(),b="isolation-b-"+UUID.randomUUID(),metric="alinksec_isolation_probe";
+        String label="quoted\\\"\npath\\end",hostA="host-a",hostB="host-b";
+        var props=new AlinkSecProperties();props.getMetrics().setEnabled(true);props.getMetrics().setVmBaseUrl(base);
+        var cfg=new HikariConfig();cfg.setJdbcUrl("jdbc:sqlite:"+root.resolve("isolation.db"));cfg.setMaximumPoolSize(1);
+        Path evidence=Path.of(System.getenv("ALINKSEC_EXTERNAL_EVIDENCE")).resolve("metrics-isolation");Files.createDirectories(evidence);
+        var client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+        long timestamp=System.currentTimeMillis()-60_000;
+        try(var pool=new HikariDataSource(cfg)) {
+            var jdbc=new JdbcTemplate(pool);jdbc.execute("CREATE TABLE t_agent(agent_id TEXT PRIMARY KEY,hostname TEXT)");
+            jdbc.update("INSERT INTO t_agent VALUES (?,?)",a,hostA);jdbc.update("INSERT INTO t_agent VALUES (?,?)",b,hostB);
+            var forwarder=new MetricsForwarder(props,jdbc);
+            try {
+                forwarder.onBatch(a,RptMetricsBatch.newBuilder().addSamples(MetricSample.newBuilder().setName(metric).setTs(timestamp).setValue(11).putLabels("mount",label)).build());
+                forwarder.onBatch(b,RptMetricsBatch.newBuilder().addSamples(MetricSample.newBuilder().setName(metric).setTs(timestamp).setValue(22)).build());
+                JsonNode before=awaitExport(client,base,b,timestamp);
+                Files.writeString(evidence.resolve("victim-before.json"),before.toString()+"\n");
+                var attack=RptMetricsBatch.newBuilder();
+                String injected=metric+"{agent_id=\""+b+"\",hostname=\""+hostB+"\"} 999 "+timestamp;
+                for(String name:List.of(metric+"\n"+injected,metric+"\"",metric+"{",metric+"}","9invalid"))
+                    attack.addSamples(MetricSample.newBuilder().setName(name).setTs(timestamp).setValue(999));
+                for(String key:List.of("agent_id","hostname","__name__","bad\n"+injected,"bad\"","bad{","bad}"))
+                    attack.addSamples(MetricSample.newBuilder().setName(metric).setTs(timestamp).setValue(999).putLabels(key,b));
+                int rejected=attack.getSamplesCount();
+                // A valid value containing a whole forged line must remain one escaped label.
+                attack.addSamples(MetricSample.newBuilder().setName(metric).setTs(timestamp+1).setValue(33).putLabels("mount",label+"\n"+injected));
+                forwarder.onBatch(a,attack.build());
+                JsonNode attacker=awaitExport(client,base,a,timestamp+1); // Completion marker follows every attack on the single exporter.
+                JsonNode after=export(client,base,b);
+                assertEquals(before,after,"An attacker must not change any series or sample owned by B");
+                assertEquals(2,attacker.size());
+                var values=new TreeMap<Long,Double>();
+                for(JsonNode row:attacker){
+                    assertEquals(a,row.path("metric").path("agent_id").asText());assertEquals(hostA,row.path("metric").path("hostname").asText());assertEquals(metric,row.path("metric").path("__name__").asText());
+                    assertEquals(1,row.path("timestamps").size());assertEquals(1,row.path("values").size());
+                    long time=row.path("timestamps").get(0).asLong();assertNull(values.put(time,row.path("values").get(0).asDouble()));
+                    assertEquals(time==timestamp?label:label+"\n"+injected,row.path("metric").path("mount").asText());
+                }
+                assertEquals(Map.of(timestamp,11.0,timestamp+1,33.0),values);
+                var stats=forwarder.statistics();assertEquals((long)rejected,stats.get("rejected"));assertEquals(0L,stats.get("failed"));assertEquals(0L,stats.get("records"));
+                JsonNode query=(JsonNode)new VmQueryClient(props).query("last_over_time("+metric+"{agent_id=\""+b+"\"}[1h])",Long.toString(Instant.now().getEpochSecond()));
+                assertEquals("success",query.path("status").asText());assertEquals(1,query.path("data").path("result").size());
+                assertEquals(22,query.path("data").path("result").get(0).path("value").get(1).asDouble());
+                Files.writeString(evidence.resolve("victim-after.json"),after.toString()+"\n");Files.writeString(evidence.resolve("attacker-after.json"),attacker.toString()+"\n");
+                Files.writeString(evidence.resolve("victim-query.json"),query.toString()+"\n");
+                Files.writeString(evidence.resolve("result.json"),JsonUtils.write(Map.of("accepted",true,"agentA",a,"agentB",b,"timestamp",timestamp,"rejected",rejected,"statistics",stats,"nativeAgentTransportVerified",false))+"\n");
+            }finally{forwarder.stop();}
+        }
+    }
+    private JsonNode awaitExport(HttpClient client,String base,String agent,long timestamp)throws Exception {
+        long deadline=System.nanoTime()+Duration.ofSeconds(20).toNanos();JsonNode rows;
+        do {
+            rows=export(client,base,agent);
+            for(JsonNode row:rows)for(JsonNode ts:row.path("timestamps"))if(ts.asLong()==timestamp)return rows;
+            Thread.sleep(100);
+        }while(System.nanoTime()<deadline);
+        fail("VictoriaMetrics did not expose the exporter completion marker");return rows;
+    }
+    private JsonNode export(HttpClient client,String base,String agent)throws Exception {
+        String selector="{agent_id=\""+agent+"\"}";
+        var response=client.send(HttpRequest.newBuilder(URI.create(base+"/api/v1/export?match%5B%5D="+URLEncoder.encode(selector,StandardCharsets.UTF_8)))
+                .timeout(Duration.ofSeconds(3)).GET().build(),HttpResponse.BodyHandlers.ofString());
+        assertEquals(200,response.statusCode());
+        var rows=new ArrayList<JsonNode>();for(String line:response.body().lines().filter(s->!s.isBlank()).toList())rows.add(JsonUtils.read(line));
+        rows.sort(Comparator.comparing(JsonNode::toString));return JsonUtils.read(JsonUtils.write(rows));
+    }
     @Test @Timeout(30)
     void recentSamplesAreQueryableWithoutTheDefaultThirtySecondOffset() throws Exception {
         String base=System.getenv("ALINKSEC_EXTERNAL_VM_URL");assertNotNull(base);

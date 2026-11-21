@@ -124,6 +124,13 @@ class ReviewDefectsIntegrationTest {
         var b=RptAssetSnapshot.newBuilder().setSequence(sequence).addCollected("ports").addCollections(AssetCollection.newBuilder().setCategory("ports").setStatus(state).setCollectedAt(1000-sequence));
         if(port>0)b.addPorts(PortInfo.newBuilder().setPort(port).setProtocol("tcp"));return b.build();
     }
+    @Test void reorderedSoftwareCannotChangeCurrentVulnerabilityJudgment() {
+        var props=new AlinkSecProperties();props.getDatabase().setType(dialect.isSqlite()?"sqlite":"postgres");
+        var libraries=new com.alinksec.service.library.LibraryProperties();libraries.setWorkDir(dir.resolve("libraries").toString());
+        var assets=new AssetService(jdbc,new com.alinksec.service.scan.VulnMatchService(jdbc,tx.getTransactionManager()),mock(SecurityEventService.class));
+        SoftwareOrderingScenario.verify(jdbc,tx.getTransactionManager(),props,libraries,agent,admin,
+                snapshot->tx.executeWithoutResult(s->assets.replaceSnapshot(agent,snapshot)));
+    }
     @Test void assetSequenceSurvivesReorderingAndFailuresPreserveSuccessfulRows(){
         var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
         tx.executeWithoutResult(s->assets.replaceSnapshot(agent,ports(2,AssetCollection.Status.COMPLETE,82)));
@@ -135,6 +142,91 @@ class ReviewDefectsIntegrationTest {
         tx.executeWithoutResult(s->assets.replaceSnapshot(agent,ports(4,AssetCollection.Status.COMPLETE,0)));
         assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
         tx.executeWithoutResult(s->assets.replaceSnapshot(agent,ports(0,AssetCollection.Status.COMPLETE,80)));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
+    }
+    @Test void failedPortProcessAndDiskEnumerationRetainsRowsAndCapturedRestResponses()throws Exception {
+        var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
+        var snapshot=RptAssetSnapshot.newBuilder().setSequence(1).addAllCollected(List.of("ports","processes","disks"))
+                .addPorts(PortInfo.newBuilder().setPort(4443).setProtocol("tcp").setProcess("retained-process").setBindAddr("127.0.0.1"))
+                .addProcesses(ProcessInfo.newBuilder().setPid(4242).setName("retained-process").setExe("/opt/review/retained-process").setUser("review-user").setRssBytes(1048576))
+                .addDisks(DiskInfo.newBuilder().setMount("/review").setFsType("ext4").setTotalBytes(1000).setUsedBytes(400));
+        for(String category:snapshot.getCollectedList())snapshot.addCollections(AssetCollection.newBuilder().setCategory(category).setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(1000));
+        var initial=collectorSnapshot("complete",snapshot.build()).toBuilder().setSequence(1).build();
+        assertEquals(1,initial.getPortsCount());assertEquals(1,initial.getProcessesCount());assertEquals(1,initial.getDisksCount());
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,initial));
+        var previous=assetRows();var phases=new ArrayList<Map<String,Object>>();
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new HostsController(
+                new com.alinksec.service.query.HostQueryService(jdbc),mock(com.alinksec.service.command.CommandService.class),
+                mock(com.alinksec.service.protect.ProtectRuleService.class),mock(com.alinksec.service.enroll.EnrollTokenService.class))).build();
+        phases.add(assetPhase("complete",mvc));
+        int sequence=1;
+        for(var status:List.of(AssetCollection.Status.FAILED,AssetCollection.Status.PARTIAL,AssetCollection.Status.UNSUPPORTED)) {
+            var incomplete=RptAssetSnapshot.newBuilder().setSequence(++sequence).addAllCollected(List.of("ports","processes","disks","accounts"))
+                    .addCollections(AssetCollection.newBuilder().setCategory("accounts").setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(1000+sequence))
+                    .addAccounts(AccountInfo.newBuilder().setName("fresh-account").setUid(1001).setShell("/bin/sh"));
+            for(String category:List.of("ports","processes","disks"))incomplete.addCollections(AssetCollection.newBuilder()
+                    .setCategory(category).setStatus(status).setError("enumeration_"+status.name().toLowerCase(Locale.ROOT)).setCollectedAt(1000+sequence));
+            // Even partial, nonempty output cannot masquerade as a complete replacement.
+            if(status==AssetCollection.Status.PARTIAL)incomplete.addPorts(PortInfo.newBuilder().setPort(9999))
+                    .addProcesses(ProcessInfo.newBuilder().setPid(9999).setName("incomplete-process"))
+                    .addDisks(DiskInfo.newBuilder().setMount("/incomplete"));
+            var failed=status==AssetCollection.Status.FAILED?collectorSnapshot("failed",incomplete.build()).toBuilder():incomplete;
+            failed.setSequence(sequence);
+            if(status==AssetCollection.Status.FAILED&&!failed.getCollectedList().contains("accounts")) {
+                failed.addCollected("accounts").addAccounts(incomplete.getAccounts(0));
+                failed.addCollections(incomplete.getCollections(0));
+            }
+            for(int i=0;i<failed.getCollectionsCount();i++)failed.setCollections(i,failed.getCollections(i).toBuilder().setCollectedAt(1000+sequence));
+            var failedSnapshot=failed.build();
+            tx.executeWithoutResult(s->assets.replaceSnapshot(agent,failedSnapshot));
+            assertEquals(previous,assetRows(),"A failed or incomplete category must retain its last successful observation");
+            assertEquals("fresh-account",jdbc.queryForObject("SELECT name FROM t_asset_account WHERE agent_id=?",String.class,agent));
+            String state=status.name().toLowerCase(Locale.ROOT);
+            assertEquals(3,jdbc.queryForObject("SELECT count(*) FROM t_asset_collection_state WHERE agent_id=? AND category IN ('ports','processes','disks') AND status=? AND collected_at=?",Integer.class,agent,state,1000+sequence));
+            phases.add(assetPhase(state,mvc));
+        }
+        var empty=RptAssetSnapshot.newBuilder().setSequence(++sequence).addAllCollected(List.of("ports","processes","disks"));
+        for(String category:empty.getCollectedList())empty.addCollections(AssetCollection.newBuilder().setCategory(category).setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(1000+sequence));
+        var emptySnapshot=collectorSnapshot("empty",empty.build()).toBuilder().setSequence(sequence).build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,emptySnapshot));
+        for(var rows:assetRows().values())assertTrue(((List<?>)rows).isEmpty(),"A successful empty enumeration must remove vanished assets");
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM t_asset_account WHERE agent_id=?",Integer.class,agent));
+        phases.add(assetPhase("empty",mvc));
+        String output=System.getenv("ALINKSEC_ASSET_BROWSER_FIXTURES");
+        if(output!=null&&!output.isBlank()) {
+            Path destination=Path.of(output).resolve(dialect.isSqlite()?"sqlite":"postgres");java.nio.file.Files.createDirectories(destination);
+            java.nio.file.Files.writeString(destination.resolve("asset-lifecycle.json"),com.alinksec.common.util.JsonUtils.write(
+                    Map.of("agentId",agent,"database",dialect.isSqlite()?"sqlite":"postgres","collectorProtobufVerified",!collectorDigests().isEmpty(),"collectorSHA256",collectorDigests(),"phases",phases))+"\n");
+        }
+    }
+    Map<String,String> collectorDigests()throws Exception {
+        String directory=System.getenv("ALINKSEC_ASSET_COLLECTOR_FIXTURES");var digests=new TreeMap<String,String>();
+        if(directory!=null&&!directory.isBlank())for(String name:List.of("complete","failed","empty"))digests.put(name,
+                HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(java.nio.file.Files.readAllBytes(Path.of(directory).resolve(name+".pb")))));
+        return digests;
+    }
+    RptAssetSnapshot collectorSnapshot(String name,RptAssetSnapshot fallback)throws Exception {
+        String directory=System.getenv("ALINKSEC_ASSET_COLLECTOR_FIXTURES");
+        if(directory==null||directory.isBlank())return fallback;
+        var snapshot=RptAssetSnapshot.parseFrom(java.nio.file.Files.readAllBytes(Path.of(directory).resolve(name+".pb")));
+        assertEquals(Set.of("ports","processes","disks"),new HashSet<>(snapshot.getCollectedList()));
+        assertEquals(3,snapshot.getCollectionsCount());
+        for(var state:snapshot.getCollectionsList())assertEquals(name.equals("failed")?AssetCollection.Status.FAILED:AssetCollection.Status.COMPLETE,state.getStatus());
+        return snapshot;
+    }
+    Map<String,Object> assetRows() {
+        return Map.of("ports",jdbc.queryForList("SELECT port,protocol,process,bind_addr FROM t_asset_port WHERE agent_id=?",agent),
+                "processes",jdbc.queryForList("SELECT pid,name,exe,username,rss_bytes FROM t_asset_process WHERE agent_id=?",agent),
+                "disks",jdbc.queryForList("SELECT mount,fs_type,total_bytes,used_bytes FROM t_asset_disk WHERE agent_id=?",agent));
+    }
+    Map<String,Object> assetPhase(String name,org.springframework.test.web.servlet.MockMvc mvc)throws Exception {
+        var responses=new TreeMap<String,Object>();
+        for(String path:List.of("/api/hosts","/api/hosts/groups","/api/hosts/"+agent,"/api/hosts/"+agent+"/software",
+                "/api/hosts/"+agent+"/ports","/api/hosts/"+agent+"/processes","/api/hosts/"+agent+"/accounts","/api/hosts/"+agent+"/containers")) {
+            var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).param("keyword",agent)).andReturn().getResponse();
+            assertEquals(200,response.getStatus());var body=com.alinksec.common.util.JsonUtils.read(response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(0,body.path("code").asInt(-1));responses.put(path,body);
+        }
+        return Map.of("name",name,"responses",responses,"disks",assetRows().get("disks"));
     }
     ReportDispatcher dispatcher(SecurityEventService events){
         return dispatcher(events,mock(AssetService.class));

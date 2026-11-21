@@ -22,14 +22,15 @@ def verify(root, reports, head):
     assert run["image"] == "quay.io/victoriametrics/victoria-metrics:v1.102.0" and run["imageDigests"]
     publisher_cases = ET.parse(reports / "TEST-com.alinksec.bootstrap.VendorAdvisoryLiveIntegrationTest.xml").getroot()
     metrics_cases = ET.parse(reports / "TEST-com.alinksec.bootstrap.ExternalMetricsIntegrationTest.xml").getroot()
-    for suite, count in [(publisher_cases, 4), (metrics_cases, 2)]:
+    for suite, count in [(publisher_cases, 4), (metrics_cases, 3)]:
         assert int(suite.attrib["tests"]) == count
         assert all(int(suite.attrib.get(key, 0)) == 0 for key in ["failures", "errors", "skipped"])
         assert len(suite.findall("testcase")) == count
         assert all(len(case) == 0 or not any(case.find(kind) is not None for kind in ["skipped", "failure", "error"]) for case in suite.findall("testcase"))
     assert all(case.attrib["name"].startswith("actualPublisherSyncCommitsRawBytesAndServesProtectedApis") for case in publisher_cases.findall("testcase"))
     assert {case.attrib["name"] for case in metrics_cases.findall("testcase")} == {
-        "realVictoriaMetricsRetainsSampleMillisecondsLabelsAndQueryResults", "recentSamplesAreQueryableWithoutTheDefaultThirtySecondOffset"}
+        "realVictoriaMetricsRetainsSampleMillisecondsLabelsAndQueryResults", "recentSamplesAreQueryableWithoutTheDefaultThirtySecondOffset",
+        "maliciousAgentCannotChangeAnotherAgentsRealVictoriaMetricsSeries"}
     accepted = []
     for kind, url in PUBLISHERS.items():
         receipt = json.loads((root / "publishers" / (kind + ".json")).read_text())
@@ -86,7 +87,32 @@ def verify(root, reports, head):
     series = recent_range["data"]["result"][0]
     assert series["metric"]["agent_id"] == recent["agentId"]
     assert series["values"] and all(float(point[1]) == 42.125 for point in series["values"])
+    isolation = json.loads((root / "metrics-isolation/result.json").read_text())
+    assert isolation["accepted"] and isolation["agentA"] != isolation["agentB"] and isolation["rejected"] == 12
+    assert isolation["nativeAgentTransportVerified"] is False
+    statistics = isolation["statistics"]
+    assert statistics["rejected"] == 12 and statistics["failed"] == statistics["records"] == statistics["bytes"] == statistics["dropped"] == 0
+    before = json.loads((root / "metrics-isolation/victim-before.json").read_text())
+    after = json.loads((root / "metrics-isolation/victim-after.json").read_text())
+    assert before == after and len(after) == 1
+    assert after[0] == {"metric": {"__name__": "alinksec_isolation_probe", "agent_id": isolation["agentB"], "hostname": "host-b"},
+                        "timestamps": [isolation["timestamp"]], "values": [22]}
+    attacker = json.loads((root / "metrics-isolation/attacker-after.json").read_text())
+    assert len(attacker) == 2
+    observed = {}
+    for row in attacker:
+        assert row["metric"]["agent_id"] == isolation["agentA"] and row["metric"]["hostname"] == "host-a"
+        assert row["metric"]["__name__"] == "alinksec_isolation_probe"
+        assert len(row["timestamps"]) == len(row["values"]) == 1
+        assert row["timestamps"][0] not in observed
+        observed[row["timestamps"][0]] = row["values"][0]
+    assert observed == {isolation["timestamp"]: 11, isolation["timestamp"] + 1: 33}
+    victim_query = json.loads((root / "metrics-isolation/victim-query.json").read_text())
+    assert victim_query["status"] == "success" and len(victim_query["data"]["result"]) == 1
+    assert victim_query["data"]["result"][0]["metric"]["agent_id"] == isolation["agentB"]
+    assert float(victim_query["data"]["result"][0]["value"][1]) == 22
     result = {"accepted": True, "head": head, "run": run["run"], "publishers": accepted, "realDisposableVictoriaMetrics": True,
+              "crossAgentMetricsIsolationVerified": True,
               "recentVisibilityMillis": recent["elapsedMillis"], "oneSecondSlaAccepted": False,
               "realPrivateServicesAccepted": False, "realWindowsPatchAccepted": False, "realHostLongSoakAccepted": False}
     (root / "accepted.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
