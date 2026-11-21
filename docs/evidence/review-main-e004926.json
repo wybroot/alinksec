@@ -1,0 +1,165 @@
+{
+  "recorded_at": "2026-11-21",
+  "scope": "Software acceptance for e004926; later documentation commits are not claimed to be the same CI source",
+  "product_baseline": "v0.0.4",
+  "source_commit": "e004926caa2ef372ee94054ad7ecc3485c7bccbc",
+  "source_tree": "8e6ceda59551fcdc57b1b05bcac7b6319468a2ce",
+  "parents": [
+    "ef89c7347739eccd7f2b6b5b8f99e583ba770b44",
+    "7a6aa226ac6d55a76c40c568124570959b0691b7"
+  ],
+  "pull_request": {
+    "number": 41,
+    "url": "https://github.com/wybroot/alinksec/pull/41"
+  },
+  "feature_ci": {
+    "passed": true,
+    "source_commit": "7a6aa226ac6d55a76c40c568124570959b0691b7",
+    "run_id": 44871333841,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/44871333841",
+    "required_jobs": 27,
+    "errors": []
+  },
+  "main_ci": {
+    "passed": true,
+    "source_commit": "e004926caa2ef372ee94054ad7ecc3485c7bccbc",
+    "run_id": 44900588010,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/44900588010",
+    "branch": "main",
+    "event": "push",
+    "required_jobs": 27,
+    "status": "completed",
+    "conclusion": "success",
+    "job_results": {
+      "success": 27
+    },
+    "gate": "deploy/release/ci-gate.mjs passesReleaseGate; no release/deployment authorized"
+  },
+  "review_kind": "Source and validation review by implementing agent; no independent human review claimed",
+  "artifact_verification": {
+    "source_commit": "e004926caa2ef372ee94054ad7ecc3485c7bccbc",
+    "run_id": 44900588010,
+    "checks": [
+      {
+        "artifact": "cluster-evidence-amd64",
+        "id": 14706013504,
+        "archive_sha256": "2b3a7db144e5038b64461f3dbc0cc99b82597dd9d8c6e2c6e8ceae0f85fb76f3",
+        "archive_digest_verified": true
+      },
+      {
+        "artifact": "cluster-evidence-arm64",
+        "id": 14705933672,
+        "archive_sha256": "f709c8499bed0be292d2ef0d08cb22ae9b51f1550e6d4b77bd4c4e64bbdf6542",
+        "archive_digest_verified": true
+      },
+      {
+        "artifact": "web-dist-amd64",
+        "id": 14706101799,
+        "archive_sha256": "2a1808f4c0bb2a8ce38cf251f02c3130224f7d4e26a0912b4a37a0dcb767b190",
+        "archive_digest_verified": true,
+        "files": 41,
+        "matches_browser_tested_production_files": true
+      },
+      {
+        "artifact": "web-dist-arm64",
+        "id": 14705801905,
+        "archive_sha256": "22f7ab15278b28aba0b845c989b7c87733fafedc38899d17f91d6d806bbb5a4e",
+        "archive_digest_verified": true,
+        "files": 41,
+        "matches_browser_tested_production_files": true
+      },
+      {
+        "artifact": "central-evidence-windows-2022-amd64",
+        "id": 14705763572,
+        "archive_sha256": "f59852cdcdb44a079c6a5d570eaab5c268d2a44e105562ef72fffd4b5594a256",
+        "archive_digest_verified": true,
+        "fresh_processes": 3,
+        "all_retained_hashes_verified": true
+      },
+      {
+        "artifact": "central-evidence-windows-amd64",
+        "id": 14705118572,
+        "archive_sha256": "df74148458624e945fa6a0684cd8d84af3d5cfc77b9d4ccdfa1ab47043a129cc",
+        "archive_digest_verified": true,
+        "fresh_processes": 3,
+        "all_retained_hashes_verified": true
+      },
+      {
+        "artifact": "scale-acceptance-amd64",
+        "id": 14705858890,
+        "archive_sha256": "944209ff35cb0878235ffe3cf37f660f9eb1724ecf32f2d7744c2defbe4b743b",
+        "archive_digest_verified": true
+      },
+      {
+        "artifact": "scale-acceptance-arm64",
+        "id": 14705918817,
+        "archive_sha256": "1d4415cb8a91144f6a57f1c6f67143cc2e6fd2b2531fb94a2eb9210f0487bd02",
+        "archive_digest_verified": true
+      }
+    ]
+  },
+  "artifact_contents": {
+    "source_commit": "e004926caa2ef372ee94054ad7ecc3485c7bccbc",
+    "run_id": 44900588010,
+    "passed": true,
+    "archives_with_digest_verified": 8,
+    "web_files_per_architecture": 41,
+    "fresh_windows_processes_per_os": 3,
+    "details": [
+      {
+        "architecture": "amd64",
+        "native_cluster_checks": 9,
+        "coordination_tests": 14,
+        "cluster_cleanup_passed": true,
+        "scope": "180 seconds on one disposable CI host, 200 synthetic mTLS protocol clients plus one actual native Agent; no 72-hour or 200-real-host claim",
+        "scale_profile_sha256": "a0ba0a15191371e45fa6bbb2d8cf0be8d1246a11099bb138285d6ed9bbec995c",
+        "long_soak_or_real_200_host_claim": false
+      },
+      {
+        "architecture": "arm64",
+        "native_cluster_checks": 9,
+        "coordination_tests": 14,
+        "cluster_cleanup_passed": true,
+        "scope": "180 seconds on one disposable CI host, 200 synthetic mTLS protocol clients plus one actual native Agent; no 72-hour or 200-real-host claim",
+        "scale_profile_sha256": "a0ba0a15191371e45fa6bbb2d8cf0be8d1246a11099bb138285d6ed9bbec995c",
+        "long_soak_or_real_200_host_claim": false
+      }
+    ]
+  },
+  "artifact_metadata_count": 85,
+  "all_artifact_bytes_downloaded_and_verified_locally": false,
+  "vendor_archive_local_transport": {
+    "run_id": 44871333841,
+    "source_commit": "7a6aa226ac6d55a76c40c568124570959b0691b7",
+    "artifact": "vendor-advisory-evidence",
+    "local_download_passed": false,
+    "timeout_seconds": 600,
+    "partial_bytes": 25214976,
+    "partial_archive_digest_accepted": false,
+    "vendor_ci": "success",
+    "recorded_at": "2026-11-21T11:57:45.127329+00:00",
+    "scope": "Local archive transport limitation; original live public fetch, parsing and integration CI passed; no production source or CI gate changed"
+  },
+  "rev_status": {
+    "REV-001": "VERIFY",
+    "REV-002": "VERIFY",
+    "REV-003": "VERIFY",
+    "REV-004": "VERIFY",
+    "REV-005": "VERIFY",
+    "REV-006": "VERIFY",
+    "REV-007": "VERIFY",
+    "REV-008": "VERIFY",
+    "REV-009": "VERIFY",
+    "REV-010": "VERIFY",
+    "REV-011": "CLOSED",
+    "REV-012": "VERIFY",
+    "REV-013": "VERIFY",
+    "REV-014": "VERIFY"
+  },
+  "field_scope": {
+    "items_25_26_27": "deferred",
+    "item_28": "not applicable to fresh deployment",
+    "real_200_hosts_72_hours_accepted": false
+  },
+  "release_or_deployment_authorized": false
+}
