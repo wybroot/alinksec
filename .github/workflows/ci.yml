@@ -648,6 +648,19 @@ jobs:
       - name: Check retained port and process rows after enumeration failures with SQLite responses
         working-directory: web
         run: node test/asset-collection-browser.mjs
+      - name: Retain bounded SQLite asset lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-collection-${{ matrix.arch }}
+          path: |
+            .tmp/asset-collector-fixtures
+            .tmp/asset-collection-fixtures
+            .tmp/asset-collection-browser
+            server/**/target/surefire-reports/*ReviewDefects*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check Linux missing-writer evidence with the actual native Agent event
         working-directory: web
         run: node test/linux-ransom-browser.mjs
@@ -1547,6 +1560,19 @@ jobs:
           npm run build
           npx playwright install --with-deps --only-shell chromium
           node test/asset-collection-browser.mjs
+      - name: Retain bounded PostgreSQL asset lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-collection-postgres
+          path: |
+            .tmp/asset-collector-fixtures
+            .tmp/asset-collection-fixtures
+            .tmp/asset-collection-browser
+            server/**/target/surefire-reports/*ReviewDefects*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1665,6 +1691,21 @@ jobs:
       - name: Check native archive console against captured REST responses
         run: node test/vendor-advisory-browser.mjs
         working-directory: web
+      - name: Retain bounded real metrics isolation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-isolation-evidence
+          path: |
+            .tmp/external-services/metrics-isolation
+            .tmp/external-services/metrics
+            .tmp/external-services/metrics-recent
+            .tmp/external-services/run.json
+            .tmp/external-services/accepted.json
+            server/**/target/surefire-reports/*ExternalMetrics*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Retain native documents, SHA-256 and parser reports
         if: always()
         uses: actions/upload-artifact@v4
