@@ -1,0 +1,158 @@
+{
+  "scope": "REV-001/003/013 supplementary software acceptance; v0.0.4",
+  "source_commit": "52b76529de165161f770536d94c1770d65b44c08",
+  "base_merged_main": "00bfbdcabf8d71d1ba9e0e547df8b0c37480c53a",
+  "workflow": {
+    "id": 44914341627,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627",
+    "branch": "test/review-data-boundaries",
+    "event": "push",
+    "accepted_attempt": 2,
+    "required_jobs": 27,
+    "latest_job_results": {
+      "success": 27
+    },
+    "first_attempt": {
+      "success": 26,
+      "failure": 1,
+      "failed_job": "vendor-advisories",
+      "failed_test": "VendorAdvisoryLiveIntegrationTest ubuntu-usn live sync",
+      "logged_error_type": "IOException",
+      "new_metrics_tests": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "retry": "Only the failed job reran at the identical source. Latest API job set contains all 27 required jobs; original failure retained.",
+    "accepted_vendor_job_id": 136881506202
+  },
+  "metadata_provenance": {
+    "artifacts": 91,
+    "unique_names": 89,
+    "all_run_and_source_verified": true,
+    "full_archive_bytes_verified": 6,
+    "duplicate_names_from_retry": {
+      "metrics-isolation-evidence": 2,
+      "vendor-advisory-evidence": 2
+    },
+    "metrics_artifact_id_from_successful_job_log": 14711597016
+  },
+  "verified_archives": [
+    {
+      "artifact": "asset-collection-amd64",
+      "id": 14711620531,
+      "archive_sha256": "0b826dc8c200ee7c6e999091fa476b33eddb9b670b3d1d60d8da4269df8968b4",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "asset-collection-amd64",
+        "database": "sqlite",
+        "tests": 19,
+        "browserPhases": 5,
+        "nativeProtobufHashesVerified": 3
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14711620531"
+    },
+    {
+      "artifact": "asset-collection-arm64",
+      "id": 14711023621,
+      "archive_sha256": "ff1b8342416f5a7bb84d546b36691a5c85143742aa4487688d3361944f9b3485",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "asset-collection-arm64",
+        "database": "sqlite",
+        "tests": 19,
+        "browserPhases": 5,
+        "nativeProtobufHashesVerified": 3
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14711023621"
+    },
+    {
+      "artifact": "asset-collection-postgres",
+      "id": 14710804062,
+      "archive_sha256": "ddc787a04902a32572c44bea8745afcd6d1e60c67729d3901ea68ef6fa2b31cd",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "asset-collection-postgres",
+        "database": "postgres",
+        "tests": 19,
+        "browserPhases": 5,
+        "nativeProtobufHashesVerified": 3
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14710804062"
+    },
+    {
+      "artifact": "cluster-evidence-amd64",
+      "id": 14710894540,
+      "archive_sha256": "46d70e12a17bff2fed5d666d4a83068c0a3a02bfa98878d29f2d40bee6e02964",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "cluster-evidence-amd64",
+        "coordinationTests": 15,
+        "orderedSoftwareReports": 7,
+        "cleanup": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14710894540"
+    },
+    {
+      "artifact": "cluster-evidence-arm64",
+      "id": 14711496386,
+      "archive_sha256": "2a7298f15d54fb0d95aa3394debe82020de304e7466e1ccc03d84657d93cf2ac",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "cluster-evidence-arm64",
+        "coordinationTests": 15,
+        "orderedSoftwareReports": 7,
+        "cleanup": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14711496386"
+    },
+    {
+      "artifact": "metrics-isolation-evidence",
+      "id": 14711597016,
+      "archive_sha256": "e0699f24855dd594b96fb66e1691332ce668209fdd8defb5dc22696055381192",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "artifact": "metrics-isolation-evidence",
+        "realVmTests": 3,
+        "rejectedAttacks": 12,
+        "victimUnchanged": true,
+        "cleanup": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44914341627/artifacts/14711597016"
+    }
+  ],
+  "closure": {
+    "newly_closed": [
+      "REV-001",
+      "REV-003",
+      "REV-013"
+    ],
+    "previously_closed": [
+      "REV-011"
+    ],
+    "remaining_verify": [
+      "REV-002",
+      "REV-004",
+      "REV-005",
+      "REV-006",
+      "REV-007",
+      "REV-008",
+      "REV-009",
+      "REV-010",
+      "REV-012",
+      "REV-014"
+    ]
+  },
+  "limits": {
+    "enumeration_faults": "controlled enumerator injection; real test process and temporary-directory usage; raw protobuf consumed by real DB and REST",
+    "browser": "production bundle with captured real database API responses",
+    "metrics": "two isolated server agent identities; this new test does not start two native Agent processes",
+    "field_acceptance_25_26_27": "deferred",
+    "item_28_fresh_deployment": "not_applicable",
+    "bkl_changes": false,
+    "release_or_production_deployment": false
+  },
+  "checked_at": "2026-11-21T14:57:19.316925+00:00"
+}
