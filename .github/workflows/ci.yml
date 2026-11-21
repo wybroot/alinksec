@@ -601,6 +601,11 @@ jobs:
         working-directory: web
         run: node test/vulnerability-provenance-browser.mjs
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm dpkg util-linux openscap-scanner
+      - name: Capture successful, failed and empty native collector protobufs
+        working-directory: agent
+        env:
+          ALINKSEC_ASSET_COLLECTOR_FIXTURES: ${{ github.workspace }}/.tmp/asset-collector-fixtures
+        run: go test -v -count=1 -run '^TestEnumerationFailureIsNotSuccessfulEmptyInventory$' ./internal/collector
       - run: mvn -B package
         env:
           ALINKSEC_PATCH_NATIVE_REQUIRED: "true"
@@ -610,6 +615,8 @@ jobs:
           ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
           ALINKSEC_WINDOWS_LOGIN_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-login-fixtures
           ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-ransom-fixtures
+          ALINKSEC_ASSET_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/asset-collection-fixtures
+          ALINKSEC_ASSET_COLLECTOR_FIXTURES: ${{ github.workspace }}/.tmp/asset-collector-fixtures
           ALINKSEC_WINDOWS_UPDATE_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-update-fixtures
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
@@ -638,6 +645,9 @@ jobs:
       - name: Check alert pagination, account management and password errors
         working-directory: web
         run: node test/review-defects-browser.mjs
+      - name: Check retained port and process rows after enumeration failures with SQLite responses
+        working-directory: web
+        run: node test/asset-collection-browser.mjs
       - name: Check Linux missing-writer evidence with the actual native Agent event
         working-directory: web
         run: node test/linux-ransom-browser.mjs
@@ -878,6 +888,10 @@ jobs:
             .tmp/windows-login-browser
             .tmp/windows-ransom-browser
             .tmp/review-defects-browser
+            .tmp/asset-collection-browser
+            .tmp/asset-collection-fixtures
+            .tmp/asset-collector-fixtures
+            server/**/target/surefire-reports/*ReviewDefects*
             .tmp/linux-ransom-browser
             .tmp/linux-ransom-native
             .tmp/windows-update-browser
@@ -1484,6 +1498,15 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: agent/go.sum
+      - name: Capture native collector protobufs for the PostgreSQL lifecycle
+        working-directory: agent
+        env:
+          ALINKSEC_ASSET_COLLECTOR_FIXTURES: ${{ github.workspace }}/.tmp/asset-collector-fixtures
+        run: go test -v -count=1 -run '^TestEnumerationFailureIsNotSuccessfulEmptyInventory$' ./internal/collector
       - name: Check Agent identity and concurrent baseline and vulnerability workflows with the PostgreSQL application role
         working-directory: server
         run: >-
@@ -1501,6 +1524,8 @@ jobs:
           ALINKSEC_WEAKPWD_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/weakpwd-fixtures
           ALINKSEC_WINDOWS_LOGIN_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-login-fixtures
           ALINKSEC_WINDOWS_RANSOM_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-ransom-fixtures
+          ALINKSEC_ASSET_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/asset-collection-fixtures
+          ALINKSEC_ASSET_COLLECTOR_FIXTURES: ${{ github.workspace }}/.tmp/asset-collector-fixtures
           ALINKSEC_WINDOWS_UPDATE_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/windows-update-fixtures
           ALINKSEC_FILE_WATCH_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/file-watch-fixtures
           ALINKSEC_CLAMAV_BROWSER_FIXTURES: ${{ github.workspace }}/.tmp/clamav-fixtures
@@ -1508,6 +1533,20 @@ jobs:
           ALINKSEC_BASELINE_UPSTREAM_FIXTURES: ${{ github.workspace }}/.tmp/baseline-upstream-fixtures
           ALINKSEC_SIGNATURE_FIXTURE_DIR: ${{ github.workspace }}/.tmp/signature-fixtures
           ALINKSEC_SOURCE_TRUST_FIXTURES: ${{ github.workspace }}/.tmp/source-trust-fixtures
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build production pages and check PostgreSQL asset failure responses
+        working-directory: web
+        env:
+          ALINKSEC_ASSET_DATABASE: postgres
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps --only-shell chromium
+          node test/asset-collection-browser.mjs
       - name: Retain PostgreSQL governance and detection response evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1515,6 +1554,10 @@ jobs:
           name: source-governance-postgres
           path: |
             .tmp/source-trust-fixtures
+            .tmp/asset-collection-fixtures
+            .tmp/asset-collector-fixtures
+            .tmp/asset-collection-browser
+            server/**/target/surefire-reports/*ReviewDefects*
             server/**/target/surefire-reports/*SourceTrust*
             server/**/target/surefire-reports/*VulnerabilityWorkflow*
             server/**/target/surefire-reports/*OpenCti*

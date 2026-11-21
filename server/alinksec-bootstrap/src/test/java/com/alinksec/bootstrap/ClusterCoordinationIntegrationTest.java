@@ -166,6 +166,18 @@ class ClusterCoordinationIntegrationTest {
         second.processHint(hint("superseded"));assertEquals("asset_superseded",row("superseded").get("error_code"));assertEquals("dead",row("superseded").get("state"));
         assertEquals(2001,jdbc.queryForObject("SELECT port FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
     }
+    @Test void reorderedSoftwareAcrossClusterReplicasKeepsInventoryAndVulnerabilityJudgment() {
+        var sender=ingress(a);var receiver=ingress(b);var id=new AtomicInteger();
+        SoftwareOrderingScenario.verify(jdbc,manager,app,libraries,agent,actor,snapshot->{
+            String reportId="software-order-"+id.incrementAndGet();
+            var report=Report.newBuilder().setAgentId(agent).setReportId(reportId).setReliable(true).setAsset(snapshot).build();
+            admit(sender,report);admit(sender,report); // Identical retransmission is admitted only once.
+            receiver.processHint(hint(reportId));receiver.processHint(hint(reportId));
+            assertEquals("applied",row(reportId).get("state"));
+        });
+        capture("software-ordering",Map.of("accepted",true,"reports",id.get(),"replicas",List.of("node-a","node-b"),
+                "vulnerableAndSafeNewerSnapshotsVerified",true,"clockRollbackVerified",true));
+    }
     @Test void actualBrokerRedeliveryAfterCommitBeforeAckDoesNotApplyLogTwice()throws Exception {
         var receiver=ingress(b);admit(ingress(a),logs("ack-loss","one durable log"));String id=hint("ack-loss");a.rabbit.publish(id);
         var factory=new ConnectionFactory();factory.setUri(a.properties.getRabbitUri());
