@@ -268,7 +268,20 @@ try:
             address=f'127.0.0.1:{proxy_grpc}', addresses=[f'127.0.0.1:{a_grpc}', f'127.0.0.1:{b_grpc}'], ca=SHARED / 'certs/ca.crt', native_agent=agent,
             java_processes=[node_a, node_b], container_ids=[pg, redis, rabbit, proxy, native_agent], redact=redact)
     assert scale_result['passed'] and scale_result['longSoakAccepted'] is False
+    # Readiness changes during the preceding load can move this long-lived
+    # stream to backup A. Re-establish the failover scenario's owner B rather
+    # than assuming the owner observed before the sustained window is current.
+    until(lambda: api(a_http, '/api/ready')['ready'] and api(b_http, '/api/ready')['ready'],
+          'Both replicas are ready after the sustained window')
+    command(['docker', 'stop', '--time', '10', native_agent], timeout=30)
+    until(lambda: not sql(f"SELECT node_id FROM t_cluster_session WHERE agent_id='{agent}'"),
+          'Stopped native Agent releases its previous stream owner')
+    command(['docker', 'start', native_agent])
+    until(lambda: sql(f"SELECT node_id FROM t_cluster_session WHERE agent_id='{agent}'") == 'node-b',
+          'Native Agent re-establishes owner B before the deliberate node B failure')
     command(['docker', 'pause', native_agent])
+    assert sql(f"SELECT node_id FROM t_cluster_session WHERE agent_id='{agent}'") == 'node-b'
+    checks.append('post_load_native_stream_owner_b_confirmed_before_injecting_failure')
     stop_java(node_b, abrupt=True)
     pending_command = collect()
     assert sql(f"SELECT status FROM t_command WHERE cmd_id='{pending_command}'") == '0'
