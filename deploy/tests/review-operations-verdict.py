@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from urllib.parse import parse_qs, urlsplit
 
 
 def verify_offline(value, baseline=()):
@@ -94,8 +95,16 @@ def main():
         verify_offline(value, value['baselineAlertNos'])
         number = next(row['alert_no'] for row in value['offline']['alerts'] if row['alert_no'] not in value['baselineAlertNos'])
         assert len(value['visibleResponses']) == 2
+        query = urlsplit(value['visibilityQuery'])
+        assert query.path == '/api/alerts' and parse_qs(query.query) == {
+            'agentId': [value['agentId']], 'eventType': ['host_offline'], 'page': ['1'], 'size': ['100']}
         for response in value['visibleResponses']:
             assert response['code'] == 0 and number in {row['alert_no'] for row in response['data']['list']}
+            assert all(row['agent_id'] == value['agentId'] and row['event_type'] == 'host_offline' for row in response['data']['list'])
+        assert len(value['unfilteredVisibleResponses']) == 2
+        for response in value['unfilteredVisibleResponses']:
+            assert response['code'] == 0 and len(response['data']['list']) <= 100
+            assert response['data']['total'] >= len(response['data']['list'])
         verdict = {'accepted': True, 'source': args.source, 'replicas': 2, 'actualNativeStop': True, 'offlineSHA256': digest('offline.json')}
     else:
         result, provenance = read('result.json'), read('provenance.json')

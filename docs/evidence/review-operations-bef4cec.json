@@ -205,5 +205,14 @@
       "failure": 6
     },
     "windowsResourceFailureCause": "not established"
+  },
+  "supersededClosureValidation": {
+    "source": "78e242bac5a3dcb8e8fcd26030d3dc233de900b4",
+    "run": 45030965710,
+    "failedJobs": [
+      "cluster (amd64)",
+      "cluster (arm64)"
+    ],
+    "scope": "Both failed while asserting native offline visibility on unfiltered global page 1 (size 100); remaining obsolete jobs cancelled after fixture correction. Old failed archive omitted response details; actual old response contents not established. Production host/event filters preserve the incident assertion; new failure observations retained."
   }
 }

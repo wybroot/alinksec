@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import urlencode
 
 
 def run(*, repo, sql, api, ok, until, command, ports, admin, native, agent, processes):
@@ -39,26 +40,39 @@ def run(*, repo, sql, api, ok, until, command, ports, admin, native, agent, proc
         assert all(process.poll() is None for process in processes), 'Both production replica schedulers must stay running'
         return value
 
-    result = {'passed': False, 'releaseOrDeployment': False}
+    result = {'passed': False, 'releaseOrDeployment': False,
+              'source': command(['git', 'rev-parse', 'HEAD']), 'arch': os.environ['GOARCH'],
+              'agentId': agent, 'observations': observations}
     try:
         channel = int(sql(f"INSERT INTO t_notify_channel(name,type,webhook_url,min_severity,enabled) VALUES('review-offline-local','webhook','http://127.0.0.1:{sink.server_port}/notify',3,TRUE) RETURNING id").splitlines()[0])
         # Earlier scale traffic may deliberately disconnect this host. Establish a fresh incident boundary.
         online = until(lambda: (v if (v := facts('online'))['hosts'][0]['status'] == 1 and not v['hosts'][0]['offlineAlerted'] else None), 'Native online before scheduled offline test', 35)
         baseline = {row['alert_no'] for row in online['alerts']}
+        result.update(online=online, baselineAlertNos=sorted(baseline))
         stopped = int(time.time() * 1000)
+        result['stoppedAtMillis'] = stopped
         command(['docker', 'stop', '--time', '10', native], timeout=30)
         def incident():
             value = facts('offline-poll')
             rows = [row for row in value['alerts'] if row['alert_no'] not in baseline]
             return value if len(rows) == 1 and any(row['alert_no'] == rows[0]['alert_no'] and row['delivered_at'] for row in value['deliveries']) else None
         offline = until(incident, 'Two production schedulers record and notify one actual native outage', 110)
+        result['offline'] = offline
         new = [row for row in offline['alerts'] if row['alert_no'] not in baseline]
         assert len(new) == 1 and new[0]['count'] == 1
         elapsed = offline['observedMillis'] - online['hosts'][0]['lastHeartbeatMillis']
         assert 59_000 <= elapsed <= 105_000, elapsed
-        visible = [api(port, '/api/alerts?page=1&size=100', token=admin) for port in ports]
+        # The preceding 200-client scale run can produce more than one page of
+        # unrelated offline alerts. Use the production filters to inspect this
+        # host's incident, while retaining the global page as diagnostic evidence.
+        unfiltered = [api(port, '/api/alerts?page=1&size=100', token=admin) for port in ports]
+        result['unfilteredVisibleResponses'] = unfiltered
+        visibility_query = '/api/alerts?' + urlencode({'agentId': agent, 'eventType': 'host_offline', 'page': 1, 'size': 100})
+        visible = [api(port, visibility_query, token=admin) for port in ports]
+        result.update(visibilityQuery=visibility_query, visibleResponses=visible)
         for response in visible:
             assert response['code'] == 0 and new[0]['alert_no'] in {row['alert_no'] for row in response['data']['list']}
+            assert all(row['agent_id'] == agent and row['event_type'] == 'host_offline' for row in response['data']['list'])
         until(lambda: facts('next-scan-wait')['observedMillis'] >= offline['observedMillis'] + 31_000, 'Repeated real scans do not duplicate the incident', 40)
         repeated = facts('after-next-scan')
         assert len(repeated['alerts']) == len(offline['alerts']) and next(row for row in repeated['alerts'] if row['alert_no'] == new[0]['alert_no'])['count'] == 1
@@ -84,6 +98,7 @@ def run(*, repo, sql, api, ok, until, command, ports, admin, native, agent, proc
                       nativeSHA256=hashlib.sha256((repo / '.tmp/alinksec-agent').read_bytes()).hexdigest(),
                       scope='actual-native-agent-production-schedulers-two-replicas-local-test-webhook')
     finally:
+        result['notifications'] = notifications
         if channel is not None:
             sql(f'DELETE FROM t_alert_notify_delivery WHERE channel_id={channel}')
             sql(f'DELETE FROM t_notify_channel WHERE id={channel}')
