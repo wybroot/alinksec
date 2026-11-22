@@ -1602,7 +1602,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=ReviewDefectsIntegrationTest,AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
+          -Dtest=ReviewDefectsIntegrationTest,EngineStatusIntegrationTest,AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:

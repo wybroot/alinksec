@@ -395,37 +395,4 @@ class ReviewDefectsIntegrationTest {
         assertEquals(jdbc.queryForList("SELECT id FROM t_alert WHERE agent_id=? ORDER BY id DESC",Long.class,agent),seen);
         assertEquals(105,new HashSet<>(seen).size());
     }
-    @Test void engineRuntimeReadinessIsIndependentOfTheUnappliedFleetFlag(){
-        var service=new com.alinksec.service.protect.EngineStatusService(jdbc);
-        var keys=List.of("file_watch","windows_login","clamav","yara","scap");
-        jdbc.update("UPDATE t_agent SET os_type=2,protect_enabled=TRUE WHERE agent_id=?",agent);
-        var before=service.engines();long now=System.currentTimeMillis();
-        try {
-            for(String key:keys){
-                var detail=new HashMap<String,Object>();
-                detail.put("state",key.equals("file_watch")?"watching":key.equals("windows_login")?"polling":"ready");
-                detail.put("observed_at",now/1000);detail.put("last_sync_at",now);detail.put("last_poll_at",now);
-                detail.put("roots",1);detail.put("watches",1);detail.put("audit_success",true);detail.put("audit_failure",true);
-                jdbc.update("INSERT INTO t_"+key+"_status(agent_id,contract,coverage,observed_at) VALUES(?,1,?,?)",agent,com.alinksec.common.util.JsonUtils.write(detail),now);
-            }
-            var ready=service.engines();
-            for(String key:keys){
-                long baseline=((Number)before.stream().filter(row->key.equals(row.get("key"))).findFirst().orElseThrow().get("ready")).longValue();
-                assertEquals(baseline+1,((Number)ready.stream().filter(row->key.equals(row.get("key"))).findFirst().orElseThrow().get("ready")).longValue(),key);
-            }
-            jdbc.update("UPDATE t_agent SET protect_enabled=FALSE WHERE agent_id=?",agent);
-            assertEquals(ready,service.engines(),"Fleet flag is not evidence that these independently reported engines stopped");
-            jdbc.update("UPDATE t_agent SET protect_enabled=TRUE WHERE agent_id=?",agent);
-            for(String key:keys)jdbc.update("UPDATE t_"+key+"_status SET coverage=? WHERE agent_id=?",com.alinksec.common.util.JsonUtils.write(Map.of("state","disabled","observed_at",now/1000,"last_sync_at",now,"last_poll_at",now)),agent);
-            var disabled=service.engines();
-            for(String key:keys){
-                long baseline=((Number)before.stream().filter(row->key.equals(row.get("key"))).findFirst().orElseThrow().get("ready")).longValue();
-                assertEquals(baseline,((Number)disabled.stream().filter(row->key.equals(row.get("key"))).findFirst().orElseThrow().get("ready")).longValue(),key);
-            }
-            jdbc.update("UPDATE t_agent SET protect_enabled=FALSE WHERE agent_id=?",agent);
-            assertEquals(disabled,service.engines(),"Own disabled reports remain disabled independently of the fleet flag");
-        } finally {
-            for(String key:keys)jdbc.update("DELETE FROM t_"+key+"_status WHERE agent_id=?",agent);
-        }
-    }
 }
