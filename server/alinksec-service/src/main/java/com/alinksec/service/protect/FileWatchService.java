@@ -65,7 +65,7 @@ public class FileWatchService {
         long now=System.currentTimeMillis();
         for(var row:rows) {
             var d=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
-            row.put("coverage",JsonUtils.read(d.toString(),Object.class));row.put("state",state(row,now));
+            row.put("state",state(row,now));row.put("coverage",JsonUtils.read(d.toString(),Object.class));
         }
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE status<>4",Long.class);
         return Map.of("items",rows,"total",total==null?0:total,"page",page,"page_size",pageSize);

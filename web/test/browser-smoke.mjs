@@ -250,7 +250,11 @@ try {
   console.log('ok - actual browser uses the designated authenticated account to approve durable offline work and cancels it with an audit reason')
 
   await page.goto('/protect')
-  await expect(page.locator('.prot-card')).toHaveCount(4)
+  await expect(page.locator('.prot-card')).toHaveCount(9)
+  await expect(page.locator('.prot-card .hd b')).toHaveText([
+    '进程防护', '文件完整性', '登录防护', '勒索诱饵', '文件事件监控',
+    'Windows 登录采集', 'ClamAV 扫描引擎', 'YARA 扫描引擎', 'SCAP 核查引擎',
+  ])
   await expect(page.locator('.evt-item .el-tag').first()).toHaveText('严重')
   await expect(page.locator('.evt-item .t').first()).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}/)
   assert.equal(await page.locator('.prot-card .el-switch').count(), 0, 'Engine cards must be read-only')

@@ -67,7 +67,7 @@ public class WindowsLoginService {
         long now=System.currentTimeMillis();
         for(var row:rows) {
             var detail=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
-            row.put("coverage",JsonUtils.read(detail.toString(),Object.class));row.put("state",state(row,now));
+            row.put("state",state(row,now));row.put("coverage",JsonUtils.read(detail.toString(),Object.class));
         }
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE os_type=2 AND status<>4",Long.class);
         return Map.of("items",rows,"total",total==null?0:total,"page",page,"page_size",pageSize);
