@@ -1,0 +1,209 @@
+{
+  "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+  "run": 45028759757,
+  "complete": true,
+  "checks": [
+    {
+      "name": "review-operations-amd64",
+      "id": 14757208356,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "7fd0120336ec0e6cc0904f752ee85e6bd12e29b52722da029446baf9b0bc9817",
+      "archiveBytes": 2226230,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "sqlite",
+          "actualHttp": 780,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "f52b50084f1d4159d58a21b6b305d8057e0809ba0e0f0a65f437e0525c76b3e9",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-operations-arm64",
+      "id": 14756679292,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "4a6dd78caa337aeb1186d4f8ce9b31a882b4a072f2c1545a77a18670c4e9b200",
+      "archiveBytes": 2262044,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "sqlite",
+          "actualHttp": 780,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "adde259944d8e2f21aa2718a0fb29d9956a11bdf63fbcbfde99fdf9a58519b9e",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-operations-postgres",
+      "id": 14756724726,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "d526e6927513d8587ef3722da410defa65b2b2cc69694ed70732753a16f84729",
+      "archiveBytes": 2257505,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "postgres",
+          "actualHttp": 776,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "d460602fb428cea7ecbc5f37bce28b68868b5329d2f8deec99e220e70fa5c724",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-offline-cluster-amd64",
+      "id": 14757461309,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "db0cb5d96fba42147e47ad5a25d64f4273cb589d163bfd063bb14301bd1c14ba",
+      "archiveBytes": 42739,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "replicas": 2,
+          "actualNativeStop": true,
+          "offlineSHA256": "fda56ad9862814096eda0ff690e23b1e7f37380cb409e725952d2104b5f4b9df"
+        }
+      ]
+    },
+    {
+      "name": "review-offline-cluster-arm64",
+      "id": 14756814324,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "48ec2c8984c160428f70309d0557d7a86bdfced89d078ac5755004a8817c3120",
+      "archiveBytes": 41952,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "replicas": 2,
+          "actualNativeStop": true,
+          "offlineSHA256": "bcaef6198d5f43728e86784ef1b97cd3700e7f266478cbfce9f16b3f3ff03215"
+        }
+      ]
+    },
+    {
+      "name": "operations-validation-amd64",
+      "id": 14757242937,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "9440e2056df6fd58799c84ba1956d3792c41e54720dde9dfdb62f2b29a675781",
+      "archiveBytes": 527376,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "postgres",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "1dbc4a4173652295409aea4bf18b22de904221a43e650f74a0d30d57b6b56996"
+        },
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "sqlite",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "d4a61b5cabee78d4ee32ad099d8575007449d41c1eb89ea440b217816452d22b"
+        }
+      ]
+    },
+    {
+      "name": "operations-validation-arm64",
+      "id": 14756853366,
+      "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+      "run": 45028759757,
+      "archiveSHA256": "0eee85d8c8ec2d36fe61303b72ed8a44aa6c0f775fa4f2677f96b6b1d737f15c",
+      "archiveBytes": 527186,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "postgres",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "ce5ab91685d19eaedcbecee5a24d51fb12cfae4926fbaafdb2fddd9f1e99c266"
+        },
+        {
+          "accepted": true,
+          "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+          "database": "sqlite",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "cd6d69e2a1ae566e005b9c096bdcacf4a397b78f908ecf23e1513aa19ee69508"
+        }
+      ]
+    }
+  ],
+  "requiredCiJobs": 27,
+  "ciAcceptance": {
+    "passed": true,
+    "source_commit": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+    "run_id": 45028759757,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/45028759757",
+    "branch": "fix/review-operations-screen",
+    "event": "push",
+    "required_jobs": 27,
+    "status": "completed",
+    "conclusion": "success",
+    "job_results": {
+      "success": 27
+    },
+    "main_gate": null,
+    "errors": [],
+    "checked_at": "2026-11-22T14:02:55.613638+00:00"
+  },
+  "artifactMetadata": {
+    "passed": true,
+    "run": 45028759757,
+    "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+    "metadataVerified": 102,
+    "uniqueNames": 102,
+    "fullArchiveBytesVerifiedForThisRun": 0,
+    "scope": "Source/run/digest-format metadata including retained attempts; seven original operations archives require separate full-byte and content verification",
+    "checkedAt": "2026-11-22T14:02:53.372795+00:00"
+  },
+  "baseMain": "2c4803a119d068963e97e1f8a306e8fa8ce1140a",
+  "itemsClosed": [
+    "REV-010",
+    "REV-012",
+    "REV-014"
+  ],
+  "currentClosed": 14,
+  "remainingVerify": [],
+  "originalConditionsChanged": false,
+  "unchangedBklRows": 55,
+  "fullArchiveBytesVerified": 7,
+  "releaseOrDeployment": false,
+  "previousFailedCandidate": {
+    "source": "6ab680abe4261701c4823c03393a2986df6c901a",
+    "run": 45027458771,
+    "jobConclusions": {
+      "success": 21,
+      "failure": 6
+    },
+    "windowsResourceFailureCause": "not established"
+  }
+}
