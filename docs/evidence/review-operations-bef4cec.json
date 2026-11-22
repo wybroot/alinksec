@@ -219,5 +219,10 @@
   ],
   "laterReopenedItems": [
     "REV-014"
-  ]
+  ],
+  "correctedAcceptance": {
+    "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+    "run": 45037371770,
+    "proof": "review-operations-6f32aae.json"
+  }
 }

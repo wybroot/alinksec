@@ -1,0 +1,252 @@
+{
+  "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+  "run": 45037371770,
+  "complete": true,
+  "checks": [
+    {
+      "name": "review-operations-amd64",
+      "id": 14761340092,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "62b67a13bba9782fad83e8aff7cc712b82102c4ba45641adabe785785ca45dda",
+      "archiveBytes": 2237274,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "sqlite",
+          "actualHttp": 779,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "acd492ea482df42ee483ff98b0bf20dfe1a78c3352a634be50f44e99f3e29735",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-operations-arm64",
+      "id": 14761091476,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "bab6a1daaabc60965f47fdb0ab21e859e433d3b29a6928f3cee8988e5a3073eb",
+      "archiveBytes": 2265039,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "sqlite",
+          "actualHttp": 779,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "a6eead330a7b3c73e1ccc66010a5070d2fedf186a8419b795d1b749857d0378a",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-operations-postgres",
+      "id": 14760169413,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "a6146b28cd5c34243c0451d77465258d1f4f92ef6f9b7e948baf62215a611409",
+      "archiveBytes": 2234706,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "postgres",
+          "actualHttp": 777,
+          "engineStages": 58,
+          "confirmedResponses": 30,
+          "httpSHA256": "35ea3bd0c31d22738bce94334e6101064c8782e1dd76ea200c632837fbec9613",
+          "browserVerified": true
+        }
+      ]
+    },
+    {
+      "name": "review-offline-cluster-amd64",
+      "id": 14759988838,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "c9b4e210e52107dfbd1d0d83e4d2f0f639951e73a915f2ff206e7c772172d7ea",
+      "archiveBytes": 41694,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "replicas": 2,
+          "actualNativeStop": true,
+          "offlineSHA256": "b936665b9cfabdda0be1d52f0301b80d73bb5cdd208cf5ed549ffa2e512ca4f1"
+        }
+      ]
+    },
+    {
+      "name": "review-offline-cluster-arm64",
+      "id": 14759904158,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "8a7df0496ed6a55270a747878f6bbf873a3b72aeda7194cf4bcb4653b30e7ac2",
+      "archiveBytes": 42507,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "replicas": 2,
+          "actualNativeStop": true,
+          "offlineSHA256": "df3ba0cadd03a32ba4ee4d62ff2d483ca0cbd3f0abeab6c2ef98ad64a30b3b7b"
+        }
+      ]
+    },
+    {
+      "name": "operations-validation-amd64",
+      "id": 14760264909,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "419dd5d36b7678a9d9f8c705c0bff37197dd802a631990506f85eb511bc604f3",
+      "archiveBytes": 527054,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "postgres",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "95e2f5c25073b1236744c007ae6b360acda6941bc55ca77d523dd5243d8a8c46"
+        },
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "sqlite",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "a176835b646be936b632953bca7701ea8cdf17f3d2d7f36b9fa966aea542e426"
+        }
+      ]
+    },
+    {
+      "name": "operations-validation-arm64",
+      "id": 14760528332,
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "archiveSHA256": "d51807cade245b4eddc4ec72b154e0269d47cf1f9fbae83e2804c0bc7214c41b",
+      "archiveBytes": 527149,
+      "originalArchiveDigestVerified": true,
+      "independentVerdicts": [
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "postgres",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "f6d9129574a8d4b2d9b123c8f3cc73a1131df94ac5fd4b4dac4d2b999f4a97a4"
+        },
+        {
+          "accepted": true,
+          "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+          "database": "sqlite",
+          "realRestoreObservations": 5,
+          "originalSessionAndCoreHostVerified": true,
+          "rawSHA256": "16b06a5eb67c5a4598c0d6b5b4e1e4daadbfdaaf924dde7bf7e3e584be4dd0a7"
+        }
+      ]
+    }
+  ],
+  "requiredCiJobs": 27,
+  "ciAcceptance": {
+    "passed": true,
+    "source_commit": "6f32aae14620cf6abb09472bb5cee496068eb308",
+    "run_id": 45037371770,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/45037371770",
+    "branch": "fix/review-operations-screen",
+    "event": "push",
+    "required_jobs": 27,
+    "status": "completed",
+    "conclusion": "success",
+    "job_results": {
+      "success": 27
+    },
+    "main_gate": null,
+    "errors": [],
+    "checked_at": "2026-11-22T15:49:53.222415+00:00"
+  },
+  "artifactMetadata": {
+    "passed": true,
+    "run": 45037371770,
+    "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+    "metadataVerified": 106,
+    "uniqueNames": 102,
+    "fullArchiveBytesVerifiedForThisRun": 0,
+    "scope": "Source/run/digest-format metadata including retained attempts; seven original operations archives require separate full-byte and content verification",
+    "checkedAt": "2026-11-22T15:49:50.202169+00:00"
+  },
+  "baseMain": "2c4803a119d068963e97e1f8a306e8fa8ce1140a",
+  "itemsClosed": [
+    "REV-010",
+    "REV-012",
+    "REV-014"
+  ],
+  "currentClosed": 14,
+  "remainingVerify": [],
+  "originalConditionsChanged": false,
+  "unchangedBklRows": 55,
+  "fullArchiveBytesVerified": 7,
+  "releaseOrDeployment": false,
+  "historicalFirstCandidate": {
+    "source": "bef4ceca4b48da4e29c6fa51e01e6e116ba62319",
+    "run": 45028759757,
+    "supersededEngineDefinition": true
+  },
+  "reopenedCondition": "REV-014 own runtime state must not be inferred from the unapplied fleet flag",
+  "correctionAcceptedByThisSource": true,
+  "supersededClosureRun": 45030965710,
+  "windowsFirstFailureCause": "not established",
+  "validationFailures": [
+    {
+      "source": "dd858b7b70cd865e18333aa60b99a6c1a2a50df3",
+      "run": 45034359634,
+      "conclusion": "cancelled",
+      "jobs": {
+        "success": 21,
+        "failure": 2,
+        "cancelled": 4
+      },
+      "causes": {
+        "schema": "Pinned runtime suite expected19; new test inside suite made20. Moved new case to standalone class; did not alter19 assertion.",
+        "cluster (amd64)": "Synthetic stream failed during old sustained-window scale profile; 23samples,laststeady7.75s,180s incomplete. Root cause not established; original assertions and thresholds unchanged."
+      },
+      "originalArchiveDigests": {
+        "cluster-evidence-amd64": "348a3807acb15f9e1b1029b198356493334d304ee14594bee7ca687953f2ab68",
+        "scale-acceptance-amd64": "5dc6ba90f0bd66331ce32fb993426068b01561f9af237807b7dcffc1ee3dda1e"
+      }
+    },
+    {
+      "source": "be2fb73cece5a1c25ec8b1c053d5a199d1792c90",
+      "run": 45035800313,
+      "failedJob": "schema",
+      "cause": "Collection driver still rejected ready in global-off, while API correctly returned file_watch ready 2/2/100%. Independent verdict already corrected. Explicit positive own-ready assertion now fixes driver; partial stages/captures retained on failure.",
+      "clusterJobs": "Both passed; previous synthetic-stream failure cause remains unconfirmed",
+      "conclusion": "Remaining obsolete jobs cancelled after fixture assertion fix",
+      "jobs": {
+        "success": 24,
+        "failure": 1,
+        "cancelled": 2
+      }
+    },
+    {
+      "source": "6f32aae14620cf6abb09472bb5cee496068eb308",
+      "run": 45037371770,
+      "job": "windows-agent (windows-2022)",
+      "firstAttemptFailure": "TestNativeResourceFeedback idle recovery CPUPercent=0 Factor=2 Reason=cpu_pressure",
+      "cause": "not established",
+      "originalLog": ".tmp/review-operations-work/candidate-windows-2022-failure.log",
+      "originalLogSHA256": "b02accfc73893c85f15d36cf1da23cd4a8375c2a0a4aaee677c04d4db4717eca",
+      "retry": "attempt 2 passed, failed Windows 2022 job only, unchanged source; latest complete set 27/27"
+    }
+  ]
+}

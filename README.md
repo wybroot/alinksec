@@ -425,7 +425,7 @@ Server versions, both Linux architectures, database, cluster and module checks. 
 image digest; see the [release notes](docs/releases/v0.0.4.md) and
 [ARM64 evidence](docs/14-ARM64支持.md).
 
-Post-release review acceptance is tracked separately: 13 items are CLOSED; REV-014 remains VERIFY while engine status independence is corrected and validated; the 55 separately tracked capability and field items retain their existing status. See the [original conditions](docs/89-复查缺陷关闭证据核对.md) and the [data boundary](docs/90-复查数据边界补证.md), [runtime evidence](docs/91-复查进程与过载补证.md), [console evidence](docs/92-复查控制台与分页补证.md) and [operations evidence](docs/93-复查运行维护与大屏补证.md).
+Post-release review acceptance is tracked separately: all 14 items are CLOSED against their original conditions after the engine status correction; the 55 separately tracked capability and field items retain their existing status. See the [original conditions](docs/89-复查缺陷关闭证据核对.md) and the [data boundary](docs/90-复查数据边界补证.md), [runtime evidence](docs/91-复查进程与过载补证.md), [console evidence](docs/92-复查控制台与分页补证.md) and [operations evidence](docs/93-复查运行维护与大屏补证.md).
 
 | Verified Area | Evidence |
 | --- | --- |
