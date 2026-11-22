@@ -82,6 +82,13 @@
       "xmlSHA256": "677538f595062234cf94d153cef25fd5530b09b6f0cb1a3aa02597ee6e71fc28",
       "remainingOwnedContainers": 0,
       "oomKilled": false
+    },
+    "CommandRepositoryTest": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xmlSHA256": "15050dbe43427032f3703482aa33a1563b4df6d86217677a3cd654f82ec85bfa"
     }
   },
   "releaseOrDeployment": false,
@@ -97,5 +104,15 @@
     "testMetaspace": 128,
     "testDirectMemory": 48,
     "codeCachePerJvm": 32
+  },
+  "ciMockSetupFailure": {
+    "source": "de5cd2adf629633396e0d5a813da5b3b88952b29",
+    "run": 44999491283,
+    "jobs": [
+      "build-and-test (amd64)",
+      "build-and-test (arm64)"
+    ],
+    "cause": "Existing repository SQL mocks did not return a matched row for the added lock; default zero stopped before original identity assertions",
+    "fixedWithoutWeakeningIdentityAssertions": true
   }
 }

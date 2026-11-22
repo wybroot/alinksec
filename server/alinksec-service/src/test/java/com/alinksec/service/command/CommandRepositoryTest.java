@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class CommandRepositoryTest {
 
@@ -32,6 +33,8 @@ class CommandRepositoryTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         CommandRepository repository = new CommandRepository(jdbc, database());
         RptAck ack = RptAck.newBuilder().setCmdId("command-b").setStage(RptAck.Stage.RECEIVED).build();
+        when(jdbc.update(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("command-b"),
+                org.mockito.ArgumentMatchers.eq("agent-a"))).thenReturn(1);
 
         repository.onAck("agent-a", ack);
 
@@ -46,6 +49,8 @@ class CommandRepositoryTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         CommandRepository repository = new CommandRepository(jdbc, database());
         RptAck ack = RptAck.newBuilder().setCmdId("command-b").setStage(RptAck.Stage.DONE).build();
+        when(jdbc.update(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("command-b"),
+                org.mockito.ArgumentMatchers.eq("agent-a"))).thenReturn(1);
 
         repository.onAck("agent-a", ack);
 
