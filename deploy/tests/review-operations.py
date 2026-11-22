@@ -33,7 +33,7 @@ control=private/'control';control.mkdir()
 data=private/'data';data.mkdir()
 work=private/'agent';work.mkdir(mode=0o700)
 prefix='alinksec-operations-'+uuid.uuid4().hex[:10]
-containers=[];samples=[];observations=[];notifications=[];captures=[];lock=threading.Lock();java=None
+containers=[];samples=[];observations=[];notifications=[];captures=[];stages=[];lock=threading.Lock();java=None
 password,enroll,owner_password,app_password=[secrets.token_urlsafe(24) for _ in range(4)]
 masked=[password,enroll,owner_password,app_password]
 class ValidationProcessExited(Exception): pass
@@ -225,7 +225,6 @@ try:
     sql=request('/api/review-operations/response-sql?'+urllib.parse.urlencode({'from':window['automated30dFrom'],'through':window['automated30dThrough']}))
     assert window['automated30d']==sql['count']>20
     write('response-sql.json',{'window':window,'sql':sql})
-    stages=[]
     for stage in ['empty','healthy','linux-only']:
         seeded=action('engine-stage',{'stage':stage});items=capture('engines-'+stage);stages.append({'stage':stage,'key':'file_watch','seedObservation':len(observations)-9,'captured':captures[-1]['name']})
         assert len(items)==9
@@ -235,10 +234,13 @@ try:
         for stage in ['missing','failed','disabled','unsupported','stale-received','stale-probe','future-received','offline','global-off','partial','beyond-page']:
             action('engine-stage',{'stage':stage,'key':key});items=capture('engines-'+key+'-'+stage)
             selected=next(x for x in items if x['key']==key)
-            assert selected['status']!='ready',(key,stage,selected)
+            stages.append({'stage':stage,'key':key,'seedObservation':len(observations)-9,'captured':captures[-1]['name']})
+            if stage=='global-off':
+                assert selected['status']=='ready' and selected['ready']==selected['total']==2 and selected['coverage']==100,(key,stage,selected)
+                assert sum(x['status']=='ready' for x in items)==5
+            else:assert selected['status']!='ready',(key,stage,selected)
             if stage=='beyond-page':assert selected['total']==121 and selected['ready']==120 and selected['coverage']==99
             if stage=='partial':assert selected['total']==2 and selected['ready']==1 and selected['coverage']==50
-            stages.append({'stage':stage,'key':key,'seedObservation':len(observations)-9,'captured':captures[-1]['name']})
     write('engine-stages.json',stages);write('captures.json',captures)
     result.update(passed=True,source=source,clean=clean,actualHttpTransactions=len(observations),engineStages=len(stages),probeResourcesVerified=True,
                   actualNativeOfflineVerified=True,localWebhookOnly=True,successfulResponseCount=window['automated30d'])
@@ -259,9 +261,10 @@ finally:
         if removed.returncode:cleanup_errors.append(redact((removed.stdout+removed.stderr)[-1500:]))
     sink.shutdown();sink.server_close();thread.join(timeout=3)
     write('http.json',observations);write('notifications.json',notifications);write('resources.json',samples);write('cleanup.json',cleanup);write('cleanup-errors.json',cleanup_errors)
+    write('engine-stages.json',stages);write('captures.json',captures)
     shutil.rmtree(private)
     remaining=command(['docker','ps','-aq','--filter','label=alinksec.review-operations='+prefix])
-    result.update(remainingOwnedContainers=0 if not remaining else len(remaining.splitlines()),privateDirectoryRemoved=not private.exists(),cleanupErrors=len(cleanup_errors),
+    result.update(actualHttpTransactions=len(observations),engineStages=len(stages),remainingOwnedContainers=0 if not remaining else len(remaining.splitlines()),privateDirectoryRemoved=not private.exists(),cleanupErrors=len(cleanup_errors),
                   cleanupVerified=not cleanup_errors and all(not x['running'] and not x['oomKilled'] and x['exitCode']==x['expectedExitCode'] for x in cleanup))
     scenario_passed=result['passed'];result['passed']=scenario_passed and result['cleanupVerified']
     for path in output.rglob('*'):
