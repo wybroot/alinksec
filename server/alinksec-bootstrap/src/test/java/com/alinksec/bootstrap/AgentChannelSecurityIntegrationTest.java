@@ -84,6 +84,8 @@ class AgentChannelSecurityIntegrationTest {
     @Autowired GrpcServerLifecycle lifecycle;
     @Autowired EnrollTokenService tokens;
     @Autowired CommandService commands;
+    @Autowired CommandRepository commandRepository;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
     @Autowired ConnectionRegistry connections;
     @Autowired PolicyStoreService policy;
     @Autowired FixTaskService fixTasks;
@@ -471,6 +473,47 @@ class AgentChannelSecurityIntegrationTest {
     private int pendingFixRecords(long id) {
         return jdbc.queryForObject("SELECT count(*) FROM t_fix_record WHERE task_id = ? AND status = 0",
                 Integer.class, id);
+    }
+
+    @Test
+    void earlyTerminalAckWaitsForDeliveryCommitAndRejectsUnsentOrForeignCommands() throws Exception {
+        var owner=enroll();var other=enroll();String id=UUID.randomUUID().toString();
+        commandRepository.insert(id,owner.getAgentId(),"policy_sync","{}",null);
+        var delivered=new java.util.concurrent.CountDownLatch(1);
+        var ackStarted=new java.util.concurrent.CountDownLatch(1);
+        var commit=new java.util.concurrent.CountDownLatch(1);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        try(var workers=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var delivery=workers.submit(()->tx.executeWithoutResult(status->{
+                assertEquals(1,commandRepository.lockForDelivery(id,CommandRepository.ST_PENDING,null));
+                delivered.countDown(); // The wire can expose the command before SENT commits.
+                try {assertTrue(commit.await(5,TimeUnit.SECONDS));}
+                catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IllegalStateException(interrupted);}
+                assertEquals(1,commandRepository.markSent(id));
+            }));
+            try {
+                assertTrue(delivered.await(5,TimeUnit.SECONDS));
+                var acknowledgement=workers.submit(()->{
+                    ackStarted.countDown();commands.onAck(owner.getAgentId(),RptAck.newBuilder().setCmdId(id).setStage(RptAck.Stage.DONE).build());
+                });
+                assertTrue(ackStarted.await(5,TimeUnit.SECONDS));
+                boolean returnedBeforeCommit;
+                try {acknowledgement.get(200,TimeUnit.MILLISECONDS);returnedBeforeCommit=true;}
+                catch(java.util.concurrent.TimeoutException expected){returnedBeforeCommit=false;}
+                finally {commit.countDown();}
+                delivery.get(5,TimeUnit.SECONDS);acknowledgement.get(5,TimeUnit.SECONDS);
+                assertFalse(returnedBeforeCommit,"An ACK must wait for the in-flight delivery transaction");
+                assertEquals(CommandRepository.ST_DONE,commandStatus(id));
+            } finally {commit.countDown();}
+        }
+        String unsent=UUID.randomUUID().toString();commandRepository.insert(unsent,owner.getAgentId(),"policy_sync","{}",null);
+        var ack=RptAck.newBuilder().setCmdId(unsent).setStage(RptAck.Stage.DONE).build();
+        commands.onAck(owner.getAgentId(),ack);assertEquals(CommandRepository.ST_PENDING,commandStatus(unsent));
+        commandRepository.markSent(unsent);
+        commands.onAck(other.getAgentId(),ack);assertEquals(CommandRepository.ST_SENT,commandStatus(unsent));
+        commands.onAck(owner.getAgentId(),ack);assertEquals(CommandRepository.ST_DONE,commandStatus(unsent));
+        commands.onAck(owner.getAgentId(),ack.toBuilder().setStage(RptAck.Stage.FAILED).build());
+        assertEquals(CommandRepository.ST_DONE,commandStatus(unsent));
     }
 
     @Test

@@ -83,6 +83,16 @@ public class CommandRepository {
         if (target < 0) {
             return 0;
         }
+        // Delivery owns this row from lockForDelivery through the SENT commit,
+        // but its network write can expose the command before that commit.
+        // Lock by identity including PENDING so a fast ACK waits for delivery;
+        // the transitions below still reject a genuinely unsent command.
+        if (jdbc.update("""
+                UPDATE t_command SET status=status
+                WHERE cmd_id=? AND agent_id=? AND status IN (0,1,2,3)
+                """, ack.getCmdId(), agentId) != 1) {
+            return 0;
+        }
         boolean terminal = target == ST_DONE || target == ST_FAILED;
         String result = terminal
                 ? JsonUtils.write(Map.of("code", ack.getCode(), "message", ack.getMessage()))

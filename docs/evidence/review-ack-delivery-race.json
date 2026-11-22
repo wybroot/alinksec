@@ -1,0 +1,118 @@
+{
+  "scope": "REV-002 early command acknowledgement during delivery transaction, discovered in final console CI",
+  "sourceScope": "local_working_tree_after_595169f",
+  "failureRun": 44983781999,
+  "failureAttempt": 1,
+  "failureJob": 137089793737,
+  "unchangedSourceRetryLatestJobsPassed": 27,
+  "unchangedSourceRetryIsRaceFix": false,
+  "productionSource": "server/alinksec-service/src/main/java/com/alinksec/service/command/CommandRepository.java",
+  "beforeProductionSHA256": "2130aea3f1d4bd342dac23cf95ee6af999779f5d12a97b65b76164cd44172f14",
+  "afterProductionSHA256": "d7e933cb5236b9b08f8e1c65a93d2adf6025feb2a06eca1fd8281e9cb439d5f2",
+  "regression": "earlyTerminalAckWaitsForDeliveryCommitAndRejectsUnsentOrForeignCommands",
+  "regressionSource": "server/alinksec-bootstrap/src/test/java/com/alinksec/bootstrap/AgentChannelSecurityIntegrationTest.java",
+  "regressionSourceSHA256": "b18fbbaf6cffb532128b5fe19db6a1d63712cc95f11eb329cf8db8b532293865",
+  "local": {
+    "ack-postgres-before": {
+      "database": "postgres",
+      "expectedFailureReproduced": true,
+      "tests": 1,
+      "failures": 1,
+      "source": "working_tree",
+      "resourceLimitsMiB": {
+        "mavenAndFork": 640,
+        "postgres": 256
+      },
+      "xmlSHA256": "601c085c75bf77fc2a22d7e92a32ccb957ea749b4c2fb2e1d99f2b4cbd1d09e9",
+      "remainingOwnedContainers": 0,
+      "oomKilled": false
+    },
+    "ack-postgres-after": {
+      "database": "postgres",
+      "expectedFailureReproduced": false,
+      "tests": 1,
+      "failures": 0,
+      "source": "working_tree",
+      "resourceLimitsMiB": {
+        "mavenAndFork": 640,
+        "postgres": 256
+      },
+      "xmlSHA256": "7201f4c2f55ffc748a5ba716af9a84c5200c0f27fd3bb165429b7c806b8e75fb",
+      "remainingOwnedContainers": 0,
+      "oomKilled": false
+    },
+    "ack-sqlite-after": {
+      "database": "sqlite",
+      "expectedFailureReproduced": false,
+      "tests": 1,
+      "failures": 0,
+      "source": "working_tree",
+      "resourceLimitsMiB": {
+        "mavenAndFork": 640,
+        "postgres": 256
+      },
+      "xmlSHA256": "f77417dc9a65fd2e8ee44694c0d0b77eed8783a3aabfbe12445f4d1c1e72dee8",
+      "remainingOwnedContainers": 0,
+      "oomKilled": false
+    },
+    "ack-postgres-after-all": {
+      "database": "postgres",
+      "expectedFailureReproduced": false,
+      "tests": 20,
+      "failures": 0,
+      "source": "working_tree",
+      "resourceLimitsMiB": {
+        "mavenAndFork": 640,
+        "postgres": 256
+      },
+      "xmlSHA256": "82a944c0c870d883d3e200913ffe175c37378a8e3f5a84d39430c47e6debdf12",
+      "remainingOwnedContainers": 0,
+      "oomKilled": false
+    },
+    "ack-sqlite-after-all": {
+      "database": "sqlite",
+      "expectedFailureReproduced": false,
+      "tests": 20,
+      "failures": 0,
+      "source": "working_tree",
+      "resourceLimitsMiB": {
+        "mavenAndFork": 640,
+        "postgres": 256
+      },
+      "xmlSHA256": "677538f595062234cf94d153cef25fd5530b09b6f0cb1a3aa02597ee6e71fc28",
+      "remainingOwnedContainers": 0,
+      "oomKilled": false
+    },
+    "CommandRepositoryTest": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xmlSHA256": "15050dbe43427032f3703482aa33a1563b4df6d86217677a3cd654f82ec85bfa"
+    }
+  },
+  "releaseOrDeployment": false,
+  "localSetupFailures": [
+    "First Maven attempt lacked cached Surefire provider and ran no test; resolved by fetching dependencies",
+    "SQLite full suite hit 640 MiB container OOM limit; stopped and removed, not counted as passed"
+  ],
+  "tunedSqliteJvmLimitsMiB": {
+    "container": 640,
+    "mavenHeap": 96,
+    "mavenMetaspace": 96,
+    "testHeap": 128,
+    "testMetaspace": 128,
+    "testDirectMemory": 48,
+    "codeCachePerJvm": 32
+  },
+  "ciMockSetupFailure": {
+    "source": "de5cd2adf629633396e0d5a813da5b3b88952b29",
+    "run": 44999491283,
+    "jobs": [
+      "build-and-test (amd64)",
+      "build-and-test (arm64)"
+    ],
+    "cause": "Existing repository SQL mocks did not return a matched row for the added lock; default zero stopped before original identity assertions",
+    "fixedWithoutWeakeningIdentityAssertions": true
+  }
+}
