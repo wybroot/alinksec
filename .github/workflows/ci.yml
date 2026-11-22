@@ -841,6 +841,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - name: Check actual console account, alert and pagination boundaries serially
+        run: |
+          python3 -B deploy/tests/review-console.py --database sqlite
+          (cd web && node test/review-console-browser.mjs)
+          python3 -B deploy/tests/review-console-verdict.py .tmp/review-console/sqlite "$GITHUB_SHA"
+      - name: Retain bounded console acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-console-${{ matrix.arch }}
+          path: .tmp/review-console/sqlite
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check Java-published delta reconstruction and actual Linux Agent commands
         # Evidence and signature checks share this already-built native Agent.
         working-directory: agent
@@ -1617,6 +1631,20 @@ jobs:
         with:
           name: review-runtime-postgres
           path: .tmp/review-runtime/postgres
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check actual PostgreSQL console account, alert and pagination boundaries serially
+        run: |
+          python3 -B deploy/tests/review-console.py --database postgres
+          (cd web && ALINKSEC_CONSOLE_FIXTURE=../.tmp/review-console/postgres node test/review-console-browser.mjs)
+          python3 -B deploy/tests/review-console-verdict.py .tmp/review-console/postgres "$GITHUB_SHA"
+      - name: Retain bounded PostgreSQL console acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-console-postgres
+          path: .tmp/review-console/postgres
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
