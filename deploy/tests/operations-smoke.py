@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,7 @@ mode = options.mode
 evidence = repo / '.tmp' / ('operations-native-' + mode)
 evidence.mkdir(exist_ok=True)
 result = {'mode': mode, 'passed': False, 'checks': []}
+restore_observations = []
 
 
 def checked(name):
@@ -70,23 +72,49 @@ with tempfile.TemporaryDirectory(prefix='alinksec-operations-ci-') as directory:
     obsolete = '/app/data/operations-obsolete'
     tls_probe = '/app/web-tls/operations-probe'
 
+    def api(path, token=None, body=None):
+        arguments = ['wget', '--no-check-certificate', '-T', '10', '-qO-', '--header=Content-Type: application/json']
+        if token:
+            arguments.append('--header=Authorization: Bearer ' + token)
+        if body is not None:
+            arguments.append('--post-data=' + json.dumps(body))
+        response = json.loads(deployment.docker('exec', deployment.containers['web']['Id'], *arguments, 'https://127.0.0.1' + path))
+        assert response['code'] == 0, path
+        return response
+
     def write_probe(value):
         for path in (probe, tls_probe):
             server('/bin/sh', '-c', 'printf %s "$1" > "$2"; chmod 640 "$2"; chown 1001:1001 "$2"', 'fixture', value, path)
         sql("UPDATE ci_operations_probe SET value='" + value + "'")
 
     def assert_probe(value):
-        assert sql('SELECT value FROM ci_operations_probe') == value
+        database_value = sql('SELECT value FROM ci_operations_probe')
+        assert database_value == value
+        observed = {'expected': value, 'databaseValue': database_value, 'files': []}
         for path in (probe, tls_probe):
-            assert server('cat', path) == value
-            assert server('stat', '-c', '%u:%g:%a', path) == '1001:1001:640'
-        assert server('sha256sum', '/app/data/certs/ca.crt').split()[0] == ca_hash
+            content, ownership = server('cat', path), server('stat', '-c', '%u:%g:%a', path)
+            assert content == value and ownership == '1001:1001:640'
+            observed['files'].append({'path': path, 'value': content, 'ownership': ownership})
+        observed['caSHA256'] = server('sha256sum', '/app/data/certs/ca.crt').split()[0]
+        assert observed['caSHA256'] == ca_hash
         if jwt_hash:
-            assert server('sha256sum', '/app/data/jwt.secret').split()[0] == jwt_hash
+            observed['jwtSHA256'] = server('sha256sum', '/app/data/jwt.secret').split()[0]
+            assert observed['jwtSHA256'] == jwt_hash
+        observed['coreHostSQL'] = sql("SELECT hostname FROM t_agent WHERE agent_id='ops-maintenance'")
+        assert observed['coreHostSQL'] == 'operations-before'
+        # Reuse the actual pre-backup session through the restored production REST path.
+        response = api('/api/hosts?keyword=ops-maintenance&page=1&size=100', original_session)
+        host = next(row for row in response['data']['list'] if row['agent_id'] == 'ops-maintenance')
+        assert host['hostname'] == observed['coreHostSQL']
+        observed['coreHostHTTP'] = host
+        observed['coreHostResponse'] = response
+        observed['originalSessionSHA256'] = hashlib.sha256(original_session.encode()).hexdigest()
         if mode == 'postgres':
-            assert sql("SELECT NOT has_schema_privilege('alinksec_app','public','CREATE') AND "
+            observed['restrictedPrivilegesSQL'] = sql("SELECT NOT has_schema_privilege('alinksec_app','public','CREATE') AND "
                        "has_table_privilege('alinksec_app','public.t_agent','SELECT,INSERT,UPDATE,DELETE') AND "
-                       "NOT has_table_privilege('alinksec_app','public.t_schema_migration','SELECT')") == 't'
+                       "NOT has_table_privilege('alinksec_app','public.t_schema_migration','SELECT')")
+            assert observed['restrictedPrivilegesSQL'] == 't'
+        restore_observations.append(observed)
 
     def reseal(snapshot):
         manifest = json.loads((snapshot / 'manifest.json').read_text())
@@ -103,6 +131,11 @@ with tempfile.TemporaryDirectory(prefix='alinksec-operations-ci-') as directory:
         jwt_hash = server('/bin/sh', '-c', 'if test -f /app/data/jwt.secret; then sha256sum /app/data/jwt.secret; fi').split()
         jwt_hash = jwt_hash[0] if jwt_hash else None
         assert jwt_hash, 'CI must exercise persisted JWT secrets'
+        sql("INSERT INTO t_agent(agent_id,hostname,ip,os_type,os_version,arch,status) VALUES('ops-maintenance','operations-before','127.0.0.1',1,'explicit maintenance fixture','amd64',0)")
+        original_session = api('/api/auth/login', body={'username': 'admin', 'password': os.environ['ALINKSEC_BOOTSTRAP_ADMIN_PASSWORD']})['data']['token']
+        print('::add-mask::' + original_session, flush=True)
+        result['identityBefore'] = {'caSHA256': ca_hash, 'jwtSHA256': jwt_hash,
+                                    'originalSessionSHA256': hashlib.sha256(original_session.encode()).hexdigest()}
         if mode == 'postgres':
             sql("REVOKE CONNECT ON DATABASE alinksec FROM PUBLIC; GRANT CONNECT ON DATABASE alinksec TO alinksec_app; "
                 "ALTER DATABASE alinksec SET statement_timeout='3min'; COMMENT ON DATABASE alinksec IS 'operations-before'; "
@@ -114,6 +147,7 @@ with tempfile.TemporaryDirectory(prefix='alinksec-operations-ci-') as directory:
         assert snapshot.stat().st_mode & 0o777 == 0o700
         assert all(entry.stat().st_mode & 0o077 == 0 for entry in snapshot.iterdir())
         write_probe('after')
+        sql("UPDATE t_agent SET hostname='operations-after' WHERE agent_id='ops-maintenance'")
         server('touch', obsolete)
         sql('CREATE TABLE ci_operations_obsolete(value TEXT)')
         if mode == 'postgres':
@@ -229,5 +263,7 @@ with tempfile.TemporaryDirectory(prefix='alinksec-operations-ci-') as directory:
                       metadataPermissions='private', remainingHelpers=0)
     finally:
         # Never upload snapshots, deployment.json or env files: they contain secrets.
+        (evidence / 'restore-observations.json').write_text(json.dumps({'source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                'mode': mode, 'observations': restore_observations}, ensure_ascii=False, indent=2) + '\n')
         (evidence / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
 print(json.dumps(result, ensure_ascii=False))

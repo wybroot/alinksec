@@ -81,7 +81,18 @@ jobs:
       - name: Install PostgreSQL CLI
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client
       - name: Validate actual dependency fencing, two Java replicas, native Agent and HAProxy failover
-        run: python3 -B deploy/tests/cluster-ci.py
+        run: |
+          python3 -B deploy/tests/cluster-ci.py
+          python3 -B deploy/tests/review-operations-verdict.py .tmp/review-offline-cluster "$GITHUB_SHA" --cluster
+      - name: Retain actual two-replica offline incident evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-offline-cluster-${{ matrix.arch }}
+          path: .tmp/review-offline-cluster
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/setup-node@v4
         if: matrix.arch == 'amd64'
         with:
@@ -855,6 +866,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - name: Check single-instance dependency, actual offline timing and operations screen serially
+        run: |
+          python3 -B deploy/tests/review-operations.py --database sqlite
+          (cd web && node test/review-operations-browser.mjs)
+          python3 -B deploy/tests/review-operations-verdict.py .tmp/review-operations/sqlite "$GITHUB_SHA"
+      - name: Retain original operations acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-operations-${{ matrix.arch }}
+          path: .tmp/review-operations/sqlite
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check Java-published delta reconstruction and actual Linux Agent commands
         # Evidence and signature checks share this already-built native Agent.
         working-directory: agent
@@ -1340,7 +1365,9 @@ jobs:
           ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-ca.crt
       - name: Check complete PostgreSQL maintenance and interrupted recovery
         timeout-minutes: 10
-        run: python3 -B deploy/tests/operations-smoke.py --mode postgres
+        run: |
+          python3 -B deploy/tests/operations-smoke.py --mode postgres
+          python3 -B deploy/tests/review-operations-verdict.py .tmp/operations-native-postgres "$GITHUB_SHA" --maintenance
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
       - name: Stop production deployment before lightweight smoke test
@@ -1381,7 +1408,9 @@ jobs:
           ALINKSEC_SMOKE_CA_FILE: ${{ runner.temp }}/alinksec-lite-ca.crt
       - name: Check complete SQLite maintenance and interrupted recovery
         timeout-minutes: 10
-        run: python3 -B deploy/tests/operations-smoke.py --mode sqlite
+        run: |
+          python3 -B deploy/tests/operations-smoke.py --mode sqlite
+          python3 -B deploy/tests/review-operations-verdict.py .tmp/operations-native-sqlite "$GITHUB_SHA" --maintenance
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
       - name: Retain sanitized complete maintenance evidence
@@ -1392,7 +1421,11 @@ jobs:
           path: |
             .tmp/operations-volume-local/result.json
             .tmp/operations-native-postgres/result.json
+            .tmp/operations-native-postgres/restore-observations.json
+            .tmp/operations-native-postgres/verdict.json
             .tmp/operations-native-sqlite/result.json
+            .tmp/operations-native-sqlite/restore-observations.json
+            .tmp/operations-native-sqlite/verdict.json
             .tmp/baseline-browser-fixtures-postgres.json
           include-hidden-files: true
           if-no-files-found: error
@@ -1569,7 +1602,7 @@ jobs:
         working-directory: server
         run: >-
           mvn -B -T1 -pl alinksec-bootstrap -am
-          -Dtest=ReviewDefectsIntegrationTest,AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
+          -Dtest=ReviewDefectsIntegrationTest,EngineStatusIntegrationTest,AgentChannelSecurityIntegrationTest,BaselineConcurrentReportIntegrationTest,VulnerabilityWorkflowIntegrationTest,LibraryGovernanceIntegrationTest,SourceTrustIntegrationTest,DetectionEvidenceIntegrationTest,WeakPasswordIntegrationTest,WindowsLoginIntegrationTest,WindowsRansomIntegrationTest,WindowsUpdateIntegrationTest,FileWatchIntegrationTest,ClamavIntegrationTest,YaraIntegrationTest,SignatureDeltaIntegrationTest,UpgradeWatchdogIntegrationTest,BaselineUpstreamIntegrationTest,VendorAdvisoryIntegrationTest,OpenCtiIntegrationTest
           -Dsurefire.failIfNoSpecifiedTests=false
           -Dalinksec.integration.database=postgres test
         env:
@@ -1645,6 +1678,20 @@ jobs:
         with:
           name: review-console-postgres
           path: .tmp/review-console/postgres
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check actual PostgreSQL outage, scheduled offline event and operations screen serially
+        run: |
+          python3 -B deploy/tests/review-operations.py --database postgres
+          (cd web && ALINKSEC_OPERATIONS_FIXTURE=../.tmp/review-operations/postgres node test/review-operations-browser.mjs)
+          python3 -B deploy/tests/review-operations-verdict.py .tmp/review-operations/postgres "$GITHUB_SHA"
+      - name: Retain original PostgreSQL operations acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-operations-postgres
+          path: .tmp/review-operations/postgres
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

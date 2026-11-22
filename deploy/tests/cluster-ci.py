@@ -291,6 +291,13 @@ try:
     # than assuming the owner observed before the sustained window is current.
     until(lambda: api(a_http, '/api/ready')['ready'] and api(b_http, '/api/ready')['ready'],
           'Both replicas are ready after the sustained window')
+    offline_spec = importlib.util.spec_from_file_location('review_offline_cluster', REPO / 'deploy/tests/review-offline-cluster.py')
+    offline_module = importlib.util.module_from_spec(offline_spec)
+    offline_spec.loader.exec_module(offline_module)
+    offline_result = offline_module.run(repo=REPO, sql=sql, api=api, ok=ok, until=until, command=command,
+            ports=[a_http, b_http], admin=admin, native=native_agent, agent=agent, processes=[node_a, node_b])
+    assert offline_result['passed']
+    checks.append('actual_native_stop_two_production_schedulers_single_notification_reconnect_and_maintenance')
     command(['docker', 'stop', '--time', '10', native_agent], timeout=30)
     until(lambda: not sql(f"SELECT node_id FROM t_cluster_session WHERE agent_id='{agent}'"),
           'Stopped native Agent releases its previous stream owner')
@@ -358,6 +365,8 @@ finally:
     result['remainingOwnedContainers'] = len(command(['docker', 'ps', '-aq', '--filter', 'label=alinksec.cluster-validation=' + prefix]).splitlines())
     result['remainingJavaProcesses'] = sum(process.poll() is None for process in processes)
     (OUTPUT / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+    if (REPO / '.tmp/review-offline-cluster').exists():
+        (REPO / '.tmp/review-offline-cluster/cluster-result.json').write_text(json.dumps(result, indent=2) + '\n')
     # Only generated fixture data is removed; no user services or volumes are touched.
     subprocess.run(['docker', 'run', '--rm', '--network=none', '--memory=64m', '--cpus=1',
                     '--mount', f'type=bind,src={PRIVATE},dst=/cleanup', '--entrypoint', '/bin/sh', 'redis:7.4.11-alpine',

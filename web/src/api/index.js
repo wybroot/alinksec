@@ -41,7 +41,7 @@ async function request(path, options = {}) {
   return body.data
 }
 
-const get = (path) => request(path)
+const get = (path, options) => request(path, options)
 const post = (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) })
 
 export const fetchRawLogs = query => get(`/api/logs?${new URLSearchParams(query)}`)
@@ -317,16 +317,16 @@ export async function fetchHostMetrics(agentId) {
 
 /* ---------------- 安全大屏 ---------------- */
 
-export async function fetchScreen() {
+export async function fetchScreen(signal) {
   const [summary, trend, sevDist, categories, topHosts, alerts, engines, status] = await Promise.all([
-    get('/api/dashboard/summary'),
-    get('/api/dashboard/screen-trend?days=7'),
-    get('/api/dashboard/event-distribution'),
-    get('/api/dashboard/baseline-categories'),
-    get('/api/dashboard/top-hosts?limit=5'),
-    get('/api/alerts?page=1&size=20'),
-    get('/api/protect/engines'),
-    get('/api/protect/status'),
+    get('/api/dashboard/summary', { signal }),
+    get('/api/dashboard/screen-trend?days=7', { signal }),
+    get('/api/dashboard/event-distribution', { signal }),
+    get('/api/dashboard/baseline-categories', { signal }),
+    get('/api/dashboard/top-hosts?limit=5', { signal }),
+    get('/api/alerts?page=1&size=20', { signal }),
+    get('/api/protect/engines', { signal }),
+    get('/api/protect/status', { signal }),
   ])
   const s = summary || {}
   const sevMap = {}
@@ -391,7 +391,7 @@ export async function fetchScreen() {
     radar,
     riskHosts,
     events,
-    engines: (engines || []).map((e) => ({ key:e.key,name:e.name,desc:e.desc,on:e.status==='ready',load:Number(e.coverage || 0),status:e.status || 'unknown' })),
+    engines: (engines || []).map((e) => ({ key:e.key,name:e.name,desc:e.desc,on:e.status==='ready',load:Number(e.coverage || 0),status:e.status || 'unknown',ready:Number(e.ready || 0),total:Number(e.total || 0),counts:e.counts || {} })),
   }
 }
 
