@@ -25,8 +25,8 @@ public class EngineStatusService {
                 List.of("login","登录防护策略","登录策略；运行观测见 Windows 登录采集"),
                 List.of("decoy","勒索诱饵防护","诱饵策略；文件事件覆盖不等于可信写入者证据"))) {
             var counts=new TreeMap<String,Long>();
-            jdbc.query("SELECT status,protect_enabled FROM t_agent WHERE deleted=FALSE AND status<>4",(org.springframework.jdbc.core.RowCallbackHandler)rs->{
-                String state=rs.getInt("status")==0?"unknown":rs.getInt("status")!=1?"offline":!rs.getBoolean("protect_enabled")?"disabled":"unknown";
+            jdbc.query("SELECT status FROM t_agent WHERE deleted=FALSE AND status<>4",(org.springframework.jdbc.core.RowCallbackHandler)rs->{
+                String state=rs.getInt("status")==0||rs.getInt("status")==1?"unknown":"offline";
                 counts.merge(state,1L,Long::sum);
             });
             result.add(summary(definition.get(0),definition.get(1),definition.get(2),counts,"unreported"));
@@ -43,7 +43,7 @@ public class EngineStatusService {
                                         BiFunction<Map<String,Object>,Long,String> classifier,long now) {
         var counts=new TreeMap<String,Long>();
         // Constant table names above; stream every applicable host, without a UI page limit.
-        jdbc.query("SELECT a.status,a.protect_enabled,s.contract,s.coverage,s.observed_at FROM t_agent a LEFT JOIN "+table+
+        jdbc.query("SELECT a.status,s.contract,s.coverage,s.observed_at FROM t_agent a LEFT JOIN "+table+
                 " s ON s.agent_id=a.agent_id WHERE a.deleted=FALSE AND a.status<>4"+(windows?" AND a.os_type=2":""),
                 (org.springframework.jdbc.core.RowCallbackHandler)rs->{
                     var row=new HashMap<String,Object>();
@@ -51,7 +51,6 @@ public class EngineStatusService {
                     String state;
                     if(rs.getInt("status")==0)state="unknown";
                     else if(rs.getInt("status")!=1)state="offline";
-                    else if(!rs.getBoolean("protect_enabled"))state="disabled";
                     else if(row.get("contract")==null)state="unknown";
                     else state=classifier.apply(row,now);
                     var detail=JsonUtils.read(row.get("coverage")==null?"{}":row.get("coverage").toString());

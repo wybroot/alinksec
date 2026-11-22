@@ -191,7 +191,9 @@ def main():
             engines = {row['key']: row for row in data(http[capture['responses'][6]])}
             assert len(engines) == 9 and raw['stage'] == stage['stage'] and raw['engine'] == stage['key']
             assert all(engines[key]['status'] != 'ready' and engines[key]['ready'] == 0 for key in ['process', 'file_tamper', 'login', 'decoy'])
+            assert all(engines[key]['status'] == ('offline' if stage['stage'] == 'offline' else 'unknown') for key in ['process', 'file_tamper', 'login', 'decoy'])
             count = len(raw['hosts']); assert count == (0 if stage['stage'] == 'empty' else 121 if stage['stage'] == 'beyond-page' else 2)
+            if stage['stage'] == 'global-off': assert all(not row['protect_enabled'] for row in raw['hosts'])
             for key in engine_keys:
                 engine = engines[key]
                 rows = raw['facts'][key]; assert all(row['agent_id'] in {host['agent_id'] for host in raw['hosts']} for row in rows)
@@ -201,7 +203,7 @@ def main():
                     continue
                 assert engine['total'] == count and sum(engine['counts'].values()) == count
                 assert engine['coverage'] == (engine['ready'] * 100 // count if count else 0)
-                negative = stage['stage'] not in ['empty', 'healthy', 'linux-only'] and (key == stage['key'] or stage['stage'] in ['offline', 'global-off'])
+                negative = stage['stage'] not in ['empty', 'healthy', 'linux-only', 'global-off'] and (key == stage['key'] or stage['stage'] == 'offline')
                 if stage['stage'] == 'empty': assert engine['status'] == 'unknown' and not rows
                 elif not negative:
                     assert engine['status'] == 'ready' and engine['ready'] == count and len(rows) == count
@@ -221,9 +223,8 @@ def main():
                         assert len(rows) == count and engine['ready'] == 0
                         if stage['stage'] == 'unsupported': assert all(row['contract'] == 0 for row in rows)
                         if stage['stage'] == 'offline': assert all(row['status'] == 2 for row in raw['hosts'])
-                        if stage['stage'] == 'global-off': assert all(not row['protect_enabled'] for row in raw['hosts'])
                         expected_state = {'disabled': 'disabled', 'unsupported': 'unsupported', 'stale-received': 'stale', 'future-received': 'stale',
-                                          'offline': 'offline', 'global-off': 'disabled', 'stale-probe': 'stalled' if key in ['file_watch', 'windows_login'] else 'stale',
+                                          'offline': 'offline', 'stale-probe': 'stalled' if key in ['file_watch', 'windows_login'] else 'stale',
                                           'failed': 'degraded' if key == 'file_watch' else 'failed' if key == 'windows_login' else 'unavailable'}[stage['stage']]
                         assert engine['status'] == expected_state
                         at = http[capture['responses'][6]]['atMillis']

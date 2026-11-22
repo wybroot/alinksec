@@ -186,13 +186,6 @@
     "checkedAt": "2026-11-22T14:02:53.372795+00:00"
   },
   "baseMain": "2c4803a119d068963e97e1f8a306e8fa8ce1140a",
-  "itemsClosed": [
-    "REV-010",
-    "REV-012",
-    "REV-014"
-  ],
-  "currentClosed": 14,
-  "remainingVerify": [],
   "originalConditionsChanged": false,
   "unchangedBklRows": 55,
   "fullArchiveBytesVerified": 7,
@@ -214,5 +207,17 @@
       "cluster (arm64)"
     ],
     "scope": "Both failed while asserting native offline visibility on unfiltered global page 1 (size 100); remaining obsolete jobs cancelled after fixture correction. Old failed archive omitted response details; actual old response contents not established. Production host/event filters preserve the incident assertion; new failure observations retained."
-  }
+  },
+  "historicalCandidateOnly": true,
+  "laterReviewLimitation": "Engine runtime classification incorrectly used the unapplied fleet protect_enabled field. Original archive verdicts reflect that earlier definition; REV-014 engine independence was reopened. This archive is not acceptance of the corrected classification.",
+  "closedAtFirstReview": 14,
+  "remainingVerifyAtFirstReview": [],
+  "itemsInitiallyClosed": [
+    "REV-010",
+    "REV-012",
+    "REV-014"
+  ],
+  "laterReopenedItems": [
+    "REV-014"
+  ]
 }
