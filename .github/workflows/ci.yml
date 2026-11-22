@@ -321,11 +321,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Check native Windows resource feedback and recovery
-        run: go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
+        run: |
+          $resourceEvidenceDirectory = $env:ALINKSEC_RESOURCE_EVIDENCE_DIRECTORY
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $env:ALINKSEC_RESOURCE_EVIDENCE_FILE = Join-Path $resourceEvidenceDirectory "run-$attempt.json"
+            Write-Host "Native resource feedback fresh process $attempt/3"
+            go test -v -count=1 -timeout=1m -run '^TestNativeResourceFeedback$' ./internal/resources
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
         working-directory: agent
         env:
           ALINKSEC_RESOURCE_NATIVE_REQUIRED: 'true'
-          ALINKSEC_RESOURCE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/resource-native/result.json
+          ALINKSEC_RESOURCE_EVIDENCE_DIRECTORY: ${{ github.workspace }}/.tmp/resource-native
       - name: Check native Windows file events, guard dispatch and recovery
         run: |
           for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -346,10 +353,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Retain native Windows resource evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: resource-validation-${{ matrix.platform }}
-          path: .tmp/resource-native/result.json
+          path: .tmp/resource-native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -763,6 +771,7 @@ jobs:
           ALINKSEC_RESOURCE_NATIVE_REQUIRED: 'true'
           ALINKSEC_RESOURCE_EVIDENCE_FILE: ${{ github.workspace }}/.tmp/resource-native/result.json
       - name: Retain native Linux resource evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: resource-validation-linux-${{ matrix.arch }}
