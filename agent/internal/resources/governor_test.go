@@ -50,6 +50,39 @@ func TestSustainedCPUAndHysteresis(t *testing.T) {
 	}
 }
 
+func TestLateIdleCPUSpikeRestartsRecovery(t *testing.T) {
+	g := New(Config{CPUWindow: 10 * time.Second, RecoveryWindow: 10 * time.Second})
+	at, cpu := time.Unix(100, 0), 0.0
+	step := func(percent float64) State {
+		at = at.Add(time.Second)
+		cpu += percent / 100
+		return g.Observe(Sample{at, cpu, 30 << 20}, nil).State
+	}
+	g.Observe(Sample{at, cpu, 30 << 20}, nil)
+	for i := 0; i < 10; i++ {
+		step(15)
+	}
+	if g.State().Factor != 2 {
+		t.Fatal("sustained workload did not throttle")
+	}
+	for i := 1; i <= 14; i++ {
+		percent := 0.0
+		if i == 5 {
+			percent = 4
+		}
+		if state := step(percent); state.Factor != 2 {
+			t.Fatalf("recovered before ten low-load seconds after the spike: %+v", state)
+		}
+	}
+	// A zero final sample does not prove a complete recovery window.
+	if state := g.State(); state.CPUPercent != 0 || state.Reason != "cpu_pressure" {
+		t.Fatalf("unexpected state before the window is complete: %+v", state)
+	}
+	if state := step(0); state.Factor != 1 || state.Reason != "normal" {
+		t.Fatalf("did not recover after the complete low-load window: %+v", state)
+	}
+}
+
 func TestMemoryTrimScanThresholdAndFailure(t *testing.T) {
 	g := New(Config{})
 	at := time.Now()
