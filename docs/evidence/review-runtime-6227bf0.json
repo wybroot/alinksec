@@ -1,0 +1,298 @@
+{
+  "scope": "REV-002/004/009 supplementary software acceptance; v0.0.4",
+  "source_commit": "6227bf0252790bf1e1d06362a91407b8a76f6143",
+  "base_merged_main": "35d9e0f661b0fc1151cc6ee44a54a2c35e12293e",
+  "workflow": {
+    "id": 44973133869,
+    "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869",
+    "branch": "test/review-runtime-boundaries",
+    "event": "push",
+    "accepted_attempt": 1,
+    "required_jobs": 27,
+    "latest_job_results": {
+      "success": 27
+    }
+  },
+  "metadata_provenance": {
+    "artifacts": 94,
+    "unique_names": 94,
+    "all_run_and_source_verified": true,
+    "full_archive_bytes_verified": 7,
+    "scope": "All artifact metadata checked; only the seven named compact ZIPs were fully downloaded, digested and content verified."
+  },
+  "verified_archives": [
+    {
+      "artifact": "review-runtime-amd64",
+      "id": 14734887701,
+      "archive_sha256": "75616ed9c224686034c09033d6550adc9e3ddcda500c2e86f86093213c12b4b3",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "accepted": true,
+        "source": "6227bf0252790bf1e1d06362a91407b8a76f6143",
+        "sourceScope": "committed",
+        "database": "sqlite",
+        "sessions": {
+          "replicas": 1,
+          "revokedSessions": 5,
+          "realJvmRestart": true,
+          "unchangedSigningKey": true,
+          "observedRequests": 51
+        },
+        "actualJvmCrashPhases": 2,
+        "sameBytesNativeAgentReplay": true,
+        "metricsProducerSeconds": 30,
+        "loginP95Millis": 192.6978980000058,
+        "businessP95Millis": 77,
+        "nativeCommandMillis": 1193.2815870000013,
+        "businessReports": 12,
+        "originalObservationsVerified": true,
+        "regressions": {
+          "ReviewDefectsIntegrationTest": 19,
+          "AgentChannelSecurityIntegrationTest": 19,
+          "accepted": true,
+          "reliableGoQueueCases": 10,
+          "originalObservationsVerified": true
+        }
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14734887701"
+    },
+    {
+      "artifact": "review-runtime-arm64",
+      "id": 14734449467,
+      "archive_sha256": "f59f22a75a7d3fda3afc26984698519ce6c7017d4fab929b0108096d62bb2891",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "accepted": true,
+        "source": "6227bf0252790bf1e1d06362a91407b8a76f6143",
+        "sourceScope": "committed",
+        "database": "sqlite",
+        "sessions": {
+          "replicas": 1,
+          "revokedSessions": 5,
+          "realJvmRestart": true,
+          "unchangedSigningKey": true,
+          "observedRequests": 51
+        },
+        "actualJvmCrashPhases": 2,
+        "sameBytesNativeAgentReplay": true,
+        "metricsProducerSeconds": 30,
+        "loginP95Millis": 166.53532999998788,
+        "businessP95Millis": 64,
+        "nativeCommandMillis": 1252.5047849999282,
+        "businessReports": 12,
+        "originalObservationsVerified": true,
+        "regressions": {
+          "ReviewDefectsIntegrationTest": 19,
+          "AgentChannelSecurityIntegrationTest": 19,
+          "accepted": true,
+          "reliableGoQueueCases": 10,
+          "originalObservationsVerified": true
+        }
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14734449467"
+    },
+    {
+      "artifact": "review-runtime-postgres",
+      "id": 14734941496,
+      "archive_sha256": "cb108f382aee5ea01556eddf32478341a98d2b36dd71268388439bb19980d01f",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "accepted": true,
+        "source": "6227bf0252790bf1e1d06362a91407b8a76f6143",
+        "sourceScope": "committed",
+        "database": "postgres",
+        "sessions": {
+          "replicas": 1,
+          "revokedSessions": 5,
+          "realJvmRestart": true,
+          "unchangedSigningKey": true,
+          "observedRequests": 51
+        },
+        "actualJvmCrashPhases": 2,
+        "sameBytesNativeAgentReplay": true,
+        "metricsProducerSeconds": 30,
+        "loginP95Millis": 177.65652100001716,
+        "businessP95Millis": 20,
+        "nativeCommandMillis": 617.6681809999991,
+        "businessReports": 10,
+        "originalObservationsVerified": true,
+        "regressions": {
+          "ReviewDefectsIntegrationTest": 19,
+          "AgentChannelSecurityIntegrationTest": 19
+        }
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14734941496"
+    },
+    {
+      "artifact": "cluster-evidence-amd64",
+      "id": 14734707821,
+      "archive_sha256": "385b4992b9593d1ce264c94a53c1eab60c6969885273d2fc180aa7493ac80664",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "replicas": 2,
+        "revokedSessions": 5,
+        "realJvmRestart": true,
+        "unchangedSigningKey": true,
+        "observedRequests": 80,
+        "coordinationTests": 15,
+        "cleanup": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14734707821"
+    },
+    {
+      "artifact": "cluster-evidence-arm64",
+      "id": 14735001273,
+      "archive_sha256": "d51b940bcf59caba791a558468def38481f5592f6e16c2a5dbca696b4e3400fe",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "replicas": 2,
+        "revokedSessions": 5,
+        "realJvmRestart": true,
+        "unchangedSigningKey": true,
+        "observedRequests": 80,
+        "coordinationTests": 15,
+        "cleanup": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14735001273"
+    },
+    {
+      "artifact": "review-reliable-queue-windows-amd64",
+      "id": 14734252353,
+      "archive_sha256": "5636f8334dc5efef7d31e720ccda20180bbc849888c3cfc3b48404e205148e89",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "accepted": true,
+        "reliableGoQueueCases": 10,
+        "originalObservationsVerified": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14734252353"
+    },
+    {
+      "artifact": "review-reliable-queue-windows-2022-amd64",
+      "id": 14733979985,
+      "archive_sha256": "d69a9466a402b910d5c63d1db2050e30d5689f42abb64c1026b423cbb9e04cb6",
+      "archive_digest_verified": true,
+      "content_validation": {
+        "accepted": true,
+        "reliableGoQueueCases": 10,
+        "originalObservationsVerified": true
+      },
+      "url": "https://github.com/wybroot/alinksec/actions/runs/44973133869/artifacts/14733979985"
+    }
+  ],
+  "overload_measurements": [
+    {
+      "artifact": "review-runtime-amd64",
+      "loginP95Millis": 192.6978980000058,
+      "loginMaxMillis": 279.1440199999897,
+      "businessP95Millis": 77,
+      "businessMaxMillis": 77,
+      "nativeCommandMillis": 1193.2815870000013,
+      "maxObservedHeartbeatGapMillis": 4218.243557999926,
+      "businessReports": 12,
+      "loginObservations": 50,
+      "metricsStatisticsSamples": 942,
+      "downstreamRequests": 134,
+      "finalStatistics": {
+        "failed": 4,
+        "records": 0,
+        "bytes": 0,
+        "dropped": 148751,
+        "rejected": 600
+      }
+    },
+    {
+      "artifact": "review-runtime-arm64",
+      "loginP95Millis": 166.53532999998788,
+      "loginMaxMillis": 380.8165520000557,
+      "businessP95Millis": 64,
+      "businessMaxMillis": 64,
+      "nativeCommandMillis": 1252.5047849999282,
+      "maxObservedHeartbeatGapMillis": 4433.5085310000295,
+      "businessReports": 12,
+      "loginObservations": 49,
+      "metricsStatisticsSamples": 922,
+      "downstreamRequests": 182,
+      "finalStatistics": {
+        "bytes": 0,
+        "records": 0,
+        "failed": 3,
+        "rejected": 600,
+        "dropped": 146881
+      }
+    },
+    {
+      "artifact": "review-runtime-postgres",
+      "loginP95Millis": 177.65652100001716,
+      "loginMaxMillis": 475.60331500000075,
+      "businessP95Millis": 20,
+      "businessMaxMillis": 20,
+      "nativeCommandMillis": 617.6681809999991,
+      "maxObservedHeartbeatGapMillis": 3438.4189269999297,
+      "businessReports": 10,
+      "loginObservations": 50,
+      "metricsStatisticsSamples": 997,
+      "downstreamRequests": 186,
+      "finalStatistics": {
+        "bytes": 0,
+        "dropped": 145705,
+        "rejected": 596,
+        "failed": 3,
+        "records": 0
+      }
+    }
+  ],
+  "fixed_profile": {
+    "producers": 2,
+    "durationSeconds": 30,
+    "samplesPerBatch": 257,
+    "periodMillis": 100,
+    "loginAndBusinessP95Millis": 3000,
+    "loginBusinessCommandMaxMillis": 8000,
+    "heartbeatGapMaxMillis": 8000
+  },
+  "resource_limits": {
+    "serverMiB": 640,
+    "javaHeapMiB": 256,
+    "agentMiB": 192,
+    "postgresMiB": 256,
+    "cpusPerContainer": 1,
+    "minAvailableMiB": 384,
+    "maxFullMemoryPSI": 10
+  },
+  "closed_items": [
+    "REV-002",
+    "REV-004",
+    "REV-009"
+  ],
+  "current_review_states": {
+    "CLOSED": 7,
+    "VERIFY": 7,
+    "allSevenP1Closed": true
+  },
+  "local_validation": {
+    "scope": "Uncommitted local working tree; not substituted for exact CI",
+    "databases": [
+      "sqlite",
+      "postgres"
+    ],
+    "reliableQueueTopLevelCasesOrdinaryAndRace": 10,
+    "initial_fixture_failures": [
+      "SQLite login attempted before seed CommandLineRunner completed; ready marker moved after application startup",
+      "Observation logger used Request.method for implicit GET; changed to Request.get_method"
+    ],
+    "failed_observations_retained": true,
+    "ownedContainersRemaining": 0,
+    "oomKilled": false
+  },
+  "limits": [
+    "30-second bounded software acceptance, not production scale, long-term stress or a field SLA",
+    "Metric producers are synthetic enrolled mTLS clients; the separate actual native Linux Agent supplies heartbeat, collect-command completion and persisted report replay",
+    "Known harmless report seeded through production OfflineQueue.Push; not a native log-collection origin acceptance",
+    "Fault controls live only on explicitly loaded test classpath, excluded from production jar",
+    "Windows Server 2022/2025 cover the ten native reliable queue cases; real-JVM and overload cases run Linux amd64/arm64 and PostgreSQL amd64",
+    "Existing 24-hour/500-MiB offline retention and eviction limits remain in force",
+    "No field acceptance, software release, production deployment or external test messages"
+  ],
+  "checked_at": "2026-11-22T02:08:07.013028+00:00"
+}

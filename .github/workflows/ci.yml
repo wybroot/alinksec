@@ -248,6 +248,21 @@ jobs:
           cache-dependency-path: agent/go.sum
       - name: Capture actual Windows host applicability
         run: python deploy/tests/system-identity.py .tmp/system-identity/result.json --scope native-host
+      - name: Check durable queue replay and capacity on native Windows
+        working-directory: agent
+        run: |
+          go test -p 1 -count=1 -json -run '^Test(Queue.*|OfflineQueuePrunesExpiredReportsBeforeReachingCapacity|TerminalAckCannotOvertakeDurableResult|BusinessReportPersistsBeforeSendAndNeedsMatchingReceipt|SenderRetainsSuccessfulSendsUntilDurableReceipt)$' ./internal/comm | Tee-Object -FilePath ../.tmp/review-windows-queue.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python ../deploy/tests/review-runtime-verdict.py ../.tmp/review-windows-queue.jsonl --queue-only
+      - name: Retain native Windows reliable queue observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-reliable-queue-${{ matrix.platform }}
+          path: .tmp/review-windows-queue.jsonl
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check Windows Agent and service lifecycle
         # These packages share native firewall/service state and PowerShell.
         run: go test -p 1 -v -count=1 ./cmd/agent ./internal/config ./internal/configguard ./internal/scan ./internal/resources ./internal/securestate ./internal/filetrace ./internal/filewatch ./internal/windowslogin ./internal/windowsupdate ./internal/upgrade ./internal/isolation ./internal/baseline ./internal/collector ./internal/packageversion ./internal/fixer ./internal/systemacceptance
@@ -707,7 +722,9 @@ jobs:
           if ! sudo test -e /run/sshd; then
             sudo install -d -o root -g root -m 0755 /run/sshd
           fi
-      - run: go test -v ./...
+      - run: |
+          set -o pipefail
+          go test -count=1 -json ./... | tee ../.tmp/review-runtime-go.jsonl
         working-directory: agent
         env:
           ALINKSEC_SSH_NATIVE_REQUIRED: 'true'
@@ -810,6 +827,20 @@ jobs:
         env:
           ALINKSEC_SMOKE_ALLOW_FIXTURES: 'true'
           ALINKSEC_SMOKE_AGENT_BIN: .tmp/alinksec-agent
+      - name: Check actual SQLite JVM crashes, session restart and metrics overload
+        run: |
+          (cd agent && CGO_ENABLED=0 go build -trimpath -o ../.tmp/review-runtime-fixture ./cmd/review-runtime-fixture)
+          python3 -B deploy/tests/review-runtime.py --database sqlite
+          python3 -B deploy/tests/review-runtime-verdict.py .tmp/review-runtime/sqlite "$GITHUB_SHA"
+      - name: Retain bounded runtime boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-runtime-${{ matrix.arch }}
+          path: .tmp/review-runtime/sqlite
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Check Java-published delta reconstruction and actual Linux Agent commands
         # Evidence and signature checks share this already-built native Agent.
         working-directory: agent
@@ -1570,6 +1601,22 @@ jobs:
             .tmp/asset-collection-fixtures
             .tmp/asset-collection-browser
             server/**/target/surefire-reports/*ReviewDefects*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Prepare and check actual PostgreSQL runtime boundary processes serially
+        run: |
+          mvn -B -ntp -T1 -f server/pom.xml -DskipTests package
+          (cd agent && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../.tmp/alinksec-agent ./cmd/agent)
+          (cd agent && CGO_ENABLED=0 go build -trimpath -o ../.tmp/review-runtime-fixture ./cmd/review-runtime-fixture)
+          python3 -B deploy/tests/review-runtime.py --database postgres
+          python3 -B deploy/tests/review-runtime-verdict.py .tmp/review-runtime/postgres "$GITHUB_SHA"
+      - name: Retain bounded PostgreSQL runtime boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-runtime-postgres
+          path: .tmp/review-runtime/postgres
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

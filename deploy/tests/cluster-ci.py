@@ -218,6 +218,23 @@ try:
     assert api(a_http, '/api/cluster', token=admin, expected=401)['code'] != 0
     sql("UPDATE t_user SET role_id=1 WHERE username='admin'")
     checks.append('actual_rest_denies_operator_viewer_and_stale_administrator_claims')
+    session_spec = importlib.util.spec_from_file_location('review_sessions', REPO / 'deploy/tests/review-sessions.py')
+    session_module = importlib.util.module_from_spec(session_spec)
+    session_spec.loader.exec_module(session_module)
+    def restart_session_replica():
+        global node_a
+        before_pid = node_a.pid
+        before_key = hashlib.sha256((SHARED / 'jwt.secret').read_bytes()).hexdigest()
+        stop_java(node_a)
+        node_a = start_java('node-a', a_http, a_grpc)
+        assert api(a_http, '/api/ready')['ready'] and api(b_http, '/api/ready')['ready']
+        after_key = hashlib.sha256((SHARED / 'jwt.secret').read_bytes()).hexdigest()
+        return {'beforePid': before_pid, 'afterPid': node_a.pid,
+                'signingKeyUnchanged': before_key == after_key, 'signingKeyBeforeSHA256': before_key, 'signingKeyAfterSHA256': after_key}
+    session_acceptance = session_module.verify([a_http, b_http], admin, password, restart_session_replica)
+    (OUTPUT / 'session-revocation.json').write_text(json.dumps(session_acceptance, indent=2) + '\n')
+    command(['python3', '-B', 'deploy/tests/review-runtime-verdict.py', OUTPUT / 'session-revocation.json', '--sessions-only'], log='session-verdict.json')
+    checks.append('actual_rest_revokes_logout_disable_demotion_password_across_replicas_and_real_jvm_restart')
     live_probe = (SHARED / '.cluster-probes/node-a').read_bytes()
     for name, extra, cluster, failure in [
         ('duplicate', {'ALINKSEC_CLUSTER_NODE_ID': 'node-a'}, True, 'cluster_node_id_in_use'),
