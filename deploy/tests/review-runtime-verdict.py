@@ -62,7 +62,8 @@ def verify_queue(path):
     return {'accepted': True, 'reliableGoQueueCases': len(selected), 'originalObservationsVerified': True}
 
 
-def verify_runtime(root, sha, allow_working_tree=False):
+def verify_runtime(root, sha, allow_working_tree=False, require_early_ack=False):
+    assert not require_early_ack or not allow_working_tree
     root = Path(root)
     result = read(root / 'result.json')
     assert result['source'] == sha and result['passed'] and result['database'] in ['sqlite', 'postgres']
@@ -78,6 +79,9 @@ def verify_runtime(root, sha, allow_working_tree=False):
                 assert {'failedReportAndDedupRollbackTogetherAndRetryExactlyOnce', 'matchingSqlFailureRollsBackAssetAndDedupBeforeSuccessfulReplay'} <= cases
             else:
                 assert 'durableReceiptFollowsCommitAndLostReplyReplaysWithoutDuplicate' in cases
+                if require_early_ack:
+                    assert int(suite.attrib['tests']) == 20
+                    assert 'earlyTerminalAckWaitsForDeliveryCommitAndRejectsUnsentOrForeignCommands' in cases
             regressions[name] = int(suite.attrib['tests'])
         if result['database'] == 'sqlite':
             regressions.update(verify_queue(root / 'regressions/go-queue.jsonl'))
@@ -142,6 +146,8 @@ def verify_runtime(root, sha, allow_working_tree=False):
                 'loginP95Millis': p95(overload['loginMillis']), 'businessP95Millis': p95(durations),
                 'nativeCommandMillis': overload['nativeCommandMillis'], 'businessReports': len(sent), 'originalObservationsVerified': True}
     accepted['regressions'] = regressions
+    if require_early_ack:
+        accepted['earlyAcknowledgementRegressionVerified'] = True
     (root / 'accepted.json').write_text(json.dumps(accepted, indent=2) + '\n')
     return accepted
 
@@ -153,7 +159,9 @@ if __name__ == '__main__':
     parser.add_argument('--sessions-only', action='store_true')
     parser.add_argument('--queue-only', action='store_true')
     parser.add_argument('--allow-working-tree', action='store_true')
+    parser.add_argument('--require-early-ack', action='store_true')
     arguments = parser.parse_args()
     assert not (arguments.sessions_only and arguments.queue_only)
-    verdict = verify_queue(arguments.path) if arguments.queue_only else verify_sessions(arguments.path, 2) if arguments.sessions_only else verify_runtime(arguments.path, arguments.source, arguments.allow_working_tree)
+    assert not arguments.require_early_ack or not (arguments.sessions_only or arguments.queue_only)
+    verdict = verify_queue(arguments.path) if arguments.queue_only else verify_sessions(arguments.path, 2) if arguments.sessions_only else verify_runtime(arguments.path, arguments.source, arguments.allow_working_tree, arguments.require_early_ack)
     print(json.dumps(verdict, indent=2))
