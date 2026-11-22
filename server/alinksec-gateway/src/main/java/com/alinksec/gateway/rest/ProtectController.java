@@ -27,27 +27,22 @@ public class ProtectController {
     private final ProtectRuleService protectRuleService;
     private final com.alinksec.service.protect.WindowsLoginService windowsLogin;
     private final com.alinksec.service.protect.FileWatchService fileWatch;
+    private final com.alinksec.service.protect.EngineStatusService engineStatus;
 
     public ProtectController(JdbcTemplate jdbc, ProtectRuleService protectRuleService, com.alinksec.service.protect.WindowsLoginService windowsLogin,
-                             com.alinksec.service.protect.FileWatchService fileWatch) {
+                             com.alinksec.service.protect.FileWatchService fileWatch,
+                             com.alinksec.service.protect.EngineStatusService engineStatus) {
         this.jdbc = jdbc;
         this.protectRuleService = protectRuleService;
         this.windowsLogin = windowsLogin;
         this.fileWatch = fileWatch;
+        this.engineStatus = engineStatus;
     }
 
-    /** 内置防护引擎清单（M2 固化：进程/文件/登录/诱饵） */
+    /** 引擎清单与各自近期运行观测；缺少独立证据的引擎保持未确认 */
     @GetMapping("/engines")
     public ApiResult<List<Map<String, Object>>> engines() {
-        return ApiResult.ok(List.of(
-                Map.of("key", "process", "name", "恶意进程防护", "desc",
-                        "EDR 进程行为规则匹配与父链取证，可按规则结束进程树", "builtin", true, "status", "unknown", "coverage", 0),
-                Map.of("key", "file_tamper", "name", "关键文件防篡改", "desc",
-                        "Linux 关键文件内容与权限监控，可按规则自动恢复", "builtin", true, "status", "unknown", "coverage", 0),
-                Map.of("key", "login", "name", "登录防护", "desc",
-                        "Linux SSH 与 Windows 远程登录检测，可按规则限时封禁来源", "builtin", true, "status", "unknown", "coverage", 0),
-                Map.of("key", "decoy", "name", "勒索诱饵防护", "desc",
-                        "诱饵触发后本地响应；缺少可信写入证据时跳过进程终止", "builtin", true, "status", "unknown", "coverage", 0)));
+        return ApiResult.ok(engineStatus.engines());
     }
 
     /** 各主机防护开关状态 */

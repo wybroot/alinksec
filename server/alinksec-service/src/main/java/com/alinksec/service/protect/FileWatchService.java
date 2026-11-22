@@ -40,6 +40,20 @@ public class FileWatchService {
                 """,agentId,contract,data,System.currentTimeMillis());
     }
 
+    public static String state(Map<String,Object> row,long now) {
+        var d=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
+        int contract=((Number)row.get("contract")).intValue();
+        long seen=row.get("observed_at") instanceof Number n?n.longValue():0;
+        long synced=d.path("last_sync_at").asLong();
+        String state=contract!=1?"unsupported":d.path("state").asText("unknown");
+        if(((Number)row.get("status")).intValue()!=1)state="offline";
+        else if(contract==1 && (now-seen>90000 || seen>now+30000))state="stale";
+        else if(contract==1 && !Set.of("starting","disabled").contains(state) && (synced==0 || now-synced>90000 || synced>now+30000))state="stalled";
+        else if(state.equals("watching") && !d.path("recovery_issue").asText().isEmpty())state="degraded";
+        else if(state.equals("watching") && d.path("recovering").asBoolean())state="recovering";
+        return state;
+    }
+
     public Map<String,Object> status(int page,int pageSize) {
         if(page<1 || page>100000 || pageSize<1 || pageSize>100)throw new IllegalArgumentException("invalid pagination");
         var rows=jdbc.queryForList("""
@@ -51,16 +65,7 @@ public class FileWatchService {
         long now=System.currentTimeMillis();
         for(var row:rows) {
             var d=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
-            int contract=((Number)row.get("contract")).intValue();
-            long seen=row.get("observed_at") instanceof Number n?n.longValue():0;
-            long synced=d.path("last_sync_at").asLong();
-            String state=contract!=1?"unsupported":d.path("state").asText("unknown");
-            if(((Number)row.get("status")).intValue()!=1)state="offline";
-            else if(contract==1 && (now-seen>90000 || seen>now+30000))state="stale";
-            else if(contract==1 && !Set.of("starting","disabled").contains(state) && (synced==0 || now-synced>90000 || synced>now+30000))state="stalled";
-            else if(state.equals("watching") && !d.path("recovery_issue").asText().isEmpty())state="degraded";
-            else if(state.equals("watching") && d.path("recovering").asBoolean())state="recovering";
-            row.put("coverage",JsonUtils.read(d.toString(),Object.class));row.put("state",state);
+            row.put("coverage",JsonUtils.read(d.toString(),Object.class));row.put("state",state(row,now));
         }
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE status<>4",Long.class);
         return Map.of("items",rows,"total",total==null?0:total,"page",page,"page_size",pageSize);

@@ -148,6 +148,8 @@
 
 ## 当前实现依据
 
+- [复查运行维护与大屏补证](93-复查运行维护与大屏补证.md)（REV-010／012／014 原条件、真实依赖故障／原生停机与逐引擎状态；当前待精确 CI 接受）
+
 - [协议](../proto/agent.proto)、[应用配置](../server/alinksec-bootstrap/src/main/resources/application.yml)、[数据库迁移](../deploy/migrations)。
 - [发布门禁](../deploy/release/ci-gate.mjs)、[版本校验](../deploy/release/check-version.mjs)、[平台校验](../deploy/release/platforms.mjs)。
 - [标准 Compose](../deploy/docker/docker-compose.yml)、[轻量 Compose](../deploy/docker/docker-compose.lite.yml)、[集群 Compose](../deploy/cluster/compose.yml)。

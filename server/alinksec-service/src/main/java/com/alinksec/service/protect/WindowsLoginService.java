@@ -44,6 +44,18 @@ public class WindowsLoginService {
                 """,agentId,contract,data,System.currentTimeMillis());
     }
 
+    public static String state(Map<String,Object> row,long now) {
+        var detail=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
+        int contract=((Number)row.get("contract")).intValue();
+        long seen=row.get("observed_at") instanceof Number n?n.longValue():0;
+        long lastPoll=detail.path("last_poll_at").asLong();
+        String state=contract!=1?"unsupported":detail.path("state").asText("unknown");
+        if(((Number)row.get("status")).intValue()!=1) state="offline";
+        else if(contract==1 && (now-seen>90000 || seen>now+30000))state="stale";
+        else if(contract==1 && !Set.of("disabled","starting").contains(state) && (lastPoll==0 || now-lastPoll>90000 || lastPoll>now+30000))state="stalled";
+        return state;
+    }
+
     public Map<String,Object> status(int page,int pageSize) {
         if(page<1 || page>100000 || pageSize<1 || pageSize>100) throw new IllegalArgumentException("invalid pagination");
         var rows=jdbc.queryForList("""
@@ -55,14 +67,7 @@ public class WindowsLoginService {
         long now=System.currentTimeMillis();
         for(var row:rows) {
             var detail=JsonUtils.read(row.get("coverage")==null?"{}":String.valueOf(row.get("coverage")));
-            int contract=((Number)row.get("contract")).intValue();
-            long seen=row.get("observed_at") instanceof Number n?n.longValue():0;
-            long lastPoll=detail.path("last_poll_at").asLong();
-            String state=contract!=1?"unsupported":detail.path("state").asText("unknown");
-            if(((Number)row.get("status")).intValue()!=1) state="offline";
-            else if(contract==1 && (now-seen>90000 || seen>now+30000))state="stale";
-            else if(contract==1 && !Set.of("disabled","starting").contains(state) && (lastPoll==0 || now-lastPoll>90000 || lastPoll>now+30000))state="stalled";
-            row.put("coverage",JsonUtils.read(detail.toString(),Object.class));row.put("state",state);
+            row.put("coverage",JsonUtils.read(detail.toString(),Object.class));row.put("state",state(row,now));
         }
         Long total=jdbc.queryForObject("SELECT count(*) FROM t_agent WHERE os_type=2 AND status<>4",Long.class);
         return Map.of("items",rows,"total",total==null?0:total,"page",page,"page_size",pageSize);

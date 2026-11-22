@@ -48,7 +48,7 @@ public class YaraService {
         }
         jdbc.update("INSERT INTO t_yara_status(agent_id,contract,coverage,observed_at) VALUES(?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET contract=excluded.contract,coverage=excluded.coverage,observed_at=excluded.observed_at",agent,contract,data,System.currentTimeMillis());
     }
-    private static String state(Map<String,Object> row,long now) {
+    public static String state(Map<String,Object> row,long now) {
         int contract=((Number)row.get("contract")).intValue();
         var d=JsonUtils.read(row.get("coverage")==null?"{}":row.get("coverage").toString());
         long seen=row.get("observed_at") instanceof Number n?n.longValue():0;

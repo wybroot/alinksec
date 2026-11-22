@@ -10,7 +10,7 @@
       <div class="glow-title">主机安全态势感知中心</div>
       <div class="clock">
         <div class="time">{{ clock.time }}</div>
-        <div class="date">{{ clock.date }} {{ clock.week }} · 数据实时同步中</div>
+        <div class="date" :role="dataAvailable === false ? 'alert' : undefined">{{ clock.date }} {{ clock.week }} · {{ dataAvailable === false ? '数据更新失败，历史指标仅供参考' : dataAvailable ? '数据已同步 · 30s 刷新' : '正在读取数据' }}</div>
       </div>
       <div class="deco-btn">
         <button type="button" @click="$router.push('/')">返回控制台</button>
@@ -27,10 +27,10 @@
           <div ref="gaugeEl" class="chart"></div>
         </div>
         <div class="panel" style="height:330px">
-          <h3>防护引擎运行状态<span class="tail">{{ kpi.hosts }}/{{ kpi.total }} 在线 · {{ kpi.protectOn }} 台防护开启</span></h3>
+          <h3>引擎自身运行观测<span class="tail">就绪／适用主机</span></h3>
           <div class="engines" style="flex:1;padding-top:4px">
-            <div class="eng" v-for="e in engines" :key="e.name">
-              <div class="row"><b>{{ e.name }}</b><span class="st" :class="{ off: !e.on }">{{ e.on ? '● 已确认就绪' : '○ 就绪未确认' }}</span></div>
+            <div class="eng" v-for="e in engines" :key="e.key" :data-engine="e.key" :title="e.desc">
+              <div class="row"><b>{{ e.name }}</b><span class="st" :class="{ off: !e.on }">{{ engineLabel(e.status) }} · {{ e.ready }}/{{ e.total }}</span></div>
               <div class="track"><div class="fill" :style="{ width: e.load + '%' }"></div></div>
             </div>
           </div>
@@ -46,7 +46,7 @@
         <div class="kpis">
           <div class="kpi"><div class="v">{{ kpi.hosts }}</div><div class="l">在线主机</div><div class="delta">接入率 {{ kpi.coverage }}%</div><div class="bar"></div></div>
           <div class="kpi"><div class="v red">{{ kpi.pending }}</div><div class="l">待处置威胁</div><div class="delta">严重 {{ kpi.crit }} · 高危 {{ kpi.high }}</div><div class="bar"></div></div>
-          <div class="kpi"><div class="v amber">{{ kpi.virus }}</div><div class="l">恶意样本检出</div><div class="delta">近 30 日 · 已确认自动响应 {{ kpi.rtHit }} 起</div><div class="bar"></div></div>
+          <div class="kpi"><div class="v amber">{{ kpi.virus }}</div><div class="l">恶意样本检出</div><div class="delta" data-confirmed-responses>近 30 日 · 已确认自动响应 {{ kpi.rtHit }} 起</div><div class="bar"></div></div>
           <div class="kpi"><div class="v green">{{ kpi.compliance == null ? '—' : kpi.compliance + '%' }}</div><div class="l">基线合规率</div><div class="delta">最近任务已核查 {{ kpi.hostsChecked }} 台</div><div class="bar"></div></div>
         </div>
 
@@ -78,8 +78,8 @@
       <!-- 右列 -->
       <div class="col">
         <div class="panel" style="height:300px">
-          <h3>威胁拦截趋势<span class="tail">近 7 日</span></h3>
-          <div ref="trendEl" class="chart"></div>
+          <h3>告警与已确认响应趋势<span class="tail">近 7 日 · 平台日界</span></h3>
+          <div ref="trendEl" class="chart" role="img" :aria-label="'近7日病毒检出 ' + trendRows.reduce((sum, row) => sum + row.virus, 0) + ' 起，已确认自动响应 ' + trendRows.reduce((sum, row) => sum + row.blocked, 0) + ' 起'"></div>
         </div>
         <div class="panel" style="height:330px">
           <h3>主机风险值 TOP5<span class="tail">点击处置 ›</span></h3>
@@ -118,6 +118,8 @@ const riskHosts = ref([])
 const radarRows = ref([])
 const events = ref([])
 const engines = ref([])
+const dataAvailable = ref(null)
+const engineLabel = (state) => ({ready:'已确认就绪',partial:'部分就绪',unknown:'就绪未确认',unsupported:'不支持',disabled:'已停用',offline:'主机离线',stale:'观测过期',stalled:'采集停滞',starting:'启动中',recovering:'恢复中',degraded:'存在降级',failed:'运行失败',unavailable:'引擎不可用',behind:'采集积压'}[state] || '就绪未确认')
 let knownEventIds = new Set()
 
 // 统一登记定时器，卸载时清理
@@ -157,11 +159,27 @@ const applyScreen = (d) => {
   if (freshIds.size) setTimeout(() => events.value.forEach(ev => ev.fresh = false), 900)
 }
 
+let pendingLoad = null, disposed = false
 const load = async () => {
+  pendingLoad?.abort()
+  const controller = new AbortController()
+  pendingLoad = controller
+  const deadline = setTimeout(() => controller.abort(), 10000)
   try {
-    applyScreen(await fetchScreen())
+    const data = await fetchScreen(controller.signal)
+    if (disposed || pendingLoad !== controller) return
+    applyScreen(data)
+    dataAvailable.value = true
     gauge.render(); pie.render(); trend.render(); risk.render(); radar.render()
-  } catch (e) { /* 后端暂不可达时保持上次数据 */ }
+  } catch (e) {
+    controller.abort()
+    if (disposed || pendingLoad !== controller) return
+    dataAvailable.value = false
+    engines.value = engines.value.map(engine => ({ ...engine, on: false, status: 'unknown', ready: 0, load: 0 }))
+  } finally {
+    clearTimeout(deadline)
+    if (pendingLoad === controller) pendingLoad = null
+  }
 }
 
 /* ---- 图表 ---- */
@@ -205,12 +223,12 @@ const trendEl = ref(null)
 const trend = useChart(trendEl, () => ({
   grid: { left: 40, right: 14, top: 34, bottom: 24 },
   tooltip: { trigger: 'axis', backgroundColor: '#102c25', borderColor: '#38655a', textStyle: { color: '#d9e8e3' } },
-  legend: { top: 0, right: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 14, data: ['病毒检出', '防护拦截'] },
+  legend: { top: 0, right: 0, textStyle: { color: C.dim, fontSize: 11 }, itemWidth: 14, data: ['病毒检出', '已确认自动响应'] },
   xAxis: { type: 'category', data: trendRows.value.map(r => r.date), axisLine: { lineStyle: { color: '#38655a' } }, axisLabel: AXT },
   yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(118, 167, 154, .12)' } }, axisLabel: AXT },
   series: [
     { name: '病毒检出', type: 'bar', barWidth: 12, data: trendRows.value.map(r => r.virus), itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: C.cyan }, { offset: 1, color: 'rgba(0,229,255,.15)' }] } } },
-    { name: '防护拦截', type: 'line', smooth: true, data: trendRows.value.map(r => r.blocked), lineStyle: { color: C.red, width: 2 }, itemStyle: { color: C.red }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(255,77,107,.25)' }, { offset: 1, color: 'rgba(255,77,107,0)' }] } } },
+    { name: '已确认自动响应', type: 'line', smooth: true, data: trendRows.value.map(r => r.blocked), lineStyle: { color: C.red, width: 2 }, itemStyle: { color: C.red }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(255,77,107,.25)' }, { offset: 1, color: 'rgba(255,77,107,0)' }] } } },
   ]
 }))
 
@@ -311,6 +329,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  pendingLoad?.abort()
   timers.forEach(clearInterval)
   window.removeEventListener('resize', fitStage)
   Object.values(chartsAlive).forEach(c => c && c.dispose())
@@ -356,6 +376,6 @@ onBeforeUnmount(() => {
 .tick { flex: 1; min-height: 0; overflow: hidden; position: relative; }.tick table { width: 100%; border-collapse: collapse; font-size: 13px; }.tick th { position: sticky; top: 0; background: #102f28; color: #91b5aa; font-size: 11px; font-weight: 600; padding: 7px 8px; text-align: left; letter-spacing: 1px; }.tick td { padding: 8px; border-bottom: 1px solid rgba(107, 154, 141, .16); color: #d9e8e3; }.tick tbody tr:hover { background: rgba(92, 191, 169, .05); }.tick .num { font-family: Consolas, Menlo, monospace; color: #a9c9c0; }
 .sev { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }.sev.critical { color: #ff958b; border: 1px solid rgba(239, 108, 98, .55); background: rgba(239, 108, 98, .10); }.sev.high { color: #f0c46f; border: 1px solid rgba(228, 174, 79, .55); background: rgba(228, 174, 79, .10); }.sev.medium { color: #7de2d0; border: 1px solid rgba(77, 213, 192, .45); background: rgba(77, 213, 192, .08); }.sev.low { color: #a9c9c0; border: 1px solid rgba(169, 201, 192, .35); }
 .enter-anim { animation: slideIn .5s ease; } @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
-.engines { display: flex; flex-direction: column; gap: 11px; overflow: hidden; }.eng { display: flex; flex-direction: column; gap: 6px; }.eng .row { display: flex; align-items: center; font-size: 13px; }.eng .row b { color: #d9e8e3; font-weight: 600; width: 88px; }.eng .row .st { margin-left: auto; color: #7bd294; font-size: 11px; }.eng .row .st.off { color: #ef7b70; }.eng .track { height: 5px; background: #183b33; border-radius: 3px; overflow: hidden; }.eng .fill { height: 100%; border-radius: 3px; background: #4bbca9; transition: width .8s; }
+.engines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; overflow: auto; }.eng { display: flex; flex-direction: column; gap: 6px; }.eng .row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; }.eng .row b { color: #d9e8e3; font-weight: 600; width: auto; }.eng .row .st { margin-left: 0; color: #7bd294; font-size: 11px; }.eng .row .st.off { color: #ef7b70; }.eng .track { height: 5px; background: #183b33; border-radius: 3px; overflow: hidden; }.eng .fill { height: 100%; border-radius: 3px; background: #4bbca9; transition: width .8s; }
 .foot-note { position: absolute; left: 0; right: 0; bottom: 4px; color: #52746b; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
 </style>

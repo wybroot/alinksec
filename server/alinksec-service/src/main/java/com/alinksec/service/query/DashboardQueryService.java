@@ -55,7 +55,9 @@ public class DashboardQueryService {
 
         // 告警
         Map<String, Object> alerts = new HashMap<>();
-        alerts.put("automated30d",jdbc.queryForObject("SELECT count(*) FROM t_automatic_response WHERE received_at>=?",Long.class,System.currentTimeMillis()-java.time.Duration.ofDays(30).toMillis()));
+        long through=System.currentTimeMillis(),from=through-java.time.Duration.ofDays(30).toMillis();
+        alerts.put("automated30d",jdbc.queryForObject("SELECT count(*) FROM t_automatic_response WHERE received_at>=? AND received_at<=?",Long.class,from,through));
+        alerts.put("automated30dFrom",from);alerts.put("automated30dThrough",through);
         alerts.put("open", jdbc.queryForObject(
                 "SELECT count(*) FROM t_alert WHERE status IN (0,1)", Long.class));
         alerts.put("criticalOpen", jdbc.queryForObject(
@@ -127,17 +129,22 @@ public class DashboardQueryService {
                 """);
     }
 
-    /** 大屏趋势：近 N 天病毒类告警数 与 已拦截（action_taken 非空）事件数 */
+    /** Platform calendar days: virus alerts and deduplicated, confirmed automatic responses. */
     public List<Map<String, Object>> screenTrend(int days) {
         String bucket = database.dayBucket("first_time");
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT %s AS day,
-                       SUM(CASE WHEN event_type = 'virus' THEN 1 ELSE 0 END) AS virus,
-                       SUM(CASE WHEN action_taken IS NOT NULL AND action_taken <> '' THEN 1 ELSE 0 END) AS blocked
-                FROM t_alert WHERE first_time >= ?
+                SELECT %s AS day, count(*) AS virus
+                FROM t_alert WHERE event_type='virus' AND first_time >= ?
                 GROUP BY %s ORDER BY day
                 """.formatted(bucket, bucket), database.startOfDayDaysAgo(days - 1));
-        return fillTrend(days, rows, "virus", "blocked");
+        var byDay=new LinkedHashMap<String,Map<String,Object>>();
+        for(var row:rows)byDay.put(String.valueOf(row.get("day")),new HashMap<>(row));
+        String responseBucket=database.dayBucketMillis("received_at");
+        long start=LocalDate.now(ZoneId.of("Asia/Shanghai")).minusDays(days-1)
+                .atStartOfDay(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli();
+        var responses=jdbc.queryForList("SELECT "+responseBucket+" AS day,count(*) AS blocked FROM t_automatic_response WHERE received_at>=? AND received_at<=? GROUP BY "+responseBucket,start,System.currentTimeMillis());
+        for(var row:responses)byDay.computeIfAbsent(String.valueOf(row.get("day")),key->new HashMap<>(Map.of("day",key))).put("blocked",row.get("blocked"));
+        return fillTrend(days, new java.util.ArrayList<>(byDay.values()), "virus", "blocked");
     }
 
     /** 大屏雷达：最近一次基线任务的等保维度通过率（category -> 0~100） */

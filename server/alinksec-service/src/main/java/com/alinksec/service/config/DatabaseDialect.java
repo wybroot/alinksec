@@ -55,6 +55,12 @@ public class DatabaseDialect {
                 : "to_char(" + column + ", 'YYYY-MM-DD')";
     }
 
+    public String dayBucketMillis(String column) {
+        if (!column.matches("[A-Za-z0-9_.]+")) throw new IllegalArgumentException("Unsafe date SQL identifier");
+        return sqlite ? "strftime('%Y-%m-%d', " + column + " / 1000, 'unixepoch', '+8 hours')"
+                : "to_char(to_timestamp(" + column + " / 1000.0) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')";
+    }
+
     public Object timestamp(Instant instant) {
         return sqlite ? SQLITE_TIME.format(instant) : Timestamp.from(instant);
     }

@@ -97,9 +97,34 @@ checks both modes serially, including actual SIGKILL after the first restored
 volume and rollback after invalid CA material prevents application startup.
 It also checks persisted JWT, CA, TLS, uploaded files, database privileges,
 private permissions, pre-downtime checksum rejection and helper cleanup.
-Only sanitized result JSON files enter `operations-validation-<arch>` artifacts;
+Sanitized result JSON, original restore observations and their independent verdict
+enter `operations-validation-<arch>` artifacts. These compare the restored core
+host through SQL and REST using the actual pre-backup session, alongside CA/JWT
+digests and file ownership. Never archive the session itself;
 raw snapshots, environment files and deployment metadata must not be uploaded.
 See [operator commands and recovery boundaries](../../docs/54-部署维护与成套恢复.md).
+
+## Single-instance operations and screen evidence
+
+After building the server including test classes and the actual native Agent at
+`.tmp/alinksec-agent`, run `review-operations.py --database sqlite` or `postgres`
+serially. Each creates private data and bounded containers, injects a real SQLite
+write lock or stops the disposable PostgreSQL dependency, and stops the actual
+Agent across the production 60-second threshold and 30-second scheduler. The
+loopback webhook is a private test receiver. No user stack is a target. Keep the
+resource watchdog active and wait for all owned containers to stop before browser
+checks or another scenario.
+
+`web/test/review-operations-browser.mjs` replays the captured screen responses
+against the production bundle; set `ALINKSEC_OPERATIONS_FIXTURE` to the selected
+database evidence directory. `review-operations-verdict.py <directory> <commit>`
+checks original HTTP, SQL, protobufs, native timings, notifications, resources,
+browser request bindings and screenshots. Local source previews require the
+explicit `--allow-working-tree` scope and do not replace exact-source CI.
+
+`review-offline-cluster.py` is invoked only by the existing hosted cluster runner.
+It tests the same actual Agent stop while both production replica schedulers run,
+then reconnects the Agent before the existing failover scenario continues.
 
 ## Native Windows Service
 
