@@ -143,6 +143,62 @@ class ReviewDefectsIntegrationTest {
         assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
         tx.executeWithoutResult(s->assets.replaceSnapshot(agent,ports(0,AssetCollection.Status.COMPLETE,80)));assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_port WHERE agent_id=?",Integer.class,agent));
     }
+    @Test void assetObservationHistoryAndDiskQueryPreserveFreshnessAcrossFailures()throws Exception {
+        var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
+        var query=new com.alinksec.service.query.HostQueryService(jdbc);
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new HostsController(query,
+                mock(com.alinksec.service.command.CommandService.class),mock(com.alinksec.service.protect.ProtectRuleService.class),
+                mock(com.alinksec.service.enroll.EnrollTokenService.class))).build();
+        var complete=RptAssetSnapshot.newBuilder().setSequence(10).addAllCollected(List.of("software","ports","processes","accounts","disks","containers"))
+                .setSoftwareInventory(SoftwareInventory.newBuilder().setStatus(SoftwareInventory.Status.COMPLETE).setSource("dpkg").setDistroId("debian").setDistroVersion("12"))
+                .addDisks(DiskInfo.newBuilder().setMount("/data").setFsType("ext4").setTotalBytes(1000).setUsedBytes(400));
+        for(String category:complete.getCollectedList())complete.addCollections(AssetCollection.newBuilder().setCategory(category)
+                .setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(1000));
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete.build()));
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/hosts/"+agent+"/disks")).andReturn().getResponse();
+        assertEquals(200,response.getStatus());
+        var body=com.alinksec.common.util.JsonUtils.read(response.getContentAsString());
+        assertEquals("/data",body.path("data").get(0).path("mount").asText());
+        var originals=jdbc.queryForList("SELECT * FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agent);
+        for(var state:originals) {
+            assertEquals(10,((Number)state.get("succeeded_sequence")).longValue());
+            assertEquals(1000,((Number)state.get("succeeded_collected_at")).longValue());
+            assertTrue(((Number)state.get("received_at")).longValue()>0);
+            assertEquals(state.get("received_at"),state.get("succeeded_received_at"));
+        }
+        var failed=complete.clone().setSequence(11).clearCollections().clearDisks();
+        for(String category:failed.getCollectedList())failed.addCollections(AssetCollection.newBuilder().setCategory(category)
+                .setStatus(AssetCollection.Status.PARTIAL).setError("permission_denied").setCollectedAt(500));
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,failed.build()));
+        for(var state:jdbc.queryForList("SELECT * FROM t_asset_collection_state WHERE agent_id=?",agent)) {
+            assertEquals("partial",state.get("status"));assertEquals(11,((Number)state.get("sequence")).longValue());
+            assertEquals(10,((Number)state.get("succeeded_sequence")).longValue());
+            assertEquals(1000,((Number)state.get("succeeded_collected_at")).longValue());
+        }
+        assertEquals("/data",jdbc.queryForObject("SELECT mount FROM t_asset_disk WHERE agent_id=?",String.class,agent));
+        var previous=jdbc.queryForList("SELECT * FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agent);
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,complete.build()));
+        assertEquals(previous,jdbc.queryForList("SELECT * FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agent));
+        // Invalid unsigned sizes, impossible usage and duplicate mount identities must not replace a valid inventory.
+        for(var disks:List.of(List.of(DiskInfo.newBuilder().setMount("/bad").setTotalBytes(-1L).build()),
+                List.of(DiskInfo.newBuilder().setMount("/bad").setTotalBytes(10).setUsedBytes(11).build()),
+                List.of(complete.getDisks(0),complete.getDisks(0)))) {
+            long seq=jdbc.queryForObject("SELECT sequence FROM t_asset_collection_state WHERE agent_id=? AND category='disks'",Long.class,agent)+1;
+            var bad=RptAssetSnapshot.newBuilder().setSequence(seq).addCollected("disks").addAllDisks(disks)
+                    .addCollections(AssetCollection.newBuilder().setCategory("disks").setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(2000)).build();
+            tx.executeWithoutResult(s->assets.replaceSnapshot(agent,bad));
+            assertEquals("/data",jdbc.queryForObject("SELECT mount FROM t_asset_disk WHERE agent_id=?",String.class,agent));
+            assertEquals("failed",jdbc.queryForObject("SELECT status FROM t_asset_collection_state WHERE agent_id=? AND category='disks'",String.class,agent));
+            assertEquals(10L,jdbc.queryForObject("SELECT succeeded_sequence FROM t_asset_collection_state WHERE agent_id=? AND category='disks'",Long.class,agent));
+        }
+        var empty=RptAssetSnapshot.newBuilder().setSequence(20).addCollected("disks")
+                .addCollections(AssetCollection.newBuilder().setCategory("disks").setStatus(AssetCollection.Status.COMPLETE).setCollectedAt(3000)).build();
+        tx.executeWithoutResult(s->assets.replaceSnapshot(agent,empty));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM t_asset_disk WHERE agent_id=?",Integer.class,agent));
+        var state=((List<Map<String,Object>>)query.detail(agent).get("collections")).stream().filter(x->x.get("category").equals("disks")).findFirst().orElseThrow();
+        assertEquals(20,((Number)state.get("succeeded_sequence")).longValue());
+        assertEquals(3000,((Number)state.get("succeeded_collected_at")).longValue());
+    }
     @Test void failedPortProcessAndDiskEnumerationRetainsRowsAndCapturedRestResponses()throws Exception {
         var assets=new AssetService(jdbc,mock(com.alinksec.service.scan.VulnMatchService.class),mock(SecurityEventService.class));
         var snapshot=RptAssetSnapshot.newBuilder().setSequence(1).addAllCollected(List.of("ports","processes","disks"))
@@ -221,7 +277,7 @@ class ReviewDefectsIntegrationTest {
     Map<String,Object> assetPhase(String name,org.springframework.test.web.servlet.MockMvc mvc)throws Exception {
         var responses=new TreeMap<String,Object>();
         for(String path:List.of("/api/hosts","/api/hosts/groups","/api/hosts/"+agent,"/api/hosts/"+agent+"/software",
-                "/api/hosts/"+agent+"/ports","/api/hosts/"+agent+"/processes","/api/hosts/"+agent+"/accounts","/api/hosts/"+agent+"/containers")) {
+                "/api/hosts/"+agent+"/ports","/api/hosts/"+agent+"/processes","/api/hosts/"+agent+"/accounts","/api/hosts/"+agent+"/containers","/api/hosts/"+agent+"/disks")) {
             var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).param("keyword",agent)).andReturn().getResponse();
             assertEquals(200,response.getStatus());var body=com.alinksec.common.util.JsonUtils.read(response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(0,body.path("code").asInt(-1));responses.put(path,body);

@@ -85,7 +85,7 @@ public class HostQueryService {
             return null;
         }
         var result=rows.get(0);
-        result.put("collections",jdbc.queryForList("SELECT category,sequence,status,error,collected_at FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agentId));
+        result.put("collections",jdbc.queryForList("SELECT category,sequence,status,error,collected_at,received_at,succeeded_sequence,succeeded_collected_at,succeeded_received_at FROM t_asset_collection_state WHERE agent_id=? ORDER BY category",agentId));
         return result;
     }
 
@@ -122,6 +122,10 @@ public class HostQueryService {
                 FROM t_asset_account WHERE agent_id = ?
                 ORDER BY uid
                 """, agentId);
+    }
+
+    public List<Map<String, Object>> disks(String agentId) {
+        return jdbc.queryForList("SELECT mount,fs_type,total_bytes,used_bytes FROM t_asset_disk WHERE agent_id=? ORDER BY mount",agentId);
     }
 
     public List<Map<String, Object>> processes(String agentId) {

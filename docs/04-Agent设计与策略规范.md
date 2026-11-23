@@ -53,7 +53,7 @@ agent/
 
 ### 2.2 scheduler（采集调度）
 
-- 每个 collector 注册 `{name, interval, run}`，调度器按 interval 派发（错峰：初始随机延迟 < interval）。
+- 六类资产由统一循环采集，启动约 15 秒后首次尝试，默认周期 6 小时（`collect_interval`），资源反馈可延长周期；不是逐类别独立定时器。
 - 支持 `CmdCollectNow` 立即触发；支持 `PAUSE_COLLECT` 全局暂停（防护不暂停）。
 
 ### 2.3 采集项清单
@@ -61,13 +61,13 @@ agent/
 | 采集项 | 频率（默认，可配） | Linux 实现 | Windows 实现 |
 |--------|------|-----------|--------------|
 | CPU/内存/load | 10s | gopsutil（/proc/stat、/proc/meminfo） | gopsutil（PDH 计数器） |
-| 磁盘容量 | 60s | statfs | GetDiskFreeSpaceEx |
+| 磁盘资产容量 | 随资产快照（默认 6h） | statfs | GetDiskFreeSpaceEx |
 | 磁盘 IO | 10s | /proc/diskstats | PDH Disk 计数器 |
 | 网络 IO | 10s | /proc/net/dev | GetIfTable |
-| 进程快照 | 60s | /proc + gopsutil | WMI Win32_Process |
-| 监听端口 | 60s | /proc/net/tcp、tcp6（无需 root 权限的部分字段降级） | GetExtendedTcpTable/GetExtendedUdpTable |
-| 软件清单 | 24h 或 dpkg/rpm 数据库 mtime 变更触发 | rpm -qa --qf / dpkg-query -l | 注册表 Uninstall 键枚举 |
-| 账户清单 | 24h | /etc/passwd、/etc/shadow（需 root） | Win32_UserAccount + SAM 状态 |
+| 进程快照 | 随资产快照（默认 6h） | /proc + gopsutil | WMI Win32_Process |
+| 监听端口 | 随资产快照（默认 6h） | /proc/net/tcp、tcp6（无需 root 权限的部分字段降级） | GetExtendedTcpTable/GetExtendedUdpTable |
+| 软件清单 | 随资产快照（默认 6h），无包数据库变更触发 | rpm -qa --qf / dpkg-query -W -f | 注册表 Uninstall 键枚举 |
+| 账户清单 | 随资产快照（默认 6h） | /etc/passwd、/etc/shadow（需 root） | Win32_UserAccount + SAM 状态 |
 | 容器/本机工作负载 | 随资产快照（默认 6h） | Docker CLI 只读清点；本机 `kubectl` 按 `spec.nodeName` 只读清点 | 本期不采集 |
 | 登录日志 | 增量读取 | /var/log/secure、/var/log/auth.log | 原生 Event Log API 每 5 秒查询 Security 4624/4625，限定远程类型 3/10；见 [Windows 登录说明](60-Windows登录防护与覆盖状态.md) |
 | 文件完整性 | 事件驱动 | inotify（目录递归 watch） | ReadDirectoryChangesW |
@@ -76,10 +76,12 @@ agent/
 `password`、`token`、`secret`、访问密钥、客户端密钥、认证头和 Cookie 等参数（含 `db-password`、
 `access_key` 等前缀写法）均只保留参数名，值替换为 `***`。
 
-资产快照的 `collected` 字段表示本轮实际执行的类别。服务端按该字段逐类替换软件、端口、进程、账户和
-容器资产；这使指定采集器的即时采集不会误删未执行类别的历史快照。字段为空时保留旧 Agent 的全量快照语义。
+资产快照的 `collected` 字段表示本轮实际执行的类别。服务端按该字段逐类替换软件、端口、进程、账户、
+磁盘和容器资产；这使指定采集器的即时采集不会误删未执行类别的历史快照。字段为空时保留旧 Agent 的全量快照语义。
 
-**降级策略**：无 root/管理员权限时，敏感采集（shadow、/proc/net/tcp 完整信息）降级并在心跳中上报 `guard_status=degraded`，平台侧提示权限不足。
+六类采集状态和最近完整报告历史、磁盘查询及页面边界见 [95 号](95-资产采集时效与磁盘查询.md)。完整历史按服务端实际接受的序号更新，失败保留旧数据，主机报告时间和平台接纳时间分别展示。
+
+**权限与降级**：资产以逐类别采集状态表达失败／部分／不支持；它与防护心跳的 `guard_status` 是不同事实。原设计期望权限不足统一可见，字段级读取失败目前尚未全部纳入类别完整性判定，继续由 BKL-017 跟踪，不能由正常防护心跳推断资产完整。
 
 容器数据仅用于宿主机安全研判。Docker 和 Kubernetes 查询彼此独立；Kubernetes 仅查询调度到本机节点的 Pod，默认节点名为宿主机 hostname，可通过 `kubernetes_node_name` 覆盖。Agent 不执行容器或 Kubernetes 生命周期操作。
 

@@ -40,7 +40,7 @@ try{
       data={...state,list,total:list.length}
     }else if(req.method()==='GET'&&path==='/api/hosts/groups') data=[]
     else if(req.method()==='GET'&&path===`/api/hosts/${fixture.agent}`) data=fixture.stages[stage].list.find(h=>h.agent_id===fixture.agent)
-    else if(req.method()==='GET'&&new RegExp(`^/api/hosts/${fixture.agent}/(ports|processes|accounts|containers)$`).test(path)) data=[]
+    else if(req.method()==='GET'&&new RegExp(`^/api/hosts/${fixture.agent}/(ports|processes|accounts|containers|disks)$`).test(path)) data=[]
     else if(req.method()==='GET'&&path===`/api/hosts/${fixture.agent}/software`) data={list:[],total:0}
     else if(req.method()==='GET'&&path==='/api/metrics/query_range') data=[]
     else if(req.method()==='POST'&&path===`/api/hosts/${fixture.agent}/isolate`){

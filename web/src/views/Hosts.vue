@@ -91,6 +91,8 @@
         <el-button size="small" type="danger" v-if="canIsolate(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, true)">隔离主机</el-button>
         <el-button size="small" type="success" v-if="canRestore(curHost)" :loading="busyIsolation === curHost.agentId" @click="isolate(curHost, false)">解除隔离</el-button>
       </div>
+      <el-alert v-if="assetError" type="error" :closable="false" :title="assetError" />
+      <AssetCollectionStatus :collections="softwareInventory.collections || []" />
       <section class="container-assets">
         <h4>软件清单</h4>
         <el-alert :type="softwareInventory.software_collection_status === 'complete' ? 'info' : 'warning'"
@@ -122,10 +124,9 @@
             <template #default="{ row }">{{ (row.ports || []).join(', ') || '—' }}</template>
           </el-table-column>
         </el-table>
-        <el-empty v-else :image-size="48" description="未发现本机 Docker 容器或 K8s 工作负载" />
+        <el-empty v-else :image-size="48" :description="emptyAssets('containers', '完整采集结果中未发现本机容器或工作负载')" />
       </section>
       <section class="container-assets">
-        <el-alert v-for="state in (softwareInventory.collections || []).filter(s=>s.status!=='complete')" :key="state.category" type="warning" :closable="false" :title="({ports:'监听端口',processes:'进程',accounts:'账户',disks:'磁盘',containers:'容器',software:'软件'}[state.category] || '资产')+'：'+({failed:'采集失败，保留上次记录',partial:'采集不完整，保留上次记录',unsupported:'当前系统不支持',legacy:'采集版本或覆盖未知'}[state.status] || '采集状态未知')" :description="state.error || ''" />
         <h4>本机进程 <span>{{ processes.length }}</span></h4>
         <el-table v-if="processes.length" :data="processes" size="small" max-height="220">
           <el-table-column prop="pid" label="PID" width="76" />
@@ -139,7 +140,8 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-else :image-size="48" description="未采集到本机进程" />
+        <p v-if="processes.length === 500" style="font-size:12px">当前展示前 500 条进程记录。</p>
+        <el-empty v-else-if="!processes.length" :image-size="48" :description="emptyAssets('processes', '完整采集结果中未发现本机进程')" />
       </section>
       <section class="container-assets">
         <h4>监听端口 <span>{{ ports.length }}</span></h4>
@@ -149,7 +151,17 @@
           <el-table-column prop="bind_addr" label="绑定地址" min-width="120" show-overflow-tooltip />
           <el-table-column prop="process" label="所属进程" min-width="130" show-overflow-tooltip />
         </el-table>
-        <el-empty v-else :image-size="48" description="未发现监听端口" />
+        <el-empty v-else :image-size="48" :description="emptyAssets('ports', '完整采集结果中未发现监听端口')" />
+      </section>
+      <section class="container-assets">
+        <h4>磁盘与挂载 <span>{{ disks.length }}</span></h4>
+        <el-table v-if="disks.length" :data="disks" size="small" max-height="220">
+          <el-table-column prop="mount" label="挂载点" min-width="130" show-overflow-tooltip />
+          <el-table-column prop="fs_type" label="文件系统" width="100" />
+          <el-table-column label="总容量" width="100"><template #default="{ row }">{{ formatAssetBytes(row.total_bytes) }}</template></el-table-column>
+          <el-table-column label="已用" width="100"><template #default="{ row }">{{ formatAssetBytes(row.used_bytes) }}</template></el-table-column>
+        </el-table>
+        <el-empty v-else :image-size="48" :description="emptyAssets('disks', '完整采集结果中未发现磁盘挂载')" />
       </section>
       <section class="container-assets">
         <h4>高风险账户 <span>{{ riskyAccounts.length }}</span></h4>
@@ -161,7 +173,7 @@
             <template #default="{ row }"><el-tag type="danger" size="small">{{ row.risky_reason || '风险账户' }}</el-tag></template>
           </el-table-column>
         </el-table>
-        <el-empty v-else :image-size="48" description="未发现高风险账户" />
+        <el-empty v-else :image-size="48" :description="emptyAssets('accounts', '完整采集结果中未发现高风险账户')" />
       </section>
     </template>
   </el-drawer>
@@ -172,6 +184,8 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } 
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
+import AssetCollectionStatus from '../components/AssetCollectionStatus.vue'
+import { collectionEmptyLabel, formatAssetBytes } from '../utils/asset-collection'
 import { getUser, setHostMaintenance, fetchHosts, fetchHostState, fetchGroups, fetchHostDetail, fetchHostMetrics, armUninstallToken, createEnrollToken, collectNow, isolateHost, createVirusTask } from '../api'
 async function maintenance(host){
  try{const {value}=await ElMessageBox.prompt('维护期间抑制离线告警，最长86400秒；输入0结束维护。','计划维护',{inputValue:'3600',inputPattern:/^\d{1,5}$/,inputErrorMessage:'请输入0到86400秒'});await setHostMaintenance(host.agentId,Number(value));ElMessage.success('维护窗口已更新')}catch(e){if(e?.message)ElMessage.error(e.message)}
@@ -195,9 +209,12 @@ const curHost = reactive({})
 const containers = ref([])
 const processes = ref([])
 const ports = ref([])
+const disks = ref([])
+const assetError = ref('')
 const riskyAccounts = ref([])
 const software = ref([])
 const softwareInventory = ref({})
+const emptyAssets = (category, label) => collectionEmptyLabel((softwareInventory.value.collections || []).find(state => state.category === category), label)
 const inventoryStatusLabel = computed(() => {
   const inventory = softwareInventory.value
   if (inventory.software_collection_status === 'complete') {
@@ -310,11 +327,15 @@ const armUninstall = async row => {
   }
 }
 
+let detailVersion = 0
 const openHost = async row => {
+  const version = ++detailVersion
   Object.assign(curHost, row)
   containers.value = []
   processes.value = []
   ports.value = []
+  disks.value = []
+  assetError.value = ''
   riskyAccounts.value = []
   software.value = []
   softwareInventory.value = {}
@@ -322,19 +343,22 @@ const openHost = async row => {
   renderMiniChart()
   try {
     const data = await fetchHostDetail(row.agentId)
-    if (curHost.agentId !== row.agentId) return
+    if (version !== detailVersion || curHost.agentId !== row.agentId) return
     containers.value = data.containers || []
     processes.value = data.processes || []
     ports.value = data.ports || []
+    disks.value = data.disks || []
     riskyAccounts.value = (data.accounts || []).filter(account => account.risky)
     software.value = data.software || []
     softwareInventory.value = data.detail || {}
   } catch (e) {
+    if (version !== detailVersion) return
+    assetError.value = '主机资产加载失败；当前空白不代表主机没有资产'
     ElMessage({ message: e?.message || '主机资产加载失败', type: 'error' })
   }
   try {
     const metrics = await fetchHostMetrics(row.agentId)
-    if (curHost.agentId === row.agentId) renderMiniChart(metrics)
+    if (version === detailVersion && curHost.agentId === row.agentId) renderMiniChart(metrics)
   } catch (e) {
     console.warn('主机指标加载失败', e)
   }

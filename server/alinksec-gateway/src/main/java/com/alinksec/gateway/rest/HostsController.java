@@ -101,6 +101,11 @@ public class HostsController {
         return ApiResult.ok(query.accounts(agentId));
     }
 
+    @GetMapping("/{agentId}/disks")
+    public ApiResult<List<Map<String, Object>>> disks(@PathVariable String agentId) {
+        return ApiResult.ok(query.disks(agentId));
+    }
+
     @GetMapping("/{agentId}/containers")
     public ApiResult<List<Map<String, Object>>> containers(@PathVariable String agentId) {
         return ApiResult.ok(query.containers(agentId));

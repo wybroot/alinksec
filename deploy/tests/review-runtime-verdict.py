@@ -75,8 +75,9 @@ def verify_runtime(root, sha, allow_working_tree=False, require_early_ack=False)
             assert int(suite.attrib['tests']) > 0 and all(int(suite.attrib.get(key, 0)) == 0 for key in ['errors', 'failures', 'skipped'])
             cases = {case.attrib['name'] for case in suite.findall('testcase')}
             if name == 'ReviewDefectsIntegrationTest':
-                assert int(suite.attrib['tests']) == 19
-                assert {'failedReportAndDedupRollbackTogetherAndRetryExactlyOnce', 'matchingSqlFailureRollsBackAssetAndDedupBeforeSuccessfulReplay'} <= cases
+                assert int(suite.attrib['tests']) == 20
+                assert {'failedReportAndDedupRollbackTogetherAndRetryExactlyOnce', 'matchingSqlFailureRollsBackAssetAndDedupBeforeSuccessfulReplay',
+                        'assetObservationHistoryAndDiskQueryPreserveFreshnessAcrossFailures'} <= cases
             else:
                 assert 'durableReceiptFollowsCommitAndLostReplyReplaysWithoutDuplicate' in cases
                 if require_early_ack:
