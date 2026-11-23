@@ -40,6 +40,7 @@ public class AssetService {
 
     @Transactional
     public void replaceSnapshot(String agentId, RptAssetSnapshot snapshot) {
+        long receivedAt=System.currentTimeMillis();
         if(snapshot.getSequence()>0 && (snapshot.getCollectedCount()==0 || snapshot.getCollectionsCount()==0) || snapshot.getCollectedCount()>6 || snapshot.getCollectionsCount()>6 || snapshot.getContainerSourcesCount()>2)
             throw new IllegalArgumentException("invalid asset collection metadata");
         Set<String> collected = new HashSet<>(snapshot.getCollectedList());
@@ -59,7 +60,7 @@ public class AssetService {
             };
             String error=legacy?"unknown_coverage":state.getError();
             if(error.length()>128)throw new IllegalArgumentException("invalid collection error");
-            int changed=jdbc.update("INSERT INTO t_asset_collection_state(agent_id,category,sequence,status,error,collected_at) VALUES(?,?,?,?,?,?) ON CONFLICT(agent_id,category) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,error=excluded.error,collected_at=excluded.collected_at WHERE excluded.sequence>t_asset_collection_state.sequence OR (excluded.sequence=0 AND t_asset_collection_state.sequence=0)",agentId,category,snapshot.getSequence(),status,error,legacy?0:state.getCollectedAt());
+            int changed=jdbc.update("INSERT INTO t_asset_collection_state(agent_id,category,sequence,status,error,collected_at,received_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(agent_id,category) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,error=excluded.error,collected_at=excluded.collected_at,received_at=excluded.received_at WHERE excluded.sequence>t_asset_collection_state.sequence OR (excluded.sequence=0 AND t_asset_collection_state.sequence=0)",agentId,category,snapshot.getSequence(),status,error,legacy?0:state.getCollectedAt(),receivedAt);
             if(changed==1) {
                 accepted.add(category);
                 if(status.equals("complete") || status.equals("legacy"))complete.add(category);
@@ -83,6 +84,10 @@ public class AssetService {
                       error=(SELECT software_collection_error FROM t_agent WHERE agent_id=?)
                     WHERE agent_id=? AND category='software' AND sequence=?
                     """,agentId,agentId,agentId,snapshot.getSequence());
+        }
+        if(collected.contains("disks") && !validDisks(snapshot)) {
+            collected.remove("disks");
+            jdbc.update("UPDATE t_asset_collection_state SET status='failed',error='invalid_disk_inventory' WHERE agent_id=? AND category='disks' AND sequence=?",agentId,snapshot.getSequence());
         }
         if(collected.contains("disks")) {
             jdbc.update("DELETE FROM t_asset_disk WHERE agent_id=?",agentId);
@@ -166,6 +171,12 @@ public class AssetService {
         }
         log.info("资产快照已更新: agent={} software={} ports={} accounts={} containers={}",
                 agentId, snapshot.getSoftwareCount(), snapshot.getPortsCount(), snapshot.getAccountsCount(), snapshot.getContainersCount());
+        // Commit observation provenance with the actual replacement. Failed,
+        // partial and legacy attempts never manufacture a successful timestamp.
+        // Sequence, rather than either machine's wall clock, determines order.
+        if(snapshot.getSequence()>0)for(String category:collected) {
+            jdbc.update("UPDATE t_asset_collection_state SET succeeded_sequence=sequence,succeeded_collected_at=collected_at,succeeded_received_at=received_at WHERE agent_id=? AND category=? AND sequence=? AND status='complete'",agentId,category,snapshot.getSequence());
+        }
         // Only a replaced software inventory should initiate a new comparison.
         // A database error can still roll back the surrounding transaction.
         if (!replaceSoftware) {
@@ -249,5 +260,17 @@ public class AssetService {
 
     private static String bounded(String value, int limit) {
         return value.length() <= limit ? value : value.substring(0, limit);
+    }
+
+    private static boolean validDisks(RptAssetSnapshot snapshot) {
+        if(snapshot.getDisksCount()>10000)return false;
+        Set<String> mounts=new HashSet<>();
+        for(var disk:snapshot.getDisksList()) {
+            if(disk.getMount().isBlank() || disk.getMount().length()>1024 || disk.getMount().indexOf('\0')>=0
+                    || disk.getFsType().length()>128 || disk.getFsType().indexOf('\0')>=0
+                    || disk.getTotalBytes()<=0 || disk.getUsedBytes()<0 || disk.getUsedBytes()>disk.getTotalBytes()
+                    || !mounts.add(disk.getMount()))return false;
+        }
+        return true;
     }
 }

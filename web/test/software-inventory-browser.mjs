@@ -40,7 +40,7 @@ try {
     else if (path === '/api/hosts/groups') data = []
     else if (path === '/api/hosts/inventory-host') data = { ...host, ...inventory }
     else if (path === '/api/hosts/inventory-host/software') data = software
-    else if (/^\/api\/hosts\/inventory-host\/(ports|processes|accounts|containers)$/.test(path)) data = []
+    else if (/^\/api\/hosts\/inventory-host\/(ports|processes|accounts|containers|disks)$/.test(path)) data = []
     else if (path === '/api/metrics/query_range') data = []
     else if (path === '/api/vuln/findings') data = new URL(route.request().url()).searchParams.has('status') ? { list: [{ ...findings[0], status: 3, cve_id: 'CVE-2099-1999', observed_at: '2026-10-13 00:00:00' }], total: 1 } : { list: findings, total: findings.length }
     else if (path === '/api/vuln/coverage') data = { list: [coverageHost()], total: 1, limitation: '没有漏洞结果不代表安全；人工来源按整条 CVE 选择，不合并其他来源范围。' }

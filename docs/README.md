@@ -155,3 +155,5 @@
 - [协议](../proto/agent.proto)、[应用配置](../server/alinksec-bootstrap/src/main/resources/application.yml)、[数据库迁移](../deploy/migrations)。
 - [发布门禁](../deploy/release/ci-gate.mjs)、[版本校验](../deploy/release/check-version.mjs)、[平台校验](../deploy/release/platforms.mjs)。
 - [标准 Compose](../deploy/docker/docker-compose.yml)、[轻量 Compose](../deploy/docker/docker-compose.lite.yml)、[集群 Compose](../deploy/cluster/compose.yml)。
+
+- [资产采集时效与磁盘查询](95-资产采集时效与磁盘查询.md)（BKL-017 的观察历史、磁盘链路及剩余字段覆盖边界）

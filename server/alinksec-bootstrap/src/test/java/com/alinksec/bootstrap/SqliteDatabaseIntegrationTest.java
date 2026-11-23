@@ -206,12 +206,31 @@ class SqliteDatabaseIntegrationTest {
     }
 
     @Test
+    void observationMigrationDoesNotInventHistoryForRetainedAssets() {
+        // Reconstruct the immediately preceding schema, then use the production
+        // migration runner to upgrade real retained rows.
+        jdbc.update("INSERT INTO t_agent(agent_id,hostname,os_type) VALUES('old-assets','old',1)");
+        jdbc.update("INSERT INTO t_asset_disk(agent_id,mount,fs_type,total_bytes,used_bytes) VALUES('old-assets','/retained','ext4',1000,400)");
+        jdbc.update("INSERT INTO t_asset_collection_state(agent_id,category,sequence,status,error,collected_at) VALUES('old-assets','disks',7,'failed','permission_denied',9000)");
+        for(String column:List.of("received_at","succeeded_sequence","succeeded_collected_at","succeeded_received_at"))
+            jdbc.execute("ALTER TABLE t_asset_collection_state DROP COLUMN "+column);
+        jdbc.update("DELETE FROM t_schema_migration WHERE version='038'");
+        new SqliteDatabaseConfiguration.SqliteMigrationBeanPostProcessor().postProcessAfterInitialization(dataSource,"dataSource");
+        var state=jdbc.queryForMap("SELECT * FROM t_asset_collection_state WHERE agent_id='old-assets'");
+        assertEquals("failed",state.get("status"));assertEquals(7,((Number)state.get("sequence")).longValue());
+        assertEquals(9000,((Number)state.get("collected_at")).longValue());
+        for(String column:List.of("received_at","succeeded_sequence","succeeded_collected_at","succeeded_received_at"))
+            assertEquals(0,((Number)state.get(column)).longValue());
+        assertEquals("/retained",jdbc.queryForObject("SELECT mount FROM t_asset_disk WHERE agent_id='old-assets'",String.class));
+    }
+
+    @Test
     void migratesSchemaSeedsDataAndRejectsChecksumChanges() {
         assertEquals(106, jdbc.queryForObject("""
                 SELECT count(*) FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                 """, Integer.class));
-        assertEquals(37, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
+        assertEquals(38, jdbc.queryForObject("SELECT count(*) FROM t_schema_migration", Integer.class));
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM t_role", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM t_baseline_template", Integer.class));
         assertEquals(60, jdbc.queryForObject("SELECT count(*) FROM t_baseline_item", Integer.class));
