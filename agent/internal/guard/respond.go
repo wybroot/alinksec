@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -267,7 +268,19 @@ func KillByPath(exe string) int {
 
 /* ---- 证据 ---- */
 
-// dumpEvidence 进程链 + 变更文件快照落 evidence/<ts>.json，返回相对 key
+const (
+	defaultGuardEvidenceFiles     = 200
+	defaultGuardEvidenceDirBytes  = 32 << 20
+	defaultGuardEvidenceFileBytes = 2 << 20
+)
+
+var (
+	guardEvidenceMaxFiles           = defaultGuardEvidenceFiles
+	guardEvidenceMaxDirBytes  int64 = defaultGuardEvidenceDirBytes
+	guardEvidenceMaxFileBytes       = defaultGuardEvidenceFileBytes
+)
+
+// dumpEvidence 进程链 + 变更文件快照落 evidence/<ts>.json，受文件数与目录总容量预算约束，返回相对 key
 func (g *Guard) dumpEvidence(trigger string, proc *suspectProc, files []string) []string {
 	ev := map[string]any{
 		"trigger": trigger,
@@ -288,15 +301,96 @@ func (g *Guard) dumpEvidence(trigger string, proc *suspectProc, files []string) 
 		ev["processes"] = list
 	}
 	b, _ := json.MarshalIndent(ev, "", " ")
+	if guardEvidenceMaxFileBytes > 0 && len(b) > guardEvidenceMaxFileBytes {
+		delete(ev, "processes")
+		ev["processes_omitted"] = true
+		b, _ = json.MarshalIndent(ev, "", " ")
+	}
 	dir := filepath.Join(g.workDir, "evidence")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil
 	}
-	name := fmt.Sprintf("%s_%d.json", triggerKind(trigger), time.Now().UnixMilli())
-	if err := os.WriteFile(filepath.Join(dir, name), b, 0600); err != nil {
+	pruneEvidenceDir(dir, int64(len(b)))
+
+	tmp, err := os.CreateTemp(dir, ".ev-*")
+	if err != nil {
+		return nil
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(b); err == nil {
+		if err = tmp.Sync(); err == nil {
+			err = tmp.Close()
+		} else {
+			_ = tmp.Close()
+		}
+	} else {
+		_ = tmp.Close()
+	}
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return nil
+	}
+
+	kind := triggerKind(trigger)
+	ts := time.Now().UnixMilli()
+	name := fmt.Sprintf("%s_%d.json", kind, ts)
+	dst := filepath.Join(dir, name)
+	for seq := 1; ; seq++ {
+		if _, statErr := os.Lstat(dst); os.IsNotExist(statErr) {
+			break
+		}
+		name = fmt.Sprintf("%s_%d_%d.json", kind, ts, seq)
+		dst = filepath.Join(dir, name)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Remove(tmpPath)
 		return nil
 	}
 	return []string{"evidence/" + name}
+}
+
+func pruneEvidenceDir(dir string, incomingBytes int64) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type evFile struct {
+		path string
+		size int64
+		mod  time.Time
+	}
+	var existing []evFile
+	var totalBytes int64
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		existing = append(existing, evFile{
+			path: filepath.Join(dir, entry.Name()),
+			size: info.Size(),
+			mod:  info.ModTime(),
+		})
+		totalBytes += info.Size()
+	}
+	sort.Slice(existing, func(i, j int) bool {
+		return existing[i].mod.Before(existing[j].mod)
+	})
+	remaining := len(existing)
+	for _, f := range existing {
+		needCount := guardEvidenceMaxFiles > 0 && remaining >= guardEvidenceMaxFiles
+		needSpace := guardEvidenceMaxDirBytes > 0 && totalBytes+incomingBytes > guardEvidenceMaxDirBytes
+		if !needCount && !needSpace {
+			break
+		}
+		if os.Remove(f.path) == nil {
+			totalBytes -= f.size
+			remaining--
+		}
+	}
 }
 
 func triggerKind(trigger string) string {
