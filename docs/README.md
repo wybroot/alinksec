@@ -157,3 +157,4 @@
 - [标准 Compose](../deploy/docker/docker-compose.yml)、[轻量 Compose](../deploy/docker/docker-compose.lite.yml)、[集群 Compose](../deploy/cluster/compose.yml)。
 
 - [资产采集时效与磁盘查询](95-资产采集时效与磁盘查询.md)（BKL-017 的观察历史、磁盘链路及剩余字段覆盖边界）
+- [资产采集字段覆盖与失败语义](96-资产采集字段覆盖与失败语义.md)（BKL-017 的端口／进程／磁盘／容器／Windows 账户与软件字段失败语义及本地验证范围）
