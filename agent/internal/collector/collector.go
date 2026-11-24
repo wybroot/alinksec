@@ -8,7 +8,12 @@
 package collector
 
 import (
+	"errors"
 	"log/slog"
+	"os"
+	"os/user"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -83,6 +88,7 @@ func SnapshotWithKubernetesNode(names []string, log *slog.Logger, kubernetesNode
 			"processes", len(snap.GetProcesses()),
 			"accounts", len(snap.GetAccounts()),
 			"disks", len(snap.GetDisks()),
+			"containers", len(snap.GetContainers()),
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	return snap
@@ -126,15 +132,73 @@ func selectedTasks(names []string) []task {
 
 /* ==================== 端口（gopsutil 跨平台） ==================== */
 
+var errEmptyProcessName = errors.New("empty process name")
+
+// isPermissionError classifies OS/gopsutil permission failures across wrapped strings.
+func isPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrPermission) || errors.Is(err, process.ErrorNotPermitted) ||
+		errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "access is denied") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "operation not permitted")
+}
+
+// isProcessGoneError distinguishes transient exited processes from readable privilege errors.
+func isProcessGoneError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, process.ErrorProcessNotRunning) || errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.ENOENT) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "process does not exist") ||
+		strings.Contains(msg, "no such process")
+}
+
+func isWindowsKernelPseudoProcess(pid int32) bool {
+	return runtime.GOOS == "windows" && (pid == 0 || pid == 4)
+}
+
+type portProcCacheEntry struct {
+	name string
+	err  error
+}
+
+func defaultLookupPortProcess(pid int32) (string, error) {
+	p, err := process.NewProcess(pid)
+	if err != nil {
+		return "", err
+	}
+	name, err := p.Name()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(name) == "" {
+		return "", errEmptyProcessName
+	}
+	return name, nil
+}
+
+var lookupPortProcess = defaultLookupPortProcess
+
 // collectPorts 采集监听端口：TCP 仅 LISTEN；UDP 为本地绑定（无状态语义）。
-// pid → 进程名做会话内缓存，避免对同一 pid 反复查询。
+// pid → 进程名做会话内缓存（包含失败结论），避免重复查询且保留缺漏原因。
 func collectPorts(snap *pb.RptAssetSnapshot) {
 	conns, err := listConnections("inet")
 	if err != nil {
 		collectionStatus(snap, "ports", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
-	nameCache := make(map[int32]string)
+	cache := make(map[int32]portProcCacheEntry)
+	var permDenied, unattributed, lookupFailed bool
 	for _, c := range conns {
 		isUDP := c.Type == syscall.SOCK_DGRAM
 		if !isUDP && c.Status != "LISTEN" {
@@ -147,49 +211,175 @@ func collectPorts(snap *pb.RptAssetSnapshot) {
 		if strings.Contains(c.Laddr.IP, ":") && !strings.Contains(c.Laddr.IP, ".") {
 			proto += "6"
 		}
+		proc := ""
+		if c.Pid <= 0 {
+			unattributed = true
+		} else {
+			entry, ok := cache[c.Pid]
+			if !ok {
+				n, lookupErr := lookupPortProcess(c.Pid)
+				entry = portProcCacheEntry{name: n, err: lookupErr}
+				cache[c.Pid] = entry
+			}
+			proc = entry.name
+			if entry.err != nil {
+				if isPermissionError(entry.err) {
+					permDenied = true
+				} else {
+					lookupFailed = true
+				}
+			}
+		}
 		snap.Ports = append(snap.Ports, &pb.PortInfo{
 			Port:     uint32(c.Laddr.Port),
 			Protocol: proto,
-			Process:  procName(c.Pid, nameCache),
+			Process:  proc,
 			BindAddr: c.Laddr.IP,
 		})
 	}
+	switch {
+	case permDenied:
+		collectionStatus(snap, "ports", pb.AssetCollection_PARTIAL, "port_process_permission_denied")
+	case unattributed:
+		collectionStatus(snap, "ports", pb.AssetCollection_PARTIAL, "port_process_unattributed")
+	case lookupFailed:
+		collectionStatus(snap, "ports", pb.AssetCollection_PARTIAL, "port_process_lookup_failed")
+	}
 }
 
-// procName pid → 进程名（带缓存；查询失败返回空串）
-func procName(pid int32, cache map[int32]string) string {
-	if pid <= 0 {
-		return ""
+type processReader interface {
+	PID() int32
+	Name() (string, error)
+	Exe() (string, error)
+	CmdlineSlice() ([]string, error)
+	Username() (string, error)
+	MemoryInfo() (*process.MemoryInfoStat, error)
+}
+
+type gopsutilProcess struct {
+	p *process.Process
+}
+
+func (g gopsutilProcess) PID() int32                                  { return g.p.Pid }
+func (g gopsutilProcess) Name() (string, error)                       { return g.p.Name() }
+func (g gopsutilProcess) Exe() (string, error)                        { return g.p.Exe() }
+func (g gopsutilProcess) CmdlineSlice() ([]string, error)             { return g.p.CmdlineSlice() }
+func (g gopsutilProcess) Username() (string, error)                   { return g.p.Username() }
+func (g gopsutilProcess) MemoryInfo() (*process.MemoryInfoStat, error) { return g.p.MemoryInfo() }
+
+func defaultListProcessReaders() ([]processReader, error) {
+	procs, err := listProcesses()
+	if err != nil {
+		return nil, err
 	}
-	if n, ok := cache[pid]; ok {
-		return n
-	}
-	name := ""
-	if p, err := process.NewProcess(pid); err == nil {
-		if n, err := p.Name(); err == nil {
-			name = n
+	readers := make([]processReader, 0, len(procs))
+	for _, p := range procs {
+		if p != nil {
+			readers = append(readers, gopsutilProcess{p: p})
 		}
 	}
-	cache[pid] = name
-	return name
+	return readers, nil
 }
 
+var listProcessReaders = defaultListProcessReaders
+
 func collectProcesses(snap *pb.RptAssetSnapshot) {
-	procs, err := listProcesses()
+	procs, err := listProcessReaders()
 	if err != nil {
 		collectionStatus(snap, "processes", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
+	var permDenied, fieldFailed bool
+	recordErr := func(err error) {
+		if isPermissionError(err) {
+			permDenied = true
+		} else {
+			fieldFailed = true
+		}
+	}
 	for _, p := range procs {
-		name, _ := p.Name()
-		exe, _ := p.Exe()
-		args, _ := p.CmdlineSlice()
-		user, _ := p.Username()
+		pid := p.PID()
+		kernelPseudo := isWindowsKernelPseudoProcess(pid)
+
+		name, nameErr := p.Name()
+		if nameErr != nil {
+			if isProcessGoneError(nameErr) {
+				continue
+			}
+			recordErr(nameErr)
+		} else if strings.TrimSpace(name) == "" {
+			fieldFailed = true
+		}
+
+		args, cmdErr := p.CmdlineSlice()
+		if cmdErr != nil {
+			if !kernelPseudo && isProcessGoneError(cmdErr) {
+				continue
+			}
+			if !kernelPseudo {
+				recordErr(cmdErr)
+			}
+		}
+
 		var rss uint64
-		if mem, err := p.MemoryInfo(); err == nil && mem != nil {
+		mem, memErr := p.MemoryInfo()
+		if memErr != nil {
+			if !kernelPseudo && isProcessGoneError(memErr) {
+				continue
+			}
+			if !kernelPseudo {
+				recordErr(memErr)
+			}
+		} else if mem != nil {
 			rss = mem.RSS
 		}
-		snap.Processes = append(snap.Processes, &pb.ProcessInfo{Pid: p.Pid, Name: name, Exe: exe, Cmdline: redactCommandLine(args), User: user, RssBytes: rss})
+
+		username, userErr := p.Username()
+		if userErr != nil {
+			if !kernelPseudo && isProcessGoneError(userErr) {
+				continue
+			}
+			var unknownUID user.UnknownUserIdError
+			if errors.As(userErr, &unknownUID) {
+				// Valid unmapped Linux/container UID; preserve numeric identity cleanly.
+				username = "uid:" + strconv.Itoa(int(unknownUID))
+			} else if !kernelPseudo {
+				recordErr(userErr)
+			}
+		}
+
+		exe, exeErr := p.Exe()
+		if exeErr != nil {
+			if isProcessGoneError(exeErr) {
+				if !kernelPseudo {
+					// Linux kernel threads and zombies lack /proc/<pid>/exe (ENOENT)
+					// while stat/status remain readable with empty args and zero RSS.
+					isKernelOrZombie := (errors.Is(exeErr, os.ErrNotExist) || errors.Is(exeErr, syscall.ENOENT)) &&
+						nameErr == nil && memErr == nil && len(args) == 0 && rss == 0
+					if !isKernelOrZombie {
+						continue
+					}
+					exe = ""
+				}
+			} else if !kernelPseudo {
+				recordErr(exeErr)
+			}
+		}
+
+		snap.Processes = append(snap.Processes, &pb.ProcessInfo{
+			Pid:      pid,
+			Name:     name,
+			Exe:      exe,
+			Cmdline:  redactCommandLine(args),
+			User:     username,
+			RssBytes: rss,
+		})
+	}
+	switch {
+	case permDenied:
+		collectionStatus(snap, "processes", pb.AssetCollection_PARTIAL, "process_fields_permission_denied")
+	case fieldFailed:
+		collectionStatus(snap, "processes", pb.AssetCollection_PARTIAL, "process_fields_incomplete")
 	}
 }
 
@@ -232,12 +422,27 @@ func collectDisks(snap *pb.RptAssetSnapshot) {
 		collectionStatus(snap, "disks", pb.AssetCollection_FAILED, "enumeration_failed")
 		return
 	}
+	seen := make(map[string]bool, len(parts))
+	var unreadable, invalidUsage bool
 	for _, p := range parts {
-		u, err := disk.Usage(p.Mountpoint)
-		if err != nil || u.Total == 0 {
-			collectionStatus(snap, "disks", pb.AssetCollection_PARTIAL, "mount_unreadable")
+		if strings.TrimSpace(p.Mountpoint) == "" || strings.ContainsRune(p.Mountpoint, '\x00') || len(p.Mountpoint) > 1024 ||
+			strings.ContainsRune(p.Fstype, '\x00') || len(p.Fstype) > 128 {
+			invalidUsage = true
 			continue
 		}
+		if seen[p.Mountpoint] {
+			continue
+		}
+		u, err := diskUsage(p.Mountpoint)
+		if err != nil || u == nil || u.Total == 0 {
+			unreadable = true
+			continue
+		}
+		if u.Used > u.Total {
+			invalidUsage = true
+			continue
+		}
+		seen[p.Mountpoint] = true
 		snap.Disks = append(snap.Disks, &pb.DiskInfo{
 			Mount:      p.Mountpoint,
 			FsType:     p.Fstype,
@@ -245,13 +450,23 @@ func collectDisks(snap *pb.RptAssetSnapshot) {
 			UsedBytes:  u.Used,
 		})
 	}
+	switch {
+	case invalidUsage:
+		collectionStatus(snap, "disks", pb.AssetCollection_PARTIAL, "invalid_mount_usage")
+	case unreadable:
+		collectionStatus(snap, "disks", pb.AssetCollection_PARTIAL, "mount_unreadable")
+	}
 }
 
 var listConnections = gnet.Connections
 var listProcesses = process.Processes
 var listPartitions = disk.Partitions
+var diskUsage = disk.Usage
 
 func collectionStatus(snap *pb.RptAssetSnapshot, category string, status pb.AssetCollection_Status, reason string) {
+	if len(reason) > 128 {
+		reason = reason[:128]
+	}
 	for _, c := range snap.Collections {
 		if c.Category == category {
 			c.Status = status
