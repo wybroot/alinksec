@@ -59,9 +59,15 @@ with zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED) as z:
  const whitelist=(await api('/api/virus/whitelist')).find(w=>w.value===digest);await api('/api/virus/whitelist/'+whitelist.id,undefined,'DELETE')
  await until(async()=>!JSON.parse(await dex('cat',`${stateRoot}/policy.json`)).virus_whitelist?.some(w=>w.value===digest),'Whitelist removal not applied')
  const cross='/tmp/alinksec-detection-cross-volume.sh';await dex('cp','/fixtures/detect-sample',cross)
- const crossTask=await scan([cross]),crossFinding=findings(crossTask)[0];assert.equal(crossFinding.status,0);assert.ok(crossFinding.action_error);assert.equal(crossFinding.quarantine_id,'')
- await act(crossFinding.id,'delete','failed');await dex('test','-f',cross);await dex('rm',cross)
- pass('actual Agent cross-volume quarantine/delete fail without removing original bytes')
+ const crossTask=await scan([cross]),crossFinding=findings(crossTask)[0]
+ assert.equal(crossFinding.status,1);assert.equal(crossFinding.action_error,'');assert.match(crossFinding.quarantine_id,/^[0-9a-f]{32}$/)
+ assert.equal(await dex('test','!','-e',cross),'')
+ await dex('cp','/fixtures/detect-replacement',cross);await act(crossFinding.id,'restore','failed')
+ assert.equal(await dex('cat',cross),'unrelated replacement')
+ await dex('rm',cross);await act(crossFinding.id,'restore','succeeded')
+ assert.equal((await dex('sha256sum',cross)).split(' ')[0],digest)
+ await act(crossFinding.id,'delete','succeeded');await dex('test','!','-e',cross)
+ pass('actual Agent cross-volume quarantine, occupied restore protection, clean restore and delete succeed safely')
  await realtime(true,'alert_only');await delay(12000)
  const periodic=prefix+'/periodic.sh';await dex('cp','/fixtures/detect-sample',periodic)
  // Native events and bounded recovery can both report the same unchanged file.

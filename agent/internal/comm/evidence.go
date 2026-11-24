@@ -40,7 +40,8 @@ func (c *Client) diagnosticZIP(request string) ([]byte, error) {
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "goVersion": runtime.Version(),
 		"goroutines": runtime.NumGoroutine(), "heapAllocatedBytes": memory.HeapAlloc,
 		"heapSystemBytes": memory.HeapSys, "gcCycles": memory.NumGC,
-		"metricsDropped": c.metricsDropped.Load(),
+		"metricsDropped":      c.metricsDropped.Load(),
+		"quarantineReconcile": c.quarantineReconcile,
 	}
 	if c.queue != nil {
 		runtimePayload["queueStats"] = c.queue.Stats()
