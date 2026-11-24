@@ -44,6 +44,14 @@ import (
 	"github.com/alinksec/alinksec-agent/internal/yara"
 )
 
+var (
+	exitProcess       = os.Exit
+	restartExitDelay  = 2 * time.Second
+	killProcessByPID  = guard.KillProcess
+	killProcessByPath = guard.KillByPath
+	runVulnFix        = fixer.Run
+)
+
 // Client Agent 通信客户端：注册 + 主通道双向流
 type Client struct {
 	receiptsSupported atomic.Bool
@@ -113,6 +121,10 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	if err != nil {
 		return nil, fmt.Errorf("初始化离线队列: %w", err)
 	}
+	dedup, err := newPersistentCmdDedup(workDir, defaultGeneralDedupCap, defaultProtectedDedupCap)
+	if err != nil {
+		return nil, fmt.Errorf("初始化指令持久去重: %w", err)
+	}
 	c := &Client{
 		cfg:             cfg,
 		configStore:     store,
@@ -123,7 +135,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
-		dedup:           newCmdDedup(1000),
+		dedup:           dedup,
 		upgradeContract: upgrade.ExecutionContract(),
 		log:             log,
 		collectTrigger:  make(chan []string, 2),
@@ -707,10 +719,13 @@ func (c *Client) wrapAck(a *pb.RptAck) *pb.Report {
 	}
 }
 
-// handleCommand 指令处理：幂等去重（§3.2）→ 执行 → 产出 ACK 序列
+// handleCommand 指令处理：幂等去重（§3.2 + BKL-025 持久防重放）→ 执行 → 产出并持久保存 ACK
 func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx context.Context) []*pb.RptAck {
 	if cmd.GetCmdId() == "" {
 		return nil
+	}
+	if len(cmd.GetCmdId()) > maxDedupCmdIDLen {
+		return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "invalid command id"}}
 	}
 	if action := cmd.GetProtectAction(); action != nil && (action.GetAction() == pb.CmdProtectAction_ISOLATE_HOST || action.GetAction() == pb.CmdProtectAction_RESTORE_ISOLATION) {
 		previous, err := isolation.CommandState(c.workDir, cmd.GetCmdId())
@@ -743,15 +758,30 @@ func (c *Client) handleCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx c
 			return []*pb.RptAck{previous}
 		}
 	}
-	if prev := c.dedup.Get(cmd.GetCmdId()); prev != nil {
-		if terminal(prev) {
-			return []*pb.RptAck{prev}
+	cls := classifyCommand(cmd)
+	digest, err := commandDigest(cmd)
+	if err != nil {
+		return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: "invalid command payload"}}
+	}
+	if prev, err := c.dedup.CheckOrBegin(cmd.GetCmdId(), cls, digest); err != nil {
+		msg := "command_dedup_persistence_failed"
+		if errors.Is(err, errCommandPayloadConflict) {
+			msg = "command_id_payload_conflict"
+		} else if errors.Is(err, errDedupCapacityExhausted) {
+			msg = "command_dedup_capacity_exhausted"
 		}
+		if c.log != nil {
+			c.log.Warn("指令去重检查拒绝执行", "cmd_id", cmd.GetCmdId(), "kind", cls.kind, "err", err)
+		}
+		return []*pb.RptAck{{CmdId: cmd.GetCmdId(), Stage: pb.RptAck_FAILED, Code: 1, Message: msg}}
+	} else if prev != nil {
 		return []*pb.RptAck{prev}
 	}
 	acks := c.executeCommand(cmd, sendCh, sctx)
 	for _, a := range acks {
-		c.dedup.Put(cmd.GetCmdId(), a)
+		if err := c.dedup.PutDurable(cmd.GetCmdId(), a); err != nil && c.log != nil {
+			c.log.Error("持久化指令去重结果失败", "cmd_id", cmd.GetCmdId(), "stage", a.GetStage(), "err", err)
+		}
 	}
 	return acks
 }
@@ -864,13 +894,19 @@ func (c *Client) executeCommand(cmd *pb.Command, sendCh chan<- *pb.Report, sctx 
 			if c.upgradeBusy.Load() || upgrade.Pending(c.workDir) {
 				return []*pb.RptAck{received, fail("upgrade or rollback pending; restart is deferred until completion")}
 			}
-			// ACK 先行，2s 后自退出由 systemd/SCM 拉起（与升级同模式）
+			doneAck := done("restarting")
+			if err := c.dedup.PutDurable(cmd.GetCmdId(), doneAck); err != nil {
+				return []*pb.RptAck{received, fail("persist restart deduplication failed")}
+			}
+			// ACK 与持久去重先落盘，再延迟自退出由 systemd/SCM 拉起（避免失联重推无限重启）
 			go func() {
-				time.Sleep(2 * time.Second)
-				c.log.Info("收到 RESTART 指令，进程退出待服务管理器拉起")
-				os.Exit(0)
+				time.Sleep(restartExitDelay)
+				if c.log != nil {
+					c.log.Info("收到 RESTART 指令，进程退出待服务管理器拉起")
+				}
+				exitProcess(0)
 			}()
-			acks = append(acks, done("restarting"))
+			acks = append(acks, doneAck)
 		case pb.CmdAgentControl_PAUSE_COLLECT:
 			c.collectPaused.Store(true)
 			acks = append(acks, done("collect paused"))
@@ -922,18 +958,18 @@ func (c *Client) executeProtectAction(pa *pb.CmdProtectAction, received *pb.RptA
 		var done bool
 		var msg string
 		if pid, err := strconv.ParseInt(target, 10, 32); err == nil {
-			done = guard.KillProcess(int32(pid))
+			done = killProcessByPID(int32(pid))
 			msg = fmt.Sprintf("kill pid %s: %v", target, done)
 		} else {
-			n := guard.KillByPath(target)
+			n := killProcessByPath(target)
 			done = n > 0
 			msg = fmt.Sprintf("kill by path %s: %d killed", target, n)
 		}
-		stage := pb.RptAck_DONE
+		stage, code := pb.RptAck_DONE, int32(0)
 		if !done {
-			stage = pb.RptAck_FAILED
+			stage, code = pb.RptAck_FAILED, 1
 		}
-		return []*pb.RptAck{received, {CmdId: cmdID, Stage: stage, Code: 0, Message: msg}}
+		return []*pb.RptAck{received, {CmdId: cmdID, Stage: stage, Code: code, Message: msg}}
 	case pb.CmdProtectAction_ISOLATE_HOST:
 		if c.isolationContract != 1 || pa.GetIsolationContract() != 1 {
 			return []*pb.RptAck{received, {CmdId: cmdID, Stage: pb.RptAck_FAILED, Code: 1, Message: "native isolation lease contract 1 is required"}}
@@ -1237,7 +1273,7 @@ func (c *Client) executeVulnFix(vf *pb.CmdVulnFix, received *pb.RptAck) []*pb.Rp
 	go func() {
 		defer c.fixBusy.Store(false)
 		start := time.Now()
-		result := fixer.Run(vf.GetTaskId(), vf.GetFixes(), c.workDir, c.log)
+		result := runVulnFix(vf.GetTaskId(), vf.GetFixes(), c.workDir, c.log)
 		var failed, rolled int
 		for _, r := range result.GetResults() {
 			if !r.GetSuccess() {
