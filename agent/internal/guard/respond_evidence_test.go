@@ -20,7 +20,7 @@ func TestDumpEvidenceEnforcesFileCountDirectoryAndSizeBudgets(t *testing.T) {
 	g := &Guard{workDir: work}
 
 	// Enforce per-file cap: drop full process list when serialized JSON exceeds limit.
-	guardEvidenceMaxFileBytes = 256
+	guardEvidenceMaxFileBytes = 200
 	keys := g.dumpEvidence("decoy_tamper", &suspectProc{Pid: 42, Exe: "/tmp/suspect"}, []string{"/tmp/a"})
 	if len(keys) != 1 {
 		t.Fatalf("unexpected evidence keys: %v", keys)
@@ -54,12 +54,16 @@ func TestDumpEvidenceEnforcesFileCountDirectoryAndSizeBudgets(t *testing.T) {
 	// Enforce total directory byte cap.
 	guardEvidenceMaxFiles = 100
 	guardEvidenceMaxDirBytes = int64(len(data)) + 200
-	if ks := g.dumpEvidence("decoy_tamper", nil, []string{"/tmp/latest"}); len(ks) != 1 {
+	ks := g.dumpEvidence("decoy_tamper", nil, []string{"/tmp/latest"})
+	if len(ks) != 1 {
 		t.Fatal(ks)
 	}
 	entries, err = os.ReadDir(filepath.Join(work, "evidence"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(entries) < 1 || len(entries) >= 4 {
+		t.Fatalf("expected older dumps pruned under byte cap, got %d files", len(entries))
 	}
 	var total int64
 	for _, entry := range entries {
@@ -71,5 +75,12 @@ func TestDumpEvidenceEnforcesFileCountDirectoryAndSizeBudgets(t *testing.T) {
 	}
 	if total > guardEvidenceMaxDirBytes {
 		t.Fatalf("evidence dir exceeded byte cap: total=%d cap=%d", total, guardEvidenceMaxDirBytes)
+	}
+	latestData, err := os.ReadFile(filepath.Join(work, filepath.FromSlash(ks[0])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(latestData), "/tmp/latest") {
+		t.Fatalf("expected latest evidence file retained, got: %s", string(latestData))
 	}
 }

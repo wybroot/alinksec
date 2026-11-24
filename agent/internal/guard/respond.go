@@ -301,7 +301,9 @@ func (g *Guard) dumpEvidence(trigger string, proc *suspectProc, files []string) 
 		ev["processes"] = list
 	}
 	b, _ := json.MarshalIndent(ev, "", " ")
-	if guardEvidenceMaxFileBytes > 0 && len(b) > guardEvidenceMaxFileBytes {
+	exceedsFileCap := guardEvidenceMaxFileBytes > 0 && len(b) > guardEvidenceMaxFileBytes
+	exceedsDirCap := guardEvidenceMaxDirBytes > 0 && int64(len(b)) > guardEvidenceMaxDirBytes
+	if exceedsFileCap || exceedsDirCap {
 		delete(ev, "processes")
 		ev["processes_omitted"] = true
 		b, _ = json.MarshalIndent(ev, "", " ")
