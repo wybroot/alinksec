@@ -34,13 +34,21 @@ func evidenceContract() uint32 {
 func (c *Client) diagnosticZIP(request string) ([]byte, error) {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
-	runtimeJSON, err := json.Marshal(map[string]any{
+	runtimePayload := map[string]any{
 		"format": 1, "requestId": request, "agentId": c.state.AgentID,
 		"collectedAt": time.Now().UTC().Format(time.RFC3339Nano), "agentVersion": identity.AgentVersion,
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "goVersion": runtime.Version(),
 		"goroutines": runtime.NumGoroutine(), "heapAllocatedBytes": memory.HeapAlloc,
 		"heapSystemBytes": memory.HeapSys, "gcCycles": memory.NumGC,
-	})
+		"metricsDropped": c.metricsDropped.Load(),
+	}
+	if c.queue != nil {
+		runtimePayload["queueStats"] = c.queue.Stats()
+	}
+	if c.workdirBudget != nil {
+		runtimePayload["workdirUsage"] = c.workdirBudget.Snapshot()
+	}
+	runtimeJSON, err := json.Marshal(runtimePayload)
 	if err != nil {
 		return nil, err
 	}

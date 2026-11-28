@@ -92,6 +92,8 @@ type Client struct {
 	sigBusy atomic.Bool
 	// 配置修复单飞：文件写入互斥（避免并发改同一配置文件）
 	fixBusy                  atomic.Bool
+	workdirBudget            *workdirBudget
+	metricsDropped           atomic.Uint64
 	windowsUpdateBusy        atomic.Bool
 	windowsUpdateReconcileAt atomic.Int64
 	upgradeBusy              atomic.Bool
@@ -125,6 +127,11 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	if err != nil {
 		return nil, fmt.Errorf("初始化指令持久去重: %w", err)
 	}
+	budget := newWorkdirBudget(workDir)
+	if reclaimedBytes, reclaimedFiles := budget.Reclaim(); reclaimedFiles > 0 && log != nil {
+		log.Info("启动阶段清理工作目录安全冗余文件", "files", reclaimedFiles, "bytes", reclaimedBytes)
+	}
+	q.SetBudget(budget)
 	c := &Client{
 		cfg:             cfg,
 		configStore:     store,
@@ -135,6 +142,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		workDir:         workDir,
 		state:           st,
 		queue:           q,
+		workdirBudget:   budget,
 		dedup:           dedup,
 		upgradeContract: upgrade.ExecutionContract(),
 		log:             log,
@@ -1358,7 +1366,10 @@ func (c *Client) persistReport(r *pb.Report) bool {
 	r.Reliable = true
 	if err := c.queue.Push(r); err != nil {
 		r.Reliable = false
-		c.log.Error("业务上报入离线队列失败", "err", err)
+		if c.log != nil {
+			stats := c.queue.Stats()
+			c.log.Error("业务上报入离线队列失败", "err", err, "queue_bytes", stats.Bytes, "capacity_rejected", stats.CapacityRejected)
+		}
 		return false
 	}
 	return true
@@ -1464,7 +1475,8 @@ func (c *Client) pushMetrics(samples []*pb.MetricSample) {
 	}
 	select {
 	case c.pendingReports <- r:
-	default: // 缓冲满：丢弃本轮指标（可再生的低价值数据）
+	default: // 缓冲满：丢弃本轮指标（可再生的低价值数据），计数可观测
+		c.metricsDropped.Add(1)
 	}
 }
 
@@ -1490,7 +1502,10 @@ func (c *Client) logLoop(ctx context.Context) {
 func (c *Client) queueLogBatch(source string, lines []*pb.LogLine) bool {
 	if err := c.queue.Push(&pb.Report{AgentId: c.state.AgentID, ReportId: newUUID(), Ts: time.Now().UnixMilli(),
 		Payload: &pb.Report_LogBatch{LogBatch: &pb.RptLogBatch{Source: source, Lines: lines}}}); err != nil {
-		c.log.Error("raw log spool admission failed")
+		if c.log != nil {
+			stats := c.queue.Stats()
+			c.log.Error("raw log spool admission failed", "err", err, "queue_bytes", stats.Bytes, "capacity_rejected", stats.CapacityRejected)
+		}
 		return false
 	}
 	return true
