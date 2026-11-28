@@ -4,11 +4,13 @@ package virusscan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"golang.org/x/sys/windows"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"unsafe"
 )
 
@@ -175,6 +177,83 @@ func secureAgentState(paths ...string) error {
 	}
 	return nil
 }
+const (
+	fileDispositionInfoEx         = 21
+	fileDispositionDelete         = 0x00000001
+	fileDispositionPosixSemantics = 0x00000002
+)
+
+func syncDir(dir *os.File) error { return nil }
+
+func isCrossDeviceErr(err error) bool {
+	var nt windows.NTStatus
+	if errors.As(err, &nt) && nt == windows.STATUS_NOT_SAME_DEVICE {
+		return true
+	}
+	return errors.Is(err, windows.ERROR_NOT_SAME_DEVICE) || errors.Is(err, syscall.EXDEV)
+}
+
+func isRestoreConflictErr(err error) bool {
+	var nt windows.NTStatus
+	if errors.As(err, &nt) && (nt == windows.STATUS_OBJECT_NAME_COLLISION || nt == windows.STATUS_OBJECT_NAME_EXISTS) {
+		return true
+	}
+	return errors.Is(err, os.ErrExist) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) || errors.Is(err, windows.ERROR_FILE_EXISTS)
+}
+
+func isFileInUseErr(err error) bool {
+	var nt windows.NTStatus
+	if errors.As(err, &nt) {
+		switch nt {
+		case windows.STATUS_SHARING_VIOLATION, windows.STATUS_FILE_LOCK_CONFLICT, windows.STATUS_CANNOT_DELETE, windows.STATUS_DELETE_PENDING:
+			return true
+		}
+	}
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
+}
+
+func isDiskFullErr(err error) bool {
+	var nt windows.NTStatus
+	if errors.As(err, &nt) && nt == windows.STATUS_DISK_FULL {
+		return true
+	}
+	return errors.Is(err, windows.ERROR_DISK_FULL) || errors.Is(err, windows.ERROR_HANDLE_DISK_FULL)
+}
+
+func deleteOpenHandle(file *os.File) error {
+	flags := uint32(fileDispositionDelete | fileDispositionPosixSemantics)
+	err := windows.SetFileInformationByHandle(windows.Handle(file.Fd()), fileDispositionInfoEx, (*byte)(unsafe.Pointer(&flags)), uint32(unsafe.Sizeof(flags)))
+	if err != nil && (errors.Is(err, windows.ERROR_INVALID_FUNCTION) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_PARAMETER)) {
+		one := byte(1)
+		err = windows.SetFileInformationByHandle(windows.Handle(file.Fd()), windows.FileDispositionInfo, &one, 1)
+	}
+	return err
+}
+
+func removeCrossVolumeSource(ctx context.Context, parent, file *os.File, base string, origInfo os.FileInfo, expected string, onStage func(stageDir string) error) (bool, error) {
+	current, err := statAt(parent, base)
+	if err != nil || !os.SameFile(origInfo, current) {
+		return false, fmt.Errorf("%w: original path replaced before isolation", errTargetChanged)
+	}
+	got, err := openedDigest(ctx, file)
+	if err != nil || got != expected {
+		return false, fmt.Errorf("%w: target modified before isolation", errTargetChanged)
+	}
+	if err := deleteOpenHandle(file); err != nil {
+		if isFileInUseErr(err) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return false, fmt.Errorf("%w: %v", errFileInUse, err)
+		}
+		return false, err
+	}
+	// Closing the pinned handle completes NTFS unlink immediately under POSIX semantics.
+	_ = file.Close()
+	return false, nil
+}
+
+func reconcileStageDir(ctx context.Context, parent *os.File, base, stageName, expected string) (stageOutcome, error) {
+	return stageAbsent, nil
+}
+
 func originalSecurity(file *os.File) (string, error) {
 	sd, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
@@ -186,6 +265,9 @@ func restoreCopy(ctx context.Context, src *os.File, parent *os.File, name string
 	temp := ".alinksec-restore-" + randomID()
 	out, err := openAt(parent, temp, true)
 	if err != nil {
+		if isDiskFullErr(err) {
+			return fmt.Errorf("%w: %v", errInsufficientSpace, err)
+		}
 		return err
 	}
 	defer out.Close()
@@ -194,9 +276,15 @@ func restoreCopy(ctx context.Context, src *os.File, parent *os.File, name string
 		return err
 	}
 	if err := copyBounded(ctx, out, src, maxFileSize); err != nil {
+		if isDiskFullErr(err) {
+			return fmt.Errorf("%w: %v", errInsufficientSpace, err)
+		}
 		return err
 	}
 	if err := out.Sync(); err != nil {
+		if isDiskFullErr(err) {
+			return fmt.Errorf("%w: %v", errInsufficientSpace, err)
+		}
 		return err
 	}
 	if security == "" {
@@ -221,5 +309,11 @@ func restoreCopy(ctx context.Context, src *os.File, parent *os.File, name string
 	if err := windows.SetSecurityInfo(windows.Handle(out.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, group, dacl, nil); err != nil {
 		return err
 	}
-	return renamePinned(parent, out, temp, parent, name)
+	if err := renamePinned(parent, out, temp, parent, name); err != nil {
+		if isRestoreConflictErr(err) {
+			return fmt.Errorf("%w: %v", errRestoreConflict, err)
+		}
+		return err
+	}
+	return nil
 }

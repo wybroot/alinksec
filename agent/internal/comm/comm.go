@@ -103,8 +103,9 @@ type Client struct {
 	isolationChallenge       isolationChallenge
 
 	// 勒索诱饵防护引擎（本地响应，事件经 reportSecurityEvent 上报）
-	grd          *guard.Guard
-	windowsLogin *windowslogin.Engine
+	grd                 *guard.Guard
+	windowsLogin        *windowslogin.Engine
+	quarantineReconcile virusscan.ReconcileReport
 }
 
 // New 创建通信客户端（加载本地状态与离线队列）
@@ -127,27 +128,50 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 	if err != nil {
 		return nil, fmt.Errorf("初始化指令持久去重: %w", err)
 	}
+	rctx, rcancel := context.WithTimeout(context.Background(), 15*time.Second)
+	report, rerr := virusscan.NewQuarantine(workDir).Reconcile(rctx)
+	rcancel()
+	if log != nil {
+		if rerr != nil {
+			log.Warn("quarantine reconcile failed on startup", "err", rerr)
+		} else if report.ReviewRequired > 0 || report.CorruptMeta > 0 {
+			log.Warn("quarantine reconcile found items requiring review",
+				"scanned", report.ScannedObjects, "active", report.ActiveObjects,
+				"promoted", report.PromotedActive, "rolled_back", report.RolledBackPrepared,
+				"completed_deletes", report.CompletedDeletes,
+				"cleaned_temp", report.CleanedOrphanTemp, "cleaned_stage", report.CleanedStageDirs,
+				"review_required", report.ReviewRequired, "corrupt_meta", report.CorruptMeta)
+		} else if report.PromotedActive > 0 || report.RolledBackPrepared > 0 || report.CompletedDeletes > 0 || report.CleanedOrphanTemp > 0 || report.CleanedTerminalBody > 0 || report.CleanedStageDirs > 0 {
+			log.Info("quarantine reconcile completed startup recovery",
+				"scanned", report.ScannedObjects, "active", report.ActiveObjects,
+				"promoted", report.PromotedActive, "rolled_back", report.RolledBackPrepared,
+				"completed_deletes", report.CompletedDeletes,
+				"cleaned_temp", report.CleanedOrphanTemp, "cleaned_body", report.CleanedTerminalBody,
+				"cleaned_stage", report.CleanedStageDirs)
+		}
+	}
 	budget := newWorkdirBudget(workDir)
 	if reclaimedBytes, reclaimedFiles := budget.Reclaim(); reclaimedFiles > 0 && log != nil {
 		log.Info("启动阶段清理工作目录安全冗余文件", "files", reclaimedFiles, "bytes", reclaimedBytes)
 	}
 	q.SetBudget(budget)
 	c := &Client{
-		cfg:             cfg,
-		configStore:     store,
-		resources:       resources.New(cfg.Resources),
-		clamav:          clamav.New(cfg.ClamAV),
-		yara:            yara.New(cfg.YARA, configguard.ReadFile),
-		scap:            scap.New(cfg.SCAP, workDir),
-		workDir:         workDir,
-		state:           st,
-		queue:           q,
-		workdirBudget:   budget,
-		dedup:           dedup,
-		upgradeContract: upgrade.ExecutionContract(),
-		log:             log,
-		collectTrigger:  make(chan []string, 2),
-		pendingReports:  make(chan *pb.Report, 4),
+		cfg:                 cfg,
+		configStore:         store,
+		resources:           resources.New(cfg.Resources),
+		clamav:              clamav.New(cfg.ClamAV),
+		yara:                yara.New(cfg.YARA, configguard.ReadFile),
+		scap:                scap.New(cfg.SCAP, workDir),
+		workDir:             workDir,
+		state:               st,
+		queue:               q,
+		workdirBudget:       budget,
+		dedup:               dedup,
+		upgradeContract:     upgrade.ExecutionContract(),
+		quarantineReconcile: report,
+		log:                 log,
+		collectTrigger:      make(chan []string, 2),
+		pendingReports:      make(chan *pb.Report, 4),
 	}
 	// 平台热下发策略优先于本地 agent.yml（重启后仍生效，直至下次同步覆盖）
 	if err := c.loadPersistedPolicy(cfg); err != nil {
@@ -160,7 +184,7 @@ func NewProtected(cfg *config.Config, workDir string, log *slog.Logger, store *c
 		c.isolationContract = 0
 	}
 	if c.isolationContract == 1 {
-		if err := isolation.Recover(workDir); err != nil {
+		if err := isolation.Recover(workDir); err != nil && log != nil {
 			log.Error("recover independent isolation watchdog", "err", err)
 		}
 	}
@@ -1192,8 +1216,10 @@ func (c *Client) executeVirusAction(va *pb.CmdVirusAction, received *pb.RptAck, 
 			code := ""
 			if err != nil {
 				failed = true
-				code = "file_identity_or_io_failure"
-				c.log.Warn("病毒处置失败", "path", target.GetPath(), "err", err)
+				code = virusscan.ActionErrorCode(err)
+				if c.log != nil {
+					c.log.Warn("病毒处置失败", "path", target.GetPath(), "code", code, "err", err)
+				}
 			}
 			receipts = append(receipts, map[string]any{"finding_id": target.GetFindingId(), "success": err == nil, "quarantine_id": id, "error": code})
 		}
