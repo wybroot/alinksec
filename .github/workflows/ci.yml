@@ -1387,6 +1387,7 @@ jobs:
         run: |
           docker compose -f docker-compose.lite.yml config -q
           docker compose -f docker-compose.lite.yml build
+          docker build --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org -f Dockerfile.sqlite-maintenance -t "$ALINKSEC_SQLITE_MAINTENANCE_IMAGE" ../..
       - name: Start lightweight SQLite deployment
         working-directory: deploy/docker
         run: docker compose -f docker-compose.lite.yml up -d --wait
